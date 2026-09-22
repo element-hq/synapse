@@ -1,3 +1,53 @@
+# Synapse 1.162.0rc1 (2026-09-22)
+
+## Features
+
+- Raise default room version to "12". Contributed by @jason-famedly @famedly. ([\#20130](https://github.com/element-hq/synapse/issues/20130))
+- Limit the number of end-to-end encryption one-time keys stored per device to 500 per algorithm, rejecting uploads which would exceed the limit with a `400 Bad Request`. ([\#20162](https://github.com/element-hq/synapse/issues/20162))
+- Add support for configuring a `username` for Redis connections, for Redis 6+ ACL authentication. ([\#20187](https://github.com/element-hq/synapse/issues/20187))
+- Add a rate limit on the client profile lookup endpoints, configurable via `rc_profile`. ([\#20218](https://github.com/element-hq/synapse/issues/20218))
+
+## Bugfixes
+
+- Fix flawed [MSC4311](https://github.com/matrix-org/matrix-spec-proposals/pull/4311) partial implementation introduced in Synapse v1.136.0 for invites/knocks: client-side API's like `/sync` use [stripped state events](https://spec.matrix.org/v1.18/client-server-api/#stripped-state) and we now send full PDUs on the federation-side. To allow some time for the ecosystem to adapt and support MSC4311, Synapse will only apply strict validation when receiving invites/knocks after 2027-06-01. ([\#19723](https://github.com/element-hq/synapse/issues/19723))
+- Allow the third party rules callback `check_event_allowed()` to work with [MSC4291](https://github.com/matrix-org/matrix-spec-proposals/pull/4291) rooms. Contributed by @famedly. ([\#19768](https://github.com/element-hq/synapse/issues/19768))
+- Improve server concurrency by opening local media thumbnails asynchronously. Contributed by @guillemo12. ([\#20100](https://github.com/element-hq/synapse/issues/20100))
+- Drop incoming federation device list updates from non-compliant (grandfathered historical) user IDs, so that such user IDs are not forwarded to clients outside the context of an event, as per [the spec](https://spec.matrix.org/v1.14/appendices/#historical-user-ids). ([\#20115](https://github.com/element-hq/synapse/issues/20115))
+- Stop treating unset display names and avatar URLs as profile fields with a `null` value. ([\#20145](https://github.com/element-hq/synapse/issues/20145))
+- Return `allowed_room_ids` in the client [`GET /_matrix/client/v1/rooms/{roomId}/hierarchy`](https://spec.matrix.org/v1.19/client-server-api/#get_matrixclientv1roomsroomidhierarchy) response, as required since Matrix 1.15. ([\#20154](https://github.com/element-hq/synapse/issues/20154))
+- Fix state events being omitted from the [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222) `state_after` sync response when the client's `since` token falls inside an event persistence batch, as could happen on worker deployments. ([\#20171](https://github.com/element-hq/synapse/issues/20171))
+- Return the stable `M_UNKNOWN_DEVICE` error code, added in Matrix 1.17, instead of its unstable [MSC4326](https://github.com/matrix-org/matrix-spec-proposals/pull/4326)-prefixed identifier. ([\#20181](https://github.com/element-hq/synapse/issues/20181))
+- Fix slow recursive `/relations` requests in large rooms by joining events inside the recursive query. ([\#20182](https://github.com/element-hq/synapse/issues/20182))
+- Fix a bug introduced in Synapse 1.135.0 where fetching an unset `displayname` or `avatar_url` via `GET /_matrix/client/v3/profile/{userId}/{field}` returned the field with a `null` value instead of an empty object. ([\#20200](https://github.com/element-hq/synapse/issues/20200))
+- Add support for un-soft-failing [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) when room state changes, making federation support more reliable. ([\#20204](https://github.com/element-hq/synapse/issues/20204))
+
+## Improved Documentation
+
+- Document the paths that can be handled on workers with stabilised delegated authentication. ([\#20209](https://github.com/element-hq/synapse/issues/20209))
+- Document the endpoint for getting a single delayed event is workerisable. ([\#20210](https://github.com/element-hq/synapse/issues/20210))
+- Fix small warnings in documentation building tooling output. ([\#20217](https://github.com/element-hq/synapse/issues/20217))
+- Replace the stale minimum `poetry` version in the contributing docs with a pointer to the minimum defined in `pyproject.toml`. ([\#20219](https://github.com/element-hq/synapse/issues/20219))
+- Added docs regarding firewall configuration. Contributed by @HarisDotParis. ([\#20225](https://github.com/element-hq/synapse/issues/20225))
+
+## Internal Changes
+
+- Port the logcontext machinery (`LoggingContext`, `ContextResourceUsage` and the current-context storage) to Rust. ([\#19979](https://github.com/element-hq/synapse/issues/19979))
+- Refactor the Rust code to have a single place to store per-homeserver state. ([\#20011](https://github.com/element-hq/synapse/issues/20011))
+- Add a `synapse_storage_stream_current_position` metric, reporting each stream's current position as each worker process sees it. ([\#20097](https://github.com/element-hq/synapse/issues/20097))
+- Add HTTP serving functions for future [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242) work. ([\#20133](https://github.com/element-hq/synapse/issues/20133))
+- Add a cache for looking up individual pieces of current room state. ([\#20160](https://github.com/element-hq/synapse/issues/20160))
+- Run the in-repo Complement test suite in CI, even when the standard Complement suite fails. ([\#20161](https://github.com/element-hq/synapse/issues/20161))
+- Refactor the federation transmission code to delineate transaction preparation and completion. ([\#20166](https://github.com/element-hq/synapse/issues/20166))
+- Add a cache to state resolution keyed off the conflicted events. ([\#20185](https://github.com/element-hq/synapse/issues/20185))
+- Improve the rendering of the set inequality errors produced by `assertEqual` in the tests. ([\#20193](https://github.com/element-hq/synapse/issues/20193))
+- Fix `/room_summary` returning stale `join_rules`. Contributed by @famedly. ([\#20205](https://github.com/element-hq/synapse/issues/20205))
+- Fix the `Schema Diff` CI check failing to post a comment on pull requests from forks. ([\#20207](https://github.com/element-hq/synapse/issues/20207))
+- Move documentation building python dependencies into `pyproject.toml` under a new `docs` dependency group. ([\#20216](https://github.com/element-hq/synapse/issues/20216))
+- Align comments in `.dockerignore` with what we have in the private Synapse Pro branch. ([\#20224](https://github.com/element-hq/synapse/issues/20224))
+
+
+
+
 # Synapse 1.161.0 (2026-09-15)
 
 No significant changes since 1.161.0rc1.
