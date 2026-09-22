@@ -2147,10 +2147,6 @@ class FederationEventHandler:
                 # There is no filter to apply here and we want all the events anyway since we need
                 # to persist the entire calculate state.
                 state_filter=None,
-                # we need to have finished processing the events causally prior to `event` in the
-                # state DAG before we can compute the state for this `event`, but this function is
-                # called unilaterally WHEN we are processing events in the state DAG.
-                # To wait here would be circular, we'd deadlock.
                 # By this point, we expect to have already finished processing the
                 # events *causally prior* to `event` in the state DAG because this
                 # function is called unilaterally WHEN we are processing events in the
