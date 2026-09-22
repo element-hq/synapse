@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-321a234e.js";
+            window.path_to_searchindex_js = "../../searchindex-09af8a35.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-64310643.js"></script>
@@ -4144,6 +4144,17 @@ It’s recommended to leave this option as it is. We expect to remove this optio
 <p><em>(string|null)</em> The <a href="../../workers.html#background-tasks">worker</a> that is used to run background tasks (e.g. cleaning up expired data). If not provided this defaults to the main process. Defaults to <code>null</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">run_background_tasks_on: worker1
+</code></pre>
+<hr>
+<h3 id="task_scheduler"><a class="header" href="#task_scheduler"><code>task_scheduler</code></a></h3>
+<p><em>(object)</em> Configuration for the task scheduler.</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li><code>max_concurrent_tasks</code> (integer): The maximum number of tasks that can run concurrently in the task scheduler. Setting this too high may swamp the database connection pool. Defaults to <code>5</code>.</li>
+</ul>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">task_scheduler:
+  max_concurrent_tasks: 5
 </code></pre>
 <hr>
 <h3 id="update_user_directory_from_worker"><a class="header" href="#update_user_directory_from_worker"><code>update_user_directory_from_worker</code></a></h3>

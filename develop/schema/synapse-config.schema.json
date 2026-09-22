@@ -4761,6 +4761,23 @@
         "worker1"
       ]
     },
+    "task_scheduler": {
+      "type": "object",
+      "description": "Configuration for the task scheduler.",
+      "properties": {
+        "max_concurrent_tasks": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The maximum number of tasks that can run concurrently in the task scheduler. Setting this too high may swamp the database connection pool.",
+          "default": 5
+        }
+      },
+      "examples": [
+        {
+          "max_concurrent_tasks": 5
+        }
+      ]
+    },
     "update_user_directory_from_worker": {
       "type": [
         "string",
