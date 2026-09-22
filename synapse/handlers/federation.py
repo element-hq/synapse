@@ -1303,6 +1303,10 @@ class FederationHandler:
 
         # Scrutinize JSON values
         if not isinstance(stripped_room_state, list):
+            invalid_stripped_state_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc(1)
+
             if (
                 invalid_stripped_state_behaviour
                 == InvalidStrippedStateBehaviour.reject_all
@@ -1318,11 +1322,12 @@ class FederationHandler:
             else:
                 assert_never(invalid_stripped_state_behaviour)
 
+        # First assemble an ordered list of PDUs (remember the order of the stripped
+        # state) as we want to concurrently process below and then re-assemble in the
+        # original order.
+        pdus: list[EventBase] = []
         already_counted_fail_metric = False
-
-        async def _validate_raw_stripped_event(raw_stripped_event: Any) -> None:
-            nonlocal already_counted_fail_metric
-
+        for raw_stripped_event in stripped_room_state:
             try:
                 # Scrutinize JSON values
                 if not isinstance(raw_stripped_event, dict):
@@ -1333,11 +1338,45 @@ class FederationHandler:
                 # Validate PDU
                 try:
                     pdu = event_from_pdu_json(raw_stripped_event, room_version)
+                    pdus.append(pdu)
                 except Exception as exc:
                     raise ValueError(
                         "Unable to parse one of the stripped state events as a PDU"
                     ) from exc
+            except ValueError as exc:
+                # Count how many times we saw invalid stripped state. We're counting the
+                # number of times we saw invalid state overall, not each individual
+                # invalid stripped state event.
+                if not already_counted_fail_metric:
+                    invalid_stripped_state_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc(1)
+                    already_counted_fail_metric = True
 
+                # React to invalid event
+                if (
+                    invalid_stripped_state_behaviour
+                    == InvalidStrippedStateBehaviour.reject_all
+                ):
+                    raise exc
+                elif (
+                    invalid_stripped_state_behaviour
+                    == InvalidStrippedStateBehaviour.remove_invalid
+                ):
+                    continue
+                else:
+                    assert_never(invalid_stripped_state_behaviour)
+
+        # Because we're processing things in parallel, we need to worry about assembling
+        # things in the correct order after we're done.
+        #
+        # Map from `event_id` to `StrippedStateEvent`
+        parsed_stripped_room_state_map: dict[str, StrippedStateEvent] = {}
+
+        async def _validate_stripped_state_pdu_event(pdu: EventBase) -> None:
+            nonlocal already_counted_fail_metric
+
+            try:
                 # Validate that it's from the same room
                 if pdu.room_id != room_id:
                     raise ValueError(
@@ -1345,6 +1384,9 @@ class FederationHandler:
                     )
                 # Validate signature/hashes
                 try:
+                    # Note: `_check_sigs_and_hash` will redact the event in the case of
+                    # a hash mismatch (proper thing to use according to the spec)) so
+                    # let's be sure to use the new updated PDU returned from this call.
                     pdu = await self.federation_client._check_sigs_and_hash(
                         room_version, pdu
                     )
@@ -1355,14 +1397,11 @@ class FederationHandler:
 
                 # Parse the stripped events to ensure it has all of the fields necessary
                 parsed_stripped_event = StrippedStateEvent.from_json_dict(
-                    # We use this over `raw_stripped_event` because `pdu` may have been
-                    # redacted by `_check_sigs_and_hash` above which is the proper thing to
-                    # use according to the spec if the hash check fails.
                     pdu.get_dict()
                 )
                 if parsed_stripped_event is None:
                     raise ValueError("Unable to parse as stripped event")
-                parsed_stripped_room_state.append(parsed_stripped_event)
+                parsed_stripped_room_state_map[pdu.event_id] = parsed_stripped_event
             except ValueError as exc:
                 # Count how many times we saw invalid stripped state. We're counting the
                 # number of times we saw invalid state overall, not each individual
@@ -1387,14 +1426,24 @@ class FederationHandler:
                 else:
                     assert_never(invalid_stripped_state_behaviour)
 
-        # Check in parallel as this can take some time if we don't already have the
-        # server signatures.
+        # Check in parallel as `_check_sigs_and_hash` can take some time if we don't
+        # already have the server signatures.
         await concurrently_execute(
-            _validate_raw_stripped_event,
-            stripped_room_state,
+            _validate_stripped_state_pdu_event,
+            pdus,
             # Arbitrary concurrency
             1000,
         )
+
+        # Create an ordered list that matches the original `stripped_room_state`
+        parsed_stripped_room_state = [
+            parsed_stripped_room_state_map[pdu.event_id]
+            # Iterate in the original order
+            for pdu in pdus
+            # But check to make sure we it ended up being parsed correctly as a stripped
+            # event
+            if pdu.event_id in parsed_stripped_room_state_map
+        ]
 
         return parsed_stripped_room_state
 
