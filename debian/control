@@ -1,6 +1,6 @@
 Source: matrix-synapse-py3
 Section: contrib/python
-Priority: extra
+Priority: optional
 Maintainer: Synapse Packaging team <packages@matrix.org>
 # keep this list in sync with the build dependencies in docker/Dockerfile-dhvirtualenv.
 Build-Depends:
@@ -30,6 +30,7 @@ Pre-Depends: dpkg (>= 1.16.1)
 Depends:
  adduser,
  debconf,
+ python3:any,
  ${misc:Depends},
  ${shlibs:Depends},
  ${synapse:pydepends},
