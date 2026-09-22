@@ -199,6 +199,46 @@ class StrippedStateEvent:
     sender: str
     content: dict[str, Any]
 
+    def as_json_dict(self) -> JsonDict:
+        """
+        Serialize to the JSON representation of 'Stripped State' according to the Matrix
+        spec
+        """
+
+        return {
+            "type": self.type,
+            "state_key": self.state_key,
+            "sender": self.sender,
+            "content": self.content,
+        }
+
+    @staticmethod
+    def from_json_dict(raw_stripped_event: JsonDict) -> "StrippedStateEvent | None":
+        """
+        Given a raw value from an event's `unsigned` field, attempt to parse it into a
+        `StrippedStateEvent`.
+        """
+        if isinstance(raw_stripped_event, dict):
+            # All of these fields are required
+            type = raw_stripped_event.get("type")
+            state_key = raw_stripped_event.get("state_key")
+            sender = raw_stripped_event.get("sender")
+            content = raw_stripped_event.get("content")
+            if (
+                isinstance(type, str)
+                and isinstance(state_key, str)
+                and isinstance(sender, str)
+                and isinstance(content, dict)
+            ):
+                return StrippedStateEvent(
+                    type=type,
+                    state_key=state_key,
+                    sender=sender,
+                    content=content,
+                )
+
+        return None
+
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventMetadata:

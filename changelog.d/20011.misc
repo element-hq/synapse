@@ -1,0 +1,1 @@
+Refactor the Rust code to have a single place to store per-homeserver state.

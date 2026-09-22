@@ -399,6 +399,9 @@ class SyncKnockTestCase(KnockingStrippedStateEventHelperMixin):
         self.check_knock_room_state_against_room_state(
             room_state_events, self.expected_room_state
         )
+        # Ensure the events have been stripped
+        for event in room_state_events:
+            self.assertNotIn("signatures", event)
 
 
 class SyncCreateEventInPrejoinStateTestCase(unittest.HomeserverTestCase):
@@ -502,7 +505,7 @@ class UnreadMessagesTestCase(unittest.HomeserverTestCase):
             self.room_id,
             EventTypes.PowerLevels,
             {
-                "users": {self.user_id: 100, self.user2: 100},
+                "users": {self.user2: 100},
                 "users_default": 0,
                 "events": {
                     "m.room.name": 50,
