@@ -25,6 +25,7 @@ from netaddr import IPSet
 from twisted.internet import defer
 from twisted.internet.error import DNSLookupError
 from twisted.internet.testing import MemoryReactor
+from twisted.python.failure import Failure
 
 from synapse.http import RequestTimedOutError
 from synapse.http.client import SimpleHttpClient
@@ -65,7 +66,7 @@ class SimpleHttpClientTests(HomeserverTestCase):
         self.assertEqual(host, "1.2.3.4")
         self.assertEqual(port, 8008)
         e = Exception("go away")
-        factory.clientConnectionFailed(None, e)
+        factory.clientConnectionFailed(self.reactor.connectors[0], Failure(e))
         self.pump(0.5)
 
         f = self.failureResultOf(d)
