@@ -216,8 +216,6 @@ class MasAuthDelegation(HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.server = FakeMasServer()
         hs = self.setup_test_homeserver()
-        # This triggers the server startup hooks, which starts the Tokio thread pool
-        reactor.run()
         self._auth = checked_cast(MasDelegatedAuth, hs.get_auth())
         return hs
 
@@ -585,6 +583,34 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         )
         self.expect_unrecognized(
             "POST", "/_matrix/client/v3/register/msisdn/requestToken"
+        )
+
+    def test_appservice_registration_without_inhibit_login(self) -> None:
+        """Test that appservice registration without `inhibit_login` is rejected
+        with the `M_APPSERVICE_LOGIN_UNSUPPORTED` errcode."""
+        appservice = ApplicationService(
+            token="i_am_an_app_service",
+            id="1234",
+            namespaces={"users": [{"regex": r"@alice:.+", "exclusive": True}]},
+            sender=UserID.from_string("@as_main:test"),
+        )
+
+        self.hs.get_datastores().main.services_cache = [appservice]
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/register",
+            {
+                "username": "alice",
+                "type": "m.login.application_service",
+            },
+            shorthand=False,
+            access_token="i_am_an_app_service",
+        )
+        self.assertEqual(channel.code, 400, channel.json_body)
+        self.assertEqual(
+            channel.json_body.get("errcode"),
+            "M_APPSERVICE_LOGIN_UNSUPPORTED",
+            channel.json_body,
         )
 
     def test_session_management_endpoints_removed(self) -> None:

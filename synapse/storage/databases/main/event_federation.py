@@ -1195,8 +1195,6 @@ class EventFederationWorkerStore(
         # Return all events where not all sets can reach them.
         return {eid for eid, n in event_to_missing_sets.items() if n}
 
-    # FIXME(2026-04-22): Remove comment when used. Unused currently, but will be used in
-    # future MSC4242 PRs.
     async def get_state_dag(
         self, room_id: str, forward_extrems: set[str]
     ) -> dict[str, MSC4242Event]:
@@ -1260,8 +1258,6 @@ class EventFederationWorkerStore(
 
         return result
 
-    # FIXME(2026-04-22): Remove comment when used. Unused currently, but will be used in
-    # future MSC4242 PRs.
     async def get_missing_events_state_dag(
         self,
         *,

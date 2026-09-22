@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 import attr
 
 from synapse.api.constants import (
+    EventContentFields,
     EventTypes,
     HistoryVisibility,
     JoinRules,
@@ -368,7 +369,7 @@ class RoomSummaryHandler:
             # inaccessible to the requesting user.
             if room_entry:
                 # Add the room (including the stripped m.space.child events).
-                rooms_result.append(room_entry.as_json(for_client=True))
+                rooms_result.append(room_entry.as_json())
 
                 # If this room is not at the max-depth, check if there are any
                 # children to process.
@@ -796,7 +797,6 @@ class RoomSummaryHandler:
             "canonical_alias": stats.canonical_alias,
             "num_joined_members": stats.joined_members,
             "avatar_url": stats.avatar,
-            "join_rule": stats.join_rules,
             "world_readable": (
                 stats.history_visibility == HistoryVisibility.WORLD_READABLE
             ),
@@ -815,6 +815,23 @@ class RoomSummaryHandler:
                 state_filter=StateFilter.from_types([(EventTypes.JoinRules, "")]),
             )
         )
+        if join_event_id := join_rules_state_ids.get((EventTypes.JoinRules, ""), None):
+            # To get the freshest data available, pull the state for the join_rules
+            # directly. In the unlikely case it is None, it will still be filtered out
+            # below.
+            #
+            # XXX: The current `/room_summary` spec (as of 2026-09-15) says that the
+            #  room is assumed to be `public` when `join_rule` isn't present but this
+            #  directly contradicts the scenarios where `join_rule` doesn't exist. For
+            #  example, if there is no `m.room.join_rules` event in the room, there is
+            #  no default and the the auth rules effectively make it so no one can join
+            #  except the room creator. The other scenario is if `join_rule` isn't a
+            #  string (not a valid `m.room.join_rules` event). See
+            #  https://github.com/matrix-org/matrix-spec/issues/2444
+            join_event = await self._store.get_event(join_event_id)
+            join_rule_content = join_event.content.get(EventContentFields.JOIN_RULE)
+            if isinstance(join_rule_content, str):
+                entry["join_rule"] = join_rule_content
 
         try:
             room_version = await self._store.get_room_version(room_id)
@@ -872,7 +889,8 @@ class RoomSummaryHandler:
         remote_room_hosts: list[str] | None = None,
     ) -> JsonDict:
         """
-        Implementation of the room summary C-S API from MSC3266
+        Implementation of the room summary C-S API, see
+        https://spec.matrix.org/v1.19/client-server-api/#get_matrixclientv1room_summaryroomidoralias
 
         Args:
             requester:  user id of the user making this request, will be None
@@ -980,25 +998,14 @@ class _RoomEntry:
     # This may not include all children.
     children_state_events: Sequence[JsonDict] = ()
 
-    def as_json(self, for_client: bool = False) -> JsonDict:
+    def as_json(self) -> JsonDict:
         """
         Returns a JSON dictionary suitable for the room hierarchy endpoint.
 
         It returns the room summary including the stripped m.space.child events
         as a sub-key.
-
-        Args:
-            for_client: If true, any server-server only fields are stripped from
-                the result.
-
         """
         result = dict(self.room)
-
-        # Before returning to the client, remove the allowed_room_ids key, if it
-        # exists.
-        if for_client:
-            result.pop("allowed_room_ids", False)
-
         result["children_state"] = self.children_state_events
         return result
 
