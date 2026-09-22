@@ -33,6 +33,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Final,
     Iterable,
     Iterator,
     Pattern,
@@ -673,8 +674,33 @@ class UnrecognizedRequestResource(resource.Resource):
         # or the response bytes as a return value.
         return NOT_DONE_YET
 
-    def getChild(self, name: str, request: Request) -> resource.Resource:
-        return self
+    def getChild(self, path: str, request: Request) -> resource.Resource:
+        # The child of a catch-all unrecognised request handler
+        # is itself another unrecognised request handler.
+        # We can return any UnrecognizedRequestResource that doesn't
+        # have children.
+        assert len(_BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE.children) == 0
+        return _BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE
+
+
+class _LeafUnrecognisedRequestResource(UnrecognizedRequestResource):
+    """
+    UnrecognizedRequestResource, but with the added caveat that it can't have any children.
+    This makes it safe for it to return itself as a dynamic child.
+
+    Constructed as a singleton; use `_BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE`
+    """
+
+    def putChild(self, path: bytes, child: IResource) -> None:
+        raise RuntimeError("_LeafUnrecognisedRequestResource does not accept children")
+
+
+_BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE: Final[_LeafUnrecognisedRequestResource] = (
+    _LeafUnrecognisedRequestResource()
+)
+"""
+An UnrecognizedRequestResource that is guaranteed not to have children.
+"""
 
 
 class RootRedirect(resource.Resource):

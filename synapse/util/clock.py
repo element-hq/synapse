@@ -62,6 +62,19 @@ this setting won't inherit the log level from the parent logger.
 logging.setLoggerClass(original_logger_class)
 
 
+CLOCK_SCHEDULE_EPSILON = Duration(microseconds=1)
+"""
+The smallest value we can use that will schedule tasks "as soon as possible", while
+still allowing other tasks to run between runs.
+
+This should be a non-zero value as the Twisted Reactor API does not specify how calls
+get scheduled. If we used `0`, a weird reactor implementation could run it immediately
+or run it any order with the other calls that are scheduled now.
+
+We want the semantics of run this in the "next reactor iteration".
+"""
+
+
 def _try_wakeup_deferred(d: Deferred) -> None:
     """Try to wake up a deferred, but ignore any exceptions raised by the
     callback. This is useful when we want to wake up a deferred that may have

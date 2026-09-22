@@ -1,0 +1,1 @@
+Fix `/room_summary` returning stale `join_rules`. Contributed by @famedly.

@@ -499,7 +499,7 @@ class ServerKeyFetcherTestCase(unittest.HomeserverTestCase):
         res = key_json[testverifykey_id]
         self.assertIsNotNone(res)
         assert res is not None
-        self.assertEqual(res.added_ts, self.reactor.seconds() * 1000)
+        self.assertEqual(res.added_ts, self.clock.time_msec())
         self.assertEqual(res.valid_until_ts, VALID_UNTIL_TS)
 
         # we expect it to be encoded as canonical json *before* it hits the db
@@ -614,7 +614,7 @@ class PerspectivesKeyFetcherTestCase(unittest.HomeserverTestCase):
         res = key_json[testverifykey_id]
         self.assertIsNotNone(res)
         assert res is not None
-        self.assertEqual(res.added_ts, self.reactor.seconds() * 1000)
+        self.assertEqual(res.added_ts, self.clock.time_msec())
         self.assertEqual(res.valid_until_ts, VALID_UNTIL_TS)
 
         self.assertEqual(res.key_json, canonicaljson.encode_canonical_json(response))
@@ -732,7 +732,7 @@ class PerspectivesKeyFetcherTestCase(unittest.HomeserverTestCase):
         res = key_json[testverifykey_id]
         self.assertIsNotNone(res)
         assert res is not None
-        self.assertEqual(res.added_ts, self.reactor.seconds() * 1000)
+        self.assertEqual(res.added_ts, self.clock.time_msec())
         self.assertEqual(res.valid_until_ts, VALID_UNTIL_TS)
 
         self.assertEqual(res.key_json, canonicaljson.encode_canonical_json(response))

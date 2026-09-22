@@ -25,6 +25,12 @@ use ulid::Ulid;
 pub struct Session {
     id: Ulid,
     hash: [u8; 32],
+    /// The hash from before the last `update`, if any. Used so that clients can
+    /// safely retry a PUT request (e.g. after a network error) without getting
+    /// a spurious 409 conflict: a PUT whose `sequence_token` matches this
+    /// previous hash and whose `data` matches the currently-stored data is
+    /// treated as an idempotent no-op.
+    previous_hash: Option<[u8; 32]>,
     data: String,
     last_modified: SystemTime,
     expires: SystemTime,
@@ -86,6 +92,7 @@ impl Session {
         Self {
             id,
             hash,
+            previous_hash: None,
             data,
             expires: now + ttl,
             last_modified: now,
@@ -99,9 +106,24 @@ impl Session {
 
     /// Update the session with new data and last modified time.
     pub fn update(&mut self, data: String, now: SystemTime) {
+        self.previous_hash = Some(self.hash);
         self.hash = Self::compute_hash(&data, now);
         self.data = data;
         self.last_modified = now;
+    }
+
+    /// Returns true if a PUT with the given `sequence_token` and `data` should
+    /// be treated as an idempotent retry of the most recent update (i.e. the
+    /// token matches the hash from before the last update, and the data
+    /// already matches the currently-stored data).
+    pub fn is_idempotent_retry(&self, sequence_token: &str, data: &str) -> bool {
+        let Some(previous_hash) = self.previous_hash else {
+            return false;
+        };
+        if data != self.data {
+            return false;
+        }
+        URL_SAFE_NO_PAD.encode(previous_hash) == sequence_token
     }
 
     /// Compute the hash of the data and timestamp.

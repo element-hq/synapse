@@ -29,7 +29,7 @@ from unpaddedbase64 import decode_base64, encode_base64
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.api.filtering import Filter
-from synapse.events.utils import FilteredEvent, SerializeEventConfig
+from synapse.events.utils import FilteredEvent
 from synapse.types import JsonDict, Requester, StrCollection, StreamKeyType, UserID
 from synapse.types.state import StateFilter
 from synapse.visibility import filter_and_transform_events_for_client
@@ -377,7 +377,9 @@ class SearchHandler:
         # blocking calls after this. Otherwise, the 'age' will be wrong.
 
         time_now = self.clock.time_msec()
-        serialize_options = SerializeEventConfig(requester=requester)
+        serialize_options = await self._event_serializer.create_config(
+            requester=requester
+        )
 
         for context in contexts.values():
             context["events_before"] = await self._event_serializer.serialize_events(

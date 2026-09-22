@@ -84,17 +84,11 @@ reference only.
 If you want to recreate these schemas, they need to be made from a database that
 has had all background updates run.
 
-To do so, use `scripts-dev/make_full_schema.sh`. This will produce new
-`full.sql.postgres` and `full.sql.sqlite` files.
+To do so, use the `make_full_schema.sh` script. This will produce new
+`full.sql.postgres` and `full.sql.sqlite` files, after having applied ALL
+schema deltas and background updates.
 
-Ensure postgres is installed, then run:
-
-```sh
-./scripts-dev/make_full_schema.sh -p postgres_username -o output_dir/
-```
-
-NB at the time of writing, this script predates the split into separate `state`/`main`
-databases so will require updates to handle that correctly.
+Run `poetry run scripts-dev/make_full_schema.sh -h` for usage instructions.
 
 ## Delta files
 

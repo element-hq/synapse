@@ -100,17 +100,19 @@ def prepare_database(
     """Prepares a physical database for usage. Will either create all necessary tables
     or upgrade from an older schema version.
 
-    If `config` is None then prepare_database will assert that no upgrade is
-    necessary, *or* will create a fresh database if the database is empty.
-
     Args:
         db_conn:
         database_engine:
-        config :
-            application config, or None if we are connecting to an existing
-            database which we expect to be configured already
+        config:
+            application config, or `None` if we are initialising a new empty/blank
+            database. Note that anything which requires the config, like module schemas,
+            is skipped when `None` is passed.
         databases: The name of the databases that will be used
             with this physical database. Defaults to all databases.
+    Raises:
+        ValueError: Passing `config=None` when a database already has a schema raises
+            `ValueError`, as we can't upgrade an existing database without the config.
+        UpgradeDatabaseException: If you try to initialize a new database from a worker.
     """
 
     try:

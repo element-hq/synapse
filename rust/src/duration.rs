@@ -40,6 +40,11 @@ impl SynapseDuration {
         Self { milliseconds }
     }
 
+    /// Returns the duration as a number of milliseconds.
+    pub const fn as_millis(&self) -> u64 {
+        self.milliseconds
+    }
+
     /// Creates a `SynapseDuration` from a number of hours.
     pub const fn from_hours(hours: u32) -> Self {
         // We take a u32 here so that we know the multiplication won't overflow.

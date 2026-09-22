@@ -40,7 +40,7 @@ from synapse.appservice import (
     TransactionUnusedFallbackKeys,
 )
 from synapse.events import EventBase
-from synapse.events.utils import FilteredEvent, SerializeEventConfig
+from synapse.events.utils import FilteredEvent
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
@@ -560,7 +560,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         return await self._event_serializer.serialize_events(
             [FilteredEvent(event=e, membership=None) for e in events],
             time_now,
-            config=SerializeEventConfig(
+            config=await self._event_serializer.create_config(
                 as_client_event=True,
                 # If this is an invite or a knock membership event, then include
                 # any stripped state alongside the event. We could narrow this

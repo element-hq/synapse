@@ -203,6 +203,9 @@ EXPOSE 8008/tcp 8448/tcp
 # SYNAPSE_ENABLE_METRICS=1).
 EXPOSE 19090/tcp
 
+# Python's `print()` buffers output by default, this tells Python to disable buffering.
+ENV PYTHONUNBUFFERED=1
+
 ENTRYPOINT ["/start.py"]
 
 HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \

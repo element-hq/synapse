@@ -109,6 +109,11 @@ class CapabilitiesRestServlet(RestServlet):
                 "capabilities"
             ]["m.profile_fields"]
 
+        response["capabilities"]["org.matrix.msc4140.delayed_events"] = {
+            "max_delay_ms": self.config.server.max_event_delay_duration.as_millis(),
+            "max_scheduled": self.config.server.max_delayed_events_per_user,
+        }
+
         if self.config.experimental.msc4267_enabled:
             response["capabilities"]["org.matrix.msc4267.forget_forced_upon_leave"] = {
                 "enabled": self.config.room.forget_on_leave,

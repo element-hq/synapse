@@ -95,9 +95,10 @@ pub use vmsc4242::EventFormatVMSC4242;
 /// pyclass.
 ///
 /// The `signatures` and `unsigned` fields are kept separate from the other
-/// fields as they are mutable (and must be deep-copied if the event is cloned).
-/// `common_fields` and `specific_fields` are both `#[serde(flatten)]`ed so that
-/// the serialised JSON is a single flat object matching the Matrix spec.
+/// fields as they are mutable. Use [`FormattedEvent::deep_copy`] when an
+/// independently-mutable copy is required. `common_fields` and
+/// `specific_fields` are both `#[serde(flatten)]`ed so that the serialised JSON
+/// is a single flat object matching the Matrix spec.
 ///
 /// Note, deserialization of this struct must not be done from
 /// [`serde_json::Value`] nor [`pythonize::depythonize`], due to a bug with

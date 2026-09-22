@@ -52,13 +52,17 @@ from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
 )
-from synapse.media.thumbnailer import ThumbnailProvider
+from synapse.media.thumbnailer import (
+    ANIMATED_THUMBNAIL_TYPE,
+    Thumbnailer,
+    ThumbnailProvider,
+)
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.rest import admin
 from synapse.rest.client import login, media
 from synapse.server import HomeServer
-from synapse.types import JsonDict, RoomAlias
+from synapse.types import JsonDict, RoomAlias, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -132,12 +136,7 @@ class MediaStorageTests(unittest.HomeserverTestCase):
 
         # This uses a real blocking threadpool so we have to wait for it to be
         # actually done :/
-        x = defer.ensureDeferred(test_ensure_media())
-
-        # Hotloop until the threadpool does its job...
-        self.wait_on_thread(x)
-
-        self.get_success(x)
+        self.get_success(test_ensure_media())
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -1412,3 +1411,319 @@ class MediaRepoSizeModuleCallbackTestCase(unittest.HomeserverTestCase):
         self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=413)
         assert self.last_user_id == self.user
         assert self.last_size == len(SMALL_PNG)
+
+
+def _make_animated_gif() -> bytes:
+    """Build a small two-frame animated GIF."""
+    frames = [Image.new("RGB", (64, 64), color) for color in ((255, 0, 0), (0, 0, 255))]
+    out = BytesIO()
+    frames[0].save(
+        out,
+        format="GIF",
+        save_all=True,
+        append_images=frames[1:],
+        duration=100,
+        loop=0,
+    )
+    return out.getvalue()
+
+
+def _make_mpo() -> bytes:
+    """Build a two-image MPO: a JPEG holding a stereo pair, not an animation."""
+    frames = [Image.new("RGB", (64, 64), color) for color in ((255, 0, 0), (0, 0, 255))]
+    out = BytesIO()
+    frames[0].save(out, format="MPO", save_all=True, append_images=frames[1:])
+    return out.getvalue()
+
+
+def _make_stale_mpo() -> bytes:
+    """Build an MPO whose trailing image is stripped but still advertised."""
+    data = _make_mpo()
+    with Image.open(BytesIO(data)) as image:
+        primary_size = image.mpinfo[0xB002][0]["Size"]  # type: ignore[attr-defined]
+    return data[:primary_size]
+
+
+def _make_webp(alpha: int) -> bytes:
+    """Build a small WebP whose pixels all have the given alpha."""
+    out = BytesIO()
+    Image.new("RGBA", (64, 64), (255, 0, 0, alpha)).save(
+        out, format="WEBP", lossless=True
+    )
+    return out.getvalue()
+
+
+class ThumbnailerAnimatedTestCase(unittest.TestCase):
+    """Tests that the thumbnailer only animates when explicitly asked to."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tempdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tempdir, ignore_errors=True)
+
+        self.gif_path = os.path.join(self.tempdir, "animated.gif")
+        with open(self.gif_path, "wb") as f:
+            f.write(_make_animated_gif())
+
+        self.png_path = os.path.join(self.tempdir, "static.png")
+        with open(self.png_path, "wb") as f:
+            f.write(SMALL_PNG)
+
+        self.mpo_path = os.path.join(self.tempdir, "stereo.jpg")
+        with open(self.mpo_path, "wb") as f:
+            f.write(_make_mpo())
+
+        self.stale_mpo_path = os.path.join(self.tempdir, "stale.jpg")
+        with open(self.stale_mpo_path, "wb") as f:
+            f.write(_make_stale_mpo())
+
+    def assert_is_first_frame(self, output: BytesIO) -> None:
+        """Raises an `AssertionError` unless the given image is red."""
+        pixel = Image.open(output).convert("RGB").getpixel((16, 16))
+        assert isinstance(pixel, tuple)
+        red, green, blue = pixel
+        # The first frame of every source here is red.
+        # WebP is lossy, so allow *some* green/blue to be present.
+        self.assertGreater(red, 200)
+        self.assertLess(max(green, blue), 50)
+
+    def test_scale_static_by_default(self) -> None:
+        """An animated source produces a static thumbnail unless animated=True."""
+        with Thumbnailer(self.gif_path) as thumbnailer:
+            out = thumbnailer.scale(32, 32, "image/png")
+        result = Image.open(out)
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    def test_scale_animated_when_requested(self) -> None:
+        """An animated source produces an animated thumbnail when animated=True."""
+        with Thumbnailer(self.gif_path) as thumbnailer:
+            out = thumbnailer.scale(32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True)
+        result = Image.open(out)
+        self.assertEqual(result.format, "WEBP")
+        self.assertTrue(getattr(result, "is_animated", False))
+        self.assertEqual(result.n_frames, 2)
+
+    def test_crop_animated_when_requested(self) -> None:
+        with Thumbnailer(self.gif_path) as thumbnailer:
+            out = thumbnailer.crop(32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True)
+        result = Image.open(out)
+        self.assertEqual(result.format, "WEBP")
+        self.assertTrue(getattr(result, "is_animated", False))
+        self.assertEqual(result.size, (32, 32))
+
+    def test_static_source_never_animates(self) -> None:
+        """A non-animated source stays static even when animated=True."""
+        with Thumbnailer(self.png_path) as thumbnailer:
+            self.assertFalse(thumbnailer.is_animated)
+            out = thumbnailer.scale(1, 1, ANIMATED_THUMBNAIL_TYPE, animated=True)
+        result = Image.open(out)
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    @parameterized.expand([("GIF", "gif"), ("PNG", "apng"), ("WEBP", "webp")])
+    def test_animated_formats(self, fmt: str, ext: str) -> None:
+        """Every animated format we accept produces an animated thumbnail."""
+        frames = [
+            Image.new("RGBA", (64, 64), color)
+            for color in ((255, 0, 0, 255), (0, 0, 255, 255))
+        ]
+        out = BytesIO()
+        frames[0].save(
+            out,
+            format=fmt,
+            save_all=True,
+            append_images=frames[1:],
+            duration=100,
+            loop=0,
+        )
+        path = os.path.join(self.tempdir, f"animated.{ext}")
+        with open(path, "wb") as f:
+            f.write(out.getvalue())
+
+        with Thumbnailer(path) as thumbnailer:
+            self.assertTrue(thumbnailer.is_animated)
+            thumbnail = thumbnailer.scale(
+                32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True
+            )
+        result = Image.open(thumbnail)
+        self.assertEqual(result.format, "WEBP")
+        self.assertTrue(getattr(result, "is_animated", False))
+        self.assertEqual(getattr(result, "n_frames", 1), 2)
+
+    @parameterized.expand(["scale", "crop"])
+    def test_mpo_is_not_animated(self, method: str) -> None:
+        """An MPO packs several stills into one JPEG; not an animation."""
+        with Thumbnailer(self.mpo_path) as thumbnailer:
+            self.assertFalse(thumbnailer.is_animated)
+            out = getattr(thumbnailer, method)(
+                32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True
+            )
+        self.assertFalse(getattr(Image.open(out), "is_animated", False))
+        self.assert_is_first_frame(out)
+
+    @parameterized.expand(["scale", "crop"])
+    def test_stale_mpo_index_does_not_raise(self, method: str) -> None:
+        """An MPO advertising frames that are not in the file still thumbnails.
+
+        Regression test for https://github.com/element-hq/synapse/issues/20024.
+        """
+        with Thumbnailer(self.stale_mpo_path) as thumbnailer:
+            out = getattr(thumbnailer, method)(
+                32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True
+            )
+        self.assertEqual(Image.open(out).format, "WEBP")
+        self.assert_is_first_frame(out)
+
+    def test_fallback_thumbnails_the_first_frame(self) -> None:
+        """Failing after the frames are read leaves the source parked on the
+        last one, so the fallback has to rewind."""
+        with patch.object(Thumbnailer, "_encode_animated", side_effect=ValueError):
+            with Thumbnailer(self.gif_path) as thumbnailer:
+                out = thumbnailer.scale(32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True)
+        self.assert_is_first_frame(out)
+
+    @parameterized.expand(["scale", "crop"])
+    def test_undecodable_animation_falls_back_to_static(self, method: str) -> None:
+        """If the frames can't be decoded we still serve a static thumbnail of
+        the first frame rather than failing the request."""
+        # Force the stale MPO down the animated path so decoding it fails.
+        with patch.object(Thumbnailer, "ANIMATED_FORMATS", frozenset({"MPO"})):
+            with Thumbnailer(self.stale_mpo_path) as thumbnailer:
+                self.assertTrue(thumbnailer.is_animated)
+                out = getattr(thumbnailer, method)(
+                    32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True
+                )
+                # A broken source isn't retried for every other thumbnail size.
+                self.assertFalse(thumbnailer.is_animated)
+
+        self.assertEqual(Image.open(out).format, "WEBP")
+        self.assertFalse(getattr(Image.open(out), "is_animated", False))
+        self.assert_is_first_frame(out)
+
+
+class ThumbnailerTransparencyTestCase(unittest.TestCase):
+    """Tests the transparency detection that picks the thumbnail format."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tempdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tempdir, ignore_errors=True)
+
+    def _thumbnailer(self, name: str, data: bytes) -> Thumbnailer:
+        path = os.path.join(self.tempdir, name)
+        with open(path, "wb") as f:
+            f.write(data)
+        thumbnailer = Thumbnailer(path)
+        self.addCleanup(thumbnailer.close)
+        return thumbnailer
+
+    def test_transparent_webp(self) -> None:
+        thumbnailer = self._thumbnailer("transparent.webp", _make_webp(0))
+        self.assertTrue(thumbnailer.has_transparency)
+
+    def test_partially_transparent_webp(self) -> None:
+        thumbnailer = self._thumbnailer("partial.webp", _make_webp(128))
+        self.assertTrue(thumbnailer.has_transparency)
+
+    def test_opaque_webp(self) -> None:
+        thumbnailer = self._thumbnailer("opaque.webp", _make_webp(255))
+        self.assertFalse(thumbnailer.has_transparency)
+
+    def test_unused_alpha_channel(self) -> None:
+        """An alpha channel that is fully opaque doesn't count as transparency."""
+        out = BytesIO()
+        Image.new("RGBA", (64, 64), (255, 0, 0, 255)).save(out, format="PNG")
+        thumbnailer = self._thumbnailer("opaque_rgba.png", out.getvalue())
+        self.assertEqual(thumbnailer.image.mode, "RGBA")
+        self.assertFalse(thumbnailer.has_transparency)
+
+    def test_palette_transparency(self) -> None:
+        """Palette images signal transparency through an index, not a channel."""
+        out = BytesIO()
+        Image.new("P", (64, 64)).save(out, format="PNG", transparency=0)
+        thumbnailer = self._thumbnailer("palette.png", out.getvalue())
+        self.assertEqual(thumbnailer.image.mode, "P")
+        self.assertTrue(thumbnailer.has_transparency)
+
+    def test_cmyk_jpeg(self) -> None:
+        thumbnailer = self._thumbnailer("opaque.jpg", SMALL_CMYK_JPEG)
+        self.assertFalse(thumbnailer.has_transparency)
+
+    def test_png_thumbnail_keeps_alpha(self) -> None:
+        """The PNG we switch to actually retains the transparency."""
+        thumbnailer = self._thumbnailer("transparent.webp", _make_webp(0))
+        result = Image.open(thumbnailer.scale(32, 32, "image/png"))
+        self.assertEqual(result.format, "PNG")
+        pixel = result.convert("RGBA").getpixel((16, 16))
+        assert isinstance(pixel, tuple)
+        self.assertEqual(pixel[3], 0)
+
+
+class ThumbnailFormatTestCase(unittest.HomeserverTestCase):
+    """Tests that transparent sources aren't flattened onto a black background."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        media.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.media_repo = hs.get_media_repository()
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def _upload(self, data: bytes, media_type: str) -> str:
+        """Upload the given media and return its media ID."""
+        mxc = self.get_success(
+            self.media_repo.create_or_update_content(
+                media_type,
+                "test",
+                BytesIO(data),
+                len(data),
+                UserID.from_string(self.user),
+            )
+        )
+        return mxc.media_id
+
+    def _thumbnail_types(self, media_id: str) -> set[str]:
+        thumbnails = self.get_success(self.store.get_local_media_thumbnails(media_id))
+        self.assertTrue(thumbnails, "no thumbnails were generated")
+        return {thumbnail.type for thumbnail in thumbnails}
+
+    def test_transparent_webp_thumbnails_as_png(self) -> None:
+        media_id = self._upload(_make_webp(0), "image/webp")
+        self.assertEqual(self._thumbnail_types(media_id), {"image/png"})
+
+    def test_opaque_webp_thumbnails_as_jpeg(self) -> None:
+        media_id = self._upload(_make_webp(255), "image/webp")
+        self.assertEqual(self._thumbnail_types(media_id), {"image/jpeg"})
+
+    def test_animated_thumbnail_is_still_webp(self) -> None:
+        """Transparency detection doesn't disturb the animated thumbnails."""
+        media_id = self._upload(_make_animated_gif(), "image/gif")
+        self.assertIn(ANIMATED_THUMBNAIL_TYPE, self._thumbnail_types(media_id))
+
+    def test_served_thumbnail_keeps_transparency(self) -> None:
+        """The thumbnail a client actually receives still has its alpha channel."""
+        media_id = self._upload(_make_webp(0), "image/webp")
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/test/{media_id}"
+            "?width=32&height=32&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.headers.getRawHeaders(b"Content-Type"), [b"image/png"])
+
+        thumbnail = Image.open(BytesIO(channel.result["body"]))
+        pixel = thumbnail.convert("RGBA").getpixel((16, 16))
+        assert isinstance(pixel, tuple)
+        self.assertEqual(pixel[3], 0)

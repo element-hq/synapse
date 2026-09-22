@@ -28,7 +28,7 @@ from typing import (
     Sequence,
 )
 
-from synapse.api.constants import Direction, EduTypes
+from synapse.api.constants import Direction, EduTypes, StateDag
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.api.urls import FEDERATION_UNSTABLE_PREFIX, FEDERATION_V2_PREFIX
@@ -37,6 +37,7 @@ from synapse.federation.transport.server._base import (
     BaseFederationServlet,
 )
 from synapse.http.servlet import (
+    parse_boolean,
     parse_boolean_from_args,
     parse_integer,
     parse_integer_from_args,
@@ -46,7 +47,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
-from synapse.media.thumbnailer import ThumbnailProvider
+from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
 from synapse.types import JsonDict
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -638,6 +639,7 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
         limit = int(content.get("limit", 10))
         earliest_events = content.get("earliest_events", [])
         latest_events = content.get("latest_events", [])
+        walk_state_dag = bool(content.get(StateDag.GET_MISSING_EVENTS_FIELD, False))
 
         result = await self.handler.on_get_missing_events(
             origin,
@@ -645,6 +647,7 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
             earliest_events=earliest_events,
             latest_events=latest_events,
             limit=limit,
+            walk_state_dag=walk_state_dag,
         )
 
         return 200, result
@@ -875,8 +878,9 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         width = parse_integer(request, "width", required=True)
         height = parse_integer(request, "height", required=True)
         method = parse_string(request, "method", "scale")
+        animated = parse_boolean(request, "animated", default=False)
         # TODO Parse the Accept header to get an prioritised list of thumbnail types.
-        m_type = "image/png"
+        m_type = ANIMATED_THUMBNAIL_TYPE if animated else "image/png"
         max_timeout_ms = parse_integer(
             request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
         )
@@ -884,7 +888,15 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
 
         if self.dynamic_thumbnails:
             await self.thumbnail_provider.select_or_generate_local_thumbnail(
-                request, media_id, width, height, method, m_type, max_timeout_ms, True
+                request,
+                media_id,
+                width,
+                height,
+                method,
+                m_type,
+                max_timeout_ms,
+                True,
+                animated=animated,
             )
         else:
             await self.thumbnail_provider.respond_local_thumbnail(

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 import attr
 
 from synapse.api.constants import (
+    EventContentFields,
     EventTypes,
     HistoryVisibility,
     JoinRules,
@@ -685,9 +686,10 @@ class RoomSummaryHandler:
             if await self._event_auth_handler.has_restricted_join_rules(
                 state_ids, room_version
             ):
-                allowed_rooms = (
-                    await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
-                )
+                (
+                    allowed_rooms,
+                    _,
+                ) = await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
                 if await self._event_auth_handler.is_user_in_rooms(
                     allowed_rooms, requester
                 ):
@@ -707,9 +709,10 @@ class RoomSummaryHandler:
             if await self._event_auth_handler.has_restricted_join_rules(
                 state_ids, room_version
             ):
-                allowed_rooms = (
-                    await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
-                )
+                (
+                    allowed_rooms,
+                    _,
+                ) = await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
                 for space_id in allowed_rooms:
                     if await self._event_auth_handler.is_host_in_room(space_id, origin):
                         return True
@@ -794,7 +797,6 @@ class RoomSummaryHandler:
             "canonical_alias": stats.canonical_alias,
             "num_joined_members": stats.joined_members,
             "avatar_url": stats.avatar,
-            "join_rule": stats.join_rules,
             "world_readable": (
                 stats.history_visibility == HistoryVisibility.WORLD_READABLE
             ),
@@ -813,6 +815,23 @@ class RoomSummaryHandler:
                 state_filter=StateFilter.from_types([(EventTypes.JoinRules, "")]),
             )
         )
+        if join_event_id := join_rules_state_ids.get((EventTypes.JoinRules, ""), None):
+            # To get the freshest data available, pull the state for the join_rules
+            # directly. In the unlikely case it is None, it will still be filtered out
+            # below.
+            #
+            # XXX: The current `/room_summary` spec (as of 2026-09-15) says that the
+            #  room is assumed to be `public` when `join_rule` isn't present but this
+            #  directly contradicts the scenarios where `join_rule` doesn't exist. For
+            #  example, if there is no `m.room.join_rules` event in the room, there is
+            #  no default and the the auth rules effectively make it so no one can join
+            #  except the room creator. The other scenario is if `join_rule` isn't a
+            #  string (not a valid `m.room.join_rules` event). See
+            #  https://github.com/matrix-org/matrix-spec/issues/2444
+            join_event = await self._store.get_event(join_event_id)
+            join_rule_content = join_event.content.get(EventContentFields.JOIN_RULE)
+            if isinstance(join_rule_content, str):
+                entry["join_rule"] = join_rule_content
 
         try:
             room_version = await self._store.get_room_version(room_id)
@@ -822,7 +841,7 @@ class RoomSummaryHandler:
         if room_version and await self._event_auth_handler.has_restricted_join_rules(
             join_rules_state_ids, room_version
         ):
-            allowed_rooms = await self._event_auth_handler.get_rooms_that_allow_join(
+            allowed_rooms, _ = await self._event_auth_handler.get_rooms_that_allow_join(
                 join_rules_state_ids
             )
             if allowed_rooms:

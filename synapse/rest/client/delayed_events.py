@@ -134,6 +134,28 @@ class SendDelayedEventServlet(RestServlet):
         return 200, {}
 
 
+class DelayedEventServlet(RestServlet):
+    PATTERNS = client_patterns(
+        r"/org\.matrix\.msc4140/delayed_events/(?P<delay_id>[^/]+)$",
+        releases=(),
+    )
+    CATEGORY = "Delayed event management requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.auth = hs.get_auth()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
+
+    async def on_GET(
+        self, request: SynapseRequest, delay_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        delayed_event = await self.delayed_events_handler.get_for_user(
+            requester, delay_id
+        )
+        return 200, delayed_event.asdict()
+
+
 class DelayedEventsServlet(RestServlet):
     PATTERNS = client_patterns(
         r"/org\.matrix\.msc4140/delayed_events$",
@@ -150,9 +172,11 @@ class DelayedEventsServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         # TODO: Support Pagination stream API ("from" query parameter)
         delayed_events = await self.delayed_events_handler.get_all_for_user(requester)
-
-        ret = {"delayed_events": delayed_events}
-        return 200, ret
+        return 200, {
+            "delayed_events": [
+                delayed_event.asdict() for delayed_event in delayed_events
+            ]
+        }
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
@@ -162,4 +186,5 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
         CancelDelayedEventServlet(hs).register(http_server)
         SendDelayedEventServlet(hs).register(http_server)
     RestartDelayedEventServlet(hs).register(http_server)
+    DelayedEventServlet(hs).register(http_server)
     DelayedEventsServlet(hs).register(http_server)
