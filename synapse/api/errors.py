@@ -161,9 +161,6 @@ class Codes(str, Enum):
 
     USER_LIMIT_EXCEEDED = "M_USER_LIMIT_EXCEEDED"
 
-    # Part of MSC4528
-    INCOMPATIBLE_SERVER = "ORG.MATRIX.MSC4528_INCOMPATIBLE_SERVER"
-
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.

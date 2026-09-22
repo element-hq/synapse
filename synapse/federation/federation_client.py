@@ -1468,7 +1468,9 @@ class FederationClient(FederationBase):
                     f"The remote homeserver ({destination}) returned {err.code} {err.errcode} "
                     "which indicates a compatibility problem between your homeserver and the "
                     "homeserver you're trying to send the invite to (either one could be at fault).",
-                    Codes.INCOMPATIBLE_SERVER,
+                    # FIXME(MSC4528): Use `M_INCOMPATIBLE_SERVER` stable error code once
+                    # the MSC is merged
+                    Codes.UNKNOWN,
                     additional_fields={
                         "cause": err.msg,
                         "destination_server": destination,
@@ -1518,7 +1520,9 @@ class FederationClient(FederationBase):
                     f"The remote homeserver ({destination}) returned {err.code} {err.errcode} "
                     "which indicates a compatibility problem between your homeserver and the "
                     "homeserver you're trying to send the invite to (either one could be at fault).",
-                    Codes.INCOMPATIBLE_SERVER,
+                    # FIXME(MSC4528): Use `M_INCOMPATIBLE_SERVER` stable error code once
+                    # the MSC is merged
+                    Codes.UNKNOWN,
                     additional_fields={
                         "cause": err.msg,
                         "destination_server": destination,
