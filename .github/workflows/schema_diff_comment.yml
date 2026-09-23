@@ -1,0 +1,71 @@
+name: Post schema diff comment for forked PRs
+
+# The "Schema Diff" workflow can't post a PR comment for PRs from forks,
+# since GITHUB_TOKEN is downgraded to read-only in that context. Instead it
+# uploads the diff (and PR number) as an artifact, which we pick up here and
+# post as a comment.
+#
+# This workflow runs in the context of the main repository, so its
+# `GITHUB_TOKEN` can have write access.
+# The downloaded artifact comes from an untrusted fork though, so it must only
+# ever be treated as inert comment text, never executed.
+# The PR number it carries is likewise untrusted: we cross-check it against the trusted
+# `workflow_run` event before posting, so a fork PR can't point the comment
+# at some other PR or issue.
+on:
+  workflow_run:
+    workflows: ["Schema Diff"]
+    types: [completed]
+
+# DANGER: Due to untrusted input and untrusted triggers,
+# think very carefully before expanding the permissions
+permissions:
+  # To read the artifacts from the `schema_diff.yml` run
+  actions: read
+  # To post a comment to the PR
+  pull-requests: write
+
+jobs:
+  comment:
+    name: Post schema diff comment
+    runs-on: ubuntu-latest
+    # Only run when triggered by a pull request and only on a PR from a fork
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_repository.full_name != github.repository && github.event.workflow_run.conclusion != 'cancelled'
+    steps:
+      - name: Download schema diff artifact
+        id: download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: schema-diff
+          path: schema-diff
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # The artifact (including the PR number) comes from an untrusted fork.
+      # Cross-check the number against the trusted workflow_run event before
+      # posting, so a fork PR cannot target another PR or issue.
+      - name: Verify PR matches the run that produced the artifact
+        id: verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No checkout in this job, so tell gh which repo to talk to.
+          GH_REPO: ${{ github.repository }}
+          EXPECTED_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          EXPECTED_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+        run: |
+          pr_number="$(cat schema-diff/pr_number)"
+          read -r pr_branch pr_head_repo < <(
+            gh api "repos/{owner}/{repo}/pulls/$pr_number" --jq '.head.ref + " " + .head.repo.full_name'
+          )
+          if [ "$pr_branch" != "$EXPECTED_BRANCH" ] || [ "$pr_head_repo" != "$EXPECTED_HEAD_REPO" ]; then
+            echo "::error::Artifact PR $pr_number does not match the triggering run; refusing to post a comment"
+            exit 1
+          fi
+          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+
+      - name: Post sticky PR comment
+        uses: marocchino/sticky-pull-request-comment@3d7b8546315c63df45a03981d50a43ec19237f80 # v3
+        with:
+          header: schema-diff
+          number_force: ${{ steps.verify.outputs.number }}
+          path: schema-diff/schema_diff.md

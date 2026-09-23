@@ -12,7 +12,7 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 -- Track updates to profile fields.
--- For MSC4429 legacy /sync and others.
+-- For MSC4429 and MSC4262 down sync and others.
 -- See https://github.com/element-hq/synapse/issues/19981 for potential future directions of this table.
 CREATE TABLE IF NOT EXISTS profile_updates (
   stream_id BIGINT NOT NULL PRIMARY KEY,

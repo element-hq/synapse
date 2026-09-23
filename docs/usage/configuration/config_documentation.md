@@ -339,7 +339,7 @@ include_profile_data_on_invite: false
 ### `include_profile_updates_in_sync`
 
 *(boolean)* Use this option to include updates of other users' profiles in sync responses, for users who share rooms.
-Requires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatible client, and is currently limited to legacy sync and local users only.
+For legacy sync clients, requires [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatibility. For sliding sync clients, requires [MSC4262](https://github.com/matrix-org/matrix-spec-proposals/pull/4262) compatibility. Note, profile updates via sync are currently limited to local users only.
 This feature is under development and should be used with caution on busy servers or servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring profile information doesn't leak across rooms. Defaults to `false`.
 
 Example configuration:
@@ -375,8 +375,9 @@ For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
 _Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
+_Changed in Synapse 1.162:_ the default room version was increased from [11](https://spec.matrix.org/v1.16/rooms/v11/) to [12](https://spec.matrix.org/v1.16/rooms/v12/)
 
-Defaults to `"11"`.
+Defaults to `"12"`.
 
 Example configuration:
 ```yaml
@@ -1073,6 +1074,21 @@ Example configuration:
 redaction_retention_period: 28d
 ```
 ---
+### `redaction_allowed_period`
+
+How long after an `m.room.message` was sent a local user is still allowed to redact it. If a local user tries to redact a `m.room.message` older than this period Synapse responds with `403 M_FORBIDDEN` and does not redact the event.
+
+Only applies to `m.room.message` events redacted by local users.  Redactions of other event types and redactions received over federation are unaffected. When the target of the redaction is an edit (`m.replace`), the age and type are taken from the original event and not the edit.
+
+Set to `null` (the default) to disable, allowing events to be redacted at any time.
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+redaction_allowed_period: 7d
+```
+---
 ### `forgotten_room_retention_period`
 
 How long to keep locally forgotten rooms before purging them from the DB. A value of `null` means it's disabled. Defaults to `null`.
@@ -1287,10 +1303,15 @@ Options related to federation.
 ---
 ### `federation_domain_whitelist`
 
-*(array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.
+*(null|array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.
+
 If specified as an empty list (`[]`), federation will be denied with all servers. Specifying an empty list (`[]`) here is the recommended way of disabling federation.
-If not specified, the default is to allow federation with all servers.
-Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist. There is no default for this option.
+
+If unset or null, allows federation with all servers.
+
+Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist.
+
+Defaults to `null`.
 
 Example configuration:
 ```yaml
@@ -2095,6 +2116,27 @@ rc_user_directory:
   burst_count: 200.0
 ```
 ---
+### `rc_profile`
+
+*(object)* This option allows admins to ratelimit profile lookups by clients.
+
+Requests are limited per user when the request is authenticated, otherwise per client IP address.
+
+_Added in Synapse 1.162.0._
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_profile:
+  per_second: 1.0
+  burst_count: 500.0
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 *(integer)* Sets outgoing federation transaction frequency for sending read-receipts, per-room.
@@ -2662,13 +2704,20 @@ This setting has the following sub-options:
 
   * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
 
-  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+  * `url` (string): The WebSocket URL of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is required.
+
+    Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
+
+  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
+
+    Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
 Example configuration:
 ```yaml
 matrix_rtc:
   transports:
   - type: livekit
+    url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```
 ---
@@ -3998,6 +4047,8 @@ Possible options are "all", "invite", and "off". They are defined as:
 
 Note that this option will only affect rooms created after it is set. It will also not affect rooms created by other servers.
 
+A client may supply its own `m.room.encryption` event in the `initial_state` of its `/createRoom` request. If that event is valid (it specifies an `algorithm` as a string), it takes precedence and this option will not overwrite it, allowing the client to, for example, choose a different encryption algorithm. An empty or otherwise invalid `m.room.encryption` event does not disable forced encryption: the default will still be applied on top of it.
+
 Defaults to `"off"`.
 
 Example configuration:
@@ -4590,6 +4641,20 @@ Example configuration:
 run_background_tasks_on: worker1
 ```
 ---
+### `task_scheduler`
+
+*(object)* Configuration for the task scheduler.
+
+This setting has the following sub-options:
+
+* `max_concurrent_tasks` (integer): The maximum number of tasks that can run concurrently in the task scheduler. Setting this too high may swamp the database connection pool. Defaults to `5`.
+
+Example configuration:
+```yaml
+task_scheduler:
+  max_concurrent_tasks: 5
+```
+---
 ### `update_user_directory_from_worker`
 
 *(string|null)* The [worker](../../workers.md#updating-the-user-directory) that is used to update the user directory. If not provided this defaults to the main process.
@@ -4641,6 +4706,8 @@ _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
 _Changed in Synapse 1.116.0: Added password\_path_
 
+_Changed in Synapse 1.162.0: Added username_
+
 This setting has the following sub-options:
 
 * `enabled` (boolean): Whether to use Redis support. Defaults to `false`.
@@ -4650,6 +4717,8 @@ This setting has the following sub-options:
 * `port` (integer): Optional port to use to connect to Redis. Defaults to `6379`.
 
 * `path` (string): The full path to a local Unix socket file. **If this is used, `host` and `port` are ignored.** Defaults to `"/tmp/redis.sock"`.
+
+* `username` (string|null): Optional username if configured on the Redis instance (Redis 6+ ACL authentication). Requires `password` (or `password_path`) to also be set. Defaults to `null`.
 
 * `password` (string|null): Optional password if configured on the Redis instance. Defaults to `null`.
 
@@ -4673,6 +4742,7 @@ redis:
   enabled: true
   host: localhost
   port: 6379
+  username: <username>
   password_path: <path_to_the_password_file>
   dbid: <dbid>
 ```
