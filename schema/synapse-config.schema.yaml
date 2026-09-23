@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.161/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.162/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -330,7 +330,11 @@ properties:
       _Changed in Synapse 1.157:_ the default version room version was increased
       from [10](https://spec.matrix.org/v1.12/rooms/v10/) to
       [11](https://spec.matrix.org/v1.12/rooms/v11/).
-    default: "11"
+
+      _Changed in Synapse 1.162:_ the default room version was increased from
+      [11](https://spec.matrix.org/v1.16/rooms/v11/) to
+      [12](https://spec.matrix.org/v1.16/rooms/v12/)
+    default: "12"
     examples:
       - "8"
   gc_thresholds:
@@ -2386,6 +2390,20 @@ properties:
     default:
       per_second: 0.016
       burst_count: 200.0
+  rc_profile:
+    $ref: "#/$defs/rc"
+    description: >-
+      This option allows admins to ratelimit profile lookups by clients.
+
+
+      Requests are limited per user when the request is authenticated,
+      otherwise per client IP address.
+
+
+      _Added in Synapse 1.162.0._
+    default:
+      per_second: 1.0
+      burst_count: 500.0
   federation_rr_transactions_per_room_per_second:
     type: integer
     description: >-
@@ -5766,6 +5784,20 @@ properties:
     default: null
     examples:
       - worker1
+  task_scheduler:
+    type: object
+    description: >-
+      Configuration for the task scheduler.
+    properties:
+      max_concurrent_tasks:
+        type: integer
+        minimum: 1
+        description: >-
+          The maximum number of tasks that can run concurrently in the task
+          scheduler. Setting this too high may swamp the database connection pool.
+        default: 5
+    examples:
+      - max_concurrent_tasks: 5
   update_user_directory_from_worker:
     type: ["string", "null"]
     description: >-
