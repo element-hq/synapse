@@ -326,7 +326,7 @@ class TestCase(unittest.TestCase):
 
     def assertEqualNormalisingWhitespace(
         self, received: str, expected: str, msg: str | None = None
-    ):
+    ) -> None:
         """
         Fail the test if `received` and `expected` are not equal,
         after having normalised all whitespace.
