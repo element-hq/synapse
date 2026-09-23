@@ -222,7 +222,13 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         now: int,
         limit: int | None,
     ) -> list[tuple[int, str, str]]:
-        if len(room_ids) == 0 or limit == 0 or to_token.is_before_or_eq(from_token):
+        if (
+            len(room_ids) == 0
+            or
+            # Check `to_token <= from_token` as a client could give us a token that is ahead of our 'now' position,
+            # perhaps if this worker is lagging
+            to_token.is_before_or_eq(from_token)
+        ):
             return []
         room_id_in_list_clause, room_id_in_list_values = make_in_list_sql_clause(
             txn.database_engine, "se.room_id", room_ids
