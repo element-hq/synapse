@@ -643,6 +643,7 @@ class DelayedEventsStore(SQLBaseStore):
                     "user_localpart": user_localpart,
                     "is_processed": False,
                 },
+            )
             return self._get_next_delayed_event_send_ts_txn(txn)
 
         return await self.db_pool.runInteraction(

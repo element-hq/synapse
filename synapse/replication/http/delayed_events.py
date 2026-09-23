@@ -19,7 +19,7 @@ from twisted.web.server import Request
 
 from synapse.http.server import HttpServer
 from synapse.replication.http._base import ReplicationEndpoint
-from synapse.types import JsonDict, JsonMapping, UserID
+from synapse.types import JsonDict, JsonMapping
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

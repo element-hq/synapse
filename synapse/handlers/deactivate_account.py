@@ -27,7 +27,13 @@ from synapse.api.errors import SynapseError
 from synapse.replication.http.deactivate_account import (
     ReplicationNotifyAccountDeactivatedServlet,
 )
-from synapse.types import Codes, Requester, UserID, create_requester
+from synapse.types import (
+    Codes,
+    Requester,
+    UserID,
+    create_requester,
+    get_localpart_from_id,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
