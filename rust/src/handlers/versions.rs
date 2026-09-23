@@ -21,6 +21,7 @@ use serde::Serialize;
 
 use crate::config::{types::RoomCreationPreset, SynapseHomeServerConfig};
 use crate::deferred::create_deferred;
+use crate::runtime::RustRuntime;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
 
 /// `GET /_matrix/client/versions` response
@@ -45,9 +46,9 @@ impl<'py> IntoPyObject<'py> for VersionsResponse {
 pub struct VersionsHandler {
     pub global_unstable_feature_map: Arc<UnstableFeatureMap>,
     pub store: Arc<Store>,
-    /// The Twisted reactor, used to bridge our `async` response back into a
-    /// Twisted deferred that Python can `await`.
-    pub reactor: Py<PyAny>,
+    /// The per-homeserver Rust state, used to bridge our `async` response
+    /// back into a Twisted deferred that Python can `await`.
+    pub runtime: RustRuntime,
 }
 
 #[pymethods]
@@ -63,7 +64,7 @@ impl VersionsHandler {
         let store = Arc::clone(&self.store);
         let global_unstable_feature_map = Arc::clone(&self.global_unstable_feature_map);
 
-        create_deferred(py, self.reactor.bind(py), async move {
+        create_deferred(py, &self.runtime, async move {
             build_versions_response(&store, &global_unstable_feature_map, user_id.as_deref())
                 .await
                 .map_err(|err| {

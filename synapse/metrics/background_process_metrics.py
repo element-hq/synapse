@@ -57,8 +57,6 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics._types import Collector
 
 if TYPE_CHECKING:
-    import resource
-
     # Old versions don't have `LiteralString`
     from typing_extensions import LiteralString
 
@@ -506,7 +504,7 @@ class BackgroundProcessLoggingContext(LoggingContext):
             desc=name, server_name=server_name, ctx=self
         )
 
-    def start(self, rusage: "resource.struct_rusage | None") -> None:
+    def start(self, rusage: "tuple[float, float] | None") -> None:
         """Log context has started running (again)."""
 
         super().start(rusage)
