@@ -923,7 +923,7 @@ class MultiTableMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         self.assertEqual(second_id_gen.get_persisted_upto_position(), 7)
 
 
-class MultiWriterShardedTokenHelpersPureTestCase(TestCase):
+class ShardedTokenHelpersPureTestCase(TestCase):
     """
     Non-database tests for the helpers for reading multi-writer streams.
     """
@@ -993,12 +993,15 @@ class MultiWriterShardedTokenHelpersPureTestCase(TestCase):
         )
 
 
-class MultiWriterShardedTokenHelpersDatabaseTestCase(TestCase):
+class ShardedTokenHelpersDatabaseTestCase(TestCase):
     """Tests for the helpers that read a range of a multi-writer stream.
 
     These don't need a homeserver: they only exercise the SQL that
     `make_multiwriter_sharded_token_bounds_sql` builds, against a throwaway
     SQLite table.
+
+    NOTE: `ShardedTokenHelpersDatabaseNullTestCase` inherits all these tests
+        with a separate set of tables.
     """
 
     ROWS = [
@@ -1177,3 +1180,69 @@ class MultiWriterShardedTokenHelpersDatabaseTestCase(TestCase):
                         f"We then read {resume_token} < ... <= {to_token} and expected to get "
                         "all the rows within range (in order, no duplicates), but didn't.",
                     )
+
+
+class ShardedTokenHelpersDatabaseNullTestCase(ShardedTokenHelpersDatabaseTestCase):
+    """
+    Variant of `ShardedTokenHelpersDatabaseTestCase` where there are rows with
+    `instance_name` being `NULL`, corresponding to rows that existed before the stream was sharded.
+    """
+
+    ROWS = [
+        # (stream_id, instance_name)
+        (4, None),
+        (5, None),
+        (6, None),
+        (7, None),
+        (8, "worker2"),
+        (9, "worker1"),
+        (10, "worker3"),
+        (11, "worker1"),
+        (12, "worker2"),
+        (13, "worker3"),
+        (14, "worker2"),
+    ]
+    """
+    (stream_id, instance_name) rows to insert into the example stream table.
+    """
+
+    SHARDED_TOKEN_RANGES = [
+        (
+            MultiWriterStreamToken(stream=5),
+            MultiWriterStreamToken(stream=14),
+        ),
+        (
+            MultiWriterStreamToken(stream=5),
+            MultiWriterStreamToken(
+                stream=10, instance_map=immutabledict({"worker2": 14})
+            ),
+        ),
+        (
+            MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 9})
+            ),
+            MultiWriterStreamToken(
+                stream=10, instance_map=immutabledict({"worker2": 14})
+            ),
+        ),
+        (
+            MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 7})
+            ),
+            MultiWriterStreamToken(
+                stream=8, instance_map=immutabledict({"worker1": 11, "worker3": 13})
+            ),
+        ),
+        (
+            MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 9, "worker2": 8})
+            ),
+            MultiWriterStreamToken(
+                stream=10,
+                instance_map=immutabledict(
+                    {"worker1": 11, "worker2": 14, "worker3": 13}
+                ),
+            ),
+        ),
+    ]
+    """(from, to) token pairs to exercise the bounds against `ROWS`."""
