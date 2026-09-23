@@ -547,6 +547,7 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
 
         self.assertEqual(_badge(room_id), 1)
         self.assertEqual(_badge(stale_room_id), 2)
+
     def test_count_aggregation_threads(self) -> None:
         """
         This is essentially the same test as test_count_aggregation, but adds
