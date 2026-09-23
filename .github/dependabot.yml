@@ -1,0 +1,81 @@
+# Configure general package update PRs filed by dependabot.
+# Security update PRs are generally unaffected by these settings.
+version: 2
+
+updates:
+  - # "pip" is the correct setting for poetry, per
+    # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
+    package-ecosystem: "pip"
+    directory: "/"
+    # Only bump the minimum and maximum versions of dependencies in our
+    # lockfile. The maximum version in `pyproject.toml` may be bumped, but the
+    # minimum may not be.
+    #
+    # We want to avoid bumping the minimum version in `pyproject.toml` unless
+    # necessary, as it requires our supported Linux distributions to have
+    # those versions in their repos first.
+    versioning-strategy: "increase-if-necessary"
+    # Group together all updates for this ecosystem into a single, big PR.
+    #
+    # Doing this prevents us from needing to review a PR per dependency upgrade
+    # (which can become burdensome).
+    # 
+    # Splitting up each ecosystem into their own PR (rather than putting ALL
+    # upgrades into a single PR) allows us to more quicker determine the culprit
+    # when CI fails.
+    groups:
+      all-python-dependencies:
+        applies-to: version-updates
+        patterns:
+          # Update all non-transitive dependencies.
+          - "*"
+    open-pull-requests-limit: 1
+    # Prevent pulling packages that were recently updated to help mitigate
+    # supply chain attacks. 14 days was taken from the recommendation at
+    # https://blog.yossarian.net/2025/11/21/We-should-all-be-using-dependency-cooldowns
+    # where the author noted that 9/10 attacks would have been mitigated by a
+    # two week cooldown.
+    #
+    # The cooldown only applies to general updates; security updates will still
+    # be pulled in as soon as possible.
+    cooldown:
+      default-days: 14
+    schedule:
+      interval: "monthly"
+      time: "08:00"
+      timezone: "Europe/London"
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    open-pull-requests-limit: 1
+    groups:
+      all-rust-dependencies:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    schedule:
+      interval: "monthly"
+      time: "08:00"
+      timezone: "Europe/London"
+    cooldown:
+      default-days: 14
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    open-pull-requests-limit: 1
+    groups:
+      all-github-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    schedule:
+      interval: "monthly"
+      time: "08:00"
+      timezone: "Europe/London"
+    cooldown:
+      default-days: 14
+
+  # Note: "docker" is purposefully excluded from this list.
+  #
+  # Our docker containers should be kept up-to-date using container scanning
+  # technology instead of dependabot.
