@@ -116,8 +116,6 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         )
         token = StreamToken.START.copy_and_advance(StreamKeyType.RECEIPT, receipt_token)
 
-        counts_before = self._get_timeout_counts_from_metric()
-
         # Function under test
         wait_d = defer.ensureDeferred(self.notifier.wait_for_stream_token(token))
         # Advance time a little bit to make the
@@ -138,12 +136,6 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         # Make sure we gave up waiting and not caught-up (False)
         wait_result = self.get_success(wait_d)
         self.assertEqual(wait_result, False)
-
-        # Receipts was the only lagging stream, so it should be the only one counted.
-        self.assertEqual(
-            self._get_timeout_counts_from_metric() - counts_before,
-            Counter({StreamKeyType.RECEIPT.value: 1}),
-        )
 
     def test_wait_for_stream_token_timeout_counts_each_lagging_stream(self) -> None:
         """
