@@ -896,7 +896,77 @@ class MultiTableMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         self.assertEqual(second_id_gen.get_persisted_upto_position(), 7)
 
 
-class MultiWriterShardedTokenBoundsTestCase(TestCase):
+class MultiWriterShardedTokenHelpersPureTestCase(TestCase):
+    """
+    Non-database tests for the helpers for reading multi-writer streams.
+    """
+
+    def test_bounds_sql_documented_example(self) -> None:
+        """
+        Tests that the example in the docstring is what we actually generate.
+        """
+        clause, values = make_multiwriter_sharded_token_bounds_sql(
+            stream_id_column="se.stream_id",
+            instance_name_column="se.instance_name",
+            from_token_exclusive=MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 8})
+            ),
+            to_token_inclusive=MultiWriterStreamToken(
+                stream=10, instance_map=immutabledict({"worker2": 14})
+            ),
+        )
+        self.assertEqualNormalisingWhitespace(
+            clause,
+            """
+            (
+                ? < se.stream_id
+                AND se.stream_id <= ?
+                AND NOT (se.instance_name = ? AND se.stream_id <= ?)
+                AND (
+                    se.stream_id <= ?
+                    OR (se.instance_name = ? AND se.stream_id <= ?)
+                )
+            )
+            """,
+        )
+        self.assertEqual(list(values), [5, 14, "worker1", 8, 10, "worker2", 14])
+
+    def test_token_after_partial_read_does_not_go_backwards(self) -> None:
+        """
+        Tests that advancing the token after a partial read doesn't let it go
+        backwards.
+
+        This is relevant because Synapse workers don't always advance their current
+        position at the same time.
+        """
+        # As a scenario: the client has already read up to a baseline position of 60,
+        # but this reader worker has only caught up to 10.
+        # It can nonetheless see that worker2 has reached 70.
+        from_token = MultiWriterStreamToken(stream=60)
+        to_token = MultiWriterStreamToken(
+            stream=10, instance_map=immutabledict({"worker2": 70})
+        )
+
+        resume_token = advance_multiwriter_sharded_token_after_partial_read(
+            from_token_exclusive=from_token,
+            to_token_inclusive=to_token,
+            last_read_stream_id=64,
+        )
+
+        # worker2 advances to what we read; everyone else stays where they were.
+        self.assertEqual(
+            resume_token,
+            MultiWriterStreamToken(
+                stream=60, instance_map=immutabledict({"worker2": 64})
+            ),
+        )
+        self.assertTrue(
+            from_token.is_before_or_eq(resume_token),
+            f"Expected {from_token} <= {resume_token}",
+        )
+
+
+class MultiWriterShardedTokenHelpersDatabaseTestCase(TestCase):
     """Tests for the helpers that read a range of a multi-writer stream.
 
     These don't need a homeserver: they only exercise the SQL that
@@ -1025,36 +1095,6 @@ class MultiWriterShardedTokenBoundsTestCase(TestCase):
             )
         ]
 
-    def test_bounds_sql_documented_example(self) -> None:
-        """
-        Tests that the example in the docstring is what we actually generate.
-        """
-        clause, values = make_multiwriter_sharded_token_bounds_sql(
-            stream_id_column="se.stream_id",
-            instance_name_column="se.instance_name",
-            from_token_exclusive=MultiWriterStreamToken(
-                stream=5, instance_map=immutabledict({"worker1": 8})
-            ),
-            to_token_inclusive=MultiWriterStreamToken(
-                stream=10, instance_map=immutabledict({"worker2": 14})
-            ),
-        )
-        self.assertEqualNormalisingWhitespace(
-            clause,
-            """
-            (
-                ? < se.stream_id
-                AND se.stream_id <= ?
-                AND NOT (se.instance_name = ? AND se.stream_id <= ?)
-                AND (
-                    se.stream_id <= ?
-                    OR (se.instance_name = ? AND se.stream_id <= ?)
-                )
-            )
-            """,
-        )
-        self.assertEqual(list(values), [5, 14, "worker1", 8, 10, "worker2", 14])
-
     def test_bounds_sql_selects_expected_rows(self) -> None:
         """
         Tests that the `make_multiwriter_sharded_token_bounds_sql` selects the correct rows,
@@ -1066,40 +1106,6 @@ class MultiWriterShardedTokenBoundsTestCase(TestCase):
                     self._select(from_token, to_token),
                     self._expected(from_token, to_token),
                 )
-
-    def test_token_after_partial_read_does_not_go_backwards(self) -> None:
-        """
-        Tests that advancing the token after a partial read doesn't let it go
-        backwards.
-
-        This is relevant because Synapse workers don't always advance their current
-        position at the same time.
-        """
-        # As a scenario: the client has already read up to a baseline position of 60,
-        # but this reader worker has only caught up to 10.
-        # It can nonetheless see that worker2 has reached 70.
-        from_token = MultiWriterStreamToken(stream=60)
-        to_token = MultiWriterStreamToken(
-            stream=10, instance_map=immutabledict({"worker2": 70})
-        )
-
-        resume_token = advance_multiwriter_sharded_token_after_partial_read(
-            from_token_exclusive=from_token,
-            to_token_inclusive=to_token,
-            last_read_stream_id=64,
-        )
-
-        # worker2 advances to what we read; everyone else stays where they were.
-        self.assertEqual(
-            resume_token,
-            MultiWriterStreamToken(
-                stream=60, instance_map=immutabledict({"worker2": 64})
-            ),
-        )
-        self.assertTrue(
-            from_token.is_before_or_eq(resume_token),
-            f"Expected {from_token} <= {resume_token}",
-        )
 
     def test_token_after_partial_read(self) -> None:
         """
