@@ -784,6 +784,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         # user1 schedules a delayed message event and a delayed state event.
         state_key = "to_cancel_on_deactivation"
         user1_delay_ids = []
+        # TODO: Schedule these through the dedicated delayed events endpoint
+        # instead of the delay query parameter on `/send` and `/state`, once
+        # https://github.com/element-hq/synapse/pull/19354 has landed.
         for path in (
             _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 900),
             _get_path_for_delayed_state(self.room_id, _EVENT_TYPE, state_key, 900),
