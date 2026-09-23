@@ -1039,17 +1039,19 @@ class MultiWriterShardedTokenBoundsTestCase(TestCase):
                 stream=10, instance_map=immutabledict({"worker2": 14})
             ),
         )
-        self.assertEqual(
+        self.assertEqualNormalisingWhitespace(
             clause,
-            "(\n"
-            "\t? < se.stream_id\n"
-            "\tAND se.stream_id <= ?\n"
-            "\tAND NOT (se.instance_name = ? AND se.stream_id <= ?)\n"
-            "\tAND (\n"
-            "\t\tse.stream_id <= ?\n"
-            "\t\tOR (se.instance_name = ? AND se.stream_id <= ?)\n"
-            "\t)\n"
-            ")",
+            """
+            (
+                ? < se.stream_id
+                AND se.stream_id <= ?
+                AND NOT (se.instance_name = ? AND se.stream_id <= ?)
+                AND (
+                    se.stream_id <= ?
+                    OR (se.instance_name = ? AND se.stream_id <= ?)
+                )
+            )
+            """,
         )
         self.assertEqual(list(values), [5, 14, "worker1", 8, 10, "worker2", 14])
 

@@ -25,6 +25,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import time
 from typing import (
@@ -322,6 +323,32 @@ class TestCase(unittest.TestCase):
             extra_message = "f\n{message}"
 
         self.fail(f"{diff_message}{extra_message}")
+
+    def assertEqualNormalisingWhitespace(
+        self, received: str, expected: str, msg: str | None = None
+    ):
+        """
+        Fail the test if `received` and `expected` are not equal,
+        after having normalised all whitespace.
+
+        By normalising whitespace, we mean that any run of whitespace
+        is replaced by a single ` `, on both sides.
+        The front and back of the strings are also trimmed.
+
+        Whitespace characters considered are: `\n`, `\t`, ` `.
+        """
+        PATTERN = r"[ \n\t]+"
+        REPLACEMENT = " "
+        normalised_received = re.sub(PATTERN, REPLACEMENT, received).strip()
+        normalised_expected = re.sub(PATTERN, REPLACEMENT, expected).strip()
+
+        if normalised_received == normalised_expected:
+            return
+
+        msg = "" if msg is None else msg
+        self.fail(
+            f"Expected strings to match, after normalising whitespace: {msg}\nReceived: {received}\nExpected: {expected}\nReceived (normalised): {normalised_received}\nExpected (normalised): {normalised_expected}"
+        )
 
 
 def DEBUG(target: TV) -> TV:

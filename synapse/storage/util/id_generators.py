@@ -1084,10 +1084,10 @@ def make_multiwriter_sharded_token_bounds_sql(
         )
         upper_or_values.extend((instance_name, pos))
 
-    clauses.append("(\n\t\t" + "\n\t\tOR ".join(upper_or_clauses) + "\n\t)")
+    clauses.append("( " + " OR ".join(upper_or_clauses) + " )")
     values.extend(upper_or_values)
 
-    return "(\n\t" + "\n\tAND ".join(clauses) + "\n)", values
+    return "( " + " AND ".join(clauses) + " )", values
 
 
 def advance_multiwriter_sharded_token_after_partial_read(
