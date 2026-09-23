@@ -444,10 +444,10 @@ class DelayedEventsHandler:
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
 
-    async def cancel_all_for_user(self, user: UserID) -> None:
+    async def cancel_all_for_user(self, user_localpart: str) -> None:
         """
-        Cancels the scheduled delivery of all delayed events owned by the given
-        local user, e.g. because their account is being deactivated (MSC4140).
+        Cancels the scheduled delivery of all delayed events owned by the local user
+        with the given localpart, e.g. because their account is being deactivated.
 
         Delayed events that are already being sent are left alone.
 
@@ -457,13 +457,13 @@ class DelayedEventsHandler:
         if not self._is_master:
             await self._cancel_all_for_user_client(
                 instance_name=MAIN_PROCESS_INSTANCE_NAME,
-                user_id=user.to_string(),
+                user_localpart=user_localpart,
             )
             return
 
         await make_deferred_yieldable(self._initialized_from_db)
 
-        next_send_ts = await self._store.cancel_delayed_events_for_user(user.localpart)
+        next_send_ts = await self._store.cancel_delayed_events_for_user(user_localpart)
 
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)

@@ -59,17 +59,17 @@ class ReplicationAddedDelayedEventRestServlet(ReplicationEndpoint):
 
 
 class ReplicationCancelDelayedEventsForUserRestServlet(ReplicationEndpoint):
-    """Cancel all of a user's delayed events, on behalf of another worker.
+    """Cancel all of a local user's delayed events, on behalf of another worker.
 
     Request format:
 
-        POST /_synapse/replication/cancel_delayed_events_for_user/:user_id
+        POST /_synapse/replication/cancel_delayed_events_for_user/:user_localpart
 
         {}
     """
 
     NAME = "cancel_delayed_events_for_user"
-    PATH_ARGS = ("user_id",)
+    PATH_ARGS = ("user_localpart",)
     CACHE = False
 
     def __init__(self, hs: "HomeServer"):
@@ -78,17 +78,17 @@ class ReplicationCancelDelayedEventsForUserRestServlet(ReplicationEndpoint):
         self.handler = hs.get_delayed_events_handler()
 
     @staticmethod
-    async def _serialize_payload(user_id: str) -> JsonDict:  # type: ignore[override]
+    async def _serialize_payload(user_localpart: str) -> JsonDict:  # type: ignore[override]
         """
         Args:
-            user_id: The ID of the user whose delayed events to cancel.
+            user_localpart: The localpart of the local user whose delayed events to cancel.
         """
         return {}
 
     async def _handle_request(  # type: ignore[override]
-        self, request: Request, content: JsonDict, user_id: str
+        self, request: Request, content: JsonDict, user_localpart: str
     ) -> tuple[int, JsonDict]:
-        await self.handler.cancel_all_for_user(UserID.from_string(user_id))
+        await self.handler.cancel_all_for_user(user_localpart)
 
         return 200, {}
 

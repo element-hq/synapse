@@ -625,7 +625,7 @@ class DelayedEventsStore(SQLBaseStore):
         self, user_localpart: str
     ) -> Timestamp | None:
         """
-        Cancels all delayed events owned by the given user, i.e. remove them as long as they haven't been processed.
+        Cancels all delayed events owned by the given local user, i.e. remove them as long as they haven't been processed.
 
         Args:
             user_localpart: The localpart of the user whose delayed events to cancel.
