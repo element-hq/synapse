@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-09af8a35.js";
+            window.path_to_searchindex_js = "searchindex-9b1f7488.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -2129,6 +2129,19 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11630"><a class="header" href="#upgrading-to-v11630">Upgrading to v1.163.0</a></h1>
+<h2 id="limit_profile_requests_to_users_who_share_rooms-now-requires-require_auth_for_profile_requests"><a class="header" href="#limit_profile_requests_to_users_who_share_rooms-now-requires-require_auth_for_profile_requests"><code>limit_profile_requests_to_users_who_share_rooms</code> now requires <code>require_auth_for_profile_requests</code></a></h2>
+<p>The shared-room check enabled by
+<a href="#limit_profile_requests_to_users_who_share_rooms"><code>limit_profile_requests_to_users_who_share_rooms</code></a>
+is only applied to authenticated requests, and profile requests are only
+authenticated when
+<a href="#require_auth_for_profile_requests"><code>require_auth_for_profile_requests</code></a>
+is enabled. Enabling the former without the latter therefore never restricted
+any profile lookup.</p>
+<p>Synapse will now refuse to start with that combination. If you have
+<code>limit_profile_requests_to_users_who_share_rooms: true</code> in your configuration,
+either also set <code>require_auth_for_profile_requests: true</code>, or remove the option to
+keep the behaviour you have today.</p>
 <h1 id="upgrading-to-v11610"><a class="header" href="#upgrading-to-v11610">Upgrading to v1.161.0</a></h1>
 <h2 id="deprecation-of-matrix_rtclivekit_service_url"><a class="header" href="#deprecation-of-matrix_rtclivekit_service_url">Deprecation of <code>matrix_rtc.livekit_service_url</code></a></h2>
 <p>When configuring the MatrixRTC LiveKit transport, the <code>livekit_service_url</code> is now
@@ -4564,13 +4577,15 @@ shown.</p>
 </code></pre>
 <hr>
 <h3 id="require_auth_for_profile_requests"><a class="header" href="#require_auth_for_profile_requests"><code>require_auth_for_profile_requests</code></a></h3>
-<p><em>(boolean)</em> Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless <code>allow_profile_lookup_over_federation</code> is set to false. Defaults to <code>false</code>.</p>
+<p><em>(boolean)</em> Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless <code>allow_profile_lookup_over_federation</code> is set to false.
+This option must be enabled in order to use <code>limit_profile_requests_to_users_who_share_rooms</code>. Defaults to <code>false</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">require_auth_for_profile_requests: true
 </code></pre>
 <hr>
 <h3 id="limit_profile_requests_to_users_who_share_rooms"><a class="header" href="#limit_profile_requests_to_users_who_share_rooms"><code>limit_profile_requests_to_users_who_share_rooms</code></a></h3>
-<p><em>(boolean)</em> Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server. Defaults to <code>false</code>.</p>
+<p><em>(boolean)</em> Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server.
+The check can only be applied to authenticated requests, so this option requires <code>require_auth_for_profile_requests</code> to be enabled as well. Synapse will refuse to start if this option is enabled without it. Defaults to <code>false</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">limit_profile_requests_to_users_who_share_rooms: true
 </code></pre>

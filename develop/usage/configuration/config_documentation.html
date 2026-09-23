@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-09af8a35.js";
+            window.path_to_searchindex_js = "../../searchindex-9b1f7488.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-64310643.js"></script>
@@ -432,13 +432,15 @@ shown.</p>
 </code></pre>
 <hr>
 <h3 id="require_auth_for_profile_requests"><a class="header" href="#require_auth_for_profile_requests"><code>require_auth_for_profile_requests</code></a></h3>
-<p><em>(boolean)</em> Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless <code>allow_profile_lookup_over_federation</code> is set to false. Defaults to <code>false</code>.</p>
+<p><em>(boolean)</em> Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless <code>allow_profile_lookup_over_federation</code> is set to false.
+This option must be enabled in order to use <code>limit_profile_requests_to_users_who_share_rooms</code>. Defaults to <code>false</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">require_auth_for_profile_requests: true
 </code></pre>
 <hr>
 <h3 id="limit_profile_requests_to_users_who_share_rooms"><a class="header" href="#limit_profile_requests_to_users_who_share_rooms"><code>limit_profile_requests_to_users_who_share_rooms</code></a></h3>
-<p><em>(boolean)</em> Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server. Defaults to <code>false</code>.</p>
+<p><em>(boolean)</em> Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server.
+The check can only be applied to authenticated requests, so this option requires <code>require_auth_for_profile_requests</code> to be enabled as well. Synapse will refuse to start if this option is enabled without it. Defaults to <code>false</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">limit_profile_requests_to_users_who_share_rooms: true
 </code></pre>
