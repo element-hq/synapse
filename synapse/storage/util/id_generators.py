@@ -1107,7 +1107,11 @@ def make_multiwriter_sharded_token_bounds_sql(
     # Now for every writer where we had already read further ahead than the baseline (lowest) position of `from`,
     # we whittle away what we have already seen from the lower end of the envelope.
     for instance_name, pos in from_token_exclusive.instance_map.items():
-        clauses.append(f"NOT ({instance_name_column} = ? AND {stream_id_column} <= ?)")
+        # We need `IS NOT DISTINCT FROM` (analogous to `=` but treats `NULL` as a known value)
+        # for legacy rows where `instance_name` is `NULL`, such as before the stream was sharded.
+        clauses.append(
+            f"NOT ({instance_name_column} IS NOT DISTINCT FROM ? AND {stream_id_column} <= ?)"
+        )
         values.extend((instance_name, pos))
 
     # Now we need to restrict the upper end of the envelope to only include those rows where either:
@@ -1117,7 +1121,7 @@ def make_multiwriter_sharded_token_bounds_sql(
     # - the row's writer is explicitly visible ahead of the baseline (minimum) position
     for instance_name, pos in to_token_inclusive.instance_map.items():
         upper_or_clauses.append(
-            f"({instance_name_column} = ? AND {stream_id_column} <= ?)"
+            f"({instance_name_column} IS NOT DISTINCT FROM ? AND {stream_id_column} <= ?)"
         )
         upper_or_values.extend((instance_name, pos))
 

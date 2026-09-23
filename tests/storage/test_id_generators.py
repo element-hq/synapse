@@ -948,10 +948,10 @@ class ShardedTokenHelpersPureTestCase(TestCase):
             (
                 ? < se.stream_id
                 AND se.stream_id <= ?
-                AND NOT (se.instance_name = ? AND se.stream_id <= ?)
+                AND NOT (se.instance_name IS NOT DISTINCT FROM ? AND se.stream_id <= ?)
                 AND (
                     se.stream_id <= ?
-                    OR (se.instance_name = ? AND se.stream_id <= ?)
+                    OR (se.instance_name IS NOT DISTINCT FROM ? AND se.stream_id <= ?)
                 )
             )
             """,
