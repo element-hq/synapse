@@ -1104,6 +1104,12 @@ def advance_multiwriter_sharded_token_after_partial_read(
     The read operation MUST have been ordered by the stream ID, e.g.
     using `ORDER BY stream_id`.
 
+    Caution:
+        For streams where one fact is represented by multiple rows with
+        the same `stream_id`, the ENTIRE fact corresponding to `last_read_stream_id`
+        MUST have been processed because this function won't help you 'pause'
+        in the middle of a fact.
+
     Arguments:
         from_token_exclusive: the exclusive lower bound the rows were read with.
         to_token_inclusive: the inclusive upper bound the rows were read with.
