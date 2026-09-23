@@ -16,7 +16,6 @@ from collections import Counter
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.notifier import wait_for_stream_token_timeout_counter
 from synapse.server import HomeServer
 from synapse.types import MultiWriterStreamToken, StreamKeyType, StreamToken
@@ -188,13 +187,16 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         The counter is process-wide, and so shared between tests. Compare against a
         count taken before the code under test ran.
         """
+
+        # Fetch all samples from the `wait_for_stream_token_timeout_counter`
+        # metric. The only label (other than the automatic `server_name` label)
+        # is `stream_key`.
+        samples = self.get_prometheus_metric_current_values(
+            wait_for_stream_token_timeout_counter,
+        )
+
         counts: Counter[str] = Counter()
-        for metric in wait_for_stream_token_timeout_counter.collect():
-            for sample in metric.samples:
-                if (
-                    sample.name.endswith("_total")
-                    and sample.labels[SERVER_NAME_LABEL] == self.hs.hostname
-                ):
-                    counts[sample.labels["stream_key"]] += int(sample.value)
+        for sample in samples:
+            counts[sample.labels["stream_key"]] = int(sample.value)
 
         return counts

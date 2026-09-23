@@ -50,6 +50,7 @@ from unittest.mock import Mock, patch
 import canonicaljson
 import signedjson.key
 import unpaddedbase64
+from prometheus_client.samples import Sample
 from typing_extensions import Concatenate, Never, ParamSpec, override
 
 from twisted.internet import defer
@@ -1230,13 +1231,10 @@ class HomeserverTestCase(TestCase):
             event_injection.inject_member_event(self.hs, room, user, membership)
         )
 
-    def get_prometheus_metric_current_value(
+    def get_prometheus_metric_current_values(
         self, metric: "Collector", **labels: str
-    ) -> int:
-        """Get the value of a prometheus metric with the given labels.
-
-        This function will raise an AssertionError if there is not exactly one
-        sample with the given labels.
+    ) -> list[Sample]:
+        """Get all samples of a prometheus metric with the given labels.
 
         Note that the metrics outlives each individual test, so it may hold
         values from previous tests.
@@ -1261,6 +1259,24 @@ class HomeserverTestCase(TestCase):
                     # We didn't break, so all the labels matched. Return this
                     # sample's value.
                     found_samples.append(sample)
+
+        return found_samples
+
+    def get_prometheus_metric_current_value(
+        self, metric: "Collector", **labels: str
+    ) -> int:
+        """Get the value of a prometheus metric with the given labels.
+
+        This function will raise an AssertionError if there is not exactly one
+        sample with the given labels.
+
+        Note that the metrics outlives each individual test, so it may hold
+        values from previous tests.
+
+        Automatically includes SERVER_NAME_LABEL.
+        """
+
+        found_samples = self.get_prometheus_metric_current_values(metric, **labels)
 
         # The caller expects there to be exactly one sample with the given
         # labels. If there are multiple (or zero) samples, we error.
