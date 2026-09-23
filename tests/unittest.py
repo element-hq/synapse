@@ -20,6 +20,7 @@
 #
 #
 import copy
+import difflib
 import functools
 import gc
 import hashlib
@@ -30,6 +31,7 @@ import os
 import secrets
 import sys
 import time
+from collections import Counter
 from collections.abc import Set
 from typing import (
     TYPE_CHECKING,
@@ -43,6 +45,7 @@ from typing import (
     NoReturn,
     Optional,
     Protocol,
+    Sequence,
     TypeVar,
 )
 from unittest.mock import Mock, patch
@@ -124,6 +127,15 @@ def _use_colour() -> bool:
     if os.environ.get("FORCE_COLOR"):
         return True
     return sys.stdout.isatty()
+
+
+def _is_hashable(item: object) -> bool:
+    """Whether `item` can be hashed."""
+    try:
+        hash(item)
+    except TypeError:
+        return False
+    return True
 
 
 class _TypedFailure(Generic[_ExcType], Protocol):
@@ -397,7 +409,119 @@ class TestCase(unittest.TestCase):
 
         extra_message = ""
         if message is not None:
-            extra_message = "f\n{message}"
+            extra_message = f"\n{message}"
+
+        self.fail(f"{diff_message}{extra_message}")
+
+    def _fail_with_sequence_inequality(
+        self,
+        actual_items: Sequence[TV],
+        expected_items: Sequence[TV],
+        message: str | None,
+    ) -> Never:
+        """
+        Fail the current test, printing a rich message showing the sequence
+        inequality.
+
+        As sequences are ordered, we align them with a sequence matcher, so that a single inserted
+        or deleted item doesn't make every subsequent item look wrong.
+        An item which appears in both lists but at a different position is marked as 'moved'.
+
+        `actual_items` and `expected_items` must contain only hashable items.
+        """
+        if _use_colour():
+            BOLD = "\033[1m"
+            DIM_GREY = "\033[2;37m"
+            RED = "\033[31m"
+            BRIGHT_YELLOW = "\033[93m"
+            RESET = "\033[0m"
+        else:
+            BOLD = DIM_GREY = RED = BRIGHT_YELLOW = RESET = ""
+
+        # If it's correct, use dim grey: we don't want to draw your attention to it
+        CORRECT_MARKER = f"{DIM_GREY}      ok"
+
+        # If it's wrong, use red: that's the most important information here
+        MISSING_MARKER = f" {RED}missing{RESET}{BRIGHT_YELLOW}"
+        UNEXPECTED_MARKER = f"{RED}unwanted{RESET}{BRIGHT_YELLOW}"
+
+        # A 'moved' item is present in both lists, but at a different position
+        MOVED_MARKER = f"{BRIGHT_YELLOW}   moved{RESET}{BRIGHT_YELLOW}"
+
+        # Match up items that appear in the same order in both lists. This means
+        # a lone insertion/deletion doesn't shift everything after it.
+        matcher = difflib.SequenceMatcher(
+            a=expected_items, b=actual_items, autojunk=False
+        )
+        expected_markers = [MISSING_MARKER] * len(expected_items)
+        actual_markers = [UNEXPECTED_MARKER] * len(actual_items)
+        for block in matcher.get_matching_blocks():
+            for offset in range(block.size):
+                expected_markers[block.a + offset] = CORRECT_MARKER
+                actual_markers[block.b + offset] = CORRECT_MARKER
+
+        # Anything left over which is present on both sides (by value) is
+        # 'moved' rather than missing/unexpected. We only move as many items as
+        # appear in both lists, so duplicates aren't over-counted.
+        unmatched_expected = Counter(
+            expected_items[i]
+            for i, marker in enumerate(expected_markers)
+            if marker != CORRECT_MARKER
+        )
+        unmatched_actual = Counter(
+            actual_items[i]
+            for i, marker in enumerate(actual_markers)
+            if marker != CORRECT_MARKER
+        )
+        movable = unmatched_expected & unmatched_actual
+        expected_budget = movable.copy()
+        actual_budget = movable.copy()
+        for i, item in enumerate(expected_items):
+            if expected_markers[i] != CORRECT_MARKER and expected_budget[item] > 0:
+                expected_markers[i] = MOVED_MARKER
+                expected_budget[item] -= 1
+        for i, item in enumerate(actual_items):
+            if actual_markers[i] != CORRECT_MARKER and actual_budget[item] > 0:
+                actual_markers[i] = MOVED_MARKER
+                actual_budget[item] -= 1
+
+        used_markers = set()
+        expected_lines: list[str] = []
+        for index, (item, marker) in enumerate(zip(expected_items, expected_markers)):
+            used_markers.add(marker)
+            expected_lines.append(f"{marker}   [{index}] {item!r}{RESET}")
+
+        actual_lines: list[str] = []
+        for index, (item, marker) in enumerate(zip(actual_items, actual_markers)):
+            used_markers.add(marker)
+            actual_lines.append(f"{marker}   [{index}] {item!r}{RESET}")
+
+        newline = "\n"
+        expected_string = f"{BOLD}Expected items:{RESET}\n         [\n{newline.join(expected_lines)}\n         ]"
+        actual_string = f"{BOLD}Actually received items:{RESET}\n         [\n{newline.join(actual_lines)}\n         ]"
+        first_message = "Sequences are not equal"
+
+        legend = f"{BOLD}Legend:{RESET}\n"
+        if CORRECT_MARKER in used_markers:
+            legend += f"  {CORRECT_MARKER}{RESET}: item is correct as it was both expected and received\n"
+        if MISSING_MARKER in used_markers:
+            legend += (
+                f"  {MISSING_MARKER}{RESET}: item is expected but was not received\n"
+            )
+        if UNEXPECTED_MARKER in used_markers:
+            legend += (
+                f"  {UNEXPECTED_MARKER}{RESET}: item was received but is not expected\n"
+            )
+        if MOVED_MARKER in used_markers:
+            legend += f"  {MOVED_MARKER}{RESET}: item is present in both sequences but at different positions\n"
+
+        diff_message = (
+            f"{first_message}\n{legend}\n{expected_string}\n\n{actual_string}"
+        )
+
+        extra_message = ""
+        if message is not None:
+            extra_message = f"\n{message}"
 
         self.fail(f"{diff_message}{extra_message}")
 
@@ -412,6 +536,7 @@ class TestCase(unittest.TestCase):
 
         Specifically:
             - better errors for set inequality
+            - better errors for list inequality
         """
         if first == second:
             return
@@ -423,6 +548,19 @@ class TestCase(unittest.TestCase):
                 # Any `str()`-able object is valid as a message. We frequently pass in raw JSON responses, for instance.
                 str(msg) if msg is not None else msg,
                 exact=True,
+            )
+
+        if (
+            isinstance(first, Sequence)
+            and isinstance(second, Sequence)
+            and all(_is_hashable(item) for item in first)
+            and all(_is_hashable(item) for item in second)
+        ):
+            self._fail_with_sequence_inequality(
+                first,
+                second,
+                # Any `str()`-able object is valid as a message. We frequently pass in raw JSON responses, for instance.
+                str(msg) if msg is not None else msg,
             )
 
         # Fall back to the base implementation for other types
