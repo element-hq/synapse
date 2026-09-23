@@ -118,6 +118,23 @@ stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
 
+# Upgrading to v1.162.0
+
+## Privacy-preserving `/requestToken` responses are now enabled by default
+
+The default value of `request_token_inhibit_3pid_errors` has changed from `false`
+to `true`. Synapse will now conceal whether an email address is associated with an
+account when responding to `/requestToken` requests, unless the setting is
+explicitly configured as `false`.
+
+Administrators who rely on the previous responses can retain them by adding the
+following to their configuration:
+
+```yaml
+request_token_inhibit_3pid_errors: false
+```
+
+
 # Upgrading to v1.161.0
 
 ## Deprecation of `matrix_rtc.livekit_service_url`

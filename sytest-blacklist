@@ -21,6 +21,11 @@ Newly created users see their own presence in /initialSync (SYT-34)
 # Blacklisted due to https://github.com/matrix-org/synapse/issues/1396
 Should reject keys claiming to belong to a different user
 
+# The test reuses a fixed email address and depends on /requestToken exposing
+# whether that address is already in use.
+# https://github.com/element-hq/synapse/issues/18415
+After deactivating account, can't log in with an email
+
 # Blacklisted until MSC2753 is implemented
 Local users can peek into world_readable rooms by room ID
 We can't peek into rooms with shared history_visibility

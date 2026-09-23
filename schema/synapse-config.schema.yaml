@@ -1334,7 +1334,7 @@ properties:
       unused. If this option is enabled, instead of returning an error, these
       endpoints will act as if no error happened and return a fake session ID
       (`sid`) to clients.
-    default: false
+    default: true
     examples:
       - true
   next_link_domain_whitelist:

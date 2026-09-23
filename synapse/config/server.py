@@ -915,7 +915,7 @@ class ServerConfig(Config):
         # which one isn't.
         self.request_token_inhibit_3pid_errors = config.get(
             "request_token_inhibit_3pid_errors",
-            False,
+            True,
         )
 
         # Whitelist of domain names that given next_link parameters must have
