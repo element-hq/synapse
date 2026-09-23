@@ -636,14 +636,13 @@ class DelayedEventsStore(SQLBaseStore):
         def cancel_delayed_events_for_user_txn(
             txn: LoggingTransaction,
         ) -> Timestamp | None:
-            txn.execute(
-                """
-                DELETE FROM delayed_events
-                WHERE user_localpart = ?
-                    AND NOT is_processed
-                """,
-                (user_localpart,),
-            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="delayed_events",
+                keyvalues={
+                    "user_localpart": user_localpart,
+                    "is_processed": False,
+                },
             return self._get_next_delayed_event_send_ts_txn(txn)
 
         return await self.db_pool.runInteraction(
