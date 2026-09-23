@@ -118,7 +118,7 @@ stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
 
-# Upgrading to v1.162.0
+# Upgrading to v1.163.0
 
 ## `limit_profile_requests_to_users_who_share_rooms` now requires `require_auth_for_profile_requests`
 
