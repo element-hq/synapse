@@ -17,21 +17,32 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
+from twisted.web.server import Site
 
-from synapse.app.generic_worker import GenericWorkerServer
+from synapse.app.generic_worker import GenericWorkerServer, GenericWorkerStore
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.config.server import parse_listener_def
 from synapse.server import HomeServer
+from synapse.storage.databases.main.openid import OpenIdStore
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests.server import make_request
 from tests.unittest import HomeserverTestCase
+
+
+class GenericWorkerStoreOpenIdMixinTests(TestCase):
+    def test_generic_worker_store_includes_openid_store(self) -> None:
+        """Workers must inherit OpenIdStore so userinfo lookups do not 500."""
+        self.assertTrue(issubclass(GenericWorkerStore, OpenIdStore))
+        self.assertTrue(hasattr(GenericWorkerStore, "get_user_id_for_open_id_token"))
+        self.assertTrue(hasattr(GenericWorkerStore, "insert_open_id_token"))
 
 
 class FederationReaderOpenIDListenerTests(HomeserverTestCase):
@@ -89,6 +100,75 @@ class FederationReaderOpenIDListenerTests(HomeserverTestCase):
         )
 
         self.assertEqual(channel.code, 401)
+
+    def _listen_openid(self) -> Site:
+        config = {
+            "port": 8080,
+            "type": "http",
+            "bind_addresses": ["0.0.0.0"],
+            "resources": [{"names": ["openid"]}],
+        }
+        hs = self.hs
+        assert isinstance(hs, GenericWorkerServer)
+        hs._listen_http(parse_listener_def(0, config))
+        site = self.reactor.tcpServers[0][1]
+        assert isinstance(site, Site)
+        return site
+
+    def test_openid_userinfo_valid_token(self) -> None:
+        """Workers can look up a valid OpenID token instead of crashing."""
+        site = self._listen_openid()
+        token = "valid_openid_token"
+        user_id = "@alice:test"
+        self.get_success(
+            self.hs.get_datastores().main.insert_open_id_token(
+                token, self.clock.time_msec() + 3600 * 1000, user_id
+            )
+        )
+
+        channel = make_request(
+            self.reactor,
+            site,
+            "GET",
+            f"/_matrix/federation/v1/openid/userinfo?access_token={token}",
+        )
+
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body, {"sub": user_id})
+
+    def test_openid_userinfo_unknown_token(self) -> None:
+        """Unknown tokens return 401 rather than raising AttributeError."""
+        site = self._listen_openid()
+
+        channel = make_request(
+            self.reactor,
+            site,
+            "GET",
+            "/_matrix/federation/v1/openid/userinfo?access_token=unknown",
+        )
+
+        self.assertEqual(channel.code, 401)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
+
+    def test_openid_userinfo_expired_token(self) -> None:
+        """Expired tokens return 401 rather than raising AttributeError."""
+        site = self._listen_openid()
+        token = "expired_openid_token"
+        self.get_success(
+            self.hs.get_datastores().main.insert_open_id_token(
+                token, self.clock.time_msec() - 1, "@alice:test"
+            )
+        )
+
+        channel = make_request(
+            self.reactor,
+            site,
+            "GET",
+            f"/_matrix/federation/v1/openid/userinfo?access_token={token}",
+        )
+
+        self.assertEqual(channel.code, 401)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
 
 
 @patch("synapse.app.homeserver.KeyResource", new=Mock())
