@@ -21,7 +21,7 @@
 
 import logging
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Optional, TypeVar, cast
 
 import attr
 from txredisapi import (
@@ -404,7 +404,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
 
         self.synapse_outbound_redis_connection = outbound_redis_connection
 
-    def buildProtocol(self, addr: IAddress | None) -> RedisSubscriber:
+    def buildProtocol(self, addr: Optional[IAddress]) -> RedisSubscriber:
         p = super().buildProtocol(addr)
         p = cast(RedisSubscriber, p)
 

@@ -22,7 +22,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
 
 from prometheus_client import Counter
 
@@ -68,7 +68,9 @@ class ReplicationStreamProtocolFactory(ServerFactory):
         # listener config again or always starting a `ReplicationStreamer`.)
         hs.get_replication_streamer()
 
-    def buildProtocol(self, addr: IAddress | None) -> ServerReplicationStreamProtocol:
+    def buildProtocol(
+        self, addr: Optional[IAddress]
+    ) -> ServerReplicationStreamProtocol:
         return ServerReplicationStreamProtocol(
             self.hs, self.server_name, self.clock, self.command_handler
         )

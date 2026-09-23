@@ -22,7 +22,7 @@
 import abc
 import base64
 import logging
-from typing import Callable, Union, cast
+from typing import Callable, Optional, Union, cast
 
 import attr
 from zope.interface import implementer
@@ -162,11 +162,11 @@ class HTTPProxiedClientFactory(protocol.ClientFactory):
         if isinstance(self.wrapped_factory, ClientFactory):
             return self.wrapped_factory.startedConnecting(connector)
 
-    def buildProtocol(self, addr: IAddress | None) -> "HTTPConnectProtocol":
+    def buildProtocol(self, addr: Optional[IAddress]) -> "HTTPConnectProtocol":
         # IProtocolFactory's annotation does not yet allow the absent address
         # accepted by Factory.buildProtocol.
         build_protocol = cast(
-            Callable[[IAddress | None], IProtocol | None],
+            Callable[[Optional[IAddress]], Optional[IProtocol]],
             self.wrapped_factory.buildProtocol,
         )
         wrapped_protocol = build_protocol(addr)
