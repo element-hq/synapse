@@ -283,52 +283,76 @@ class CleanupExtremDummyEventsTestCase(HomeserverTestCase):
         self.user = UserID.from_string(self.register_user("user1", "password"))
         self.token1 = self.login("user1", "password")
         self.requester = create_requester(self.user)
-        self.room_id, _, _ = self.get_success(
-            self.room_creator.create_room(self.requester, {"visibility": "public"})
-        )
         self.event_creator = homeserver.get_event_creation_handler()
         homeserver.config.consent.user_consent_version = self.CONSENT_VERSION
 
     def test_send_dummy_event(self) -> None:
-        self._create_extremity_rich_graph()
+        room_id, _, _ = self.get_success(
+            self.room_creator.create_room(self.requester, {"visibility": "public"})
+        )
+        self._create_extremity_rich_graph(room_id, self.user)
 
         # Pump the reactor repeatedly so that the background updates have a
         # chance to run.
         self.pump(20)
 
         latest_event_ids = self.get_success(
-            self.store.get_latest_event_ids_in_room(self.room_id)
+            self.store.get_latest_event_ids_in_room(room_id)
         )
         self.assertTrue(len(latest_event_ids) < 10, len(latest_event_ids))
 
     @patch("synapse.handlers.message._DUMMY_EVENT_ROOM_EXCLUSION_EXPIRY", new=0)
     def test_send_dummy_events_when_insufficient_power(self) -> None:
-        self._create_extremity_rich_graph()
-        # Criple power levels
+        # The Plan:
+        # create a new room with main user(creator).
+        # join with second user(user2).
+        # creator changes power levels of user2 so cannot send any events.
+        # create extremities graph.
+        # creators leaves - this should remove the user with potentially infinite power
+        #   level. Side effect: this event will capture 10 extremities.
+        # move time(pump()), try and resolve with dummy events. Should fail.
+        # creator rejoins. Side effect: this will take tie up 10 more extremities.
+        # move time(pump()), try and resolve with dummy events again. Should succeed.
+
+        room_id, _, _ = self.get_success(
+            self.room_creator.create_room(self.requester, {"visibility": "public"})
+        )
+
+        user2 = self.register_user("user2", "password")
+        token2 = self.login("user2", "password")
+        self.helper.join(room_id, user2, tok=token2)
+
+        # Cripple power levels for this new user
         self.helper.send_state(
-            self.room_id,
+            room_id,
             EventTypes.PowerLevels,
-            body={"users": {str(self.user): -1}},
+            body={"users": {user2: -1}},
             tok=self.token1,
         )
+
+        self._create_extremity_rich_graph(room_id, self.user)
+
+        # The room creator leaves now. They are the only member of the room with a power
+        # level that can not be tweaked
+        self.helper.leave(room_id, self.user.to_string(), tok=self.token1)
+
         # Pump the reactor repeatedly so that the background updates have a
         # chance to run.
         self.pump(10 * 60)
 
         latest_event_ids = self.get_success(
-            self.store.get_latest_event_ids_in_room(self.room_id)
+            self.store.get_latest_event_ids_in_room(room_id)
         )
         # Check that the room has not been pruned
         self.assertTrue(len(latest_event_ids) > 10)
 
-        # New user with regular levels
-        user2 = self.register_user("user2", "password")
-        token2 = self.login("user2", "password")
-        self.helper.join(self.room_id, user2, tok=token2)
+        # Rejoin the room creator
+        self.helper.join(room_id, self.user.to_string(), tok=self.token1)
+        # Running the background updates again should clean up the extremities
         self.pump(10 * 60)
 
         latest_event_ids = self.get_success(
-            self.store.get_latest_event_ids_in_room(self.room_id)
+            self.store.get_latest_event_ids_in_room(room_id)
         )
         self.assertTrue(len(latest_event_ids) < 10, len(latest_event_ids))
 
@@ -373,18 +397,20 @@ class CleanupExtremDummyEventsTestCase(HomeserverTestCase):
             0,
         )
 
-    def _create_extremity_rich_graph(self) -> None:
+    def _create_extremity_rich_graph(
+        self, room_id: str, user_for_sending: UserID
+    ) -> None:
         """Helper method to create bushy graph on demand"""
 
-        event_id_start = self.create_and_send_event(self.room_id, self.user)
+        event_id_start = self.create_and_send_event(room_id, user_for_sending)
 
         for _ in range(self.EXTREMITIES_COUNT):
             self.create_and_send_event(
-                self.room_id, self.user, prev_event_ids=[event_id_start]
+                room_id, user_for_sending, prev_event_ids=[event_id_start]
             )
 
         latest_event_ids = self.get_success(
-            self.store.get_latest_event_ids_in_room(self.room_id)
+            self.store.get_latest_event_ids_in_room(room_id)
         )
         self.assertEqual(len(latest_event_ids), 50)
 

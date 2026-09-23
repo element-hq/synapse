@@ -316,6 +316,9 @@ class EventContentFields:
     M_TOPIC: Final = "m.topic"
     M_TEXT: Final = "m.text"
 
+    # `m.room.join_rules` `join_rule` field
+    JOIN_RULE: Final = "join_rule"
+
 
 class EventUnsignedContentFields:
     """Fields found inside the 'unsigned' data on events"""
@@ -499,4 +502,14 @@ class StickyEvent:
     Maximum number of sticky events to include in /sync.
 
     This is the default specified in the MSC. Chosen arbitrarily.
+    """
+
+
+class StateDag:
+    GET_MISSING_EVENTS_FIELD: Final = "org.matrix.msc4242.state_dag"
+    MAX_MISSING_EVENTS: Final = 1000
+    """
+    Max number of events to return in a single /get_missing_events response.
+    Arbitrary, servers usually never get this high so it's mostly to bound the max size of
+    a single /get_missing_events response.
     """

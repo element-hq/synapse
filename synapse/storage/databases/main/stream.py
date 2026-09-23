@@ -608,7 +608,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             stream_column="stream_ordering",
             max_value=events_max,
         )
-        self._events_stream_cache = StreamChangeCache(
+        self._events_stream_cache: StreamChangeCache = StreamChangeCache(
             name="EventsRoomStreamChangeCache",
             server_name=self.server_name,
             current_stream_pos=min_event_val,
