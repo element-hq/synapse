@@ -1250,6 +1250,12 @@ class HomeserverTestCase(TestCase):
 
         for collected in metric.collect():
             for sample in collected.samples:
+                # Old versions of `prometheus_client` also emit a `_created`
+                # timestamp sample alongside each sample, which is never what we
+                # want.
+                if sample.name.endswith("_created"):
+                    continue
+
                 # Check that all the labels match. If any label doesn't match,
                 # we skip this sample.
                 for label, value in labels.items():
