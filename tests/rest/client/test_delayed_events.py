@@ -16,7 +16,7 @@
 
 import sqlite3
 from http import HTTPStatus
-from typing import Any, Literal
+from typing import Literal
 
 from parameterized import parameterized
 
@@ -29,11 +29,19 @@ from synapse.api.constants import (
     GuestAccess,
     StickyEvent,
 )
-from synapse.api.errors import Codes
+from synapse.api.errors import Codes, NotFoundError
 from synapse.rest import admin
-from synapse.rest.client import delayed_events, login, register, room, sync, versions
+from synapse.rest.client import (
+    account,
+    delayed_events,
+    login,
+    register,
+    room,
+    sync,
+    versions,
+)
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
@@ -80,6 +88,7 @@ class DelayedEventsTestCaseBase(HomeserverTestCase):
 
     servlets = [
         admin.register_servlets,
+        account.register_servlets,
         delayed_events.register_servlets,
         login.register_servlets,
         register.register_servlets,
@@ -937,6 +946,130 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         self._find_sent_delayed_event(self.user1_access_token, delay_id, False)
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
 
+    @parameterized.expand((("client_api", False), ("admin_api", True)))
+    def test_delayed_events_are_cancelled_on_deactivation(
+        self, _name: str, by_admin: bool
+    ) -> None:
+        store = self.hs.get_datastores().main
+        handler = self.hs.get_delayed_events_handler()
+
+        # user1 schedules a delayed message event and a delayed state event.
+        user1_delay_ids = []
+        state_key = "to_cancel_on_deactivation"
+        for state_event in True, False:
+            channel = self._send_delayed_event_request(
+                room_id=self.room_id,
+                delay_ms=900,
+                event_type=_EVENT_TYPE,
+                state_key=state_key if state_event else None,
+                content={"key": "value"},
+                access_token=self.user1_access_token,
+            )
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+            user1_delay_ids.append(channel.json_body["delay_id"])
+
+        # user2 schedules a delayed event to be sent later than user1's.
+        channel = self._send_delayed_event_request(
+            room_id=self.room_id,
+            delay_ms=2000,
+            event_type=_EVENT_TYPE,
+            content={"key": "value"},
+            method="POST",
+            access_token=self.user2_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        user2_delay_id = channel.json_body["delay_id"]
+
+        self.assertEqual(2, len(self._get_delayed_events()))
+
+        # The next send is scheduled for user1's delayed events.
+        assert handler._next_delayed_event_call is not None
+        self.assertLess(
+            handler._next_delayed_event_call.getTime() - self.reactor.seconds(), 1
+        )
+
+        if by_admin:
+            self.register_user("admin", "pass", admin=True)
+            channel = self.make_request(
+                "POST",
+                f"/_synapse/admin/v1/deactivate/{self.user1_user_id}",
+                {},
+                self.login("admin", "pass"),
+            )
+        else:
+            channel = self.make_request(
+                "POST",
+                "account/deactivate",
+                {
+                    "auth": {
+                        "type": "m.login.password",
+                        "user": self.user1_user_id,
+                        "password": "pass",
+                    },
+                },
+                self.user1_access_token,
+            )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        # user1's delayed events are gone...
+        self.assertListEqual(
+            [], self.get_success(store.get_all_delayed_events_for_user("user1"))
+        )
+        for delay_id in user1_delay_ids:
+            self.get_failure(
+                store.get_delayed_event_for_user(delay_id, "user1"), NotFoundError
+            )
+
+        # ...and the next send has been rescheduled for user2's delayed event.
+        assert handler._next_delayed_event_call is not None
+        self.assertGreater(
+            handler._next_delayed_event_call.getTime() - self.reactor.seconds(), 1
+        )
+
+        # Nothing gets sent when user1's delayed events would have timed out.
+        self.reactor.advance(1)
+        for delay_id in user1_delay_ids:
+            self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+        self.helper.get_state(
+            self.room_id,
+            _EVENT_TYPE,
+            self.user2_access_token,
+            state_key=state_key,
+            expect_code=HTTPStatus.NOT_FOUND,
+        )
+
+        # user2's delayed event is unaffected, and still gets sent.
+        self._find_sent_delayed_event(self.user2_access_token, user2_delay_id, False)
+        self.reactor.advance(1)
+        for delay_id in user1_delay_ids:
+            self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+        self._find_sent_delayed_event(self.user2_access_token, user2_delay_id, True)
+
+    def test_deactivation_cancels_the_timer_when_no_delayed_events_remain(
+        self,
+    ) -> None:
+        handler = self.hs.get_delayed_events_handler()
+
+        channel = self._send_delayed_event_request(
+            room_id=self.room_id,
+            delay_ms=900,
+            event_type=_EVENT_TYPE,
+            content={},
+            method="POST",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertIsNotNone(handler._next_delayed_event_call)
+
+        self.get_success(
+            self.hs.get_deactivate_account_handler().deactivate_account(
+                self.user1_user_id,
+                erase_data=False,
+                requester=create_requester(self.user1_user_id),
+            )
+        )
+        self.assertIsNone(handler._next_delayed_event_call)
+
 
 class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
     """Tests scheduling delayed sticky events (MSC4354)."""
@@ -985,16 +1118,17 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
 
 
 class DelayedEventsWorkerTestCase(BaseMultiWorkerStreamTestCase):
-    """Tests scheduling delayed events on a worker."""
+    """Tests delayed events when some of the work happens off the main process."""
 
     servlets = [
         admin.register_servlets,
+        delayed_events.register_servlets,
         login.register_servlets,
         room.register_servlets,
         sync.register_servlets,
     ]
 
-    def default_config(self) -> dict[str, Any]:
+    def default_config(self) -> JsonDict:
         config = super().default_config()
         config["max_event_delay_duration"] = "24h"
         return config
@@ -1035,6 +1169,39 @@ class DelayedEventsWorkerTestCase(BaseMultiWorkerStreamTestCase):
             if event["unsigned"].get("org.matrix.msc4140.delay_id") == delay_id
         ]
         self.assertEqual(1, len(sent), timeline)
+
+    def test_delayed_events_are_cancelled_on_deactivation_from_worker(self) -> None:
+        worker_hs = self.make_worker_hs("synapse.app.generic_worker")
+        store = self.hs.get_datastores().main
+        handler = self.hs.get_delayed_events_handler()
+
+        channel = self.make_request(
+            *_build_delayed_event_request(
+                room_id=self.room_id,
+                delay_ms=900,
+                event_type=_EVENT_TYPE,
+                content={},
+                method="POST",
+            ),
+            access_token=self.access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertIsNotNone(handler._next_delayed_event_call)
+
+        # Deactivate the account on the worker. The main process, which is the
+        # one to send delayed events, must get to know about it.
+        self.get_success(
+            worker_hs.get_deactivate_account_handler().deactivate_account(
+                self.user_id,
+                erase_data=False,
+                requester=create_requester(self.user_id),
+            )
+        )
+
+        self.assertListEqual(
+            [], self.get_success(store.get_all_delayed_events_for_user("user"))
+        )
+        self.assertIsNone(handler._next_delayed_event_call)
 
 
 def _build_delayed_event_request(
