@@ -998,7 +998,7 @@ class FederationEventHandler:
             # Remember the frontier so that we can recalculate the current state if it moves.
             state_dag_extremities_before: frozenset[str] | None = None
             if (
-                backfilled # Non-backfilled pulled events will automatically update the current state, this check is only for /backfill
+                backfilled  # Non-backfilled pulled events will automatically update the current state, this check is only for /backfill
                 and sorted_events
                 and supports_msc4242_state_dag(sorted_events[0])
             ):
