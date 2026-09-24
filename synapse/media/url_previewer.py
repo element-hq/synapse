@@ -670,9 +670,9 @@ class UrlPreviewer:
 
         except Exception as e:
             logger.error("Error handling downloaded %s: %r", url, e)
-            # TODO: we really ought to delete the downloaded file in this
-            # case, since we won't have recorded it in the db, and will
-            # therefore not expire it.
+            # We won't have recorded the file in the db, and will
+            # therefore not expire it; delete it now.
+            self._delete_url_cache_file(file_id)
             raise
 
         return MediaInfo(
@@ -701,7 +701,9 @@ class UrlPreviewer:
         except FileNotFoundError:
             pass  # If the path doesn't exist, meh
         except OSError as e:
-            logger.warning("Failed to remove media from url preview cache: %r", e)
+            logger.warning(
+                "Failed to remove media from url preview cache: %r: %s", fname, e
+            )
             return
 
         _try_remove_parent_dirs(
