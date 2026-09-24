@@ -18,33 +18,49 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Awaitable, Callable, Dict
-from unittest.mock import AsyncMock, Mock
+from typing import Any, Awaitable, Callable
+from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
 import synapse.types
-from synapse.api.errors import AuthError, SynapseError
+from synapse.api.constants import (
+    EventTypes,
+    ProfileFields,
+    ProfileUpdateAction,
+)
+from synapse.api.errors import AuthError, Codes, SynapseError
 from synapse.rest import admin
+from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID
+from synapse.storage.databases.main.profile import ProfileUpdate
+from synapse.types import JsonDict, StreamKeyType, UserID
+from synapse.types.state import StateFilter
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
+from synapse.util.task_scheduler import TaskStatus
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 class ProfileTestCase(unittest.HomeserverTestCase):
     """Tests profile management."""
 
-    servlets = [admin.register_servlets]
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        knock.register_servlets,
+    ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.mock_federation = AsyncMock()
         self.mock_registry = Mock()
 
-        self.query_handlers: Dict[str, Callable[[dict], Awaitable[JsonDict]]] = {}
+        self.query_handlers: dict[str, Callable[[dict], Awaitable[JsonDict]]] = {}
 
         def register_query_handler(
             query_type: str, handler: Callable[[dict], Awaitable[JsonDict]]
@@ -52,8 +68,10 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.query_handlers[query_type] = handler
 
         self.mock_registry.register_query_handler = register_query_handler
+        self.mock_hs_notifier = Mock()
 
         hs = self.setup_test_homeserver(
+            notifier=self.mock_hs_notifier,
             federation_client=self.mock_federation,
             federation_server=Mock(),
             federation_registry=self.mock_registry,
@@ -62,17 +80,28 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
+        self.storage_controllers = self.hs.get_storage_controllers()
+        self.task_scheduler = hs.get_task_scheduler()
 
         self.frank = UserID.from_string("@1234abcd:test")
         self.bob = UserID.from_string("@4567:test")
         self.alice = UserID.from_string("@alice:remote")
 
         self.register_user(self.frank.localpart, "frankpassword")
+        self.frank_token = self.login(self.frank.localpart, "frankpassword")
 
         self.handler = hs.get_profile_handler()
+        self.on_new_event = self.mock_hs_notifier.on_new_event
 
     def test_get_my_name(self) -> None:
-        self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
+            )
+        )
 
         displayname = self.get_success(self.handler.get_displayname(self.frank))
 
@@ -80,8 +109,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     def test_set_my_name(self) -> None:
         self.get_success(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank Jr."
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank Jr.",
             )
         )
 
@@ -92,8 +124,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Set displayname again
         self.get_success(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank"
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
             )
         )
 
@@ -104,8 +139,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Set displayname to an empty string
         self.get_success(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), ""
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="",
             )
         )
 
@@ -113,11 +151,755 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.get_success(self.store.get_profile_displayname(self.frank))
         )
 
-    def test_set_my_name_if_disabled(self) -> None:
-        self.hs.config.registration.enable_set_displayname = False
+    def test_update_room_membership_on_set_displayname(self) -> None:
+        """Test that `set_displayname` updates membership events in rooms."""
 
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
+            )
+        )
+
+        room_id = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+
+        state_tuple = (EventTypes.Member, self.frank.to_string())
+
+        membership = self.get_success(
+            self.storage_controllers.state.get_current_state(
+                room_id, StateFilter.from_types([state_tuple])
+            )
+        )
+        self.assertEqual(membership[state_tuple].content["displayname"], "Frank")
+
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank Jr.",
+            )
+        )
+
+        membership = self.get_success(
+            self.storage_controllers.state.get_current_state(
+                room_id, StateFilter.from_types([state_tuple])
+            )
+        )
+        self.assertEqual(membership[state_tuple].content["displayname"], "Frank Jr.")
+
+    @parameterized.expand(
+        [
+            ["displayname", "Frank"],
+            ["avatar_url", "mxc://foobar"],
+            ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
+        ]
+    )
+    def test_update_profile_does_not_update_stream_on_set_field_if_include_profile_updates_in_sync_not_enabled(
+        self,
+        field_name: str,
+        new_value: str,
+    ) -> None:
+        """Test that profile updates don't get recorded in the profile updates stream
+        if `include_profile_updates_in_sync` is not enabled."""
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value=new_value,
+            )
+        )
+        updates = self.get_success(
+            self.store.get_updated_profile_updates(
+                from_id=1,
+                to_id=2,
+                limit=1,
+            )
+        )
+        self.assertEqual(len(updates), 0)
+
+    @parameterized.expand(
+        [
+            ["displayname", "Frank"],
+            ["avatar_url", "mxc://foobar"],
+            ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
+        ]
+    )
+    def test_update_profile_does_not_notify_notifier_on_set_field_if_include_profile_updates_in_sync_not_enabled(
+        self,
+        field_name: str,
+        new_value: str,
+    ) -> None:
+        """Test that profile updates do not cause the profile updates stream notifier
+        to wake up if `include_profile_updates_in_sync` is not enabled."""
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value=new_value,
+            )
+        )
+
+        calls_found = [
+            call
+            for call in self.on_new_event.mock_calls
+            if call.args[0] == StreamKeyType.PROFILE_UPDATES
+        ]
+        self.assertEqual(len(calls_found), 0)
+
+    @parameterized.expand(
+        [
+            ["displayname", "Frank"],
+            ["avatar_url", "mxc://foobar"],
+            ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_update_profile_does_notify_notifier_on_set_field_if_user_not_in_rooms(
+        self, field_name: str, new_value: str
+    ) -> None:
+        """Test that profile updates does cause the profile updates stream notifier
+        to wake up if the user is not in any rooms, if `include_profile_updates_in_sync`
+        is enabled."""
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value=new_value,
+            )
+        )
+        calls_found = [
+            call
+            for call in self.on_new_event.mock_calls
+            if call.args[0] == StreamKeyType.PROFILE_UPDATES
+        ]
+        self.assertEqual(len(calls_found), 1)
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_update_profile_does_notify_notifier_on_delete_profile_field_if_user_not_in_rooms(
+        self,
+    ) -> None:
+        """Test that profile updates does cause the profile updates stream notifier
+        to wake up if the user is not in any rooms, if `include_profile_updates_in_sync`
+        is enabled."""
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="field",
+                new_value="value",
+            )
+        )
+        self.on_new_event.reset_mock()
+        self.get_success(
+            self.handler.delete_profile_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="field",
+            )
+        )
+        calls_found = [
+            call
+            for call in self.on_new_event.mock_calls
+            if call.args[0] == StreamKeyType.PROFILE_UPDATES
+        ]
+        self.assertEqual(len(calls_found), 1)
+
+    @parameterized.expand(
+        [
+            ["displayname", "Frank"],
+            ["avatar_url", "mxc://foobar"],
+            ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_update_profile_updates_stream_on_set_field(
+        self, field_name: str, new_value: str
+    ) -> None:
+        """Test that profile updates get recorded in the profile updates stream if
+        `include_profile_updates_in_sync` is enabled."""
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value=new_value,
+            )
+        )
+        updates = self.get_success(
+            self.store.get_updated_profile_updates(
+                from_id=1,
+                to_id=2,
+                limit=1,
+            )
+        )
+        self.assertEqual(
+            updates[0],
+            (
+                2,
+                "@1234abcd:test",
+                ProfileUpdateAction.UPDATE.value,
+                {field_name},
+            ),
+        )
+
+        fields_updates = self.get_success(
+            # FIXME this function should be deleted, it's not used.
+            # Adapt this test to use the right one.
+            self.store.get_profile_updates_for_fields(
+                from_id=1,
+                to_id=2,
+                field_names={field_name},
+            )
+        )
+        self.assertEqual(
+            fields_updates[0],
+            ProfileUpdate(
+                stream_id=2,
+                user_id="@1234abcd:test",
+                action=ProfileUpdateAction.UPDATE.value,
+                affected_fields=frozenset({field_name}),
+            ),
+        )
+
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value="",
+            )
+        )
+        delete_updates = self.get_success(
+            self.store.get_updated_profile_updates(
+                from_id=2,
+                to_id=3,
+                limit=1,
+            )
+        )
+        self.assertEqual(
+            delete_updates[0],
+            (3, "@1234abcd:test", ProfileUpdateAction.UPDATE.value, {field_name}),
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_update_profile_set_field_writes_to_per_user_profile_tracking_table(
+        self,
+    ) -> None:
+        """Test that profiles updates get recorded in the 'per user' profile updates
+        stream tracking table, if `include_profile_updates_in_sync` is enabled."""
+        self.register_user("roger", "password")
+        roger_token = self.login("roger", "password")
+        self.register_user("millie", "password")
+        millie_token = self.login("millie", "password")
+        room_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        self.helper.join(room_id, "@roger:test", tok=roger_token)
+        self.helper.join(room_id, "@millie:test", tok=millie_token)
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="m.status",
+                new_value='{"text": "Holiday"}',
+            )
+        )
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@roger:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=3,
+                    user_id="@millie:test",
+                    action="joined_room",
+                    affected_fields=None,
+                ),
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    affected_fields=frozenset({"m.status"}),
+                ),
+            ],
+        )
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@millie:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    affected_fields=frozenset({"m.status"}),
+                ),
+            ],
+        )
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id=self.frank.to_string(),
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=2,
+                    user_id="@roger:test",
+                    action="joined_room",
+                    affected_fields=None,
+                ),
+                ProfileUpdate(
+                    stream_id=3,
+                    user_id="@millie:test",
+                    action="joined_room",
+                    affected_fields=None,
+                ),
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    affected_fields=frozenset({"m.status"}),
+                ),
+            ],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_membership_addition_to_room_adds_the_right_join_action_to_profile_streams(
+        self,
+    ) -> None:
+        """Test that a membership event, which adds a user as joined to a room,
+        adds the relevant joined action to the profile update stream tables.
+
+        Here we consider join, knock and invite to all be additions to the room
+        list of members for answering the question "which profiles should we send
+        information about to clients based on memberships appearing".
+        """
+        self.register_user("roger", "password")
+        roger_token = self.login("roger", "password")
+        room_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+
+        self.helper.join(room_id, "@roger:test", tok=roger_token)
+
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id=self.frank.to_string(),
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=2,
+                    user_id="@roger:test",
+                    action="joined_room",
+                    affected_fields=None,
+                ),
+            ],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_previous_profile_updates_stream_rows_cleared_if_no_longer_sharing_a_room(
+        self,
+    ) -> None:
+        """Test that previous profile update stream rows are removed for a user if
+        the user no longer shares rooms with another user, if
+        `include_profile_updates_in_sync` is enabled.
+
+        This test ensures that when a user leaves a room, we clear all old profile
+        update rows of users who the user no longer shares rooms with, to avoid
+        leaking any further profile field updates from those users.
+        """
+        self.register_user("roger", "password")
+        roger_token = self.login("roger", "password")
+        self.register_user("millie", "password")
+        millie_token = self.login("millie", "password")
+        self.register_user("gracie", "password")
+        gracie_token = self.login("gracie", "password")
+        room_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        room_with_millie_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        self.helper.join(room_id, "@roger:test", tok=roger_token)
+        self.helper.join(room_with_millie_id, "@millie:test", tok=millie_token)
+        self.helper.join(room_id, "@gracie:test", tok=gracie_token)
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="m.status",
+                new_value='{"text": "Holiday"}',
+            )
+        )
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@roger:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id="@gracie:test",
+                    action="joined_room",
+                    affected_fields=None,
+                ),
+                ProfileUpdate(
+                    stream_id=5,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    affected_fields=frozenset({"m.status"}),
+                ),
+            ],
+        )
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@millie:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=5,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    affected_fields=frozenset({"m.status"}),
+                ),
+            ],
+        )
+
+        # Make frank leave room and verify only the "left room" + gracies join exists
+        # for roger
+        self.helper.leave(room_id, self.frank.to_string(), tok=self.frank_token)
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@roger:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id="@gracie:test",
+                    action="joined_room",
+                    affected_fields=None,
+                ),
+                ProfileUpdate(
+                    stream_id=6,
+                    user_id=self.frank.to_string(),
+                    action="left_room",
+                    affected_fields=None,
+                ),
+            ],
+        )
+        # Make gracie leave room and verify only the "left room"'s
+        self.helper.leave(room_id, "@gracie:test", tok=gracie_token)
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@roger:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=6,
+                    user_id=self.frank.to_string(),
+                    action="left_room",
+                    affected_fields=None,
+                ),
+                ProfileUpdate(
+                    stream_id=7,
+                    user_id="@gracie:test",
+                    action="left_room",
+                    affected_fields=None,
+                ),
+            ],
+        )
+
+        # Sanity check we didn't clear any rows for millie
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@millie:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=5,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    affected_fields=frozenset({"m.status"}),
+                ),
+            ],
+        )
+
+    @parameterized.expand(
+        [
+            ["displayname", "Frank"],
+            ["avatar_url", "mxc://foobar"],
+            ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_update_profile_notifies_notifier_on_set_field(
+        self,
+        field_name: str,
+        new_value: str,
+    ) -> None:
+        """Test that profile updates wake up the profile updates stream on profile
+        field updates, if `include_profile_updates_in_sync` is enabled."""
+        self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value=new_value,
+            )
+        )
+        calls_found = [
+            call
+            for call in self.on_new_event.mock_calls
+            if call.args[0] == StreamKeyType.PROFILE_UPDATES
+        ]
+        self.assertEqual(len(calls_found), 1)
+
+    def test_background_update_room_membership_on_set_displayname(self) -> None:
+        """Test that `set_displayname` returns immediately and that room membership updates are still done in background."""
+
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
+            )
+        )
+
+        room_id = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+
+        original_update_membership = self.hs.get_room_member_handler().update_membership
+
+        async def slow_update_membership(*args: Any, **kwargs: Any) -> tuple[str, int]:
+            await self.clock.sleep(Duration(milliseconds=10))
+            return await original_update_membership(*args, **kwargs)
+
+        with patch.object(
+            self.hs.get_room_member_handler(),
+            "update_membership",
+            side_effect=slow_update_membership,
+        ):
+            state_tuple = (EventTypes.Member, self.frank.to_string())
+            self.get_success(
+                self.handler.set_field(
+                    target_user=self.frank,
+                    requester=synapse.types.create_requester(self.frank),
+                    field_name=ProfileFields.DISPLAYNAME,
+                    new_value="Frank Jr.",
+                )
+            )
+
+            membership = self.get_success(
+                self.storage_controllers.state.get_current_state(
+                    room_id, StateFilter.from_types([state_tuple])
+                )
+            )
+            self.assertEqual(membership[state_tuple].content["displayname"], "Frank")
+
+            # Let's be sure we are over the delay introduced by slow_update_membership
+            self.reactor.advance(Duration(milliseconds=20).as_secs())
+
+            membership = self.get_success(
+                self.storage_controllers.state.get_current_state(
+                    room_id, StateFilter.from_types([state_tuple])
+                )
+            )
+            self.assertEqual(
+                membership[state_tuple].content["displayname"], "Frank Jr."
+            )
+
+    def test_background_update_room_membership_resume_after_restart(self) -> None:
+        """Test that room membership updates triggered by changing the avatar or the display name are resumed after a restart."""
+
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
+            )
+        )
+
+        room_id_1 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+
+        room_id_2 = self.helper.create_room_as(
+            self.frank.to_string(), tok=self.frank_token
+        )
+
+        # Ensure `room_id_1` comes before `room_id_2` alphabetically
+        if room_id_1 > room_id_2:
+            room_id_1, room_id_2 = room_id_2, room_id_1
+
+        original_update_membership = self.hs.get_room_member_handler().update_membership
+
+        room_1_updated = False
+
+        async def potentially_slow_update_membership(
+            *args: Any, **kwargs: Any
+        ) -> tuple[str, int]:
+            if args[2] == room_id_2:
+                await self.clock.sleep(Duration(milliseconds=10))
+            if args[2] == room_id_1:
+                nonlocal room_1_updated
+                room_1_updated = True
+            return await original_update_membership(*args, **kwargs)
+
+        with patch.object(
+            self.hs.get_room_member_handler(),
+            "update_membership",
+            side_effect=potentially_slow_update_membership,
+        ):
+            state_tuple = (EventTypes.Member, self.frank.to_string())
+            self.get_success(
+                self.handler.set_field(
+                    target_user=self.frank,
+                    requester=synapse.types.create_requester(self.frank),
+                    field_name=ProfileFields.DISPLAYNAME,
+                    new_value="Frank Jr.",
+                )
+            )
+
+            # Check that the displayname is updated immediately for the first room
+            membership = self.get_success(
+                self.storage_controllers.state.get_current_state(
+                    room_id_1, StateFilter.from_types([state_tuple])
+                )
+            )
+            self.assertEqual(
+                membership[state_tuple].content["displayname"], "Frank Jr."
+            )
+
+            # Simulate a synapse restart by emptying the list of running tasks
+            # and canceling the deferred
+            _, deferred = self.task_scheduler._running_tasks.popitem()
+            deferred.cancel()
+
+            # Let's reset the flag to track whether room 1 was updated after the restart
+            room_1_updated = False
+
+            # Let's be sure we are over the delay introduced by slow_update_membership
+            # and that the task was not executed as expected
+            self.reactor.advance(Duration(milliseconds=20).as_secs())
+
+            membership = self.get_success(
+                self.storage_controllers.state.get_current_state(
+                    room_id_2, StateFilter.from_types([state_tuple])
+                )
+            )
+            self.assertEqual(membership[state_tuple].content["displayname"], "Frank")
+
+            cancelled_task = self.get_success(
+                self.task_scheduler.get_tasks(
+                    actions=["update_join_states"], statuses=[TaskStatus.CANCELLED]
+                )
+            )[0]
+
+            self.get_success(
+                self.task_scheduler.update_task(
+                    cancelled_task.id, status=TaskStatus.ACTIVE
+                )
+            )
+
+            # Wait for the `TaskScheduler.SCHEDULE_INTERVAL`
+            self.reactor.advance(Duration(minutes=1).as_secs())
+            # Let's be sure we are over the delay introduced by slow_update_membership
+            self.reactor.advance(Duration(milliseconds=20).as_secs())
+
+            # Updates should have been resumed from room 2 after the restart
+            # so room 1 should not have been updated this time
+            self.assertFalse(room_1_updated)
+
+            membership = self.get_success(
+                self.storage_controllers.state.get_current_state(
+                    room_id_2, StateFilter.from_types([state_tuple])
+                )
+            )
+            self.assertEqual(
+                membership[state_tuple].content["displayname"], "Frank Jr."
+            )
+
+    @override_config({"enable_set_displayname": False})
+    def test_set_my_name_if_disabled(self) -> None:
         # Setting displayname for the first time is allowed
-        self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.frank,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
+            )
+        )
 
         self.assertEqual(
             (self.get_success(self.store.get_profile_displayname(self.frank))),
@@ -125,17 +907,25 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
         # Setting displayname a second time is forbidden
-        self.get_failure(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank Jr."
+        f = self.get_failure(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank Jr.",
             ),
             SynapseError,
         )
+        self.assertEqual(f.value.code, 403)
+        self.assertEqual(f.value.errcode, Codes.FORBIDDEN)
 
     def test_set_my_name_noauth(self) -> None:
         self.get_failure(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.bob), "Frank Jr."
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.bob),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank Jr.",
             ),
             AuthError,
         )
@@ -158,8 +948,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.store.create_profile(UserID.from_string("@caroline:test"))
         )
         self.get_success(
-            self.store.set_profile_displayname(
-                UserID.from_string("@caroline:test"), "Caroline"
+            self.handler.set_field(
+                target_user=UserID.from_string("@caroline:test"),
+                requester=synapse.types.create_requester("@caroline:test"),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Caroline",
             )
         )
 
@@ -177,16 +970,31 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     def test_get_my_avatar(self) -> None:
         self.get_success(
-            self.store.set_profile_avatar_url(self.frank, "http://my.server/me.png")
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/me.png",
+            )
         )
         avatar_url = self.get_success(self.handler.get_avatar_url(self.frank))
 
         self.assertEqual("http://my.server/me.png", avatar_url)
 
     def test_get_profile_empty_displayname(self) -> None:
-        self.get_success(self.store.set_profile_displayname(self.frank, None))
         self.get_success(
-            self.store.set_profile_avatar_url(self.frank, "http://my.server/me.png")
+            self.store.set_profile_field(
+                user_id=self.frank,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value=None,
+            )
+        )
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.frank,
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/me.png",
+            )
         )
 
         profile = self.get_success(self.handler.get_profile(self.frank.to_string()))
@@ -195,10 +1003,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     def test_set_my_avatar(self) -> None:
         self.get_success(
-            self.handler.set_avatar_url(
-                self.frank,
-                synapse.types.create_requester(self.frank),
-                "http://my.server/pic.gif",
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/pic.gif",
             )
         )
 
@@ -209,10 +1018,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Set avatar again
         self.get_success(
-            self.handler.set_avatar_url(
-                self.frank,
-                synapse.types.create_requester(self.frank),
-                "http://my.server/me.png",
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/me.png",
             )
         )
 
@@ -223,10 +1033,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Set avatar to an empty string
         self.get_success(
-            self.handler.set_avatar_url(
-                self.frank,
-                synapse.types.create_requester(self.frank),
-                "",
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="",
             )
         )
 
@@ -234,12 +1045,16 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             (self.get_success(self.store.get_profile_avatar_url(self.frank))),
         )
 
+    @override_config({"enable_set_avatar_url": False})
     def test_set_my_avatar_if_disabled(self) -> None:
-        self.hs.config.registration.enable_set_avatar_url = False
-
         # Setting displayname for the first time is allowed
         self.get_success(
-            self.store.set_profile_avatar_url(self.frank, "http://my.server/me.png")
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/me.png",
+            )
         )
 
         self.assertEqual(
@@ -248,14 +1063,17 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
         # Set avatar a second time is forbidden
-        self.get_failure(
-            self.handler.set_avatar_url(
-                self.frank,
-                synapse.types.create_requester(self.frank),
-                "http://my.server/pic.gif",
+        f = self.get_failure(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/pic.gif",
             ),
             SynapseError,
         )
+        self.assertEqual(f.value.code, 403)
+        self.assertEqual(f.value.errcode, Codes.FORBIDDEN)
 
     def test_avatar_constraints_no_config(self) -> None:
         """Tests that the method to check an avatar against configured constraints skips
@@ -377,7 +1195,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.get_success(self.handler.check_avatar_size_and_mime_type(remote_mxc))
         )
 
-    def _setup_local_files(self, names_and_props: Dict[str, Dict[str, Any]]) -> None:
+    def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 
         Args:

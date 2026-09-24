@@ -20,7 +20,6 @@
 #
 
 import logging
-from typing import Optional
 
 from synapse.storage._base import SQLBaseStore
 
@@ -28,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class RejectionsStore(SQLBaseStore):
-    async def get_rejection_reason(self, event_id: str) -> Optional[str]:
+    async def get_rejection_reason(self, event_id: str) -> str | None:
         return await self.db_pool.simple_select_one_onecol(
             table="rejections",
             retcol="reason",

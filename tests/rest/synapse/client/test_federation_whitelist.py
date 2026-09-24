@@ -11,7 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Dict
 
 from twisted.web.resource import Resource
 
@@ -28,7 +27,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
         login.register_servlets,
     ]
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         base = super().create_resource_dict()
         base.update(build_synapse_client_resource_tree(self.hs))
         return base

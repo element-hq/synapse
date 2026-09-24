@@ -20,7 +20,6 @@
 #
 
 from copy import deepcopy
-from typing import List
 
 from twisted.internet.testing import MemoryReactor
 
@@ -334,7 +333,7 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(events, original_events)
 
     def _test_filters_private(
-        self, events: List[JsonDict], expected_output: List[JsonDict]
+        self, events: list[JsonDict], expected_output: list[JsonDict]
     ) -> None:
         """Tests that the _filter_out_private returns the expected output"""
         filtered_events = self.event_source.filter_out_private_receipts(

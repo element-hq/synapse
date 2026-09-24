@@ -15,7 +15,7 @@ _First introduced in Synapse v1.57.0_
 ```python
 async def on_account_data_updated(
     user_id: str,
-    room_id: Optional[str],
+    room_id: str | None,
     account_data_type: str,
     content: "synapse.module_api.JsonDict",
 ) -> None:
@@ -82,7 +82,7 @@ class CustomAccountDataModule:
     async def log_new_account_data(
         self,
         user_id: str,
-        room_id: Optional[str],
+        room_id: str | None,
         account_data_type: str,
         content: JsonDict,
     ) -> None:

@@ -20,7 +20,7 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
 import attr
 
@@ -75,10 +75,19 @@ class MetricsConfig(Config):
                 )
 
     def generate_config_section(
-        self, report_stats: Optional[bool] = None, **kwargs: Any
+        self,
+        report_stats: bool | None = None,
+        enable_metrics: bool = False,
+        **kwargs: Any,
     ) -> str:
         if report_stats is not None:
             res = "report_stats: %s\n" % ("true" if report_stats else "false")
         else:
             res = "\n"
+
+        # We avoid adding anything if it's `False` since that's the default (less noise
+        # in the default generated config)
+        if enable_metrics:
+            res += "enable_metrics: true\n"
+
         return res

@@ -31,7 +31,6 @@ See doc/log_contexts.rst for details on how this works.
 """
 
 import logging
-import threading
 import typing
 from types import TracebackType
 from typing import (
@@ -40,11 +39,9 @@ from typing import (
     Awaitable,
     Callable,
     Literal,
-    Optional,
-    Tuple,
-    Type,
     TypeVar,
     Union,
+    cast,
     overload,
 )
 
@@ -55,17 +52,24 @@ from twisted.internet import defer, threads
 from twisted.python.threadpool import ThreadPool
 
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
-from synapse.util.stringutils import random_string
+from synapse.synapse_rust.logcontext import (
+    DEBUG_LOGGER_NAME,
+    # Not used in this module, but re-exported: callers import it from here.
+    ContextResourceUsage,  # noqa: F401
+    LoggingContext,
+    current_context as _rust_current_context,
+    set_current_context as _rust_set_current_context,
+)
+from synapse.util.stringutils import random_string_insecure_fast
 
 if TYPE_CHECKING:
-    from synapse.logging.scopecontextmanager import _LogContextScope
     from synapse.types import ISynapseReactor
 
 logger = logging.getLogger(__name__)
 
 original_logger_class = logging.getLoggerClass()
 logging.setLoggerClass(ExplicitlyConfiguredLogger)
-logcontext_debug_logger = logging.getLogger("synapse.logging.context.debug")
+logcontext_debug_logger = logging.getLogger(DEBUG_LOGGER_NAME)
 """
 A logger for debugging when the logcontext switches.
 
@@ -77,144 +81,10 @@ configuration and does not inherit the log level from the parent logger.
 # Restore the original logger class
 logging.setLoggerClass(original_logger_class)
 
-try:
-    import resource
-
-    # Python doesn't ship with a definition of RUSAGE_THREAD but it's defined
-    # to be 1 on linux so we hard code it.
-    RUSAGE_THREAD = 1
-
-    # If the system doesn't support RUSAGE_THREAD then this should throw an
-    # exception.
-    resource.getrusage(RUSAGE_THREAD)
-
-    is_thread_resource_usage_supported = True
-
-    def get_thread_resource_usage() -> "Optional[resource.struct_rusage]":
-        return resource.getrusage(RUSAGE_THREAD)
-
-except Exception:
-    # If the system doesn't support resource.getrusage(RUSAGE_THREAD) then we
-    # won't track resource usage.
-    is_thread_resource_usage_supported = False
-
-    def get_thread_resource_usage() -> "Optional[resource.struct_rusage]":
-        return None
-
 
 # a hook which can be set during testing to assert that we aren't abusing logcontexts.
 def logcontext_error(msg: str) -> None:
     logger.warning(msg)
-
-
-# get an id for the current thread.
-#
-# threading.get_ident doesn't actually return an OS-level tid, and annoyingly,
-# on Linux it actually returns the same value either side of a fork() call. However
-# we only fork in one place, so it's not worth the hoop-jumping to get a real tid.
-#
-get_thread_id = threading.get_ident
-
-
-class ContextResourceUsage:
-    """Object for tracking the resources used by a log context
-
-    Attributes:
-        ru_utime (float): user CPU time (in seconds)
-        ru_stime (float): system CPU time (in seconds)
-        db_txn_count (int): number of database transactions done
-        db_sched_duration_sec (float): amount of time spent waiting for a
-            database connection
-        db_txn_duration_sec (float): amount of time spent doing database
-            transactions (excluding scheduling time)
-        evt_db_fetch_count (int): number of events requested from the database
-    """
-
-    __slots__ = [
-        "ru_stime",
-        "ru_utime",
-        "db_txn_count",
-        "db_txn_duration_sec",
-        "db_sched_duration_sec",
-        "evt_db_fetch_count",
-    ]
-
-    def __init__(self, copy_from: "Optional[ContextResourceUsage]" = None) -> None:
-        """Create a new ContextResourceUsage
-
-        Args:
-            copy_from: if not None, an object to copy stats from
-        """
-        if copy_from is None:
-            self.reset()
-        else:
-            # FIXME: mypy can't infer the types set via reset() above, so specify explicitly for now
-            self.ru_utime: float = copy_from.ru_utime
-            self.ru_stime: float = copy_from.ru_stime
-            self.db_txn_count: int = copy_from.db_txn_count
-
-            self.db_txn_duration_sec: float = copy_from.db_txn_duration_sec
-            self.db_sched_duration_sec: float = copy_from.db_sched_duration_sec
-            self.evt_db_fetch_count: int = copy_from.evt_db_fetch_count
-
-    def copy(self) -> "ContextResourceUsage":
-        return ContextResourceUsage(copy_from=self)
-
-    def reset(self) -> None:
-        self.ru_stime = 0.0
-        self.ru_utime = 0.0
-        self.db_txn_count = 0
-
-        self.db_txn_duration_sec = 0.0
-        self.db_sched_duration_sec = 0.0
-        self.evt_db_fetch_count = 0
-
-    def __repr__(self) -> str:
-        return (
-            "<ContextResourceUsage ru_stime='%r', ru_utime='%r', "
-            "db_txn_count='%r', db_txn_duration_sec='%r', "
-            "db_sched_duration_sec='%r', evt_db_fetch_count='%r'>"
-        ) % (
-            self.ru_stime,
-            self.ru_utime,
-            self.db_txn_count,
-            self.db_txn_duration_sec,
-            self.db_sched_duration_sec,
-            self.evt_db_fetch_count,
-        )
-
-    def __iadd__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
-        """Add another ContextResourceUsage's stats to this one's.
-
-        Args:
-            other: the other resource usage object
-        """
-        self.ru_utime += other.ru_utime
-        self.ru_stime += other.ru_stime
-        self.db_txn_count += other.db_txn_count
-        self.db_txn_duration_sec += other.db_txn_duration_sec
-        self.db_sched_duration_sec += other.db_sched_duration_sec
-        self.evt_db_fetch_count += other.evt_db_fetch_count
-        return self
-
-    def __isub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
-        self.ru_utime -= other.ru_utime
-        self.ru_stime -= other.ru_stime
-        self.db_txn_count -= other.db_txn_count
-        self.db_txn_duration_sec -= other.db_txn_duration_sec
-        self.db_sched_duration_sec -= other.db_sched_duration_sec
-        self.evt_db_fetch_count -= other.evt_db_fetch_count
-        return self
-
-    def __add__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
-        res = ContextResourceUsage(copy_from=self)
-        res += other
-        return res
-
-    def __sub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
-        res = ContextResourceUsage(copy_from=self)
-        res -= other
-        return res
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -232,15 +102,12 @@ class ContextRequest:
     request_id: str
     ip_address: str
     site_tag: str
-    requester: Optional[str]
-    authenticated_entity: Optional[str]
+    requester: str | None
+    authenticated_entity: str | None
     method: str
     url: str
     protocol: str
     user_agent: str
-
-
-LoggingContextOrSentinel = Union["LoggingContext", "_Sentinel"]
 
 
 class _Sentinel:
@@ -276,10 +143,10 @@ class _Sentinel:
     def __str__(self) -> str:
         return "sentinel"
 
-    def start(self, rusage: "Optional[resource.struct_rusage]") -> None:
+    def start(self, rusage: "tuple[float, float] | None") -> None:
         pass
 
-    def stop(self, rusage: "Optional[resource.struct_rusage]") -> None:
+    def stop(self, rusage: "tuple[float, float] | None") -> None:
         pass
 
     def add_database_transaction(self, duration_sec: float) -> None:
@@ -297,285 +164,41 @@ class _Sentinel:
 
 SENTINEL_CONTEXT = _Sentinel()
 
+LoggingContextOrSentinel = Union[LoggingContext, _Sentinel]
 
-class LoggingContext:
-    """Additional context for log formatting. Contexts are scoped within a
-    "with" block.
 
-    If a parent is given when creating a new context, then:
-        - logging fields are copied from the parent to the new context on entry
-        - when the new context exits, the cpu usage stats are copied from the
-          child to the parent
+def current_context() -> LoggingContextOrSentinel:
+    """Get the current logging context.
 
-    Args:
-        name: Name for the context for logging.
-        server_name: The name of the server this context is associated with
-            (`config.server.server_name` or `hs.hostname`)
-        parent_context (LoggingContext|None): The parent of the new context
-        request: Synapse Request Context object. Useful to associate all the logs
-            happening to a given request.
-
+    The storage lives in the Rust extension, which represents "no context" as
+    `None`. This wrapper maps that to `SENTINEL_CONTEXT`, so callers never see
+    `None`.
     """
+    context = _rust_current_context()
+    return SENTINEL_CONTEXT if context is None else context
 
-    __slots__ = [
-        "previous_context",
-        "name",
-        "server_name",
-        "parent_context",
-        "_resource_usage",
-        "usage_start",
-        "main_thread",
-        "finished",
-        "request",
-        "tag",
-        "scope",
-    ]
 
-    def __init__(
-        self,
-        *,
-        name: str,
-        server_name: str,
-        parent_context: "Optional[LoggingContext]" = None,
-        request: Optional[ContextRequest] = None,
-    ) -> None:
-        self.previous_context = current_context()
+def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSentinel:
+    """Set the current logging context, returning the context that was
+    previously current.
 
-        # track the resources used by this context so far
-        self._resource_usage = ContextResourceUsage()
+    The implementation lives in the Rust extension: it reads the thread CPU
+    usage once (`getrusage(RUSAGE_THREAD)`) and does the `stop`/`start`
+    accounting in Rust. Rust represents the sentinel as `None`. This wrapper
+    converts in both directions, so callers only ever see
+    `LoggingContextOrSentinel`.
+    """
+    # everything blows up if we allow current_context to be set to None, so
+    # sanity-check that now.
+    if context is None:
+        raise TypeError("'context' argument may not be None")
 
-        # The thread resource usage when the logcontext became active. None
-        # if the context is not currently active.
-        self.usage_start: Optional[resource.struct_rusage] = None
-
-        self.name = name
-        self.server_name = server_name
-        self.main_thread = get_thread_id()
-        self.request = None
-        self.tag = ""
-        self.scope: Optional["_LogContextScope"] = None
-
-        # keep track of whether we have hit the __exit__ block for this context
-        # (suggesting that the the thing that created the context thinks it should
-        # be finished, and that re-activating it would suggest an error).
-        self.finished = False
-
-        self.parent_context = parent_context
-
-        # Inherit some fields from the parent context
-        if self.parent_context is not None:
-            # which request this corresponds to
-            self.request = self.parent_context.request
-
-            # we also track the current scope:
-            self.scope = self.parent_context.scope
-
-        if request is not None:
-            # the request param overrides the request from the parent context
-            self.request = request
-
-    def __str__(self) -> str:
-        return self.name
-
-    def __enter__(self) -> "LoggingContext":
-        """Enters this logging context into thread local storage"""
-        logcontext_debug_logger.debug("LoggingContext(%s).__enter__", self.name)
-        old_context = set_current_context(self)
-        if self.previous_context != old_context:
-            logcontext_error(
-                "Expected previous context %r, found %r"
-                % (
-                    self.previous_context,
-                    old_context,
-                )
-            )
-        return self
-
-    def __exit__(
-        self,
-        type: Optional[Type[BaseException]],
-        value: Optional[BaseException],
-        traceback: Optional[TracebackType],
-    ) -> None:
-        """Restore the logging context in thread local storage to the state it
-        was before this context was entered.
-        Returns:
-            None to avoid suppressing any exceptions that were thrown.
-        """
-        logcontext_debug_logger.debug(
-            "LoggingContext(%s).__exit__ --> %s", self.name, self.previous_context
-        )
-        current = set_current_context(self.previous_context)
-        if current is not self:
-            if current is SENTINEL_CONTEXT:
-                logcontext_error("Expected logging context %s was lost" % (self,))
-            else:
-                logcontext_error(
-                    "Expected logging context %s but found %s" % (self, current)
-                )
-
-        # the fact that we are here suggests that the caller thinks that everything
-        # is done and dusted for this logcontext, and further activity will not get
-        # recorded against the correct metrics.
-        self.finished = True
-
-    def start(self, rusage: "Optional[resource.struct_rusage]") -> None:
-        """
-        Record that this logcontext is currently running.
-
-        This should not be called directly: use set_current_context
-
-        Args:
-            rusage: the resources used by the current thread, at the point of
-                switching to this logcontext. May be None if this platform doesn't
-                support getrusuage.
-        """
-        if get_thread_id() != self.main_thread:
-            logcontext_error("Started logcontext %s on different thread" % (self,))
-            return
-
-        if self.finished:
-            logcontext_error("Re-starting finished log context %s" % (self,))
-
-        # If we haven't already started record the thread resource usage so
-        # far
-        if self.usage_start:
-            logcontext_error("Re-starting already-active log context %s" % (self,))
-        else:
-            self.usage_start = rusage
-
-    def stop(self, rusage: "Optional[resource.struct_rusage]") -> None:
-        """
-        Record that this logcontext is no longer running.
-
-        This should not be called directly: use set_current_context
-
-        Args:
-            rusage: the resources used by the current thread, at the point of
-                switching away from this logcontext. May be None if this platform
-                doesn't support getrusuage.
-        """
-
-        try:
-            if get_thread_id() != self.main_thread:
-                logcontext_error("Stopped logcontext %s on different thread" % (self,))
-                return
-
-            if not rusage:
-                return
-
-            # Record the cpu used since we started
-            if not self.usage_start:
-                logcontext_error(
-                    "Called stop on logcontext %s without recording a start rusage"
-                    % (self,)
-                )
-                return
-
-            utime_delta, stime_delta = self._get_cputime(rusage)
-            self.add_cputime(utime_delta, stime_delta)
-        finally:
-            self.usage_start = None
-
-    def get_resource_usage(self) -> ContextResourceUsage:
-        """Get resources used by this logcontext so far.
-
-        Returns:
-            A *copy* of the object tracking resource usage so far
-        """
-        # we always return a copy, for consistency
-        res = self._resource_usage.copy()
-
-        # If we are on the correct thread and we're currently running then we
-        # can include resource usage so far.
-        is_main_thread = get_thread_id() == self.main_thread
-        if self.usage_start and is_main_thread:
-            rusage = get_thread_resource_usage()
-            assert rusage is not None
-            utime_delta, stime_delta = self._get_cputime(rusage)
-            res.ru_utime += utime_delta
-            res.ru_stime += stime_delta
-
-        return res
-
-    def _get_cputime(self, current: "resource.struct_rusage") -> Tuple[float, float]:
-        """Get the cpu usage time between start() and the given rusage
-
-        Args:
-            rusage: the current resource usage
-
-        Returns: Tuple[float, float]: seconds in user mode, seconds in system mode
-        """
-        assert self.usage_start is not None
-
-        utime_delta = current.ru_utime - self.usage_start.ru_utime
-        stime_delta = current.ru_stime - self.usage_start.ru_stime
-
-        # sanity check
-        if utime_delta < 0:
-            logger.error(
-                "utime went backwards! %f < %f",
-                current.ru_utime,
-                self.usage_start.ru_utime,
-            )
-            utime_delta = 0
-
-        if stime_delta < 0:
-            logger.error(
-                "stime went backwards! %f < %f",
-                current.ru_stime,
-                self.usage_start.ru_stime,
-            )
-            stime_delta = 0
-
-        return utime_delta, stime_delta
-
-    def add_cputime(self, utime_delta: float, stime_delta: float) -> None:
-        """Update the CPU time usage of this context (and any parents, recursively).
-
-        Args:
-            utime_delta: additional user time, in seconds, spent in this context.
-            stime_delta: additional system time, in seconds, spent in this context.
-        """
-        self._resource_usage.ru_utime += utime_delta
-        self._resource_usage.ru_stime += stime_delta
-        if self.parent_context:
-            self.parent_context.add_cputime(utime_delta, stime_delta)
-
-    def add_database_transaction(self, duration_sec: float) -> None:
-        """Record the use of a database transaction and the length of time it took.
-
-        Args:
-            duration_sec: The number of seconds the database transaction took.
-        """
-        if duration_sec < 0:
-            raise ValueError("DB txn time can only be non-negative")
-        self._resource_usage.db_txn_count += 1
-        self._resource_usage.db_txn_duration_sec += duration_sec
-        if self.parent_context:
-            self.parent_context.add_database_transaction(duration_sec)
-
-    def add_database_scheduled(self, sched_sec: float) -> None:
-        """Record a use of the database pool
-
-        Args:
-            sched_sec: number of seconds it took us to get a connection
-        """
-        if sched_sec < 0:
-            raise ValueError("DB scheduling time can only be non-negative")
-        self._resource_usage.db_sched_duration_sec += sched_sec
-        if self.parent_context:
-            self.parent_context.add_database_scheduled(sched_sec)
-
-    def record_event_fetch(self, event_count: int) -> None:
-        """Record a number of events being fetched from the db
-
-        Args:
-            event_count: number of events being fetched
-        """
-        self._resource_usage.evt_db_fetch_count += event_count
-        if self.parent_context:
-            self.parent_context.record_event_fetch(event_count)
+    # The cast is needed because mypy cannot narrow the Union via the
+    # `is SENTINEL_CONTEXT` identity check; Rust enforces the type at runtime.
+    previous = _rust_set_current_context(
+        None if context is SENTINEL_CONTEXT else cast(LoggingContext, context)
+    )
+    return SENTINEL_CONTEXT if previous is None else previous
 
 
 class LoggingContextFilter(logging.Filter):
@@ -606,25 +229,62 @@ class LoggingContextFilter(logging.Filter):
         self._default_request = request
 
     def filter(self, record: logging.LogRecord) -> Literal[True]:
-        """Add each fields from the logging contexts to the record.
+        """
+        Add each field from the logging context to the record.
+
+        Please be mindful of 3rd-party code outside of Synapse (like in the case of
+        Synapse Pro for small hosts) as this is running as a global log record filter.
+        Other code may have set their own attributes on the record and the log record
+        may not be relevant to Synapse at all so we should not mangle it.
+
+        We can have some defaults but we should avoid overwriting existing attributes on
+        any log record unless we actually have a Synapse logcontext (not just the
+        default sentinel logcontext).
+
         Returns:
             True to include the record in the log output.
         """
         context = current_context()
-        record.request = self._default_request
-        record.server_name = "unknown_server_from_no_context"
-
-        # context should never be None, but if it somehow ends up being, then
-        # we end up in a death spiral of infinite loops, so let's check, for
+        # type-ignore: `context` should never be `None`, but if it somehow ends up
+        # being, then we end up in a death spiral of infinite loops, so let's check, for
         # robustness' sake.
-        if context is not None:
-            record.server_name = context.server_name
+        #
+        # Add some default values to avoid log formatting errors.
+        if context is None:
+            record.request = self._default_request  # type: ignore[unreachable]
+
+            # Avoid overwriting an existing `server_name` on the record. This is running in
+            # the context of a global log record filter so there may be 3rd-party code that
+            # adds their own `server_name` and we don't want to interfere with that
+            # (clobber).
+            if not hasattr(record, "server_name"):
+                record.server_name = "unknown_server_from_no_logcontext"
+
+        # Otherwise, in the normal, expected case, fill in the log record attributes
+        # from the logcontext.
+        else:
+
+            def safe_set(attr: str, value: Any) -> None:
+                """
+                Only write the attribute if it hasn't already been set or we actually have
+                a Synapse logcontext (indicating that this log record is relevant to
+                Synapse).
+                """
+                if context is not SENTINEL_CONTEXT or not hasattr(record, attr):
+                    setattr(record, attr, value)
+
+            safe_set("server_name", context.server_name)
+
             # Logging is interested in the request ID. Note that for backwards
             # compatibility this is stored as the "request" on the record.
-            record.request = str(context)
+            safe_set("request", str(context))
 
             # Add some data from the HTTP request.
             request = context.request
+            # The sentinel logcontext has no request so if we get past this point, we
+            # know we have some actual Synapse logcontext and don't need to worry about
+            # using `safe_set`. We'll consider this an optimization since this is a
+            # pretty hot-path.
             if request is None:
                 return True
 
@@ -659,7 +319,7 @@ class PreserveLoggingContext:
         self, new_context: LoggingContextOrSentinel = SENTINEL_CONTEXT
     ) -> None:
         self._new_context = new_context
-        self._instance_id = random_string(5)
+        self._instance_id = random_string_insecure_fast(5)
 
     def __enter__(self) -> None:
         logcontext_debug_logger.debug(
@@ -672,9 +332,9 @@ class PreserveLoggingContext:
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
-        value: Optional[BaseException],
-        traceback: Optional[TracebackType],
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
     ) -> None:
         logcontext_debug_logger.debug(
             "PreserveLoggingContext(%s).__exit %s --> %s",
@@ -697,39 +357,6 @@ class PreserveLoggingContext:
                         context,
                     )
                 )
-
-
-_thread_local = threading.local()
-_thread_local.current_context = SENTINEL_CONTEXT
-
-
-def current_context() -> LoggingContextOrSentinel:
-    """Get the current logging context from thread local storage"""
-    return getattr(_thread_local, "current_context", SENTINEL_CONTEXT)
-
-
-def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSentinel:
-    """Set the current logging context in thread local storage
-    Args:
-        context: The context to activate.
-
-    Returns:
-        The context that was previously active
-    """
-    # everything blows up if we allow current_context to be set to None, so sanity-check
-    # that now.
-    if context is None:
-        raise TypeError("'context' argument may not be None")
-
-    current = current_context()
-
-    if current is not context:
-        rusage = get_thread_resource_usage()
-        current.stop(rusage)
-        _thread_local.current_context = context
-        context.start(rusage)
-
-    return current
 
 
 def nested_logging_context(suffix: str) -> LoggingContext:
@@ -793,10 +420,7 @@ def preserve_fn(f: Callable[P, R]) -> Callable[P, "defer.Deferred[R]"]: ...
 
 
 def preserve_fn(
-    f: Union[
-        Callable[P, R],
-        Callable[P, Awaitable[R]],
-    ],
+    f: Callable[P, R] | Callable[P, Awaitable[R]],
 ) -> Callable[P, "defer.Deferred[R]"]:
     """Function decorator which wraps the function with run_in_background"""
 
@@ -822,10 +446,7 @@ def run_in_background(
 
 
 def run_in_background(
-    f: Union[
-        Callable[P, R],
-        Callable[P, Awaitable[R]],
-    ],
+    f: Callable[P, R] | Callable[P, Awaitable[R]],
     *args: P.args,
     **kwargs: P.kwargs,
 ) -> "defer.Deferred[R]":
@@ -861,7 +482,7 @@ def run_in_background(
         Note that the returned Deferred does not follow the synapse logcontext
         rules.
     """
-    instance_id = random_string(5)
+    instance_id = random_string_insecure_fast(5)
     calling_context = current_context()
     logcontext_debug_logger.debug(
         "run_in_background(%s): called with logcontext=%s", instance_id, calling_context
@@ -898,7 +519,7 @@ def run_in_background(
         # If the function messes with logcontexts, we can assume it follows the Synapse
         # logcontext rules (Rules for functions returning awaitables: "If the awaitable
         # is already complete, the function returns with the same logcontext it started
-        # with."). If it function doesn't touch logcontexts at all, we can also assume
+        # with."). If the function doesn't touch logcontexts at all, we can also assume
         # the logcontext is unchanged.
         #
         # Either way, the function should have maintained the calling logcontext, so we
@@ -907,11 +528,21 @@ def run_in_background(
         # to reset the logcontext to the sentinel logcontext as that would run
         # immediately (remember our goal is to maintain the calling logcontext when we
         # return).
-        logcontext_debug_logger.debug(
-            "run_in_background(%s): deferred already completed and the function should have maintained the logcontext %s",
-            instance_id,
-            calling_context,
-        )
+        if current_context() != calling_context:
+            logcontext_error(
+                "run_in_background(%s): deferred already completed but the function did not maintain the calling logcontext %s (found %s)"
+                % (
+                    instance_id,
+                    calling_context,
+                    current_context(),
+                )
+            )
+        else:
+            logcontext_debug_logger.debug(
+                "run_in_background(%s): deferred already completed (maintained the calling logcontext %s)",
+                instance_id,
+                calling_context,
+            )
         return d
 
     # Since the function we called may follow the Synapse logcontext rules (Rules for
@@ -1014,7 +645,7 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     restores the old context once the awaitable completes (execution passes from the
     reactor back to the code).
     """
-    instance_id = random_string(5)
+    instance_id = random_string_insecure_fast(5)
     logcontext_debug_logger.debug(
         "make_deferred_yieldable(%s): called with logcontext=%s",
         instance_id,

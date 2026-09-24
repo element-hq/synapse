@@ -1,11 +1,10 @@
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import NotFoundError
 from synapse.events.utils import (
-    SerializeEventConfig,
-    format_event_raw,
-    serialize_event,
+    EventFormat,
+    FilteredEvent,
 )
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
@@ -40,10 +39,11 @@ class EventRestServlet(RestServlet):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
+        self._event_serializer = hs.get_event_client_serializer()
 
     async def on_GET(
         self, request: SynapseRequest, event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self._auth.get_user_by_req(request)
         await assert_user_is_admin(self._auth, requester)
 
@@ -56,14 +56,20 @@ class EventRestServlet(RestServlet):
         if event is None:
             raise NotFoundError("Event not found")
 
-        config = SerializeEventConfig(
+        config = await self._event_serializer.create_config(
             as_client_event=False,
-            event_format=format_event_raw,
+            event_format=EventFormat.Raw,
             requester=requester,
-            only_event_fields=None,
+            event_field_allowlist=None,
             include_stripped_room_state=True,
             include_admin_metadata=True,
         )
-        res = {"event": serialize_event(event, self._clock.time_msec(), config=config)}
+        res = {
+            "event": await self._event_serializer.serialize_event(
+                FilteredEvent.admin_override(event),
+                self._clock.time_msec(),
+                config=config,
+            )
+        }
 
         return HTTPStatus.OK, res

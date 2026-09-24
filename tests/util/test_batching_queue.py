@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Tuple
 
 from prometheus_client import Gauge
 
@@ -47,7 +46,7 @@ class BatchingQueueTestCase(HomeserverTestCase):
         except KeyError:
             pass
 
-        self._pending_calls: List[Tuple[List[str], defer.Deferred]] = []
+        self._pending_calls: list[tuple[list[str], defer.Deferred]] = []
         self.queue: BatchingQueue[str, str] = BatchingQueue(
             name="test_queue",
             hs=self.hs,
@@ -55,7 +54,7 @@ class BatchingQueueTestCase(HomeserverTestCase):
             process_batch_callback=self._process_queue,
         )
 
-    async def _process_queue(self, values: List[str]) -> str:
+    async def _process_queue(self, values: list[str]) -> str:
         d: "defer.Deferred[str]" = defer.Deferred()
         self._pending_calls.append((values, d))
         return await make_deferred_yieldable(d)

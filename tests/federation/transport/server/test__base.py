@@ -20,7 +20,6 @@
 #
 
 from http import HTTPStatus
-from typing import Dict, List, Tuple
 
 from twisted.web.resource import Resource
 
@@ -31,10 +30,11 @@ from synapse.http.server import JsonResource
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.cancellation import cancellable
+from synapse.util.duration import Duration
 from synapse.util.ratelimitutils import FederationRateLimiter
 
 from tests import unittest
-from tests.http.server._base import test_disconnect
+from tests.http.server._base import disconnect_and_assert
 
 
 class CancellableFederationServlet(BaseFederationServlet):
@@ -52,15 +52,15 @@ class CancellableFederationServlet(BaseFederationServlet):
 
     @cancellable
     async def on_GET(
-        self, origin: str, content: None, query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
-        await self.clock.sleep(1.0)
+        self, origin: str, content: None, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, {"result": True}
 
     async def on_POST(
-        self, origin: str, content: JsonDict, query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
-        await self.clock.sleep(1.0)
+        self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, {"result": True}
 
 
@@ -94,7 +94,7 @@ class BaseFederationServletCancellationTests(unittest.FederatingHomeserverTestCa
         # request won't be processed.
         self.pump()
 
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=True,
@@ -114,7 +114,7 @@ class BaseFederationServletCancellationTests(unittest.FederatingHomeserverTestCa
         # request won't be processed.
         self.pump()
 
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=False,

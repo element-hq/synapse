@@ -4,8 +4,10 @@ It is recommended to put a reverse proxy such as
 [nginx](https://nginx.org/en/docs/http/ngx_http_proxy_module.html),
 [Apache](https://httpd.apache.org/docs/current/mod/mod_proxy_http.html),
 [Caddy](https://caddyserver.com/docs/quick-starts/reverse-proxy),
-[HAProxy](https://www.haproxy.org/) or
-[relayd](https://man.openbsd.org/relayd.8) in front of Synapse.
+[HAProxy](https://www.haproxy.org/),
+[relayd](https://man.openbsd.org/relayd.8) or
+[lighttpd](https://www.lighttpd.net/)
+in front of Synapse.
 This has the advantage of being able to expose the default HTTPS port (443) to Matrix
 clients without requiring Synapse to bind to a privileged port (port numbers less than
 1024), avoiding the need for `CAP_NET_BIND_SERVICE` or running as root.
@@ -84,6 +86,45 @@ server {
 	proxy_http_version 1.1;
     }
 }
+```
+
+### Nginx Proxy Manager or NPMPlus
+
+```nginx
+Add New Proxy-Host
+	- Tab Details
+		- Domain Names: matrix.example.com
+		- Scheme: http
+		- Forward Hostname / IP: localhost # IP address or hostname where Synapse is hosted. Bare-metal or Container.
+		- Forward Port: 8008
+
+	- Tab Custom locations
+		- Add Location
+		- Define Location: /_matrix
+		- Scheme: http
+		- Forward Hostname / IP: localhost # IP address or hostname where Synapse is hosted. Bare-metal or Container.
+		- Forward Port: 8008
+		- Click on the gear icon to display a custom configuration field. Increase client_max_body_size to match max_upload_size defined in homeserver.yaml
+			- Enter this in the Custom Field: client_max_body_size 50M;
+
+	- Tab SSL/TLS
+		- Choose your SSL/TLS certificate and preferred settings.
+
+	- Tab Advanced
+		- Enter this in the Custom Field. This means that port 8448 no longer needs to be opened in your Firewall.
+		  The Federation communication use now Port 443.
+
+			location /.well-known/matrix/server {
+			  return 200 '{"m.server": "matrix.example.com:443"}';
+      		  add_header Content-Type application/json;
+			}
+
+ 			location /.well-known/matrix/client {
+      		  return 200 '{"m.homeserver": {"base_url": "https://matrix.example.com"}}';
+      		  add_header Content-Type application/json;
+      		  add_header "Access-Control-Allow-Origin" *;
+			}
+
 ```
 
 ### Caddy v2
@@ -270,6 +311,88 @@ relay "matrix_federation" {
     listen on egress port 8448 tls
     protocol "matrix"
     forward to <matrixserver> port 8008 check tcp
+}
+```
+
+### lighttpd
+```conf
+server.modules = (
+    "mod_rewrite",
+    "mod_redirect",
+    "mod_access",
+    "mod_setenv",
+    "mod_openssl",
+    "mod_proxy",
+    "mod_accesslog"
+)
+
+server.username      = "lighttpd"
+server.groupname     = "lighttpd"
+
+# We set this to "disable" and use IPv6 `[::]` explicitly below,
+# in order to listen on all incoming IPv6 addresses.
+#
+# If you only want to listen on specific IPv6 addresses, set this
+# to "enable" and specify said addresses below.
+server.use-ipv6 = "disable"
+
+ssl.pemfile = "/etc/lighttpd/cert+privkey.pem"
+ssl.ca-file = "/etc/lighttpd/fullchain.pem"
+
+# redirect HTTP traffic to HTTPS, same for IPv6 below
+$SERVER["socket"] == "0.0.0.0:80" {
+    url.redirect = (
+        "" => "https://${url.authority.noport}${url.path}${qsa}"
+    )
+}
+$SERVER["socket"] == "0.0.0.0:443" { ssl.engine = "enable" }
+$SERVER["socket"] == "0.0.0.0:8448" { ssl.engine = "enable" }
+$SERVER["socket"] == "[::]:80" {
+    url.redirect = (
+        "" => "https://${url.authority.noport}${url.path}${qsa}"
+    )
+}
+$SERVER["socket"] == "[::]:443" { ssl.engine = "enable" }
+$SERVER["socket"] == "[::]:8448" {  ssl.engine = "enable" }
+
+
+
+# both lighttpd and synapse need permissions for socket r/w
+$HTTP["url"] =~ "(/_matrix|_synapse/admin|/_synapse/client)" {
+    proxy.balance = "hash"
+    proxy.server = ( 
+        "" => ( 
+            "backend-socket" => (
+                "host" => "/var/lib/synapse/main_public.sock",
+                "port" => 0
+            )
+        )
+    )
+    proxy.forwarded = (
+        "for" => 1,
+        "proto" => 1,
+        "host" => 1,
+    )
+}
+# protect admin access IPv6 ULA only
+$HTTP["remoteip"] !="fd00::/8" {
+    $HTTP["url"] =~ "^/_synapse/admin/" {
+        url.access-deny = ( "" )
+    }
+}
+```
+
+[Delegation](delegate.md) example:
+```conf
+url.rewrite-once = (
+    "^/\.well-known/matrix/client$" => "/.well-known/matrix/client.json",
+    "^/\.well-known/matrix/server$" => "/.well-known/matrix/server.json"
+)
+
+# This condition intentionally matches the post-rewrite URLs.
+$HTTP["url"] =~ "^/\.well-known/matrix/(client|server)\.json$" {
+    mimetype.assign = ( ".json" => "application/json" )
+    setenv.set-response-header = ( "Access-Control-Allow-Origin" => "*" )
 }
 ```
 

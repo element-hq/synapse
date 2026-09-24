@@ -18,13 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Optional, Protocol, Tuple
+from typing import TYPE_CHECKING, Protocol
 
 from prometheus_client import Histogram
 
 from twisted.web.server import Request
 
-from synapse.appservice import ApplicationService
+from synapse.appservice import ApplicationService, Scopes
 from synapse.http.site import SynapseRequest
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import Requester
@@ -51,7 +51,7 @@ class Auth(Protocol):
         room_id: str,
         requester: Requester,
         allow_departed_users: bool = False,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Check if the user is in the room, or was at some point.
         Args:
             room_id: The room to check.
@@ -96,6 +96,20 @@ class Auth(Protocol):
             InvalidClientCredentialsError if no user by that token exists or the token
                 is invalid.
             AuthError if access is denied for the user in the access token
+        """
+
+    async def get_optional_user_by_req(
+        self,
+        request: SynapseRequest,
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester | None:
+        """Like `get_user_by_req`, except returns None when the request carries
+        no access token at all. A token that is present but invalid still
+        raises, as with `get_user_by_req`.
+
+        For endpoints where authentication is optional.
         """
 
     async def get_user_by_req_experimental_feature(
@@ -190,7 +204,7 @@ class Auth(Protocol):
 
     async def check_user_in_room_or_world_readable(
         self, room_id: str, requester: Requester, allow_departed_users: bool = False
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Checks that the user is or was in the room or the room is world
         readable. If it isn't then an exception is raised.
 
@@ -204,4 +218,10 @@ class Auth(Protocol):
             Resolves to the current membership of the user in the room and the
             membership event ID of the user. If the user is not in the room and
             never has been, then `(Membership.JOIN, None)` is returned.
+        """
+
+    def assert_requester_has_scope(self, requester: Requester, scope: Scopes) -> None:
+        """Asserts that the requester has the given scope, either directly
+        (e.g. via an OAuth token) or via the scopes registered against the
+        application service.
         """

@@ -19,7 +19,7 @@
 #
 import logging
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from twisted.internet.address import IPv4Address
 from twisted.internet.protocol import Protocol, connectionDone
@@ -39,6 +39,7 @@ from synapse.replication.tcp.protocol import (
 from synapse.replication.tcp.resource import ReplicationStreamProtocolFactory
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.server import FakeTransport
@@ -105,10 +106,10 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
             repl_handler,
         )
 
-        self._client_transport: Optional[FakeTransport] = None
-        self._server_transport: Optional[FakeTransport] = None
+        self._client_transport: FakeTransport | None = None
+        self._server_transport: FakeTransport | None = None
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         d = super().create_resource_dict()
         d["/_synapse/replication"] = ReplicationRestResource(self.hs)
         return d
@@ -183,7 +184,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
 
         # hook into the channel's request factory so that we can keep a record
         # of the requests
-        requests: List[SynapseRequest] = []
+        requests: list[SynapseRequest] = []
         real_request_factory = channel.requestFactory
 
         def request_factory(*args: Any, **kwargs: Any) -> SynapseRequest:
@@ -256,7 +257,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
         # Redis replication only takes place on Postgres
         skip = "Requires Postgres"
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         """
         Overrides the default config to enable Redis.
         Even if the test only uses make_worker_hs, the main process needs Redis
@@ -325,7 +326,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
         return resource
 
     def make_worker_hs(
-        self, worker_app: str, extra_config: Optional[dict] = None, **kwargs: Any
+        self, worker_app: str, extra_config: dict | None = None, **kwargs: Any
     ) -> HomeServer:
         """Make a new worker HS instance, correctly connecting replication
         stream to the master HS.
@@ -483,6 +484,78 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
             )
             server_protocol.makeConnection(server_to_client_transport)
 
+    def _generate_rooms_on_worker(
+        self,
+        user_id: str,
+        user_tok: str,
+        list_of_worker_names: list[str] | None = None,
+        try_at_most_count: int | None = None,
+    ) -> dict[str, str]:
+        """
+        Given a list of worker names, generate rooms until there is at least one on each
+        of the named workers.
+
+        Args:
+            user_id: The user_id of the user making the room.
+            user_tok: The token of the user making the room.
+            list_of_worker_names: A list of worker names that need to have rooms. By
+                default, each `events` worker provided in the homeserver config will be used.
+            try_at_most_count: A given number of iterations to try and produce rooms. If
+                not provided, use the number of workers multiplied by 3 for the count.
+        Returns:
+            A mapping of `worker_name`->`room_id`
+        """
+        # Save a shorter reference to the `RoutableShardedWorkerHandlingConfig` that
+        # contains the information needed to not only identify the full list of workers
+        # (in case the default for `list_of_workernames` is used) and provides the
+        # routing hash function that decides which worker a given room id should go to.
+        events_writers_config = self.hs.config.worker.events_shard_config
+
+        if list_of_worker_names is None:
+            _set_of_worker_names = set(events_writers_config.instances)
+        else:
+            _set_of_worker_names = set(list_of_worker_names)
+
+        assert len(_set_of_worker_names) > 0
+        # Save a copy of this to use now, we can use the original to assert expectations
+        # before returning.
+        set_of_workernames = set(_set_of_worker_names)
+
+        results_mapping = {}
+
+        # Maintain a count, in case of a runaway process. The number 3 has no magical
+        # significance other than at the time of writing it allowed all tests that used
+        # this function to pass. The count is on a one based index(counts down to 1 and
+        # doesn't go past), so this will allow for (3 * num_of_workers) attempts before
+        # giving up if `try_at_most_count` does not override.
+        count = try_at_most_count or len(set_of_workernames) * 3
+
+        while set_of_workernames:
+            # Rooms created at the same millisecond will have the same room_id for
+            # MSC4291 rooms. Bump the reactor by that much so a different room_id will
+            # be tried on the next iteration.
+            self.reactor.advance(Duration(milliseconds=1).as_secs())
+            _room_id = self.helper.create_room_as(user_id, tok=user_tok)
+
+            _worker_responsible = events_writers_config.get_instance(_room_id)
+
+            if _worker_responsible in set_of_workernames:
+                results_mapping[_worker_responsible] = _room_id
+                # Remember to remove the worker now that it is found
+                set_of_workernames.remove(_worker_responsible)
+
+            count -= 1
+            if count == 1:
+                raise AssertionError(
+                    "Count exhausted attempting to generate rooms. Aborting and failing test"
+                )
+
+        # Since this *IS* part of a test, lets make sure all worker names requested are
+        # accounted for
+        assert results_mapping.keys() == _set_of_worker_names
+
+        return results_mapping
+
 
 class TestReplicationDataHandler(ReplicationDataHandler):
     """Drop-in for ReplicationDataHandler which just collects RDATA rows"""
@@ -491,7 +564,7 @@ class TestReplicationDataHandler(ReplicationDataHandler):
         super().__init__(hs)
 
         # list of received (stream_name, token, row) tuples
-        self.received_rdata_rows: List[Tuple[str, int, Any]] = []
+        self.received_rdata_rows: list[tuple[str, int, Any]] = []
 
     async def on_rdata(
         self, stream_name: str, instance_name: str, token: int, rows: list
@@ -505,9 +578,13 @@ class FakeRedisPubSubServer:
     """A fake Redis server for pub/sub."""
 
     def __init__(self) -> None:
-        self._subscribers_by_channel: Dict[bytes, Set["FakeRedisPubSubProtocol"]] = (
+        self._subscribers_by_channel: dict[bytes, set["FakeRedisPubSubProtocol"]] = (
             defaultdict(set)
         )
+
+        # The arguments of every `AUTH` command received, in order: `(password,)`
+        # when only a password is configured, `(username, password)` with both.
+        self.auth_attempts: list[tuple[bytes, ...]] = []
 
     def add_subscriber(self, conn: "FakeRedisPubSubProtocol", channel: bytes) -> None:
         """A connection has called SUBSCRIBE"""
@@ -534,7 +611,7 @@ class FakeRedisPubSubServer:
 class FakeRedisPubSubProtocol(Protocol):
     """A connection from a client talking to the fake Redis server."""
 
-    transport: Optional[FakeTransport] = None
+    transport: FakeTransport | None = None
 
     def __init__(self, server: FakeRedisPubSubServer):
         self._server = server
@@ -580,6 +657,11 @@ class FakeRedisPubSubProtocol(Protocol):
         # Connection keep-alives.
         elif command == b"PING":
             self.send("PONG")
+
+        # We don't check the credentials, just record that they were sent.
+        elif command == b"AUTH":
+            self._server.auth_attempts.append(args)
+            self.send("OK")
 
         else:
             raise Exception(f"Unknown command: {command!r}")

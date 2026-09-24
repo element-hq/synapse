@@ -19,13 +19,13 @@
 #
 #
 
-from typing import Any, Collection, List, Optional, Tuple
+from typing import Any, Collection
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.auth.internal import InternalAuth
-from synapse.api.constants import UserTypes
+from synapse.api.constants import ProfileFields, UserTypes
 from synapse.api.errors import (
     CodeMessageException,
     Codes,
@@ -63,10 +63,10 @@ class TestSpamChecker:
 
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
-        auth_provider_id: Optional[str],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
+        auth_provider_id: str | None,
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.ALLOW
 
@@ -74,10 +74,10 @@ class TestSpamChecker:
 class DenyAll(TestSpamChecker):
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
-        auth_provider_id: Optional[str],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
+        auth_provider_id: str | None,
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.DENY
 
@@ -85,10 +85,10 @@ class DenyAll(TestSpamChecker):
 class BanAll(TestSpamChecker):
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
-        auth_provider_id: Optional[str],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
+        auth_provider_id: str | None,
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.SHADOW_BAN
 
@@ -96,10 +96,10 @@ class BanAll(TestSpamChecker):
 class BanBadIdPUser(TestSpamChecker):
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
-        auth_provider_id: Optional[str] = None,
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
+        auth_provider_id: str | None = None,
     ) -> RegistrationBehaviour:
         # Reject any user coming from CAS and whose username contains profanity
         if auth_provider_id == "cas" and username and "flimflob" in username:
@@ -113,9 +113,9 @@ class TestLegacyRegistrationSpamChecker:
 
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.ALLOW
 
@@ -123,9 +123,9 @@ class TestLegacyRegistrationSpamChecker:
 class LegacyAllowAll(TestLegacyRegistrationSpamChecker):
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.ALLOW
 
@@ -133,9 +133,9 @@ class LegacyAllowAll(TestLegacyRegistrationSpamChecker):
 class LegacyDenyAll(TestLegacyRegistrationSpamChecker):
     async def check_registration_for_spam(
         self,
-        email_threepid: Optional[dict],
-        username: Optional[str],
-        request_info: Collection[Tuple[str, str]],
+        email_threepid: dict | None,
+        username: str | None,
+        request_info: Collection[tuple[str, str]],
     ) -> RegistrationBehaviour:
         return RegistrationBehaviour.DENY
 
@@ -477,6 +477,7 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
             "auto_join_rooms": ["#room:test"],
             "autocreate_auto_join_room_preset": "private_chat",
             "auto_join_mxid_localpart": "support",
+            "default_room_version": "11",
         }
     )
     def test_auto_create_auto_join_room_preset_invalid_permissions(self) -> None:
@@ -485,6 +486,8 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
         registration doesn't completely break if the inviter doesn't have proper
         permissions.
         """
+        # This test is limited to room version 11, as after that the room creator will
+        # always have permission to invite users and make any other changes they wish.
         inviter = "@support:test"
 
         # Register an initial user to create the room and such (essentially this
@@ -528,7 +531,7 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        # Register a second user, which won't be be in the room (or even have an invite)
+        # Register a second user, which won't be in the room (or even have an invite)
         # since the inviter no longer has the proper permissions.
         user_id = self.get_success(self.handler.register_user(localpart="bob"))
 
@@ -777,9 +780,9 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
         self,
         requester: Requester,
         localpart: str,
-        displayname: Optional[str],
-        password_hash: Optional[str] = None,
-    ) -> Tuple[str, str]:
+        displayname: str | None,
+        password_hash: str | None = None,
+    ) -> tuple[str, str]:
         """Creates a new user if the user does not exist,
         else revokes all previous access tokens and generates a new one.
 
@@ -824,8 +827,12 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
 
         if displayname is not None:
             # logger.info("setting user display name: %s -> %s", user_id, displayname)
-            await self.hs.get_profile_handler().set_displayname(
-                user, requester, displayname, by_admin=True
+            await self.hs.get_profile_handler().set_field(
+                target_user=user,
+                requester=requester,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value=displayname,
+                by_admin=True,
             )
 
         return user_id, token
@@ -842,7 +849,7 @@ class RemoteAutoJoinTestCase(unittest.HomeserverTestCase):
 
         async def lookup_room_alias(
             *args: Any, **kwargs: Any
-        ) -> Tuple[RoomID, List[str]]:
+        ) -> tuple[RoomID, list[str]]:
             return RoomID.from_string(self.room_id), ["remotetest"]
 
         self.room_member_handler = Mock(spec=["update_membership", "lookup_room_alias"])

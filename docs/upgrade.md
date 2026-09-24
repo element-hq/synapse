@@ -117,6 +117,199 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+
+# Upgrading to v1.163.0
+
+## `limit_profile_requests_to_users_who_share_rooms` now requires `require_auth_for_profile_requests`
+
+The shared-room check enabled by
+[`limit_profile_requests_to_users_who_share_rooms`](usage/configuration/config_documentation.md#limit_profile_requests_to_users_who_share_rooms)
+is only applied to authenticated requests, and profile requests are only
+authenticated when
+[`require_auth_for_profile_requests`](usage/configuration/config_documentation.md#require_auth_for_profile_requests)
+is enabled. Enabling the former without the latter therefore never restricted
+any profile lookup.
+
+Synapse will now refuse to start with that combination. If you have
+`limit_profile_requests_to_users_who_share_rooms: true` in your configuration,
+either also set `require_auth_for_profile_requests: true`, or remove the option to
+keep the behaviour you have today.
+
+# Upgrading to v1.161.0
+
+## Deprecation of `matrix_rtc.livekit_service_url`
+
+When configuring the MatrixRTC LiveKit transport, the `livekit_service_url` is now
+deprecated but should continue to be listed to ensure backwards compatibility with
+older clients. A new sibling `url` config property is added that should be set to
+your SFU's WebSocket URL. Clients that support `url` will use the Client-Server API
+to (indirectly) interact with the LiveKit authorization service. The service needs
+to be set up as an application service in order to support these endpoints. See
+https://github.com/element-hq/lk-jwt-service and
+https://element-hq.github.io/synapse/v1.161/usage/configuration/config_documentation.html#matrix_rtc
+for further details.
+
+# Upgrading to v1.159.0
+
+## Change of signing key expiry date for the Debian/Ubuntu package repository (2026)
+
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`,
+please be aware that we have recently updated the expiry date on the repository's GPG signing key,
+but this change must be imported into your keyring.
+
+If you have the `matrix-org-archive-keyring` package installed and it updates before the current key expires, this should
+happen automatically.
+
+Otherwise, if you see an error similar to `The following signatures were invalid: EXPKEYSIG F473DD4473365DE1`, you
+will need to get a fresh copy of the keys. You can do so with:
+
+```sh
+sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
+```
+
+The old version of the key will expire on `2027-03-15`.
+
+# Upgrading to v1.158.0
+
+## Drop support for Ubuntu 25.10 'Questing Quokka', add support for Ubuntu 26.04 'Resolute Raccoon'
+
+Ubuntu 25.10 'Questing Quokka' [is end-of-life as of
+2026-07-01](https://endoflife.date/ubuntu). This release drops support for Ubuntu 25.10,
+and in its place adds support for Ubuntu 26.04 'Resolute Raccoon'.
+
+# Upgrading to v1.157.0
+
+## MSC3861 Auth Delegation must be migrated to stable Matrix Authentication Service integration
+
+Support for the deprecated MSC3861 Auth Delegation (`experimental_features.msc3861`)
+has been dropped in this version, in favour of the stable Matrix Authentication Service
+integration.
+
+See [the previous upgrade notes](#stable-integration-with-matrix-authentication-service)
+and the [`matrix_authentication_service` section in the Configuration Manual](usage/configuration/config_documentation.md#matrix_authentication_service)
+for more information.
+
+# Upgrading to v1.152.0
+
+## Workers which quarantine media must be stream writers
+
+A new [`quarantined_media_changes` stream writer](./workers.md#the-quarantined_media_changes-stream) is
+introduced. Existing deployments which route the `/quarantine_media` endpoints to a
+worker (instead of the main process) *must* also add those workers to the
+`quarantined_media_changes` stream writer list. Quarantining media will not work without
+this.
+
+If your deployment does not use workers, or instead uses the main process for
+quarantining media, you do not need to make any changes to your configuration.
+
+# Upgrading to v1.150.0
+
+## Removal of the `systemd` pip extra
+
+The `matrix-synapse[systemd]` pip extra has been removed.
+If you use `systemd.journal.JournalHandler` in your logging configuration
+(e.g. `contrib/systemd/log_config.yaml`), you must now install
+`systemd-python` manually in Synapse's runtime environment:
+
+```bash
+pip install systemd-python
+```
+
+No action is needed if you do not use journal logging, or if you installed
+Synapse from the Debian packages (which handle this automatically).
+
+## Module API: Deprecation of the `deactivation` parameter in the `set_displayname` method
+
+If you have Synapse modules installed that use the `set_displayname` method to change
+the display name of your users, please ensure that it doesn't pass the optional
+`deactivation` parameter.
+
+This parameter is now deprecated and it is intended to be removed in 2027.
+No immediate change is necessary, however once the parameter is removed, modules passing it will produce errors.
+[Issue #19546](https://github.com/element-hq/synapse/issues/19546) tracks this removal.
+
+From this version, when the parameter is passed, an error such as
+``Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: False). This will break in 2027.`` will be logged. The method will otherwise continue to work.
+
+## Updated request log format (`Processed request: ...`)
+
+The [request log format](usage/administration/request_log.md) has slightly changed to
+include `ru=(...)` and `db=(...)` labels to better disambiguate the number groupings.
+Previously, these values appeared without labels.
+
+This only matters if you have third-party tooling that parses the Synapse logs.
+
+# Upgrading to v1.146.0
+
+## Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka
+
+Ubuntu 25.04 Plucky Puffin [is end-of-life as of 17 Jan
+2026](https://endoflife.date/ubuntu). This release drops support for Ubuntu
+25.04, and in its place adds support for Ubuntu 25.10 Questing Quokka.
+
+## Removal of MSC2697 (Legacy) Dehydrated devices
+
+The endpoints for
+[MSC2697](https://github.com/matrix-org/matrix-spec-proposals/pull/2697) have now
+been removed, since the MSC is closed. Developers who rely on this feature should
+migrate to [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814)
+which introduces support for a newer version of dehydrated devices.
+
+# Upgrading to v1.144.0
+
+## Worker support for unstable MSC4140 `/restart` endpoint
+
+The following unstable endpoint pattern may now be routed to worker processes:
+
+```
+^/_matrix/client/unstable/org.matrix.msc4140/delayed_events/.*/restart$
+```
+
+## Unstable mutual rooms endpoint is now behind an experimental feature flag
+
+The unstable mutual rooms endpoint from
+[MSC2666](https://github.com/matrix-org/matrix-spec-proposals/pull/2666)
+(`/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`) is now
+disabled by default.  If you rely on this unstable endpoint, you must now set
+`experimental_features.msc2666_enabled: true` in your configuration to keep
+using it.
+
+# Upgrading to v1.143.0
+
+## Dropping support for PostgreSQL 13
+
+In line with our [deprecation policy](deprecation_policy.md), we've dropped
+support for PostgreSQL 13, as it is no longer supported upstream.
+This release of Synapse requires PostgreSQL 14+.
+
+# Upgrading to v1.142.0
+
+## Python 3.10+ is now required
+
+The minimum supported Python version has been increased from v3.9 to v3.10.
+You will need Python 3.10+ to run Synapse v1.142.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+## SQLite 3.40.0+ is now required
+
+The minimum supported SQLite version has been increased from 3.27.0 to 3.40.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
+
+# Upgrading to v1.141.0
+
+## Docker images now based on Debian `trixie` with Python 3.13
+
+The Docker images are now based on Debian `trixie` and use Python 3.13. If you
+are using the Docker images as a base image you may need to e.g. adjust the
+paths you mount any additional Python packages at.
+
 # Upgrading to v1.140.0
 
 ## Users of `synapse-s3-storage-provider` must update the module to `v1.6.0`
@@ -206,7 +399,8 @@ using these metrics.
 Support for [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service) is now stable, with a simplified configuration.
 This stable integration requires MAS 0.20.0 or later.
 
-The existing `experimental_features.msc3861` configuration option is now deprecated and will be removed in Synapse v1.137.0.
+The existing `experimental_features.msc3861` configuration option is now deprecated and will be removed in Synapse v1.157.0.
+(*Note*: this previously read v1.137.0 but the removal date was missed.)
 
 Synapse deployments already using MAS should now use the new configuration options:
 
@@ -773,7 +967,7 @@ the names of Prometheus metrics.
 If you want to test your changes before legacy names are disabled by default,
 you may specify `enable_legacy_metrics: false` in your homeserver configuration.
 
-A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html?highlight=metrics%20deprecated#renaming-of-metrics--deprecation-of-old-names-in-12).
+A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12).
 
 
 ## Deprecation of the `generate_short_term_login_token` module API method
@@ -2368,7 +2562,7 @@ back to v1.3.1, subject to the following:
 
 Some counter metrics have been renamed, with the old names deprecated.
 See [the metrics
-documentation](metrics-howto.md#renaming-of-metrics--deprecation-of-old-names-in-12)
+documentation](https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12)
 for details.
 
 # Upgrading to v1.1.0

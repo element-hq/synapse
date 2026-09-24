@@ -30,7 +30,7 @@ import signal
 import subprocess
 import sys
 import time
-from typing import Iterable, NoReturn, Optional, TextIO
+from typing import Iterable, NoReturn, TextIO
 
 import yaml
 
@@ -135,7 +135,7 @@ def start(pidfile: str, app: str, config_files: Iterable[str], daemonize: bool) 
         return False
 
 
-def stop(pidfile: str, app: str) -> Optional[int]:
+def stop(pidfile: str, app: str) -> int | None:
     """Attempts to kill a synapse worker from the pidfile.
     Args:
         pidfile: path to file containing worker's pid

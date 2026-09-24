@@ -18,7 +18,6 @@
 #
 #
 
-from typing import List, Optional
 from unittest.mock import Mock, patch
 
 from synapse._scripts.register_new_matrix_user import request_registration
@@ -34,14 +33,14 @@ class RegisterTestCase(TestCase):
         post that MAC.
         """
 
-        def get(url: str, verify: Optional[bool] = None) -> Mock:
+        def get(url: str, verify: bool | None = None) -> Mock:
             r = Mock()
             r.status_code = 200
             r.json = lambda: {"nonce": "a"}
             return r
 
         def post(
-            url: str, json: Optional[JsonDict] = None, verify: Optional[bool] = None
+            url: str, json: JsonDict | None = None, verify: bool | None = None
         ) -> Mock:
             # Make sure we are sent the correct info
             assert json is not None
@@ -60,8 +59,8 @@ class RegisterTestCase(TestCase):
         requests.post = post
 
         # The fake stdout will be written here
-        out: List[str] = []
-        err_code: List[int] = []
+        out: list[str] = []
+        err_code: list[int] = []
 
         with patch("synapse._scripts.register_new_matrix_user.requests", requests):
             request_registration(
@@ -85,7 +84,7 @@ class RegisterTestCase(TestCase):
         If the script fails to fetch a nonce, it throws an error and quits.
         """
 
-        def get(url: str, verify: Optional[bool] = None) -> Mock:
+        def get(url: str, verify: bool | None = None) -> Mock:
             r = Mock()
             r.status_code = 404
             r.reason = "Not Found"
@@ -96,8 +95,8 @@ class RegisterTestCase(TestCase):
         requests.get = get
 
         # The fake stdout will be written here
-        out: List[str] = []
-        err_code: List[int] = []
+        out: list[str] = []
+        err_code: list[int] = []
 
         with patch("synapse._scripts.register_new_matrix_user.requests", requests):
             request_registration(
@@ -123,14 +122,14 @@ class RegisterTestCase(TestCase):
         report an error and quit.
         """
 
-        def get(url: str, verify: Optional[bool] = None) -> Mock:
+        def get(url: str, verify: bool | None = None) -> Mock:
             r = Mock()
             r.status_code = 200
             r.json = lambda: {"nonce": "a"}
             return r
 
         def post(
-            url: str, json: Optional[JsonDict] = None, verify: Optional[bool] = None
+            url: str, json: JsonDict | None = None, verify: bool | None = None
         ) -> Mock:
             # Make sure we are sent the correct info
             assert json is not None
@@ -151,8 +150,8 @@ class RegisterTestCase(TestCase):
         requests.post = post
 
         # The fake stdout will be written here
-        out: List[str] = []
-        err_code: List[int] = []
+        out: list[str] = []
+        err_code: list[int] = []
 
         with patch("synapse._scripts.register_new_matrix_user.requests", requests):
             request_registration(

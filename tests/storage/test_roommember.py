@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import List, Optional, Tuple, cast
+from typing import Any, cast
 
 from twisted.internet.testing import MemoryReactor
 
@@ -133,7 +133,7 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         room = self.helper.create_room_as(self.u_alice, tok=self.t_alice)
 
         res = cast(
-            List[Tuple[Optional[str], str]],
+            list[tuple[str | None, str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     "room_memberships",
@@ -165,7 +165,7 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         )
 
         res2 = cast(
-            List[Tuple[Optional[str], str]],
+            list[tuple[str | None, str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     "room_memberships",
@@ -238,7 +238,7 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         creator = "@user:other"
         room_id = "!foo:other"
         room_version = RoomVersions.V10
-        shared_kwargs = {
+        shared_kwargs: dict[str, Any] = {
             "room_id": room_id,
             "room_version": room_version.identifier,
         }
@@ -408,9 +408,9 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
     def _assert_member_summary(
         self,
         actual_member_summary: MemberSummary,
-        expected_member_list: List[str],
+        expected_member_list: list[str],
         *,
-        expected_member_count: Optional[int] = None,
+        expected_member_count: int | None = None,
     ) -> None:
         """
         Assert that the `MemberSummary` object has the expected members.

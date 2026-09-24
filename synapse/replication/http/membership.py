@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -63,7 +63,7 @@ class ReplicationRemoteJoinRestServlet(ReplicationEndpoint):
         requester: Requester,
         room_id: str,
         user_id: str,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         content: JsonDict,
     ) -> JsonDict:
         """
@@ -85,11 +85,11 @@ class ReplicationRemoteJoinRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: SynapseRequest, content: JsonDict, room_id: str, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         remote_room_hosts = content["remote_room_hosts"]
         event_content = content["content"]
 
-        requester = Requester.deserialize(self.store, content["requester"])
+        requester = Requester.deserialize(content["requester"])
         request.requester = requester
 
         logger.info("remote_join: %s into room: %s", user_id, room_id)
@@ -130,7 +130,7 @@ class ReplicationRemoteKnockRestServlet(ReplicationEndpoint):
         requester: Requester,
         room_id: str,
         user_id: str,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         content: JsonDict,
     ) -> JsonDict:
         """
@@ -149,11 +149,11 @@ class ReplicationRemoteKnockRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: SynapseRequest, content: JsonDict, room_id: str, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         remote_room_hosts = content["remote_room_hosts"]
         event_content = content["content"]
 
-        requester = Requester.deserialize(self.store, content["requester"])
+        requester = Requester.deserialize(content["requester"])
         request.requester = requester
 
         logger.debug("remote_knock: %s on room: %s", user_id, room_id)
@@ -192,7 +192,7 @@ class ReplicationRemoteRejectInviteRestServlet(ReplicationEndpoint):
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
         invite_event_id: str,
-        txn_id: Optional[str],
+        txn_id: str | None,
         requester: Requester,
         content: JsonDict,
     ) -> JsonDict:
@@ -215,11 +215,11 @@ class ReplicationRemoteRejectInviteRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: SynapseRequest, content: JsonDict, invite_event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         txn_id = content["txn_id"]
         event_content = content["content"]
 
-        requester = Requester.deserialize(self.store, content["requester"])
+        requester = Requester.deserialize(content["requester"])
         request.requester = requester
 
         # hopefully we're now on the master, so this won't recurse!
@@ -260,7 +260,7 @@ class ReplicationRemoteRescindKnockRestServlet(ReplicationEndpoint):
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
         knock_event_id: str,
-        txn_id: Optional[str],
+        txn_id: str | None,
         requester: Requester,
         content: JsonDict,
     ) -> JsonDict:
@@ -279,11 +279,11 @@ class ReplicationRemoteRescindKnockRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: SynapseRequest, content: JsonDict, knock_event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         txn_id = content["txn_id"]
         event_content = content["content"]
 
-        requester = Requester.deserialize(self.store, content["requester"])
+        requester = Requester.deserialize(content["requester"])
         request.requester = requester
 
         # hopefully we're now on the master, so this won't recurse!
@@ -343,7 +343,7 @@ class ReplicationUserJoinedLeftRoomRestServlet(ReplicationEndpoint):
         room_id: str,
         user_id: str,
         change: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         logger.info("user membership change: %s in %s", user_id, room_id)
 
         user = UserID.from_string(user_id)

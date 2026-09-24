@@ -22,7 +22,7 @@
 """This module contains REST servlets to do with presence: /presence/<paths>"""
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import AuthError, Codes, LimitExceededError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 class PresenceStatusRestServlet(RestServlet):
-    PATTERNS = client_patterns("/presence/(?P<user_id>[^/]*)/status", v1=True)
+    PATTERNS = client_patterns("/presence/(?P<user_id>[^/]*)/status$", v1=True)
     CATEGORY = "Presence requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -60,7 +60,7 @@ class PresenceStatusRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user = UserID.from_string(user_id)
 
@@ -84,7 +84,7 @@ class PresenceStatusRestServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user = UserID.from_string(user_id)
 

@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Mapping, cast
 
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.database import (
@@ -94,7 +94,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
                 WHERE (users.appservice_id IS NULL OR users.appservice_id = '');
             """
             txn.execute(sql)
-            (count,) = cast(Tuple[int], txn.fetchone())
+            (count,) = cast(tuple[int], txn.fetchone())
             return count
 
         return await self.db_pool.runInteraction("count_users", _count_users)
@@ -112,7 +112,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
 
         """
 
-        def _count_users_by_service(txn: LoggingTransaction) -> Dict[str, int]:
+        def _count_users_by_service(txn: LoggingTransaction) -> dict[str, int]:
             sql = """
                 SELECT COALESCE(appservice_id, 'native'), COUNT(*)
                 FROM monthly_active_users
@@ -121,7 +121,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
             """
 
             txn.execute(sql)
-            result = cast(List[Tuple[str, int]], txn.fetchall())
+            result = cast(list[tuple[str, int]], txn.fetchall())
             return dict(result)
 
         return await self.db_pool.runInteraction(
@@ -129,8 +129,8 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
         )
 
     async def get_monthly_active_users_by_service(
-        self, start_timestamp: Optional[int] = None, end_timestamp: Optional[int] = None
-    ) -> List[Tuple[str, str]]:
+        self, start_timestamp: int | None = None, end_timestamp: int | None = None
+    ) -> list[tuple[str, str]]:
         """Generates list of monthly active users and their services.
         Please see "get_monthly_active_count_by_service" docstring for more details
         about services.
@@ -160,7 +160,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
             where_clause = ""
             query_params = []
 
-        def _list_users(txn: LoggingTransaction) -> List[Tuple[str, str]]:
+        def _list_users(txn: LoggingTransaction) -> list[tuple[str, str]]:
             sql = f"""
                     SELECT COALESCE(appservice_id, 'native'), user_id
                     FROM monthly_active_users
@@ -169,11 +169,11 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
                 """
 
             txn.execute(sql, query_params)
-            return cast(List[Tuple[str, str]], txn.fetchall())
+            return cast(list[tuple[str, str]], txn.fetchall())
 
         return await self.db_pool.runInteraction("list_users", _list_users)
 
-    async def get_registered_reserved_users(self) -> List[str]:
+    async def get_registered_reserved_users(self) -> list[str]:
         """Of the reserved threepids defined in config, retrieve those that are associated
         with registered users
 
@@ -194,7 +194,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
         return users
 
     @cached(num_args=1)
-    async def user_last_seen_monthly_active(self, user_id: str) -> Optional[int]:
+    async def user_last_seen_monthly_active(self, user_id: str) -> int | None:
         """
         Checks if a given user is part of the monthly active user group
 
@@ -219,7 +219,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
         entries exist.
         """
 
-        def _reap_users(txn: LoggingTransaction, reserved_users: List[str]) -> None:
+        def _reap_users(txn: LoggingTransaction, reserved_users: list[str]) -> None:
             """
             Args:
                 reserved_users: reserved users to preserve
@@ -294,7 +294,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
         )
 
     def _initialise_reserved_users(
-        self, txn: LoggingTransaction, threepids: List[dict]
+        self, txn: LoggingTransaction, threepids: list[dict]
     ) -> None:
         """Ensures that reserved threepids are accounted for in the MAU table, should
         be called on start up.

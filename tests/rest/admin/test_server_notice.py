@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Sequence
+from typing import Sequence
 
 from twisted.internet.testing import MemoryReactor
 
@@ -729,7 +729,7 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
 
         return invited_rooms
 
-    def _sync_and_get_messages(self, room_id: str, token: str) -> List[JsonDict]:
+    def _sync_and_get_messages(self, room_id: str, token: str) -> list[JsonDict]:
         """
         Do a sync and get messages of a room.
 

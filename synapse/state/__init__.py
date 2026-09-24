@@ -26,24 +26,18 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    DefaultDict,
-    Dict,
-    FrozenSet,
-    List,
     Mapping,
     Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 import attr
-from immutabledict import immutabledict
 from prometheus_client import Counter, Histogram
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, StateResolutionVersions
 from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.snapshot import (
     EventContext,
     UnpersistedEventContext,
@@ -58,8 +52,10 @@ from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import StateMap, StrCollection
 from synapse.types.state import StateFilter
+from synapse.util import MutableOverlayMapping
 from synapse.util.async_helpers import Linearizer
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure, measure_func
 from synapse.util.stringutils import shortstr
 
@@ -102,10 +98,10 @@ class _StateCacheEntry:
 
     def __init__(
         self,
-        state: Optional[StateMap[str]],
-        state_group: Optional[int],
-        prev_group: Optional[int] = None,
-        delta_ids: Optional[StateMap[str]] = None,
+        state: StateMap[str] | None,
+        state_group: int | None,
+        prev_group: int | None = None,
+        delta_ids: StateMap[str] | None = None,
     ):
         if state is None and state_group is None and prev_group is None:
             raise Exception("One of state, state_group or prev_group must be not None")
@@ -117,18 +113,13 @@ class _StateCacheEntry:
         #
         # This can be None if we have a `state_group` (as then we can fetch the
         # state from the DB.)
-        self._state: Optional[StateMap[str]] = (
-            immutabledict(state) if state is not None else None
-        )
-
+        self._state = state
         # the ID of a state group if one and only one is involved.
         # otherwise, None otherwise?
         self.state_group = state_group
 
         self.prev_group = prev_group
-        self.delta_ids: Optional[StateMap[str]] = (
-            immutabledict(delta_ids) if delta_ids is not None else None
-        )
+        self.delta_ids = delta_ids
 
     async def get_state(
         self,
@@ -178,12 +169,27 @@ class _StateCacheEntry:
         length = 0
 
         if self._state:
-            length += len(self._state)
+            length += _state_map_size(self._state)
 
         if self.delta_ids:
-            length += len(self.delta_ids)
+            length += _state_map_size(self.delta_ids)
 
         return length or 1  # Make sure its not 0.
+
+
+def _state_map_size(state_map: Mapping[Any, Any]) -> int:
+    """Estimate a proxy for the memory a state map holds, for sizing caches.
+
+    Since state maps are often combinations of `ChainMap` and
+    `MutableOverlayMapping`, we look at the total number of entries across all
+    layers rather than just the number of distinct keys. This is both faster and
+    a more accurate proxy for memory usage.
+    """
+    if isinstance(state_map, ChainMap):
+        return sum(_state_map_size(layer) for layer in state_map.maps)
+    if isinstance(state_map, MutableOverlayMapping):
+        return state_map.total_entries()
+    return len(state_map)
 
 
 class StateHandler:
@@ -212,7 +218,7 @@ class StateHandler:
         self,
         room_id: str,
         event_ids: StrCollection,
-        state_filter: Optional[StateFilter] = None,
+        state_filter: StateFilter | None = None,
         await_full_state: bool = True,
     ) -> StateMap[str]:
         """Fetch the state after each of the given event IDs. Resolve them and return.
@@ -244,34 +250,9 @@ class StateHandler:
         )
         return await ret.get_state(self._state_storage_controller, state_filter)
 
-    async def get_current_user_ids_in_room(
-        self, room_id: str, latest_event_ids: StrCollection
-    ) -> Set[str]:
-        """
-        Get the users IDs who are currently in a room.
-
-        Note: This is much slower than using the equivalent method
-        `DataStore.get_users_in_room` or `DataStore.get_users_in_room_with_profiles`,
-        so this should only be used when wanting the users at a particular point
-        in the room.
-
-        Args:
-            room_id: The ID of the room.
-            latest_event_ids: Precomputed list of latest event IDs. Will be computed if None.
-        Returns:
-            Set of user IDs in the room.
-        """
-
-        assert latest_event_ids is not None
-
-        logger.debug("calling resolve_state_groups from get_current_user_ids_in_room")
-        entry = await self.resolve_state_groups_for_events(room_id, latest_event_ids)
-        state = await entry.get_state(self._state_storage_controller, StateFilter.all())
-        return await self.store.get_joined_user_ids_from_state(room_id, state)
-
     async def get_hosts_in_room_at_events(
         self, room_id: str, event_ids: StrCollection
-    ) -> FrozenSet[str]:
+    ) -> frozenset[str]:
         """Get the hosts that were in a room at the given event ids
 
         Args:
@@ -289,9 +270,9 @@ class StateHandler:
     async def calculate_context_info(
         self,
         event: EventBase,
-        state_ids_before_event: Optional[StateMap[str]] = None,
-        partial_state: Optional[bool] = None,
-        state_group_before_event: Optional[int] = None,
+        state_ids_before_event: StateMap[str] | None = None,
+        partial_state: bool | None = None,
+        state_group_before_event: int | None = None,
     ) -> UnpersistedEventContextBase:
         """
         Calulates the contents of an unpersisted event context, other than the current
@@ -308,7 +289,8 @@ class StateHandler:
             membership events.
             `False` if `state_ids_before_event` is the full state.
             `None` when `state_ids_before_event` is not provided. In this case, the
-            flag will be calculated based on `event`'s prev events.
+            flag will be calculated based on `event`'s `prev_events` or `prev_state_events`
+            for state DAG rooms.
         state_group_before_event:
             the current state group at the time of event, if known
         Returns:
@@ -342,7 +324,11 @@ class StateHandler:
             # (This is slightly racy - the prev-events might get fixed up before we use
             # their states - but I don't think that really matters; it just means we
             # might redundantly recalculate the state for this event later.)
-            prev_event_ids = event.prev_event_ids()
+            prev_event_ids = frozenset(
+                event.prev_state_events
+                if supports_msc4242_state_dag(event)
+                else event.prev_event_ids()
+            )
             incomplete_prev_events = await self.store.get_partial_state_events(
                 prev_event_ids
             )
@@ -360,7 +346,7 @@ class StateHandler:
 
             entry = await self.resolve_state_groups_for_events(
                 event.room_id,
-                event.prev_event_ids(),
+                prev_event_ids,
                 await_full_state=False,
             )
 
@@ -462,8 +448,8 @@ class StateHandler:
     async def compute_event_context(
         self,
         event: EventBase,
-        state_ids_before_event: Optional[StateMap[str]] = None,
-        partial_state: Optional[bool] = None,
+        state_ids_before_event: StateMap[str] | None = None,
+        partial_state: bool | None = None,
     ) -> EventContext:
         """Build an EventContext structure for a non-outlier event.
 
@@ -647,7 +633,7 @@ class StateResolutionHandler:
         )
 
         # dict of set of event_ids -> _StateCacheEntry.
-        self._state_cache: ExpiringCache[FrozenSet[int], _StateCacheEntry] = (
+        self._state_cache: ExpiringCache[frozenset[int], _StateCacheEntry] = (
             ExpiringCache(
                 cache_name="state_cache",
                 server_name=self.server_name,
@@ -660,23 +646,48 @@ class StateResolutionHandler:
             )
         )
 
+        # The result of resolving a conflicted set of state, keyed on a digest
+        # of the inputs to `_resolve_conflicted_set`. See
+        # `v2._conflict_cache_key`.
+        #
+        # This is different to `_state_cache` above, which caches the resolved
+        # state based on the state groups. This cache aims to address the case
+        # where resolving across different state groups often produces the same
+        # conflicted set, which we can then cache.
+        #
+        # We bound the size of the cache based on the size calculated by
+        # `_state_map_size`, which calculates a proxy for a rough estimate of
+        # the memory footprint of a state map.
+        self._conflict_resolution_cache: ExpiringCache[bytes, StateMap[str]] = (
+            ExpiringCache(
+                cache_name="state_conflict_resolution_cache",
+                server_name=self.server_name,
+                hs=hs,
+                clock=self.clock,
+                max_len=100000,
+                expiry_ms=EVICTION_TIMEOUT_SECONDS * 1000,
+                size_callback=_state_map_size,
+                reset_expiry_on_get=True,
+            )
+        )
+
         #
         # stuff for tracking time spent on state-res by room
         #
 
         # tracks the amount of work done on state res per room
-        self._state_res_metrics: DefaultDict[str, _StateResMetrics] = defaultdict(
+        self._state_res_metrics: defaultdict[str, _StateResMetrics] = defaultdict(
             _StateResMetrics
         )
 
-        self.clock.looping_call(self._report_metrics, 120 * 1000)
+        self.clock.looping_call(self._report_metrics, Duration(minutes=2))
 
     async def resolve_state_groups(
         self,
         room_id: str,
         room_version: str,
         state_groups_ids: Mapping[int, StateMap[str]],
-        event_map: Optional[Dict[str, EventBase]],
+        event_map: dict[str, EventBase] | None,
         state_res_store: "StateResolutionStore",
     ) -> _StateCacheEntry:
         """Resolves conflicts between a set of state groups
@@ -776,7 +787,7 @@ class StateResolutionHandler:
         room_id: str,
         room_version: str,
         state_sets: Sequence[StateMap[str]],
-        event_map: Optional[Dict[str, EventBase]],
+        event_map: dict[str, EventBase] | None,
         state_res_store: "StateResolutionStore",
     ) -> StateMap[str]:
         """
@@ -822,6 +833,7 @@ class StateResolutionHandler:
                         state_sets,
                         event_map,
                         state_res_store,
+                        conflict_cache=self._conflict_resolution_cache,
                     )
         finally:
             self._record_state_res_metrics(room_id, m.get_resource_usage())
@@ -884,7 +896,7 @@ class StateResolutionHandler:
         items = self._state_res_metrics.items()
 
         # log the N biggest rooms
-        biggest: List[Tuple[str, _StateResMetrics]] = heapq.nlargest(
+        biggest: list[tuple[str, _StateResMetrics]] = heapq.nlargest(
             n_to_log, items, key=lambda i: extract_key(i[1])
         )
         metrics_logger.debug(
@@ -940,7 +952,7 @@ def _make_state_cache_entry(
 
     # failing that, look for the closest match.
     prev_group = None
-    delta_ids: Optional[StateMap[str]] = None
+    delta_ids: StateMap[str] | None = None
 
     for old_group, old_state in state_groups_ids.items():
         if old_state.keys() - new_state.keys():
@@ -975,7 +987,7 @@ class StateResolutionStore:
 
     def get_events(
         self, event_ids: StrCollection, allow_rejected: bool = False
-    ) -> Awaitable[Dict[str, EventBase]]:
+    ) -> Awaitable[dict[str, EventBase]]:
         """Get events from the database
 
         Args:
@@ -996,9 +1008,9 @@ class StateResolutionStore:
     def get_auth_chain_difference(
         self,
         room_id: str,
-        state_sets: List[Set[str]],
-        conflicted_state: Optional[Set[str]],
-        additional_backwards_reachable_conflicted_events: Optional[Set[str]],
+        state_sets: list[set[str]],
+        conflicted_state: set[str] | None,
+        additional_backwards_reachable_conflicted_events: set[str] | None,
     ) -> Awaitable[StateDifference]:
         """ "Given sets of state events figure out the auth chain difference (as
         per state res v2 algorithm).

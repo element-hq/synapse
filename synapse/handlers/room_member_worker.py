@@ -20,9 +20,10 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.handlers.room_member import NoKnownServersError, RoomMemberHandler
+from synapse.logging.opentracing import trace
 from synapse.replication.http.membership import (
     ReplicationRemoteJoinRestServlet as ReplRemoteJoin,
     ReplicationRemoteKnockRestServlet as ReplRemoteKnock,
@@ -48,14 +49,15 @@ class RoomMemberWorkerHandler(RoomMemberHandler):
         self._remote_rescind_client = ReplRescindKnock.make_client(hs)
         self._notify_change_client = ReplJoinedLeft.make_client(hs)
 
+    @trace
     async def _remote_join(
         self,
         requester: Requester,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         room_id: str,
         user: UserID,
         content: dict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Implements RoomMemberHandler._remote_join"""
         if len(remote_room_hosts) == 0:
             raise NoKnownServersError()
@@ -70,13 +72,14 @@ class RoomMemberWorkerHandler(RoomMemberHandler):
 
         return ret["event_id"], ret["stream_id"]
 
+    @trace
     async def remote_reject_invite(
         self,
         invite_event_id: str,
-        txn_id: Optional[str],
+        txn_id: str | None,
         requester: Requester,
         content: dict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """
         Rejects an out-of-band invite received from a remote user
 
@@ -90,13 +93,14 @@ class RoomMemberWorkerHandler(RoomMemberHandler):
         )
         return ret["event_id"], ret["stream_id"]
 
+    @trace
     async def remote_rescind_knock(
         self,
         knock_event_id: str,
-        txn_id: Optional[str],
+        txn_id: str | None,
         requester: Requester,
         content: JsonDict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """
         Rescinds a local knock made on a remote room
 
@@ -118,14 +122,15 @@ class RoomMemberWorkerHandler(RoomMemberHandler):
         )
         return ret["event_id"], ret["stream_id"]
 
+    @trace
     async def remote_knock(
         self,
         requester: Requester,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         room_id: str,
         user: UserID,
         content: dict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Sends a knock to a room.
 
         Implements RoomMemberHandler.remote_knock

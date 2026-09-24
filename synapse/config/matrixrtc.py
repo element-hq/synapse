@@ -15,11 +15,11 @@
 #
 #
 
-from typing import Any, Optional
+from typing import Any
 
-from pydantic import ValidationError
+from pydantic import Field, StrictStr, ValidationError, field_validator, model_validator
+from typing_extensions import Self
 
-from synapse._pydantic_compat import Field, StrictStr, validator
 from synapse.types import JsonDict
 from synapse.util.pydantic_models import ParseModel
 
@@ -29,21 +29,34 @@ from ._base import Config, ConfigError
 class TransportConfigModel(ParseModel):
     type: StrictStr
 
-    livekit_service_url: Optional[StrictStr] = Field(default=None)
-    """An optional livekit service URL. Only required if type is "livekit"."""
+    url: StrictStr | None = Field(default=None)
+    """An optional WebSocket URL pointing to the LiveKit SFU. If type is "livekit", either this or livekit_service_url is required."""
 
-    @validator("livekit_service_url", always=True)
-    def validate_livekit_service_url(cls, v: Any, values: dict) -> Any:
-        if values.get("type") == "livekit" and not v:
+    livekit_service_url: StrictStr | None = Field(default=None)
+    """Deprecated. An optional HTTP URL pointing to the LiveKit authorization service. If type is "livekit", either this or url is required."""
+
+    @model_validator(mode="after")
+    def validate_livekit_transport(self) -> Self:
+        if self.type == "livekit" and not self.url and not self.livekit_service_url:
             raise ValueError(
-                "You must set a `livekit_service_url` when using the 'livekit' transport."
+                "You must set either `url` or `livekit_service_url` when using the 'livekit' transport."
             )
-
-        return v
+        return self
 
 
 class MatrixRtcConfigModel(ParseModel):
-    transports: list = []
+    transports: list[dict[str, Any]] = []
+
+    @field_validator("transports")
+    @classmethod
+    def validate_transports(
+        cls, transports: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Validate each transport by attempting to construct a `TransportConfigModel`
+        from it, raising a `ValidationError` if construction fails."""
+        for transport in transports:
+            TransportConfigModel(**transport)
+        return transports
 
 
 class MatrixRtcConfig(Config):

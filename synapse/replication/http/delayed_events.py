@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -52,11 +52,47 @@ class ReplicationAddedDelayedEventRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
-    ) -> Tuple[int, Dict[str, Optional[JsonMapping]]]:
+    ) -> tuple[int, dict[str, JsonMapping | None]]:
         self.handler.on_added(int(content["next_send_ts"]))
+
+        return 200, {}
+
+
+class ReplicationCancelDelayedEventsForUserRestServlet(ReplicationEndpoint):
+    """Cancel all of a local user's delayed events, on behalf of another worker.
+
+    Request format:
+
+        POST /_synapse/replication/cancel_delayed_events_for_user/:user_localpart
+
+        {}
+    """
+
+    NAME = "cancel_delayed_events_for_user"
+    PATH_ARGS = ("user_localpart",)
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self.handler = hs.get_delayed_events_handler()
+
+    @staticmethod
+    async def _serialize_payload(user_localpart: str) -> JsonDict:  # type: ignore[override]
+        """
+        Args:
+            user_localpart: The localpart of the local user whose delayed events to cancel.
+        """
+        return {}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, user_localpart: str
+    ) -> tuple[int, JsonDict]:
+        await self.handler.cancel_all_for_user(user_localpart)
 
         return 200, {}
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationAddedDelayedEventRestServlet(hs).register(http_server)
+    ReplicationCancelDelayedEventsForUserRestServlet(hs).register(http_server)

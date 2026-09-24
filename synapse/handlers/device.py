@@ -25,15 +25,12 @@ from threading import Lock
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Set,
-    Tuple,
     cast,
 )
+
+from prometheus_client import Gauge
 
 from synapse.api import errors
 from synapse.api.constants import EduTypes, EventTypes, Membership
@@ -46,6 +43,7 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.logging.opentracing import log_kv, set_tag, trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
@@ -63,6 +61,7 @@ from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    MultiWriterStreamToken,
     ScheduledTask,
     StrCollection,
     StreamKeyType,
@@ -71,11 +70,13 @@ from synapse.types import (
     UserID,
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
+    is_compliant_user_id_localpart,
 )
 from synapse.util import stringutils
 from synapse.util.async_helpers import Linearizer
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.cancellation import cancellable
+from synapse.util.duration import Duration
 from synapse.util.metrics import measure_func
 from synapse.util.retryutils import (
     NotRetryingDestination,
@@ -90,10 +91,25 @@ logger = logging.getLogger(__name__)
 
 DELETE_DEVICE_MSGS_TASK_NAME = "delete_device_messages"
 MAX_DEVICE_DISPLAY_NAME_LEN = 100
-DELETE_STALE_DEVICES_INTERVAL_MS = 24 * 60 * 60 * 1000
+DELETE_STALE_DEVICES_INTERVAL = Duration(days=1)
+
+device_list_conversion_lag_gauge = Gauge(
+    "synapse_device_lists_changes_conversion_lag_seconds",
+    "Age of the oldest device list change that has yet to be converted to outbound federation pokes",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+device_list_conversion_stream_lag_gauge = Gauge(
+    "synapse_device_lists_changes_conversion_stream_lag",
+    "Number of stream IDs between the current device lists stream position and the position converted to outbound federation pokes",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+# How often to update the device list conversion lag gauges.
+DEVICE_LIST_CONVERSION_LAG_GAUGE_METRIC_UPDATE_INTERVAL = Duration(seconds=30)
 
 
-def _check_device_name_length(name: Optional[str]) -> None:
+def _check_device_name_length(name: str | None) -> None:
     """
     Checks whether a device name is longer than the maximum allowed length.
 
@@ -133,7 +149,6 @@ class DeviceHandler:
         self._auth_handler = hs.get_auth_handler()
         self._account_data_handler = hs.get_account_data_handler()
         self._event_sources = hs.get_event_sources()
-        self._msc3852_enabled = hs.config.experimental.msc3852_enabled
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
         )
@@ -191,7 +206,7 @@ class DeviceHandler:
         ):
             self.clock.looping_call(
                 self.hs.run_as_background_process,
-                DELETE_STALE_DEVICES_INTERVAL_MS,
+                DELETE_STALE_DEVICES_INTERVAL,
                 desc="delete_stale_devices",
                 func=self._delete_stale_devices,
             )
@@ -212,10 +227,10 @@ class DeviceHandler:
     async def check_device_registered(
         self,
         user_id: str,
-        device_id: Optional[str],
-        initial_device_display_name: Optional[str] = None,
-        auth_provider_id: Optional[str] = None,
-        auth_provider_session_id: Optional[str] = None,
+        device_id: str | None,
+        initial_device_display_name: str | None = None,
+        auth_provider_id: str | None = None,
+        auth_provider_session_id: str | None = None,
     ) -> str:
         """
         If the given device has not been registered, register it with the
@@ -273,7 +288,7 @@ class DeviceHandler:
 
     @trace
     async def delete_all_devices_for_user(
-        self, user_id: str, except_device_id: Optional[str] = None
+        self, user_id: str, except_device_id: str | None = None
     ) -> None:
         """Delete all of the user's devices
 
@@ -294,6 +309,8 @@ class DeviceHandler:
             user_id: The user to delete devices from.
             device_ids: The list of device IDs to delete
         """
+        logger.info("Deleting devices %r for %r", list(device_ids), user_id)
+
         to_device_stream_id = self._event_sources.get_current_token().to_device_key
 
         try:
@@ -348,7 +365,7 @@ class DeviceHandler:
         await self.notify_device_update(user_id, device_ids)
 
     async def upsert_device(
-        self, user_id: str, device_id: str, display_name: Optional[str] = None
+        self, user_id: str, device_id: str, display_name: str | None = None
     ) -> bool:
         """Create or update a device
 
@@ -407,7 +424,7 @@ class DeviceHandler:
                 raise
 
     @trace
-    async def get_devices_by_user(self, user_id: str) -> List[JsonDict]:
+    async def get_devices_by_user(self, user_id: str) -> list[JsonDict]:
         """
         Retrieve the given user's devices
 
@@ -429,9 +446,7 @@ class DeviceHandler:
         log_kv(device_map)
         return devices
 
-    async def get_dehydrated_device(
-        self, user_id: str
-    ) -> Optional[Tuple[str, JsonDict]]:
+    async def get_dehydrated_device(self, user_id: str) -> tuple[str, JsonDict] | None:
         """Retrieve the information for a dehydrated device.
 
         Args:
@@ -445,10 +460,10 @@ class DeviceHandler:
     async def store_dehydrated_device(
         self,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         device_data: JsonDict,
-        initial_device_display_name: Optional[str] = None,
-        keys_for_device: Optional[JsonDict] = None,
+        initial_device_display_name: str | None,
+        keys_for_device: JsonDict,
     ) -> str:
         """Store a dehydrated device for a user, optionally storing the keys associated with
         it as well.  If the user had a previous dehydrated device, it is removed.
@@ -478,46 +493,6 @@ class DeviceHandler:
             await self.delete_devices(user_id, [old_device_id])
 
         return device_id
-
-    async def rehydrate_device(
-        self, user_id: str, access_token: str, device_id: str
-    ) -> dict:
-        """Process a rehydration request from the user.
-
-        Args:
-            user_id: the user who is rehydrating the device
-            access_token: the access token used for the request
-            device_id: the ID of the device that will be rehydrated
-        Returns:
-            a dict containing {"success": True}
-        """
-        success = await self.store.remove_dehydrated_device(user_id, device_id)
-
-        if not success:
-            raise errors.NotFoundError()
-
-        # If the dehydrated device was successfully deleted (the device ID
-        # matched the stored dehydrated device), then modify the access
-        # token and refresh token to use the dehydrated device's ID and
-        # copy the old device display name to the dehydrated device,
-        # and destroy the old device ID
-        old_device_id = await self.store.set_device_for_access_token(
-            access_token, device_id
-        )
-        await self.store.set_device_for_refresh_token(user_id, old_device_id, device_id)
-        old_device = await self.store.get_device(user_id, old_device_id)
-        if old_device is None:
-            raise errors.NotFoundError()
-        await self.store.update_device(user_id, device_id, old_device["display_name"])
-        # can't call self.delete_device because that will clobber the
-        # access token so call the storage layer directly
-        await self.store.delete_devices(user_id, [old_device_id])
-
-        # tell everyone that the old device is gone and that the dehydrated
-        # device has a new display name
-        await self.notify_device_update(user_id, [old_device_id, device_id])
-
-        return {"success": True}
 
     async def delete_dehydrated_device(self, user_id: str, device_id: str) -> None:
         """
@@ -567,8 +542,8 @@ class DeviceHandler:
         user_id: str,
         room_ids: StrCollection,
         from_token: StreamToken,
-        now_token: Optional[StreamToken] = None,
-    ) -> Set[str]:
+        now_token: StreamToken | None = None,
+    ) -> set[str]:
         """Get the set of users whose devices have changed who share a room with
         the given user.
         """
@@ -644,8 +619,8 @@ class DeviceHandler:
         # Check for newly joined or left rooms. We need to make sure that we add
         # to newly joined in the case membership goes from join -> leave -> join
         # again.
-        newly_joined_rooms: Set[str] = set()
-        newly_left_rooms: Set[str] = set()
+        newly_joined_rooms: set[str] = set()
+        newly_left_rooms: set[str] = set()
         for change in membership_changes:
             # We check for changes in "joinedness", i.e. if the membership has
             # changed to or from JOIN.
@@ -661,10 +636,10 @@ class DeviceHandler:
         # the user is currently in.
 
         # List of membership changes per room
-        room_to_deltas: Dict[str, List[StateDelta]] = {}
+        room_to_deltas: dict[str, list[StateDelta]] = {}
         # The set of event IDs of membership events (so we can fetch their
         # associated membership).
-        memberships_to_fetch: Set[str] = set()
+        memberships_to_fetch: set[str] = set()
 
         # TODO: Only pull out membership events?
         state_changes = await self.store.get_current_state_deltas_for_rooms(
@@ -681,7 +656,7 @@ class DeviceHandler:
                 memberships_to_fetch.add(delta.prev_event_id)
 
         # Fetch all the memberships for the membership events
-        event_id_to_memberships: Mapping[str, Optional[EventIdMembership]] = {}
+        event_id_to_memberships: Mapping[str, EventIdMembership | None] = {}
         if memberships_to_fetch:
             event_id_to_memberships = await self.store.get_membership_from_event_ids(
                 memberships_to_fetch
@@ -695,8 +670,8 @@ class DeviceHandler:
 
         # We now want to find any user that have newly joined/invited/knocked,
         # or newly left, similarly to above.
-        newly_joined_or_invited_or_knocked_users: Set[str] = set()
-        newly_left_users: Set[str] = set()
+        newly_joined_or_invited_or_knocked_users: set[str] = set()
+        newly_left_users: set[str] = set()
         for _, deltas in room_to_deltas.items():
             for delta in deltas:
                 # Get the prev/new memberships for the delta
@@ -838,7 +813,7 @@ class DeviceHandler:
         # Check if the application services have any results.
         if self._query_appservices_for_keys:
             # Query the appservice for all devices for this user.
-            query: Dict[str, Optional[List[str]]] = {user_id: None}
+            query: dict[str, list[str] | None] = {user_id: None}
 
             # Query the appservices for any keys.
             appservice_results = await self._appservice_handler.query_keys(query)
@@ -898,7 +873,7 @@ class DeviceHandler:
     async def notify_user_signature_update(
         self,
         from_user_id: str,
-        user_ids: List[str],
+        user_ids: list[str],
     ) -> None:
         """Notify a device writer that a user have made new signatures of other users.
 
@@ -922,12 +897,12 @@ class DeviceHandler:
         )
 
     DEVICE_MSGS_DELETE_BATCH_LIMIT = 1000
-    DEVICE_MSGS_DELETE_SLEEP_MS = 100
+    DEVICE_MSGS_DELETE_SLEEP = Duration(milliseconds=100)
 
     async def _delete_device_messages(
         self,
         task: ScheduledTask,
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         """Scheduler task to delete device messages in batch of `DEVICE_MSGS_DELETE_BATCH_LIMIT`."""
         assert task.params is not None
         user_id = task.params["user_id"]
@@ -948,9 +923,7 @@ class DeviceHandler:
             if from_stream_id is None:
                 return TaskStatus.COMPLETE, None, None
 
-            await self.clock.sleep(
-                DeviceWriterHandler.DEVICE_MSGS_DELETE_SLEEP_MS / 1000.0
-            )
+            await self.clock.sleep(DeviceWriterHandler.DEVICE_MSGS_DELETE_SLEEP)
 
 
 class DeviceWriterHandler(DeviceHandler):
@@ -1006,6 +979,13 @@ class DeviceWriterHandler(DeviceHandler):
                 self.device_list_updater.incoming_device_list_update,
             )
 
+            # Report how far behind we are at converting device list changes
+            # into outbound pokes.
+            self.clock.looping_call(
+                self._report_device_list_conversion_lag,
+                DEVICE_LIST_CONVERSION_LAG_GAUGE_METRIC_UPDATE_INTERVAL,
+            )
+
     @trace
     @measure_func("notify_device_update")
     async def notify_device_update(
@@ -1051,7 +1031,7 @@ class DeviceWriterHandler(DeviceHandler):
             await self.handle_new_device_update()
 
     async def notify_user_signature_update(
-        self, from_user_id: str, user_ids: List[str]
+        self, from_user_id: str, user_ids: list[str]
     ) -> None:
         """Notify a user that they have made new signatures of other users.
 
@@ -1078,6 +1058,35 @@ class DeviceWriterHandler(DeviceHandler):
 
         self._handle_new_device_update_async()
         return
+
+    @wrap_as_background_process("_report_device_list_conversion_lag")
+    async def _report_device_list_conversion_lag(self) -> None:
+        """Report how far behind we are at converting rows in
+        `device_lists_changes_in_room` to `device_lists_outbound_pokes`.
+        """
+        (
+            oldest_ts,
+            last_converted_pos,
+        ) = await self.store.get_device_list_conversion_lag()
+
+        if oldest_ts is None:
+            device_list_conversion_lag_ms = 0
+        else:
+            device_list_conversion_lag_ms = max(0, self.clock.time_msec() - oldest_ts)
+
+        device_list_conversion_lag_gauge.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(device_list_conversion_lag_ms / 1000.0)  # convert to seconds
+
+        # The stream ID lag is only an approximation of the conversion
+        # backlog: the converted position only advances when the conversion
+        # loop runs, and stream IDs in the gap may not have rows needing
+        # conversion at all.
+        current_pos = self.store.get_device_stream_token().stream
+
+        device_list_conversion_stream_lag_gauge.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(max(0, current_pos - last_converted_pos))
 
     @wrap_as_background_process("_handle_new_device_update_async")
     async def _handle_new_device_update_async(self) -> None:
@@ -1112,7 +1121,7 @@ class DeviceWriterHandler(DeviceHandler):
         # hosts we've already poked about for this update. This is so that we
         # don't poke the same remote server about the same update repeatedly.
         current_stream_id = None
-        hosts_already_sent_to: Set[str] = set()
+        hosts_already_sent_to: set[str] = set()
 
         try:
             stream_id, room_id = await self.store.get_device_change_last_converted_pos()
@@ -1240,7 +1249,16 @@ class DeviceWriterHandler(DeviceHandler):
         changes = await self.store.get_device_list_changes_in_room(
             room_id, device_lists_stream_id
         )
-        local_changes = {(u, d) for u, d in changes if self.hs.is_mine_id(u)}
+        if changes is not None:
+            local_changes = {(u, d) for u, d in changes if self.hs.is_mine_id(u)}
+        else:
+            # The `device_lists_stream_id` is too old, so we need to fall back
+            # to looking for changes for all local users.
+            local_users = await self.store.get_local_users_in_room(room_id)
+            local_changes = await self.store.get_device_changes_for_users(
+                MultiWriterStreamToken(stream=device_lists_stream_id), local_users
+            )
+
         if not local_changes:
             return
 
@@ -1311,7 +1329,7 @@ class DeviceWriterHandler(DeviceHandler):
 
 
 def _update_device_from_client_ips(
-    device: JsonDict, client_ips: Mapping[Tuple[str, str], DeviceLastConnectionInfo]
+    device: JsonDict, client_ips: Mapping[tuple[str, str], DeviceLastConnectionInfo]
 ) -> None:
     ip = client_ips.get((device["user_id"], device["device_id"]))
     device.update(
@@ -1338,8 +1356,8 @@ class DeviceListWorkerUpdater:
 
     async def multi_user_device_resync(
         self,
-        user_ids: List[str],
-    ) -> Dict[str, Optional[JsonMapping]]:
+        user_ids: list[str],
+    ) -> dict[str, JsonMapping | None]:
         """
         Like `user_device_resync` but operates on multiple users **from the same origin**
         at once.
@@ -1363,9 +1381,9 @@ class DeviceListWorkerUpdater:
     async def process_cross_signing_key_update(
         self,
         user_id: str,
-        master_key: Optional[JsonDict],
-        self_signing_key: Optional[JsonDict],
-    ) -> List[str]:
+        master_key: JsonDict | None,
+        self_signing_key: JsonDict | None,
+    ) -> list[str]:
         """Process the given new master and self-signing key for the given remote user.
 
         Args:
@@ -1455,14 +1473,14 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         )
 
         # user_id -> list of updates waiting to be handled.
-        self._pending_updates: Dict[
-            str, List[Tuple[str, str, Iterable[str], JsonDict]]
+        self._pending_updates: dict[
+            str, list[tuple[str, str, Iterable[str], JsonDict]]
         ] = {}
 
         # Recently seen stream ids. We don't bother keeping these in the DB,
         # but they're useful to have them about to reduce the number of spurious
         # resyncs.
-        self._seen_updates: ExpiringCache[str, Set[str]] = ExpiringCache(
+        self._seen_updates: ExpiringCache[str, set[str]] = ExpiringCache(
             cache_name="device_update_edu",
             server_name=self.server_name,
             hs=self.hs,
@@ -1476,7 +1494,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self._resync_retry_lock = Lock()
         self.clock.looping_call(
             self.hs.run_as_background_process,
-            30 * 1000,
+            Duration(seconds=30),
             func=self._maybe_retry_device_resync,
             desc="_maybe_retry_device_resync",
         )
@@ -1515,6 +1533,28 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                 {
                     "message": "Got a device list update edu from a user and "
                     "device which does not match the origin of the request.",
+                    "user_id": user_id,
+                    "device_id": device_id,
+                }
+            )
+            return
+
+        if not is_compliant_user_id_localpart(UserID.from_string(user_id).localpart):
+            # We SHOULD NOT forward non-compliant (grandfathered historical)
+            # user IDs to clients outside the context of an event, and the spec
+            # gives dropping their device list updates as the example. See
+            # https://spec.matrix.org/v1.14/appendices/#historical-user-ids
+            logger.warning(
+                "Dropping device list update edu for non-compliant user ID %r from %r",
+                user_id,
+                origin,
+            )
+
+            set_tag("error", True)
+            log_kv(
+                {
+                    "message": "Got a device list update edu from a "
+                    "non-compliant user ID, dropping it.",
                     "user_id": user_id,
                     "device_id": device_id,
                 }
@@ -1619,12 +1659,12 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                 )
 
     async def _need_to_do_resync(
-        self, user_id: str, updates: Iterable[Tuple[str, str, Iterable[str], JsonDict]]
+        self, user_id: str, updates: Iterable[tuple[str, str, Iterable[str], JsonDict]]
     ) -> bool:
         """Given a list of updates for a user figure out if we need to do a full
         resync, or whether we have enough data that we can just apply the delta.
         """
-        seen_updates: Set[str] = self._seen_updates.get(user_id, set())
+        seen_updates: set[str] = self._seen_updates.get(user_id, set())
 
         extremity = await self.store.get_device_list_last_stream_id_for_remote(user_id)
 
@@ -1702,8 +1742,8 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
             self._resync_retry_lock.release()
 
     async def multi_user_device_resync(
-        self, user_ids: List[str], mark_failed_as_stale: bool = True
-    ) -> Dict[str, Optional[JsonMapping]]:
+        self, user_ids: list[str], mark_failed_as_stale: bool = True
+    ) -> dict[str, JsonMapping | None]:
         """
         Like `user_device_resync` but operates on multiple users **from the same origin**
         at once.
@@ -1739,7 +1779,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
 
     async def _user_device_resync_returning_failed(
         self, user_id: str
-    ) -> Tuple[Optional[JsonMapping], bool]:
+    ) -> tuple[JsonMapping | None, bool]:
         """Fetches all devices for a user and updates the device cache with them.
 
         Args:

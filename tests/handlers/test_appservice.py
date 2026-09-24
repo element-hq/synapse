@@ -24,10 +24,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Iterable,
-    List,
-    Optional,
     TypeVar,
 )
 from unittest.mock import AsyncMock, Mock
@@ -39,7 +36,7 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.storage
-from synapse.api.constants import EduTypes, EventTypes
+from synapse.api.constants import EduTypes, EventTypes, ReceiptTypes
 from synapse.appservice import (
     ApplicationService,
     TransactionOneTimeKeysCount,
@@ -80,13 +77,14 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         self.reactor, self.clock = get_clock()
 
         hs = Mock()
+        hs.hostname = "test_server"
 
         def test_run_as_background_process(
             desc: "LiteralString",
-            func: Callable[..., Awaitable[Optional[R]]],
+            func: Callable[..., Awaitable[R | None]],
             *args: Any,
             **kwargs: Any,
-        ) -> "defer.Deferred[Optional[R]]":
+        ) -> "defer.Deferred[R | None]":
             # Ignore linter error as this is used only for testing purposes (i.e. outside of Synapse).
             return run_as_background_process(desc, "test_server", func, *args, **kwargs)  # type: ignore[untracked-background-process]
 
@@ -295,7 +293,7 @@ class AppServiceHandlerTestCase(unittest.TestCase):
 
         async def get_3pe_protocol(
             service: ApplicationService, protocol: str
-        ) -> Optional[JsonDict]:
+        ) -> JsonDict | None:
             if service == service_one:
                 return {
                     "x-protocol-data": 42,
@@ -387,7 +385,7 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         )
 
     def _mkservice(
-        self, is_interested_in_event: bool, protocols: Optional[Iterable] = None
+        self, is_interested_in_event: bool, protocols: Iterable | None = None
     ) -> Mock:
         """
         Create a new mock representing an ApplicationService.
@@ -450,7 +448,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         hs.get_application_service_handler().scheduler.txn_ctrl.send = self.send_mock  # type: ignore[method-assign]
 
         # Mock out application services, and allow defining our own in tests
-        self._services: List[ApplicationService] = []
+        self._services: list[ApplicationService] = []
         self.hs.get_datastores().main.get_app_services = Mock(  # type: ignore[method-assign]
             return_value=self._services
         )
@@ -571,8 +569,8 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
             # notify us because the interesting user is joined to the room where the
             # message was sent.
             self.assertEqual(service, interested_appservice)
-            self.assertEqual(events[0]["type"], "m.room.message")
-            self.assertEqual(events[0]["sender"], alice)
+            self.assertEqual(events[0].type, "m.room.message")
+            self.assertEqual(events[0].sender, alice)
         else:
             self.send_mock.assert_not_called()
 
@@ -631,8 +629,8 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         # Events sent from an interesting local user should also be picked up as
         # interesting to the appservice.
         self.assertEqual(service, interested_appservice)
-        self.assertEqual(events[0]["type"], "m.room.message")
-        self.assertEqual(events[0]["sender"], alice)
+        self.assertEqual(events[0].type, "m.room.message")
+        self.assertEqual(events[0].sender, alice)
 
     def test_sending_read_receipt_batches_to_application_services(self) -> None:
         """Tests that a large batch of read receipts are sent correctly to
@@ -705,6 +703,105 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         event_id = list(latest_read_receipt["content"].keys())[0]
         self.assertEqual(
             latest_read_receipt["content"][event_id]["m.read"], {self.local_user: {}}
+        )
+
+    def test_application_services_receive_private_read_receipts_of_namespaced_users_only(
+        self,
+    ) -> None:
+        """Tests that private read receipts are only sent to an application
+        service for users within the appservice's namespaces, while public read
+        receipts are sent regardless of the sending user.
+
+        See https://spec.matrix.org/v1.19/application-service-api/#pushing-ephemeral-data
+        """
+        # Register an application service that's interested in a certain user
+        # and room prefix
+        interested_appservice = self._register_application_service(
+            namespaces={
+                ApplicationService.NS_USERS: [
+                    {
+                        "regex": "@exclusive_as_user:.+",
+                        "exclusive": True,
+                    }
+                ],
+                ApplicationService.NS_ROOMS: [
+                    {
+                        "regex": "!fakeroom_.*",
+                        "exclusive": True,
+                    }
+                ],
+            },
+        )
+
+        room_id = "!fakeroom_private:test"
+        event_id = "$eventid"
+
+        # A public read receipt from a user outside the appservice's namespaces.
+        self.get_success(
+            self.hs.get_datastores().main.insert_receipt(
+                room_id=room_id,
+                receipt_type=ReceiptTypes.READ,
+                user_id=self.local_user,
+                event_ids=[event_id],
+                thread_id=None,
+                data={},
+            )
+        )
+        # A private read receipt from a user within the appservice's namespaces.
+        self.get_success(
+            self.hs.get_datastores().main.insert_receipt(
+                room_id=room_id,
+                receipt_type=ReceiptTypes.READ_PRIVATE,
+                user_id=self.exclusive_as_user,
+                event_ids=[event_id],
+                thread_id=None,
+                data={},
+            )
+        )
+        # A private read receipt on the same event from a user outside the
+        # appservice's namespaces.
+        self.get_success(
+            self.hs.get_datastores().main.insert_receipt(
+                room_id=room_id,
+                receipt_type=ReceiptTypes.READ_PRIVATE,
+                user_id=self.local_user,
+                event_ids=[event_id],
+                thread_id=None,
+                data={},
+            )
+        )
+
+        # Notify the appservice handler about the receipts in one go.
+        # note: stream tokens start at 2, so the three receipts above have
+        # stream IDs 2, 3 and 4.
+        self.get_success(
+            self.hs.get_application_service_handler()._notify_interested_services_ephemeral(
+                services=[interested_appservice],
+                stream_key=StreamKeyType.RECEIPT,
+                new_token=MultiWriterStreamToken(stream=4),
+                users=[self.local_user, self.exclusive_as_user],
+            )
+        )
+
+        self.send_mock.assert_called_once()
+        ephemeral_events = self.send_mock.call_args[0][2]
+
+        # All receipts for the room are batched into a single m.receipt event.
+        self.assertEqual(len(ephemeral_events), 1)
+        receipt_event = ephemeral_events[0]
+        self.assertEqual(receipt_event["type"], EduTypes.RECEIPT)
+        self.assertEqual(receipt_event["room_id"], room_id)
+
+        # The public read receipt and the namespaced user's private read receipt
+        # should have been sent, but not the other user's private read receipt.
+        self.assertEqual(
+            receipt_event["content"],
+            {
+                event_id: {
+                    ReceiptTypes.READ: {self.local_user: {}},
+                    ReceiptTypes.READ_PRIVATE: {self.exclusive_as_user: {}},
+                },
+            },
         )
 
     @unittest.override_config(
@@ -859,7 +956,9 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
 
         # Seed the device_inbox table with our fake messages
         self.get_success(
-            self.hs.get_datastores().main.add_messages_to_device_inbox(messages, {})
+            self.hs.get_datastores().main.add_local_messages_from_client_to_device_inbox(
+                messages
+            )
         )
 
         # Now have local_user send a final to-device message to exclusive_as_user. All unsent
@@ -884,7 +983,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         # Count the total number of to-device messages that were sent out per-service.
         # Ensure that we only sent to-device messages to interested services, and that
         # each interested service received the full count of to-device messages.
-        service_id_to_message_count: Dict[str, int] = {}
+        service_id_to_message_count: dict[str, int] = {}
 
         for call in self.send_mock.call_args_list:
             (
@@ -1023,7 +1122,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
 
     def _register_application_service(
         self,
-        namespaces: Optional[Dict[str, Iterable[Dict]]] = None,
+        namespaces: dict[str, Iterable[dict]] | None = None,
     ) -> ApplicationService:
         """
         Register a new application service, with the given namespaces of interest.
@@ -1073,7 +1172,7 @@ class ApplicationServicesHandlerDeviceListsTestCase(unittest.HomeserverTestCase)
         hs.get_application_service_api().put_json = self.put_json  # type: ignore[method-assign]
 
         # Mock out application services, and allow defining our own in tests
-        self._services: List[ApplicationService] = []
+        self._services: list[ApplicationService] = []
         self.hs.get_datastores().main.get_app_services = Mock(  # type: ignore[method-assign]
             return_value=self._services
         )
@@ -1318,8 +1417,8 @@ class ApplicationServicesHandlerOtkCountsTestCase(unittest.HomeserverTestCase):
         # Capture what was sent as an AS transaction.
         self.send_mock.assert_called()
         last_args, _last_kwargs = self.send_mock.call_args
-        otks: Optional[TransactionOneTimeKeysCount] = last_args[self.ARG_OTK_COUNTS]
-        unused_fallbacks: Optional[TransactionUnusedFallbackKeys] = last_args[
+        otks: TransactionOneTimeKeysCount | None = last_args[self.ARG_OTK_COUNTS]
+        unused_fallbacks: TransactionUnusedFallbackKeys | None = last_args[
             self.ARG_FALLBACK_KEYS
         ]
 

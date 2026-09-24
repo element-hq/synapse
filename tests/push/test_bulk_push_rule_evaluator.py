@@ -20,7 +20,7 @@
 #
 
 from http import HTTPStatus
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from parameterized import parameterized
@@ -210,7 +210,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
     def _create_and_process(
         self,
         bulk_evaluator: BulkPushRuleEvaluator,
-        content: Optional[JsonDict] = None,
+        content: JsonDict | None = None,
         type: str = "test",
     ) -> bool:
         """Returns true iff the `mentions` trigger an event push action."""

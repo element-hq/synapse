@@ -20,14 +20,20 @@
 #
 import itertools
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
 from synapse.replication.http.deactivate_account import (
     ReplicationNotifyAccountDeactivatedServlet,
 )
-from synapse.types import Codes, Requester, UserID, create_requester
+from synapse.types import (
+    Codes,
+    Requester,
+    UserID,
+    create_requester,
+    get_localpart_from_id,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -47,6 +53,7 @@ class DeactivateAccountHandler:
         self._room_member_handler = hs.get_room_member_handler()
         self._identity_handler = hs.get_identity_handler()
         self._profile_handler = hs.get_profile_handler()
+        self._delayed_events_handler = hs.get_delayed_events_handler()
         self._pusher_pool = hs.get_pusherpool()
         self.user_directory_handler = hs.get_user_directory_handler()
         self._server_name = hs.hostname
@@ -76,7 +83,7 @@ class DeactivateAccountHandler:
         user_id: str,
         erase_data: bool,
         requester: Requester,
-        id_server: Optional[str] = None,
+        id_server: str | None = None,
         by_admin: bool = False,
     ) -> bool:
         """Deactivate a user's account
@@ -107,6 +114,12 @@ class DeactivateAccountHandler:
             user_id,
             erase_data,
             id_server,
+        )
+
+        # Cancel the user's delayed events (MSC4140). Do this first, so that none
+        # of them get sent while the rest of the deactivation is in progress.
+        await self._delayed_events_handler.cancel_all_for_user(
+            get_localpart_from_id(user_id)
         )
 
         # FIXME: Theoretically there is a race here wherein user resets
@@ -167,13 +180,15 @@ class DeactivateAccountHandler:
         # Mark the user as erased, if they asked for that
         if erase_data:
             user = UserID.from_string(user_id)
-            # Remove avatar URL from this user
-            await self._profile_handler.set_avatar_url(
-                user, requester, "", by_admin, deactivation=True
-            )
-            # Remove displayname from this user
-            await self._profile_handler.set_displayname(
-                user, requester, "", by_admin, deactivation=True
+            # Remove displayname, avatar URL and custom profile fields from this user
+            #
+            # Note that displayname and avatar URL may persist as historical state events
+            # in rooms, but these cases behave like message history, following
+            # https://spec.matrix.org/v1.17/client-server-api/#post_matrixclientv3accountdeactivate
+            await self._profile_handler.delete_profile_upon_deactivation(
+                target_user=user,
+                requester=requester,
+                by_admin=by_admin,
             )
 
             logger.info("Marking %s as erased", user_id)
@@ -348,6 +363,9 @@ class DeactivateAccountHandler:
 
         # Ensure the user is not marked as erased.
         await self.store.mark_user_not_erased(user_id)
+
+        # The profile row is deleted on erasure, so recreate it if missing.
+        await self.store.create_profile(user)
 
         # Mark the user as active.
         await self.store.set_user_deactivated_status(user_id, False)

@@ -23,7 +23,7 @@ import ctypes
 import logging
 import os
 import re
-from typing import Iterable, Literal, Optional, overload
+from typing import Iterable, Literal, overload
 
 import attr
 from prometheus_client import REGISTRY, Metric
@@ -40,17 +40,17 @@ class JemallocStats:
 
     @overload
     def _mallctl(
-        self, name: str, read: Literal[True] = True, write: Optional[int] = None
+        self, name: str, read: Literal[True] = True, write: int | None = None
     ) -> int: ...
 
     @overload
     def _mallctl(
-        self, name: str, read: Literal[False], write: Optional[int] = None
+        self, name: str, read: Literal[False], write: int | None = None
     ) -> None: ...
 
     def _mallctl(
-        self, name: str, read: bool = True, write: Optional[int] = None
-    ) -> Optional[int]:
+        self, name: str, read: bool = True, write: int | None = None
+    ) -> int | None:
         """Wrapper around `mallctl` for reading and writing integers to
         jemalloc.
 
@@ -131,10 +131,10 @@ class JemallocStats:
         return self._mallctl(f"stats.{name}")
 
 
-_JEMALLOC_STATS: Optional[JemallocStats] = None
+_JEMALLOC_STATS: JemallocStats | None = None
 
 
-def get_jemalloc_stats() -> Optional[JemallocStats]:
+def get_jemalloc_stats() -> JemallocStats | None:
     """Returns an interface to jemalloc, if it is being used.
 
     Note that this will always return None until `setup_jemalloc_stats` has been

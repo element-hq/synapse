@@ -21,25 +21,23 @@
 import itertools
 from typing import (
     Collection,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Set,
-    Tuple,
+    Sequence,
     TypeVar,
 )
 
 import attr
+from parameterized import parameterized
 
 from twisted.internet import defer
 
 from synapse.api.constants import EventTypes, JoinRules, Membership
-from synapse.api.room_versions import RoomVersions
+from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.event_auth import auth_types_for_event
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.state.v2 import (
+    ConflictCache,
     _get_auth_chain_difference,
     _get_power_level_for_sender,
     lexicographical_topological_sort,
@@ -47,8 +45,10 @@ from synapse.state.v2 import (
 )
 from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import EventID, StateMap
+from synapse.util.duration import Duration
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 
 ALICE = "@alice:example.com"
 BOB = "@bob:example.com"
@@ -66,7 +66,7 @@ ORIGIN_SERVER_TS = 0
 
 
 class FakeClock:
-    async def sleep(self, msec: float) -> None:
+    async def sleep(self, duration: Duration) -> None:
         return None
 
 
@@ -83,7 +83,7 @@ class FakeEvent:
         id: str,
         sender: str,
         type: str,
-        state_key: Optional[str],
+        state_key: str | None,
         content: Mapping[str, object],
     ):
         self.node_id = id
@@ -94,15 +94,12 @@ class FakeEvent:
         self.content = content
         self.room_id = ROOM_ID
 
-    def to_event(self, auth_events: List[str], prev_events: List[str]) -> EventBase:
+    def to_event(self, auth_events: list[str], prev_events: list[str]) -> EventBase:
         """Given the auth_events and prev_events, convert to a Frozen Event
 
         Args:
             auth_events: list of event_ids
             prev_events: list of event_ids
-
-        Returns:
-            FrozenEvent
         """
         global ORIGIN_SERVER_TS
 
@@ -123,7 +120,7 @@ class FakeEvent:
         if self.state_key is not None:
             event_dict["state_key"] = self.state_key
 
-        return make_event_from_dict(event_dict)
+        return make_test_event(event_dict)
 
 
 # All graphs start with this set of events
@@ -186,6 +183,59 @@ INITIAL_EVENTS = [
 ]
 
 INITIAL_EDGES = ["START", "IMZ", "IMC", "IMB", "IJR", "IPOWER", "IMA", "CREATE"]
+
+ZARA_KEY = (EventTypes.Member, ZARA)
+TOPIC_KEY = (EventTypes.Topic, "")
+
+
+def _member(node_id: str, sender: str, state_key: str, content: dict) -> FakeEvent:
+    return FakeEvent(
+        id=node_id,
+        sender=sender,
+        type=EventTypes.Member,
+        state_key=state_key,
+        content=content,
+    )
+
+
+# Events for the conflict cache tests. All branch off START.
+#
+# PA is a power levels event that gives Bob PL 50. T1 and T2 are topic changes
+# by Bob. Bob has no power under IPOWER, so they only pass auth if PA is in the
+# state.
+#
+# ZJ1 and ZJ2 are Zara re-joining on two branches, and INV1 and INV2 are
+# invites she sends to Evelyn on each branch. The invites pull the joins into
+# the auth chain difference (see `test_conflict_cache_key_repartitioned`).
+CACHE_TEST_CASE_EVENTS = [
+    FakeEvent(
+        id="PA",
+        sender=ALICE,
+        type=EventTypes.PowerLevels,
+        state_key="",
+        content={"users": {ALICE: 100, BOB: 50}},
+    ),
+    FakeEvent(id="T1", sender=BOB, type=EventTypes.Topic, state_key="", content={}),
+    FakeEvent(id="T2", sender=BOB, type=EventTypes.Topic, state_key="", content={}),
+    _member("ZJ1", ZARA, ZARA, MEMBERSHIP_CONTENT_JOIN),
+    _member("ZJ2", ZARA, ZARA, MEMBERSHIP_CONTENT_JOIN),
+    _member("INV1", ZARA, EVELYN, {"membership": Membership.INVITE}),
+    _member("INV2", ZARA, EVELYN, {"membership": Membership.INVITE}),
+]
+
+CACHE_TEST_CASE_EDGES = [
+    ["PA", "START"],
+    ["T1", "START"],
+    ["T2", "START"],
+    ["INV1", "ZJ1", "START"],
+    ["INV2", "ZJ2", "START"],
+]
+
+# Room versions that use v2 and v2.1 state resolution respectively. Both have
+# the same auth rules. The difference is that v2.1 starts the iterative auth
+# checks from empty state rather than from the unconflicted state.
+V2_ROOM = RoomVersions.V11
+V21_ROOM = RoomVersions.HydraV11
 
 
 class StateTestCase(unittest.TestCase):
@@ -459,26 +509,142 @@ class StateTestCase(unittest.TestCase):
 
         self.do_check(events, edges, expected_state_ids)
 
-    def do_check(
+    # Helpers for the conflict cache tests. These use a plain dict as the
+    # cache, so `len(conflict_cache)` after a call tells us whether it was a
+    # hit or a miss.
+
+    def _build_cache_scenario(self) -> None:
+        self.event_map, self.state_at_event = self.build_event_graph(
+            CACHE_TEST_CASE_EVENTS, CACHE_TEST_CASE_EDGES
+        )
+
+    def _state(self, *node_ids: str) -> StateMap[str]:
+        """The state at START with the given events applied on top."""
+        state = dict(self.state_at_event["START"])
+        for node_id in node_ids:
+            event = self.event_map[EventID(node_id, "example.com").to_string()]
+            state[(event.type, event.state_key)] = event.event_id
+        return state
+
+    def _resolve_with_cache(
         self,
-        events: List[FakeEvent],
-        edges: List[List[str]],
-        expected_state_ids: List[str],
+        room_version: RoomVersion,
+        state_sets: Sequence[StateMap[str]],
+        conflict_cache: ConflictCache,
+    ) -> StateMap[str]:
+        return self.successResultOf(
+            defer.ensureDeferred(
+                resolve_events_with_store(
+                    FakeClock(),
+                    ROOM_ID,
+                    room_version,
+                    state_sets,
+                    event_map=None,
+                    state_res_store=TestStateResolutionStore(self.event_map),
+                    conflict_cache=conflict_cache,
+                )
+            )
+        )
+
+    @parameterized.expand((V2_ROOM, V21_ROOM))
+    def test_conflict_cache_shared_across_unconflicted_state(
+        self, room_version: RoomVersion
     ) -> None:
-        """Take a list of events and edges and calculate the state of the
-        graph at END, and asserts it matches `expected_state_ids`
+        """Test that two resolutions with the same conflicted set but different
+        unconflicted state share a cache entry, and that each result still
+        includes its own unconflicted state.
+
+        The unconflicted state differs on Zara's membership. The topic events
+        aren't authed against that, so under v2 it isn't part of the cache key.
+        """
+        self._build_cache_scenario()
+        conflict_cache: dict[bytes, StateMap[str]] = {}
+
+        with_zara = [self._state("PA", "T1"), self._state("PA", "T2")]
+        without_zara = [
+            {key: value for key, value in state.items() if key != ZARA_KEY}
+            for state in with_zara
+        ]
+
+        first = self._resolve_with_cache(room_version, with_zara, conflict_cache)
+        second = self._resolve_with_cache(room_version, without_zara, conflict_cache)
+        self.assertEqual(len(conflict_cache), 1, "expected a cache hit")
+
+        self.assertIn(ZARA_KEY, first)
+        self.assertNotIn(ZARA_KEY, second)
+
+        # Everything else agrees.
+        self.assertEqual({k: v for k, v in first.items() if k != ZARA_KEY}, second)
+
+    def test_conflict_cache_keys_on_base_state(self) -> None:
+        """Test that under v2 the cache key includes the unconflicted state the
+        auth checks depend on. Changing the power levels is a cache miss and
+        gives a different result."""
+        self._build_cache_scenario()
+
+        powerless = [self._state("T1"), self._state("T2")]
+        powered = [self._state("PA", "T1"), self._state("PA", "T2")]
+
+        conflict_cache: dict[bytes, StateMap[str]] = {}
+        under_ipower = self._resolve_with_cache(V2_ROOM, powerless, conflict_cache)
+        under_pa = self._resolve_with_cache(V2_ROOM, powered, conflict_cache)
+        self.assertEqual(len(conflict_cache), 2, "expected a cache miss")
+
+        # Bob's topics fail auth under IPOWER and pass under PA.
+        self.assertNotIn(TOPIC_KEY, under_ipower)
+        self.assertIn(TOPIC_KEY, under_pa)
+
+    def test_conflict_cache_key_repartitioned(self) -> None:
+        """Test that a cached result is correct when the same conflicted set is
+        split differently between conflicted and unconflicted keys.
+
+        In the first call Zara's membership is unconflicted, but ZJ1 and ZJ2 are
+        in the auth chain difference (via the invites) and so are in the
+        conflicted set. In the second call Zara's membership is itself
+        conflicted. Both calls have the same cache key, so the cached result
+        must include the resolved Zara membership, even though the first call
+        overrides it with its unconflicted state.
+        """
+        self._build_cache_scenario()
+
+        agreed = [self._state("INV1"), self._state("INV2")]
+        conflicting = [self._state("ZJ1", "INV1"), self._state("ZJ2", "INV2")]
+
+        conflict_cache: dict[bytes, StateMap[str]] = {}
+        agreed_result = self._resolve_with_cache(V21_ROOM, agreed, conflict_cache)
+        warm = self._resolve_with_cache(V21_ROOM, conflicting, conflict_cache)
+        self.assertEqual(len(conflict_cache), 1, "expected a cache hit")
+
+        # The first call's unconflicted state takes precedence over the cached
+        # resolution.
+        self.assertEqual(agreed_result[ZARA_KEY], self._state()[ZARA_KEY])
+
+        # The second call gets the winner from the cached resolution, the same
+        # one it computes from cold.
+        conflict_cache.clear()
+        cold = self._resolve_with_cache(V21_ROOM, conflicting, conflict_cache)
+        self.assertNotEqual(warm[ZARA_KEY], agreed_result[ZARA_KEY])
+        self.assertEqual(warm, cold)
+
+    def build_event_graph(
+        self,
+        events: list[FakeEvent],
+        edges: list[list[str]],
+    ) -> tuple[dict[str, EventBase], dict[str, StateMap[str]]]:
+        """Build the graph of `INITIAL_EVENTS` plus `events`.
 
         Args:
             events
             edges: A list of chains of event edges, e.g.
                 `[[A, B, C]]` are edges A->B and B->C.
-            expected_state_ids: The expected state at END, (excluding
-                the keys that haven't changed since START).
+
+        Returns:
+            The events by event ID, and the state after each node ID.
         """
         # We want to sort the events into topological order for processing.
-        graph: Dict[str, Set[str]] = {}
+        graph: dict[str, set[str]] = {}
 
-        fake_event_map: Dict[str, FakeEvent] = {}
+        fake_event_map: dict[str, FakeEvent] = {}
 
         for ev in itertools.chain(INITIAL_EVENTS, events):
             graph[ev.node_id] = set()
@@ -491,8 +657,8 @@ class StateTestCase(unittest.TestCase):
             for a, b in pairwise(edge_list):
                 graph[a].add(b)
 
-        event_map: Dict[str, EventBase] = {}
-        state_at_event: Dict[str, StateMap[str]] = {}
+        event_map: dict[str, EventBase] = {}
+        state_at_event: dict[str, StateMap[str]] = {}
 
         # We copy the map as the sort consumes the graph
         graph_copy = {k: set(v) for k, v in graph.items()}
@@ -529,7 +695,7 @@ class StateTestCase(unittest.TestCase):
             #    EventBuilder. But this is Hard because the relevant attributes are
             #    DictProperty[T] descriptors on EventBase but normal Ts on FakeEvent.
             # 2. Define a `GenericEvent` Protocol describing `FakeEvent` only, and
-            #    change this function to accept Union[Event, EventBase, EventBuilder].
+            #    change this function to accept Event | EventBase | EventBuilder.
             #    This seems reasonable to me, but mypy isn't happy. I think that's
             #    a mypy bug, see https://github.com/python/mypy/issues/5570
             # Instead, resort to a type-ignore.
@@ -544,6 +710,26 @@ class StateTestCase(unittest.TestCase):
 
             state_at_event[node_id] = state_after
             event_map[event_id] = event
+
+        return event_map, state_at_event
+
+    def do_check(
+        self,
+        events: list[FakeEvent],
+        edges: list[list[str]],
+        expected_state_ids: list[str],
+    ) -> None:
+        """Take a list of events and edges and calculate the state of the
+        graph at END, and asserts it matches `expected_state_ids`
+
+        Args:
+            events
+            edges: A list of chains of event edges, e.g.
+                `[[A, B, C]]` are edges A->B and B->C.
+            expected_state_ids: The expected state at END, (excluding
+                the keys that haven't changed since START).
+        """
+        event_map, state_at_event = self.build_event_graph(events, edges)
 
         expected_state = {}
         for node_id in expected_state_ids:
@@ -568,7 +754,7 @@ class StateTestCase(unittest.TestCase):
 
 class LexicographicalTestCase(unittest.TestCase):
     def test_simple(self) -> None:
-        graph: Dict[str, Set[str]] = {
+        graph: dict[str, set[str]] = {
             "l": {"o"},
             "m": {"n", "o"},
             "n": {"o"},
@@ -882,7 +1068,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         on room version"""
         store = TestStateResolutionStore({})
         for room_version in [RoomVersions.V10, RoomVersions.V11]:
-            create_event = make_event_from_dict(
+            create_event = make_test_event(
                 {
                     "room_id": ROOM_ID,
                     "sender": ALICE,
@@ -898,9 +1084,9 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                         else {}
                     ),
                 },
-                room_version,
+                room_version=room_version,
             )
-            member_event = make_event_from_dict(
+            member_event = make_test_event(
                 {
                     "room_id": ROOM_ID,
                     "sender": ALICE,
@@ -912,9 +1098,9 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                     "auth_events": [create_event.event_id],
                     "prev_events": [create_event.event_id],
                 },
-                room_version,
+                room_version=room_version,
             )
-            pl_event = make_event_from_dict(
+            pl_event = make_test_event(
                 {
                     "room_id": ROOM_ID,
                     "sender": ALICE,
@@ -930,7 +1116,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                     "auth_events": [create_event.event_id, member_event.event_id],
                     "prev_events": [member_event.event_id],
                 },
-                room_version,
+                room_version=room_version,
             )
 
             event_map = {
@@ -944,7 +1130,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                 CHARLIE: 10,
             }
             for user_id, want_pl in want_pls.items():
-                test_event = make_event_from_dict(
+                test_event = make_test_event(
                     {
                         "room_id": ROOM_ID,
                         "sender": user_id,
@@ -958,7 +1144,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                         ],
                         "prev_events": [pl_event.event_id],
                     },
-                    room_version,
+                    room_version=room_version,
                 )
                 event_map[test_event.event_id] = test_event
                 got_pl = self.successResultOf(
@@ -981,7 +1167,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                 CHARLIE: 0,
             }
             for user_id, want_pl in want_pls.items():
-                test_event = make_event_from_dict(
+                test_event = make_test_event(
                     {
                         "room_id": ROOM_ID,
                         "sender": user_id,
@@ -995,7 +1181,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                         ],
                         "prev_events": [pl_event.event_id],
                     },
-                    room_version,
+                    room_version=room_version,
                 )
                 got_pl = self.successResultOf(
                     defer.ensureDeferred(
@@ -1020,7 +1206,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
 T = TypeVar("T")
 
 
-def pairwise(iterable: Iterable[T]) -> Iterable[Tuple[T, T]]:
+def pairwise(iterable: Iterable[T]) -> Iterable[tuple[T, T]]:
     "s -> (s0,s1), (s1,s2), (s2, s3), ..."
     a, b = itertools.tee(iterable)
     next(b, None)
@@ -1029,11 +1215,11 @@ def pairwise(iterable: Iterable[T]) -> Iterable[Tuple[T, T]]:
 
 @attr.s
 class TestStateResolutionStore:
-    event_map: Dict[str, EventBase] = attr.ib()
+    event_map: dict[str, EventBase] = attr.ib()
 
     def get_events(
         self, event_ids: Collection[str], allow_rejected: bool = False
-    ) -> "defer.Deferred[Dict[str, EventBase]]":
+    ) -> "defer.Deferred[dict[str, EventBase]]":
         """Get events from the database
 
         Args:
@@ -1048,7 +1234,7 @@ class TestStateResolutionStore:
             {eid: self.event_map[eid] for eid in event_ids if eid in self.event_map}
         )
 
-    def _get_auth_chain(self, event_ids: Iterable[str]) -> List[str]:
+    def _get_auth_chain(self, event_ids: Iterable[str]) -> list[str]:
         """Gets the full auth chain for a set of events (including rejected
         events).
 
@@ -1085,9 +1271,9 @@ class TestStateResolutionStore:
     def get_auth_chain_difference(
         self,
         room_id: str,
-        auth_sets: List[Set[str]],
-        conflicted_state: Optional[Set[str]],
-        additional_backwards_reachable_conflicted_events: Optional[Set[str]],
+        auth_sets: list[set[str]],
+        conflicted_state: set[str] | None,
+        additional_backwards_reachable_conflicted_events: set[str] | None,
     ) -> "defer.Deferred[StateDifference]":
         chains = [frozenset(self._get_auth_chain(a)) for a in auth_sets]
 

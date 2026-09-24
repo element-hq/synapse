@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import LimitBlockingTypes, UserTypes
 from synapse.api.errors import Codes, ResourceLimitError
@@ -51,10 +51,10 @@ class AuthBlocking:
 
     async def check_auth_blocking(
         self,
-        user_id: Optional[str] = None,
-        threepid: Optional[dict] = None,
-        user_type: Optional[str] = None,
-        requester: Optional[Requester] = None,
+        user_id: str | None = None,
+        threepid: dict | None = None,
+        user_type: str | None = None,
+        requester: Requester | None = None,
     ) -> None:
         """Checks if the user should be rejected for some external reason,
         such as monthly active user limiting or global disable flag
@@ -88,7 +88,7 @@ class AuthBlocking:
                 # We never block the server from doing actions on behalf of
                 # users.
                 return
-            if requester.app_service and not self._track_appservice_user_ips:
+            if requester.app_service_id and not self._track_appservice_user_ips:
                 # If we're authenticated as an appservice then we only block
                 # auth if `track_appservice_user_ips` is set, as that option
                 # implicitly means that application services are part of MAU
@@ -117,7 +117,7 @@ class AuthBlocking:
             # If the user is already part of the MAU cohort or a trial user
             if user_id:
                 timestamp = await self.store.user_last_seen_monthly_active(user_id)
-                if timestamp:
+                if timestamp is not None:
                     return
 
                 is_trial = await self.store.is_trial_user(user_id)

@@ -18,17 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from collections import ChainMap
 from typing import (
     Any,
     Collection,
-    Dict,
     Generator,
     Iterable,
     Iterator,
-    List,
-    Optional,
-    Set,
-    Tuple,
 )
 from unittest.mock import AsyncMock, Mock
 
@@ -37,27 +33,34 @@ from twisted.internet import defer
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
-from synapse.state import StateHandler, StateResolutionHandler, _make_state_cache_entry
-from synapse.types import MutableStateMap, StateMap
+from synapse.state import (
+    StateHandler,
+    StateResolutionHandler,
+    _make_state_cache_entry,
+    _state_map_size,
+)
+from synapse.types import JsonDict, MutableStateMap, StateMap
 from synapse.types.state import StateFilter
+from synapse.util import MutableOverlayMapping
 from synapse.util.macaroons import MacaroonGenerator
 
 from tests import unittest
 from tests.server import get_clock
+from tests.test_utils.event_builders import make_test_event
 from tests.utils import default_config
 
 _next_event_id = 1000
 
 
 def create_event(
-    name: Optional[str] = None,
-    type: Optional[str] = None,
-    state_key: Optional[str] = None,
+    name: str | None = None,
+    type: str | None = None,
+    state_key: str | None = None,
     depth: int = 2,
-    event_id: Optional[str] = None,
-    prev_events: Optional[List[Tuple[str, dict]]] = None,
+    event_id: str | None = None,
+    prev_events: list[tuple[str, dict]] | None = None,
     **kwargs: Any,
 ) -> EventBase:
     global _next_event_id
@@ -72,13 +75,14 @@ def create_event(
         else:
             name = "<%s, %s>" % (type, event_id)
 
-    d = {
+    d: JsonDict = {
         "event_id": event_id,
         "type": type,
         "sender": "@user_id:example.com",
         "room_id": "!room_id:example.com",
         "depth": depth,
         "prev_events": prev_events or [],
+        "content": {},
     }
 
     if state_key is not None:
@@ -86,21 +90,21 @@ def create_event(
 
     d.update(kwargs)
 
-    return make_event_from_dict(d)
+    return make_test_event(d)
 
 
 class _DummyStore:
     def __init__(self) -> None:
-        self._event_to_state_group: Dict[str, int] = {}
-        self._group_to_state: Dict[int, MutableStateMap[str]] = {}
+        self._event_to_state_group: dict[str, int] = {}
+        self._group_to_state: dict[int, MutableStateMap[str]] = {}
 
-        self._event_id_to_event: Dict[str, EventBase] = {}
+        self._event_id_to_event: dict[str, EventBase] = {}
 
         self._next_group = 1
 
     async def get_state_groups_ids(
         self, room_id: str, event_ids: Collection[str]
-    ) -> Dict[int, MutableStateMap[str]]:
+    ) -> dict[int, MutableStateMap[str]]:
         groups = {}
         for event_id in event_ids:
             group = self._event_to_state_group.get(event_id)
@@ -110,7 +114,7 @@ class _DummyStore:
         return groups
 
     async def get_state_ids_for_group(
-        self, state_group: int, state_filter: Optional[StateFilter] = None
+        self, state_group: int, state_filter: StateFilter | None = None
     ) -> MutableStateMap[str]:
         return self._group_to_state[state_group]
 
@@ -118,9 +122,9 @@ class _DummyStore:
         self,
         event_id: str,
         room_id: str,
-        prev_group: Optional[int],
-        delta_ids: Optional[StateMap[str]],
-        current_state_ids: Optional[StateMap[str]],
+        prev_group: int | None,
+        delta_ids: StateMap[str] | None,
+        current_state_ids: StateMap[str] | None,
     ) -> int:
         state_group = self._next_group
         self._next_group += 1
@@ -137,7 +141,7 @@ class _DummyStore:
 
     async def get_events(
         self, event_ids: Collection[str], **kwargs: Any
-    ) -> Dict[str, EventBase]:
+    ) -> dict[str, EventBase]:
         return {
             e_id: self._event_id_to_event[e_id]
             for e_id in event_ids
@@ -146,12 +150,12 @@ class _DummyStore:
 
     async def get_partial_state_events(
         self, event_ids: Collection[str]
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         return dict.fromkeys(event_ids, False)
 
     async def get_state_group_delta(
         self, name: str
-    ) -> Tuple[Optional[int], Optional[StateMap[str]]]:
+    ) -> tuple[int | None, StateMap[str] | None]:
         return None, None
 
     def register_events(self, events: Iterable[EventBase]) -> None:
@@ -170,7 +174,7 @@ class _DummyStore:
 
     async def get_state_group_for_events(
         self, event_ids: Collection[str], await_full_state: bool = True
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         res = {}
         for event in event_ids:
             res[event] = self._event_to_state_group[event]
@@ -178,7 +182,7 @@ class _DummyStore:
 
     async def get_state_for_groups(
         self, groups: Collection[int]
-    ) -> Dict[int, MutableStateMap[str]]:
+    ) -> dict[int, MutableStateMap[str]]:
         res = {}
         for group in groups:
             state = self._group_to_state[group]
@@ -193,15 +197,15 @@ class DictObj(dict):
 
 
 class Graph:
-    def __init__(self, nodes: Dict[str, DictObj], edges: Dict[str, List[str]]):
-        events: Dict[str, EventBase] = {}
-        clobbered: Set[str] = set()
+    def __init__(self, nodes: dict[str, DictObj], edges: dict[str, list[str]]):
+        events: dict[str, EventBase] = {}
+        clobbered: set[str] = set()
 
         for event_id, fields in nodes.items():
             refs = edges.get(event_id)
             if refs:
                 clobbered.difference_update(refs)
-                prev_events: List[Tuple[str, dict]] = [(r, {}) for r in refs]
+                prev_events: list[tuple[str, dict]] = [(r, {}) for r in refs]
             else:
                 prev_events = []
 
@@ -247,7 +251,8 @@ class StateTestCase(unittest.TestCase):
             ]
         )
         reactor, clock = get_clock()
-        hs.config = default_config("tesths", True)
+        hs.config = default_config(server_name="tesths", parse=True)
+        hs.hostname = "tesths"
         hs.get_datastores.return_value = Mock(
             main=self.dummy_store,
             state_deletion=dummy_deletion_store,
@@ -281,7 +286,7 @@ class StateTestCase(unittest.TestCase):
 
         self.dummy_store.register_events(graph.walk())
 
-        context_store: Dict[str, EventContext] = {}
+        context_store: dict[str, EventContext] = {}
 
         for event in graph.walk():
             context = yield defer.ensureDeferred(
@@ -328,7 +333,7 @@ class StateTestCase(unittest.TestCase):
 
         self.dummy_store.register_events(graph.walk())
 
-        context_store: Dict[str, EventContext] = {}
+        context_store: dict[str, EventContext] = {}
 
         for event in graph.walk():
             context = yield defer.ensureDeferred(
@@ -389,7 +394,7 @@ class StateTestCase(unittest.TestCase):
 
         self.dummy_store.register_events(graph.walk())
 
-        context_store: Dict[str, EventContext] = {}
+        context_store: dict[str, EventContext] = {}
 
         for event in graph.walk():
             context = yield defer.ensureDeferred(
@@ -467,7 +472,7 @@ class StateTestCase(unittest.TestCase):
 
         self.dummy_store.register_events(graph.walk())
 
-        context_store: Dict[str, EventContext] = {}
+        context_store: dict[str, EventContext] = {}
 
         for event in graph.walk():
             context = yield defer.ensureDeferred(
@@ -490,7 +495,7 @@ class StateTestCase(unittest.TestCase):
         self.assertEqual(ctx_d.state_group_before_event, ctx_d.state_group)
 
     def _add_depths(
-        self, nodes: Dict[str, DictObj], edges: Dict[str, List[str]]
+        self, nodes: dict[str, DictObj], edges: dict[str, list[str]]
     ) -> None:
         def _get_depth(ev: str) -> int:
             node = nodes[ev]
@@ -865,6 +870,31 @@ class StateTestCase(unittest.TestCase):
 
         result = yield defer.ensureDeferred(self.state.compute_event_context(event))
         return result
+
+    def test_state_map_size(self) -> None:
+        "Cache sizing counts every held entry, not the distinct keys"
+
+        base: StateMap[str] = {("a", ""): "A", ("b", ""): "B", ("c", ""): "C"}
+        self.assertEqual(_state_map_size(base), 3)
+
+        # Overriding and deleting keys leaves `len()` alone but holds entries.
+        overlay = MutableOverlayMapping(base)
+        overlay[("a", "")] = "A2"
+        overlay[("d", "")] = "D"
+        del overlay[("b", "")]
+        self.assertEqual(len(overlay), 3)
+        self.assertEqual(_state_map_size(overlay), 3 + 2 + 1)
+
+        # Nested overlays are followed down.
+        outer = MutableOverlayMapping(overlay)
+        outer[("e", "")] = "E"
+        self.assertEqual(len(outer), 4)
+        self.assertEqual(_state_map_size(outer), 6 + 1)
+
+        # A `ChainMap` holds every layer in full, however much they overlap.
+        chain = ChainMap({("a", ""): "A3", ("f", ""): "F"}, outer)
+        self.assertEqual(len(chain), 5)
+        self.assertEqual(_state_map_size(chain), 2 + 7)
 
     def test_make_state_cache_entry(self) -> None:
         "Test that calculating a prev_group and delta is correct"

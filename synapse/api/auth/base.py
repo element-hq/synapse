@@ -19,7 +19,9 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from abc import ABC, abstractmethod
+from http import HTTPStatus
+from typing import TYPE_CHECKING
 
 from netaddr import IPAddress
 
@@ -33,7 +35,7 @@ from synapse.api.errors import (
     MissingClientTokenError,
     UnstableSpecAuthError,
 )
-from synapse.appservice import ApplicationService
+from synapse.appservice import ApplicationService, Scopes
 from synapse.http import get_request_user_agent
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace
@@ -48,7 +50,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BaseAuth:
+class BaseAuth(ABC):
     """Common base class for all auth implementations."""
 
     def __init__(self, hs: "HomeServer"):
@@ -64,7 +66,7 @@ class BaseAuth:
         room_id: str,
         requester: Requester,
         allow_departed_users: bool = False,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Check if the user is in the room, or was at some point.
         Args:
             room_id: The room to check.
@@ -114,7 +116,7 @@ class BaseAuth:
     @trace
     async def check_user_in_room_or_world_readable(
         self, room_id: str, requester: Requester, allow_departed_users: bool = False
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Checks that the user is or was in the room or the room is world
         readable. If it isn't then an exception is raised.
 
@@ -186,6 +188,7 @@ class BaseAuth:
                 403, "Application service has not registered this user (%s)" % user_id
             )
 
+    @abstractmethod
     async def is_server_admin(self, requester: Requester) -> bool:
         """Check if the given user is a local server admin.
 
@@ -238,6 +241,40 @@ class BaseAuth:
         )
 
         return user_level >= send_level
+
+    @abstractmethod
+    async def get_user_by_req(
+        self,
+        request: SynapseRequest,
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester:
+        """Get a registered user's ID. See `Auth.get_user_by_req`."""
+        raise NotImplementedError()
+
+    async def get_optional_user_by_req(
+        self,
+        request: SynapseRequest,
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester | None:
+        """Like `get_user_by_req`, except returns None when the request carries
+        no access token at all. A token that is present but invalid still
+        raises, as with `get_user_by_req`.
+
+        For endpoints where authentication is optional.
+        """
+        if not self.has_access_token(request):
+            return None
+
+        return await self.get_user_by_req(
+            request,
+            allow_guest=allow_guest,
+            allow_expired=allow_expired,
+            allow_locked=allow_locked,
+        )
 
     @staticmethod
     def has_access_token(request: Request) -> bool:
@@ -294,7 +331,7 @@ class BaseAuth:
     @cancellable
     async def get_appservice_user(
         self, request: Request, access_token: str
-    ) -> Optional[Requester]:
+    ) -> Requester | None:
         """
         Given a request, reads the request parameters to determine:
         - whether it's an application service that's making this request
@@ -316,9 +353,6 @@ class BaseAuth:
         - The returned device ID, if present, has been checked to be a valid device ID
           for the returned user ID.
         """
-        # TODO: We can drop unstable support after 2026-01-01 (couple months after stable support)
-        UNSTABLE_DEVICE_ID_ARG_NAME = b"org.matrix.msc3202.device_id"
-
         app_service = self.store.get_app_service_by_token(access_token)
         if app_service is None:
             return None
@@ -339,9 +373,7 @@ class BaseAuth:
         else:
             effective_user_id = app_service.sender
 
-        effective_device_id_args = request.args.get(
-            b"device_id", request.args.get(UNSTABLE_DEVICE_ID_ARG_NAME)
-        )
+        effective_device_id_args = request.args.get(b"device_id")
         if effective_device_id_args:
             effective_device_id = effective_device_id_args[0].decode("utf8")
             # We only just set this so it can't be None!
@@ -362,6 +394,21 @@ class BaseAuth:
             effective_user_id, app_service=app_service, device_id=effective_device_id
         )
 
+    def assert_requester_has_scope(self, requester: Requester, scope: Scopes) -> None:
+        """Asserts that the requester has the given scope, either directly
+        (e.g. via an OAuth token) or via the scopes registered against the
+        application service.
+        """
+        if scope in requester.scope:
+            return
+
+        if requester.app_service_id is not None:
+            app_service = self.store.get_app_service_by_id(requester.app_service_id)
+            if app_service is not None and app_service.has_scope(scope):
+                return
+
+        raise AuthError(HTTPStatus.FORBIDDEN, f"Missing {scope} scope")
+
     async def _record_request(
         self, request: SynapseRequest, requester: Requester
     ) -> None:
@@ -371,7 +418,9 @@ class BaseAuth:
         """
         ip_addr = request.get_client_ip_if_available()
 
-        if ip_addr and (not requester.app_service or self._track_appservice_user_ips):
+        if ip_addr and (
+            not requester.app_service_id or self._track_appservice_user_ips
+        ):
             user_agent = get_request_user_agent(request)
             access_token = self.get_access_token_from_request(request)
 
@@ -381,7 +430,7 @@ class BaseAuth:
             # table during the transition
             recorded_device_id = (
                 "dummy-device"
-                if requester.device_id is None and requester.app_service is not None
+                if requester.device_id is None and requester.app_service_id is not None
                 else requester.device_id
             )
             await self.store.insert_client_ip(

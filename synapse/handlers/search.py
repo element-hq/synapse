@@ -21,7 +21,7 @@
 
 import itertools
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Iterable
 
 import attr
 from unpaddedbase64 import decode_base64, encode_base64
@@ -29,11 +29,10 @@ from unpaddedbase64 import decode_base64, encode_base64
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.api.filtering import Filter
-from synapse.events import EventBase
-from synapse.events.utils import SerializeEventConfig
+from synapse.events.utils import FilteredEvent
 from synapse.types import JsonDict, Requester, StrCollection, StreamKeyType, UserID
 from synapse.types.state import StateFilter
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -46,13 +45,13 @@ class _SearchResult:
     # The count of results.
     count: int
     # A mapping of event ID to the rank of that event.
-    rank_map: Dict[str, int]
+    rank_map: dict[str, int]
     # A list of the resulting events.
-    allowed_events: List[EventBase]
+    allowed_events: list[FilteredEvent]
     # A map of room ID to results.
-    room_groups: Dict[str, JsonDict]
+    room_groups: dict[str, JsonDict]
     # A set of event IDs to highlight.
-    highlights: Set[str]
+    highlights: set[str]
 
 
 class SearchHandler:
@@ -117,7 +116,7 @@ class SearchHandler:
         return historical_room_ids
 
     async def search(
-        self, requester: Requester, content: JsonDict, batch: Optional[str] = None
+        self, requester: Requester, content: JsonDict, batch: str | None = None
     ) -> JsonDict:
         """Performs a full text search for a user.
 
@@ -226,18 +225,18 @@ class SearchHandler:
     async def _search(
         self,
         requester: Requester,
-        batch_group: Optional[str],
-        batch_group_key: Optional[str],
-        batch_token: Optional[str],
+        batch_group: str | None,
+        batch_group_key: str | None,
+        batch_token: str | None,
         search_term: str,
-        keys: List[str],
+        keys: list[str],
         filter_dict: JsonDict,
         order_by: str,
         include_state: bool,
-        group_keys: List[str],
-        event_context: Optional[bool],
-        before_limit: Optional[int],
-        after_limit: Optional[int],
+        group_keys: list[str],
+        event_context: bool | None,
+        before_limit: int | None,
+        after_limit: int | None,
         include_profile: bool,
     ) -> JsonDict:
         """Performs a full text search for a user.
@@ -286,7 +285,7 @@ class SearchHandler:
         # If doing a subset of all rooms search, check if any of the rooms
         # are from an upgraded room, and search their contents as well
         if search_filter.rooms:
-            historical_room_ids: List[str] = []
+            historical_room_ids: list[str] = []
             for room_id in search_filter.rooms:
                 # Add any previous rooms to the search if they exist
                 ids = await self.get_old_rooms_from_upgraded_room(room_id)
@@ -307,7 +306,7 @@ class SearchHandler:
                 }
             }
 
-        sender_group: Optional[Dict[str, JsonDict]]
+        sender_group: dict[str, JsonDict] | None
 
         if order_by == "rank":
             search_result, sender_group = await self._search_by_rank(
@@ -355,12 +354,12 @@ class SearchHandler:
 
         state_results = {}
         if include_state:
-            for room_id in {e.room_id for e in search_result.allowed_events}:
+            for room_id in {e.event.room_id for e in search_result.allowed_events}:
                 state = await self._storage_controllers.state.get_current_state(room_id)
                 state_results[room_id] = list(state.values())
 
         aggregations = await self._relations_handler.get_bundled_aggregations(
-            # Generate an iterable of EventBase for all the events that will be
+            # Generate an iterable of FilteredEvent for all the events that will be
             # returned, including contextual events.
             itertools.chain(
                 # The events_before and events_after for each context.
@@ -378,7 +377,9 @@ class SearchHandler:
         # blocking calls after this. Otherwise, the 'age' will be wrong.
 
         time_now = self.clock.time_msec()
-        serialize_options = SerializeEventConfig(requester=requester)
+        serialize_options = await self._event_serializer.create_config(
+            requester=requester
+        )
 
         for context in contexts.values():
             context["events_before"] = await self._event_serializer.serialize_events(
@@ -396,14 +397,14 @@ class SearchHandler:
 
         results = [
             {
-                "rank": search_result.rank_map[e.event_id],
+                "rank": search_result.rank_map[e.event.event_id],
                 "result": await self._event_serializer.serialize_event(
                     e,
                     time_now,
                     bundle_aggregations=aggregations,
                     config=serialize_options,
                 ),
-                "context": contexts.get(e.event_id, {}),
+                "context": contexts.get(e.event.event_id, {}),
             }
             for e in search_result.allowed_events
         ]
@@ -417,7 +418,9 @@ class SearchHandler:
         if state_results:
             rooms_cat_res["state"] = {
                 room_id: await self._event_serializer.serialize_events(
-                    state_events, time_now, config=serialize_options
+                    [FilteredEvent.state(e) for e in state_events],
+                    time_now,
+                    config=serialize_options,
                 )
                 for room_id, state_events in state_results.items()
             }
@@ -442,7 +445,7 @@ class SearchHandler:
         search_term: str,
         keys: Iterable[str],
         search_filter: Filter,
-    ) -> Tuple[_SearchResult, Dict[str, JsonDict]]:
+    ) -> tuple[_SearchResult, dict[str, JsonDict]]:
         """
         Performs a full text search for a user ordering by rank.
 
@@ -461,9 +464,9 @@ class SearchHandler:
         """
         rank_map = {}  # event_id -> rank of event
         # Holds result of grouping by room, if applicable
-        room_groups: Dict[str, JsonDict] = {}
+        room_groups: dict[str, JsonDict] = {}
         # Holds result of grouping by sender, if applicable
-        sender_group: Dict[str, JsonDict] = {}
+        sender_group: dict[str, JsonDict] = {}
 
         search_result = await self.store.search_msgs(room_ids, search_term, keys)
 
@@ -479,25 +482,25 @@ class SearchHandler:
 
         filtered_events = await search_filter.filter([r["event"] for r in results])
 
-        events = await filter_events_for_client(
+        events = await filter_and_transform_events_for_client(
             self._storage_controllers,
             user.to_string(),
             filtered_events,
         )
 
-        events.sort(key=lambda e: -rank_map[e.event_id])
+        events.sort(key=lambda e: -rank_map[e.event.event_id])
         allowed_events = events[: search_filter.limit]
 
         for e in allowed_events:
             rm = room_groups.setdefault(
-                e.room_id, {"results": [], "order": rank_map[e.event_id]}
+                e.event.room_id, {"results": [], "order": rank_map[e.event.event_id]}
             )
-            rm["results"].append(e.event_id)
+            rm["results"].append(e.event.event_id)
 
             s = sender_group.setdefault(
-                e.sender, {"results": [], "order": rank_map[e.event_id]}
+                e.event.sender, {"results": [], "order": rank_map[e.event.event_id]}
             )
-            s["results"].append(e.event_id)
+            s["results"].append(e.event.event_id)
 
         return (
             _SearchResult(
@@ -517,10 +520,10 @@ class SearchHandler:
         search_term: str,
         keys: Iterable[str],
         search_filter: Filter,
-        batch_group: Optional[str],
-        batch_group_key: Optional[str],
-        batch_token: Optional[str],
-    ) -> Tuple[_SearchResult, Optional[str]]:
+        batch_group: str | None,
+        batch_group_key: str | None,
+        batch_token: str | None,
+    ) -> tuple[_SearchResult, str | None]:
         """
         Performs a full text search for a user ordering by recent.
 
@@ -542,14 +545,14 @@ class SearchHandler:
         """
         rank_map = {}  # event_id -> rank of event
         # Holds result of grouping by room, if applicable
-        room_groups: Dict[str, JsonDict] = {}
+        room_groups: dict[str, JsonDict] = {}
 
         # Holds the next_batch for the entire result set if one of those exists
         global_next_batch = None
 
         highlights = set()
 
-        room_events: List[EventBase] = []
+        room_events: list[FilteredEvent] = []
         i = 0
 
         pagination_token = batch_token
@@ -580,7 +583,7 @@ class SearchHandler:
 
             filtered_events = await search_filter.filter([r["event"] for r in results])
 
-            events = await filter_events_for_client(
+            events = await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user.to_string(),
                 filtered_events,
@@ -595,11 +598,11 @@ class SearchHandler:
                 pagination_token = results[-1]["pagination_token"]
 
         for event in room_events:
-            group = room_groups.setdefault(event.room_id, {"results": []})
-            group["results"].append(event.event_id)
+            group = room_groups.setdefault(event.event.room_id, {"results": []})
+            group["results"].append(event.event.event_id)
 
         if room_events and len(room_events) >= search_filter.limit:
-            last_event_id = room_events[-1].event_id
+            last_event_id = room_events[-1].event.event_id
             pagination_token = results_map[last_event_id]["pagination_token"]
 
             # We want to respect the given batch group and group keys so
@@ -632,11 +635,11 @@ class SearchHandler:
     async def _calculate_event_contexts(
         self,
         user: UserID,
-        allowed_events: List[EventBase],
+        allowed_events: list[FilteredEvent],
         before_limit: int,
         after_limit: int,
         include_profile: bool,
-    ) -> Dict[str, JsonDict]:
+    ) -> dict[str, JsonDict]:
         """
         Calculates the contextual events for any search results.
 
@@ -658,7 +661,7 @@ class SearchHandler:
         contexts = {}
         for event in allowed_events:
             res = await self.store.get_events_around(
-                event.room_id, event.event_id, before_limit, after_limit
+                event.event.room_id, event.event.event_id, before_limit, after_limit
             )
 
             logger.info(
@@ -667,13 +670,13 @@ class SearchHandler:
                 len(res.events_after),
             )
 
-            events_before = await filter_events_for_client(
+            events_before = await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user.to_string(),
                 res.events_before,
             )
 
-            events_after = await filter_events_for_client(
+            events_after = await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user.to_string(),
                 res.events_after,
@@ -692,14 +695,14 @@ class SearchHandler:
 
             if include_profile:
                 senders = {
-                    ev.sender
+                    ev.event.sender
                     for ev in itertools.chain(events_before, [event], events_after)
                 }
 
                 if events_after:
-                    last_event_id = events_after[-1].event_id
+                    last_event_id = events_after[-1].event.event_id
                 else:
-                    last_event_id = event.event_id
+                    last_event_id = event.event.event_id
 
                 state_filter = StateFilter.from_types(
                     [(EventTypes.Member, sender) for sender in senders]
@@ -718,6 +721,6 @@ class SearchHandler:
                     if s.type == EventTypes.Member and s.state_key in senders
                 }
 
-            contexts[event.event_id] = context
+            contexts[event.event.event_id] = context
 
         return contexts

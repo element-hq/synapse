@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Any, Mapping, NoReturn, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Mapping, NoReturn, cast
 
 import psycopg2.extensions
 
@@ -31,6 +31,7 @@ from synapse.storage.engines._base import (
     IsolationLevel,
 )
 from synapse.storage.types import Cursor
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.storage.database import LoggingDatabaseConnection
@@ -54,16 +55,35 @@ class PostgresEngine(
 
         psycopg2.extensions.register_adapter(bytes, _disable_bytes_adapter)
         self.synchronous_commit: bool = database_config.get("synchronous_commit", True)
-        # Set the statement timeout to 1 hour by default.
-        # Any query taking more than 1 hour should probably be considered a bug;
+        # Set the statement timeout to 10 minutes by default.
+        #
+        # Any query taking more than 10 minutes should probably be considered a bug;
         # most of the time this is a sign that work needs to be split up or that
         # some degenerate query plan has been created and the client has probably
         # timed out/walked off anyway.
         # This is in milliseconds.
-        self.statement_timeout: Optional[int] = database_config.get(
-            "statement_timeout", 60 * 60 * 1000
+        self.statement_timeout: int | None = database_config.get(
+            "statement_timeout", Duration(minutes=10).as_millis()
         )
-        self._version: Optional[int] = None  # unknown as yet
+
+        # Abort transactions that sit idle for too long.
+        #
+        # Idle transactions can block maintenance tasks server-side like
+        # vacuums, which can lead to bloat and performance issues.
+        #
+        # We should never hit this timeout in normal operation, as Synapse
+        # should always be actively using the connection when in a transaction
+        # and so it should only ever be briefly idle. If we do hit this timeout,
+        # it's likely that no progress is being made and so aborting the session
+        # is safe.
+        #
+        # In certain cases we have seen connections leak, particularly when
+        # using a connection pooler like pgcat, and this timeout will help with
+        # that.
+        self.idle_in_transaction_session_timeout: int | None = database_config.get(
+            "idle_in_transaction_session_timeout", Duration(minutes=30).as_millis()
+        )
+        self._version: int | None = None  # unknown as yet
 
         self.isolation_level_map: Mapping[int, int] = {
             IsolationLevel.READ_COMMITTED: psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED,
@@ -79,11 +99,11 @@ class PostgresEngine(
     def single_threaded(self) -> bool:
         return False
 
-    def get_db_locale(self, txn: Cursor) -> Tuple[str, str]:
+    def get_db_locale(self, txn: Cursor) -> tuple[str, str]:
         txn.execute(
             "SELECT datcollate, datctype FROM pg_database WHERE datname = current_database()"
         )
-        collation, ctype = cast(Tuple[str, str], txn.fetchone())
+        collation, ctype = cast(tuple[str, str], txn.fetchone())
         return collation, ctype
 
     def check_database(
@@ -99,8 +119,8 @@ class PostgresEngine(
         allow_unsafe_locale = self.config.get("allow_unsafe_locale", False)
 
         # Are we on a supported PostgreSQL version?
-        if not allow_outdated_version and self._version < 130000:
-            raise RuntimeError("Synapse requires PostgreSQL 13 or above.")
+        if not allow_outdated_version and self._version < 140000:
+            raise RuntimeError("Synapse requires PostgreSQL 14 or above.")
 
         with db_conn.cursor() as txn:
             txn.execute("SHOW SERVER_ENCODING")
@@ -185,17 +205,20 @@ class PostgresEngine(
         if self.statement_timeout is not None:
             cursor.execute("SET statement_timeout TO ?", (self.statement_timeout,))
 
+        # Abort transactions that sit idle for too long, as they hold locks
+        # and block vacuum.
+        if self.idle_in_transaction_session_timeout is not None:
+            cursor.execute(
+                "SET idle_in_transaction_session_timeout TO ?",
+                (self.idle_in_transaction_session_timeout,),
+            )
+
         cursor.close()
         db_conn.commit()
 
     @property
     def supports_using_any_list(self) -> bool:
         """Do we support using `a = ANY(?)` and passing a list"""
-        return True
-
-    @property
-    def supports_returning(self) -> bool:
-        """Do we support the `RETURNING` clause in insert/update/delete?"""
         return True
 
     def is_deadlock(self, error: Exception) -> bool:
@@ -239,7 +262,7 @@ class PostgresEngine(
         return conn.set_session(autocommit=autocommit)
 
     def attempt_to_set_isolation_level(
-        self, conn: psycopg2.extensions.connection, isolation_level: Optional[int]
+        self, conn: psycopg2.extensions.connection, isolation_level: int | None
     ) -> None:
         if isolation_level is None:
             isolation_level = self.default_isolation_level

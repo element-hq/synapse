@@ -24,7 +24,7 @@
 import logging
 import urllib.parse
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Any
 
 from canonicaljson import encode_canonical_json
 
@@ -127,6 +127,37 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 400, channel.result)
 
+    @unittest.override_config({"enable_set_displayname": False})
+    def test_set_displayname_disabled(self) -> None:
+        """Changing an existing displayname while `enable_set_displayname` is off
+        should get a 403 with M_FORBIDDEN."""
+        channel = self.make_request(
+            "PUT",
+            "/profile/%s/displayname" % (self.owner,),
+            content={"displayname": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        res = self._get_displayname()
+        self.assertEqual(res, "owner")
+
+    @unittest.override_config({"enable_set_displayname": False})
+    def test_delete_displayname_disabled(self) -> None:
+        """Deleting an existing displayname while `enable_set_displayname` is off
+        should get a 403 with M_FORBIDDEN."""
+        channel = self.make_request(
+            "DELETE",
+            "/profile/%s/displayname" % (self.owner,),
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        res = self._get_displayname()
+        self.assertEqual(res, "owner")
+
     def test_get_avatar_url(self) -> None:
         res = self._get_avatar_url()
         self.assertIsNone(res)
@@ -177,7 +208,54 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 400, channel.result)
 
-    def _get_displayname(self, name: Optional[str] = None) -> Optional[str]:
+    @unittest.override_config({"enable_set_avatar_url": False})
+    def test_set_avatar_url_disabled(self) -> None:
+        """Changing an existing avatar while `enable_set_avatar_url` is off should
+        get a 403 with M_FORBIDDEN. Setting it for the first time is allowed."""
+        channel = self.make_request(
+            "PUT",
+            "/profile/%s/avatar_url" % (self.owner,),
+            content={"avatar_url": "http://my.server/pic.gif"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "PUT",
+            "/profile/%s/avatar_url" % (self.owner,),
+            content={"avatar_url": "http://my.server/me.png"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        res = self._get_avatar_url()
+        self.assertEqual(res, "http://my.server/pic.gif")
+
+    @unittest.override_config({"enable_set_avatar_url": False})
+    def test_delete_avatar_url_disabled(self) -> None:
+        """Deleting an existing avatar while `enable_set_avatar_url` is off should
+        get a 403 with M_FORBIDDEN."""
+        channel = self.make_request(
+            "PUT",
+            "/profile/%s/avatar_url" % (self.owner,),
+            content={"avatar_url": "http://my.server/pic.gif"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "DELETE",
+            "/profile/%s/avatar_url" % (self.owner,),
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        res = self._get_avatar_url()
+        self.assertEqual(res, "http://my.server/pic.gif")
+
+    def _get_displayname(self, name: str | None = None) -> str | None:
         channel = self.make_request(
             "GET", "/profile/%s/displayname" % (name or self.owner,)
         )
@@ -187,7 +265,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         # https://github.com/matrix-org/synapse/issues/13137.
         return channel.json_body.get("displayname")
 
-    def _get_avatar_url(self, name: Optional[str] = None) -> Optional[str]:
+    def _get_avatar_url(self, name: str | None = None) -> str | None:
         channel = self.make_request(
             "GET", "/profile/%s/avatar_url" % (name or self.owner,)
         )
@@ -485,6 +563,27 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             # The client requested ?propagate=true, so it should have happened.
             self.assertEqual(channel.json_body.get(prop), "http://my.server/pic.gif")
 
+    def test_get_unset_field_omits_key(self) -> None:
+        """
+        Fetching a standard profile field which the user has not set should
+        return a 200 with an empty body, rather than the key with a null value.
+        """
+        for field in ("displayname", "avatar_url"):
+            channel = self.make_request(
+                "DELETE",
+                f"/_matrix/client/v3/profile/{self.owner}/{field}",
+                access_token=self.owner_tok,
+            )
+            self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+            for path in (
+                f"/profile/{self.owner}/{field}",
+                f"/_matrix/client/v3/profile/{self.owner}/{field}",
+            ):
+                channel = self.make_request("GET", path)
+                self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+                self.assertEqual(channel.json_body, {}, path)
+
     def test_get_missing_custom_field(self) -> None:
         channel = self.make_request(
             "GET",
@@ -767,6 +866,21 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         avatar_url = self._get_avatar_url()
         self.assertEqual(avatar_url, "mxc://test/good")
 
+    def test_set_custom_field_never_existed_user(self) -> None:
+        """Setting a profile field for a user that does not exist should not
+        conjure up a profile row for them, even for a server admin."""
+        self.register_user("admin", "pass", admin=True)
+        admin_tok = self.login("admin", "pass")
+
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/v3/profile/@never-existed:test/custom_field",
+            content={"custom_field": "test"},
+            access_token=admin_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
     def test_set_custom_field_other(self) -> None:
         """Setting someone else's profile field should fail"""
         channel = self.make_request(
@@ -778,7 +892,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
-    def _setup_local_files(self, names_and_props: Dict[str, Dict[str, Any]]) -> None:
+    def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 
         Args:
@@ -846,7 +960,7 @@ class ProfilesRestrictedTestCase(unittest.HomeserverTestCase):
         self.try_fetch_profile(200, self.requester_tok)
 
     def try_fetch_profile(
-        self, expected_code: int, access_token: Optional[str] = None
+        self, expected_code: int, access_token: str | None = None
     ) -> None:
         self.request_profile(expected_code, access_token=access_token)
 
@@ -862,7 +976,7 @@ class ProfilesRestrictedTestCase(unittest.HomeserverTestCase):
         self,
         expected_code: int,
         url_suffix: str = "",
-        access_token: Optional[str] = None,
+        access_token: str | None = None,
     ) -> None:
         channel = self.make_request(
             "GET", self.profile_url + url_suffix, access_token=access_token
@@ -921,5 +1035,66 @@ class OwnProfileUnrestrictedTestCase(unittest.HomeserverTestCase):
             "GET",
             "/profile/" + self.requester + "/avatar_url",
             access_token=self.requester_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+
+class ProfileRatelimitTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets_for_client_rest_resource,
+        login.register_servlets,
+        profile.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.owner = self.register_user("owner", "pass")
+        self.owner_tok = self.login("owner", "pass")
+        self.other = self.register_user("other", "pass", displayname="Bob")
+        self.other_tok = self.login("other", "pass")
+
+    @unittest.override_config({"rc_profile": {"per_second": 0.1, "burst_count": 3}})
+    def test_ratelimit_authenticated(self) -> None:
+        """Profile lookups from an authenticated user are rate limited per user,
+        with the limit shared across the profile endpoints.
+        """
+        channel = self.make_request(
+            "GET", f"/profile/{self.other}", access_token=self.owner_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET", f"/profile/{self.other}/displayname", access_token=self.owner_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET", f"/profile/{self.other}/avatar_url", access_token=self.owner_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET", f"/profile/{self.other}", access_token=self.owner_tok
+        )
+        self.assertEqual(channel.code, 429, channel.result)
+
+        # Another user is not affected by the first user's limit.
+        channel = self.make_request(
+            "GET", f"/profile/{self.owner}", access_token=self.other_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+    @unittest.override_config({"rc_profile": {"per_second": 0.1, "burst_count": 3}})
+    def test_ratelimit_unauthenticated(self) -> None:
+        """Unauthenticated profile lookups are rate limited per IP address."""
+        for _ in range(3):
+            channel = self.make_request("GET", f"/profile/{self.other}")
+            self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request("GET", f"/profile/{self.other}")
+        self.assertEqual(channel.code, 429, channel.result)
+
+        # An authenticated user is not affected by the per-IP limit.
+        channel = self.make_request(
+            "GET", f"/profile/{self.other}", access_token=self.owner_tok
         )
         self.assertEqual(channel.code, 200, channel.result)

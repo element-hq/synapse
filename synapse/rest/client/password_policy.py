@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -46,7 +46,7 @@ class PasswordPolicyServlet(RestServlet):
         self.policy = hs.config.auth.password_policy
         self.enabled = hs.config.auth.password_policy_enabled
 
-    def on_GET(self, request: Request) -> Tuple[int, JsonDict]:
+    def on_GET(self, request: Request) -> tuple[int, JsonDict]:
         if not self.enabled or not self.policy:
             return 200, {}
 

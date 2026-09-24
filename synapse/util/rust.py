@@ -24,7 +24,6 @@ import os
 import urllib.parse
 from hashlib import blake2b
 from importlib.metadata import Distribution, PackageNotFoundError
-from typing import Optional
 
 import synapse
 from synapse.synapse_rust import get_rust_file_digest
@@ -41,24 +40,24 @@ def check_rust_lib_up_to_date() -> None:
         return None
 
     # Get the hash of all Rust source files
-    rust_path = os.path.join(synapse_root, "rust", "src")
+    rust_path = os.path.join(synapse_root, "rust")
     if not os.path.exists(rust_path):
         return None
 
-    hash = _hash_rust_files_in_directory(rust_path)
+    hash = _hash_rust_files_in_directory(synapse_root)
 
     if hash != get_rust_file_digest():
         raise Exception("Rust module outdated. Please rebuild using `poetry install`")
 
 
-def _hash_rust_files_in_directory(directory: str) -> str:
+def _hash_rust_files_in_directory(synapse_root: str) -> str:
     """Get the hash of all files in a directory (recursively)"""
 
-    directory = os.path.abspath(directory)
+    src_directory = os.path.abspath(os.path.join(synapse_root, "rust", "src"))
 
     paths = []
 
-    dirs = [directory]
+    dirs = [src_directory]
     while dirs:
         dir = dirs.pop()
         with os.scandir(dir) as d:
@@ -68,19 +67,26 @@ def _hash_rust_files_in_directory(directory: str) -> str:
                 else:
                     paths.append(entry.path)
 
+    # Manually add Cargo.toml's, Cargo.lock and build.rs to the hash, since
+    # changes to these files should also invalidate the built module.
+    paths.append(os.path.join(synapse_root, "rust", "Cargo.toml"))
+    paths.append(os.path.join(synapse_root, "rust", "build.rs"))
+    paths.append(os.path.join(synapse_root, "Cargo.lock"))
+    paths.append(os.path.join(synapse_root, "Cargo.toml"))
+
     # We sort to make sure that we get a consistent and well-defined ordering.
     paths.sort()
 
     hasher = blake2b()
 
     for path in paths:
-        with open(os.path.join(directory, path), "rb") as f:
+        with open(path, "rb") as f:
             hasher.update(f.read())
 
     return hasher.hexdigest()
 
 
-def get_synapse_source_directory() -> Optional[str]:
+def get_synapse_source_directory() -> str | None:
     """Try and find the source directory of synapse for editable installs (like
     those used in development).
 
@@ -112,7 +118,38 @@ def get_synapse_source_directory() -> Optional[str]:
     # c.f. https://packaging.python.org/en/latest/specifications/direct-url/
     direct_url_json = package.read_text("direct_url.json")
     if direct_url_json is None:
-        return None
+        # No direct url metadata. Check if this is an egg-info install.
+        #
+        # An egg-info install is when there exists a `matrix_synapse.egg-info`
+        # directory alongside the source tree, containing the package metadata.
+        # This allows discovering packages in the current directory, without
+        # installing them properly to the environment wide `site-packages`
+        # directory.
+        #
+        # When searching for a package, Python will look for `.egg-info` files
+        # in the current working directory before looking in `site-packages`.
+        # This means that when running Synapse (or the tests) from the source
+        # tree Python will pick up the synapse package from the egg-info
+        # install.
+        #
+        # Poetry will create an egg-info install when running `poetry install`.
+        #
+        # The combination of the above means that it is very common for
+        # developers (e.g. running tests) to encounter egg-info installs.
+        #
+        # In this case we can find the source tree by looking for the
+        # `matrix_synapse.egg-info/PKG-INFO` file, and going up two directories
+        # from there.
+
+        metadata_path = package.locate_file("matrix_synapse.egg-info/PKG-INFO")
+        if not os.path.exists(str(metadata_path)):
+            # Not an egg-info install.
+            return None
+
+        # `metadata_path` points to the egg-info/PKG-INFO file, so go up two
+        # directories to get the root of the source tree.
+        source_dir = metadata_path.parent.parent
+        return os.fspath(source_dir)
 
     # c.f. https://packaging.python.org/en/latest/specifications/direct-url/ for
     # the format

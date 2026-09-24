@@ -20,7 +20,6 @@
 #
 
 from functools import partial
-from typing import List, Tuple
 
 from twisted.internet import defer
 
@@ -169,7 +168,7 @@ class DeferredCacheTestCase(TestCase):
         self.assertEqual(v, 2)
 
     def test_invalidate(self) -> None:
-        cache: DeferredCache[Tuple[str], int] = DeferredCache(
+        cache: DeferredCache[tuple[str], int] = DeferredCache(
             name="test", clock=self.clock, server_name="test_server"
         )
         cache.prefill(("foo",), 123)
@@ -266,7 +265,7 @@ class DeferredCacheTestCase(TestCase):
         cache.get(3)
 
     def test_eviction_iterable(self) -> None:
-        cache: DeferredCache[int, List[str]] = DeferredCache(
+        cache: DeferredCache[int, list[str]] = DeferredCache(
             name="test",
             clock=self.clock,
             server_name="test_server",

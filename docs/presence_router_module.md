@@ -76,7 +76,7 @@ possible.
 #### `get_interested_users`
 
 ```python
-async def get_interested_users(self, user_id: str) -> Union[Set[str], str]
+async def get_interested_users(self, user_id: str) -> set[str] | str
 ```
 
 **Required.** An asynchronous method that is passed a single Matrix User ID. This
@@ -182,7 +182,7 @@ class ExamplePresenceRouter:
     async def get_interested_users(
         self,
         user_id: str,
-    ) -> Union[Set[str], PresenceRouter.ALL_USERS]:
+    ) -> set[str] | PresenceRouter.ALL_USERS:
         """
         Retrieve a list of users that `user_id` is interested in receiving the
         presence of. This will be in addition to those they share a room with.

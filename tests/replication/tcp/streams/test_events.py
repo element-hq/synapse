@@ -18,7 +18,7 @@
 #
 #
 
-from typing import Any, List, Optional
+from typing import Any
 
 from parameterized import parameterized
 
@@ -27,6 +27,7 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
 from synapse.replication.tcp.commands import RdataCommand
+from synapse.replication.tcp.resource import _batch_updates
 from synapse.replication.tcp.streams._base import _STREAM_UPDATE_TARGET_ROW_COUNT
 from synapse.replication.tcp.streams.events import (
     _MAX_STATE_UPDATES_PER_ROOM,
@@ -41,8 +42,13 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
+from tests import unittest
 from tests.replication._base import BaseStreamTestCase
-from tests.test_utils.event_injection import inject_event, inject_member_event
+from tests.test_utils.event_injection import (
+    inject_event,
+    inject_member_event,
+    persist_message_and_state_event_in_one_batch,
+)
 
 
 class EventsStreamTestCase(BaseStreamTestCase):
@@ -299,7 +305,7 @@ class EventsStreamTestCase(BaseStreamTestCase):
             self.assertEqual(row.data.event_id, pl_event.event_id)
 
             # the state rows are unsorted
-            state_rows: List[EventsStreamCurrentStateRow] = []
+            state_rows: list[EventsStreamCurrentStateRow] = []
             for stream_name, _, row in received_event_rows:
                 self.assertEqual("events", stream_name)
                 self.assertIsInstance(row, EventsStreamRow)
@@ -355,7 +361,7 @@ class EventsStreamTestCase(BaseStreamTestCase):
             self.hs.get_datastores().main.get_latest_event_ids_in_room(self.room_id)
         )
 
-        events: List[EventBase] = []
+        events: list[EventBase] = []
         for user in user_ids:
             events.extend(
                 self._inject_state_event(sender=user) for _ in range(STATES_PER_USER)
@@ -426,7 +432,7 @@ class EventsStreamTestCase(BaseStreamTestCase):
             self.assertEqual(row.data.event_id, pl_events[i].event_id)
 
             # the state rows are unsorted
-            state_rows: List[EventsStreamCurrentStateRow] = []
+            state_rows: list[EventsStreamCurrentStateRow] = []
             for _ in range(STATES_PER_USER + 1):
                 stream_name, token, row = received_event_rows.pop(0)
                 self.assertEqual("events", stream_name)
@@ -517,7 +523,7 @@ class EventsStreamTestCase(BaseStreamTestCase):
     event_count = 0
 
     def _inject_test_event(
-        self, body: Optional[str] = None, sender: Optional[str] = None, **kwargs: Any
+        self, body: str | None = None, sender: str | None = None, **kwargs: Any
     ) -> EventBase:
         if sender is None:
             sender = self.user_id
@@ -539,9 +545,9 @@ class EventsStreamTestCase(BaseStreamTestCase):
 
     def _inject_state_event(
         self,
-        body: Optional[str] = None,
-        state_key: Optional[str] = None,
-        sender: Optional[str] = None,
+        body: str | None = None,
+        state_key: str | None = None,
+        sender: str | None = None,
     ) -> EventBase:
         if sender is None:
             sender = self.user_id
@@ -563,3 +569,66 @@ class EventsStreamTestCase(BaseStreamTestCase):
                 content={"body": body},
             )
         )
+
+
+class EventsStreamBatchTokensTestCase(unittest.HomeserverTestCase):
+    """Tests for the tokens `EventsStream` hands to readers, which need no
+    worker (so they run under SQLite too, unlike `EventsStreamTestCase`)."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user_id = self.register_user("u1", "pass")
+        self.user_tok = self.login("u1", "pass")
+        self.room_id = self.helper.create_room_as(tok=self.user_tok)
+
+    def test_update_function_splits_persist_batches(self) -> None:
+        """The events stream emits a distinct token for every event stream
+        ordering (`_batch_updates` only collapses rows that share a token), and
+        `_process_rdata` calls `on_rdata` -- and hence
+        `process_replication_position` -- once per token. So a reader worker
+        (e.g. a sync worker) advances its events-stream position *through* the
+        middle of a persist batch, one event at a time, while reading
+        `current_state_delta_stream` -- whose rows are stamped with the batch
+        minimum -- straight from the database.
+
+        This is what makes the hand-built `since` token in
+        `tests/rest/client/test_sync.py::SyncStateAfterTimelineStateTestCase`
+        one a real deployment hands out.
+        """
+        store = self.hs.get_datastores().main
+        before = store.get_room_max_token().stream
+        message, state_event = self.get_success(
+            persist_message_and_state_event_in_one_batch(
+                self.hs, self.room_id, self.user_id
+            )
+        )
+        after = store.get_room_max_token().stream
+
+        message_pos = message.internal_metadata.stream_ordering
+        state_pos = state_event.internal_metadata.stream_ordering
+        assert message_pos is not None and state_pos is not None
+        self.assertLess(message_pos, state_pos)
+
+        stream = EventsStream(self.hs)
+        updates, _upto, _limited = self.get_success(
+            # A limit of 100 is comfortably more than the handful of rows this
+            # test persists, so the update batch is never truncated.
+            stream._update_function("master", before, after, 100)
+        )
+
+        # The tokens a reader will actually advance to, in order.
+        delivered = [token for token, _row in _batch_updates(updates) if token]
+
+        self.assertIn(
+            message_pos,
+            delivered,
+            "a reader worker advances to the batch minimum before it sees the "
+            "state event",
+        )
+        self.assertIn(state_pos, delivered)
+        self.assertLess(delivered.index(message_pos), delivered.index(state_pos))

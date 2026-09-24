@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import EventTypes, Membership, RoomCreationPreset
 from synapse.events import EventBase
@@ -59,8 +59,8 @@ class ServerNoticesManager:
         user_id: str,
         event_content: dict,
         type: str = EventTypes.Message,
-        state_key: Optional[str] = None,
-        txn_id: Optional[str] = None,
+        state_key: str | None = None,
+        txn_id: str | None = None,
     ) -> EventBase:
         """Send a notice to the given user
 
@@ -99,7 +99,7 @@ class ServerNoticesManager:
         return event
 
     @cached()
-    async def maybe_get_notice_room_for_user(self, user_id: str) -> Optional[str]:
+    async def maybe_get_notice_room_for_user(self, user_id: str) -> str | None:
         """Try to look up the server notice room for this user if it exists.
 
         Does not create one if none can be found.
@@ -294,8 +294,8 @@ class ServerNoticesManager:
         self,
         requester: Requester,
         room_id: str,
-        display_name: Optional[str],
-        avatar_url: Optional[str],
+        display_name: str | None,
+        avatar_url: str | None,
     ) -> None:
         """
         Updates the notice user's profile if it's different from what is in the room.
@@ -341,7 +341,7 @@ class ServerNoticesManager:
         room_id: str,
         info_event_type: str,
         info_content_key: str,
-        info_value: Optional[str],
+        info_value: str | None,
     ) -> None:
         """
         Updates a specific notice room's info if it's different from what is set.

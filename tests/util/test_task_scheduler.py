@@ -18,14 +18,15 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional, Tuple
 
-from twisted.internet.task import deferLater
+from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
+from synapse.logging.context import make_deferred_yieldable
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -39,10 +40,16 @@ class TestTaskScheduler(HomeserverTestCase):
         self.task_scheduler.register_action(self._sleeping_task, "_sleeping_task")
         self.task_scheduler.register_action(self._raising_task, "_raising_task")
         self.task_scheduler.register_action(self._resumable_task, "_resumable_task")
+        self.task_scheduler.register_action(
+            self._incrementing_active_task, "_incrementing_active_task"
+        )
+        self.task_scheduler.register_action(
+            self._incrementing_running_task, "_incrementing_running_task"
+        )
 
     async def _test_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         # This test task will copy the parameters to the result
         result = None
         if task.params:
@@ -68,7 +75,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
         # The timestamp being 30s after now the task should been executed
         # after the first scheduling loop is run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS / 1000)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         task = self.get_success(self.task_scheduler.get_task(task_id))
         assert task is not None
@@ -85,15 +92,16 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _sleeping_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         # Sleep for a second
-        await deferLater(self.reactor, 1, lambda: None)
+        await self.hs.get_clock().sleep(Duration(seconds=1))
         return TaskStatus.COMPLETE, None, None
 
     def test_schedule_lot_of_tasks(self) -> None:
-        """Schedule more than `TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS` tasks and check the behavior."""
+        """Schedule more than `self.task_scheduler._max_concurrent_tasks` tasks and check the behavior."""
+        max_concurrent = self.task_scheduler._max_concurrent_tasks
         task_ids = []
-        for i in range(TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS + 1):
+        for i in range(max_concurrent + 1):
             task_ids.append(
                 self.get_success(
                     self.task_scheduler.schedule_task(
@@ -103,18 +111,18 @@ class TestTaskScheduler(HomeserverTestCase):
                 )
             )
 
-        def get_tasks_of_status(status: TaskStatus) -> List[ScheduledTask]:
+        def get_tasks_of_status(status: TaskStatus) -> list[ScheduledTask]:
             tasks = (
                 self.get_success(self.task_scheduler.get_task(task_id))
                 for task_id in task_ids
             )
             return [t for t in tasks if t is not None and t.status == status]
 
-        # At this point, there should be MAX_CONCURRENT_RUNNING_TASKS active tasks and
+        # At this point, there should be max_concurrent active tasks and
         # one scheduled task.
         self.assertEqual(
             len(get_tasks_of_status(TaskStatus.ACTIVE)),
-            TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS,
+            max_concurrent,
         )
         self.assertEqual(
             len(get_tasks_of_status(TaskStatus.SCHEDULED)),
@@ -124,11 +132,70 @@ class TestTaskScheduler(HomeserverTestCase):
         # Give the time to the active tasks to finish
         self.reactor.advance(1)
 
-        # Check that MAX_CONCURRENT_RUNNING_TASKS tasks have run and that one
+        # Check that max_concurrent tasks have run and that one
         # is still scheduled.
         self.assertEqual(
             len(get_tasks_of_status(TaskStatus.COMPLETE)),
-            TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS,
+            max_concurrent,
+        )
+        scheduled_tasks = get_tasks_of_status(TaskStatus.SCHEDULED)
+        self.assertEqual(len(scheduled_tasks), 1)
+
+        # The scheduled task should start 0.1s after the first of the active tasks
+        # finishes
+        self.reactor.advance(0.1)
+        self.assertEqual(len(get_tasks_of_status(TaskStatus.ACTIVE)), 1)
+
+        # ... and should finally complete after another second
+        self.reactor.advance(1)
+        prev_scheduled_task = self.get_success(
+            self.task_scheduler.get_task(scheduled_tasks[0].id)
+        )
+        assert prev_scheduled_task is not None
+        self.assertEqual(
+            prev_scheduled_task.status,
+            TaskStatus.COMPLETE,
+        )
+
+    @override_config({"task_scheduler": {"max_concurrent_tasks": 4}})
+    def test_schedule_lot_of_tasks_custom_concurrency(self) -> None:
+        """Test that configuring a higher concurrency limit allows more concurrent tasks."""
+        self.assertEqual(self.task_scheduler._max_concurrent_tasks, 4)
+        max_concurrent = self.task_scheduler._max_concurrent_tasks
+        task_ids = []
+        for i in range(max_concurrent + 1):
+            task_ids.append(
+                self.get_success(
+                    self.task_scheduler.schedule_task(
+                        "_sleeping_task",
+                        params={"val": i},
+                    )
+                )
+            )
+
+        def get_tasks_of_status(status: TaskStatus) -> list[ScheduledTask]:
+            tasks = (
+                self.get_success(self.task_scheduler.get_task(task_id))
+                for task_id in task_ids
+            )
+            return [t for t in tasks if t is not None and t.status == status]
+
+        self.assertEqual(
+            len(get_tasks_of_status(TaskStatus.ACTIVE)),
+            4,
+        )
+        self.assertEqual(
+            len(get_tasks_of_status(TaskStatus.SCHEDULED)),
+            1,
+        )
+
+        # Give the time to the active tasks to finish
+        self.reactor.advance(1)
+
+        # Check that 4 tasks have run and that one is still scheduled.
+        self.assertEqual(
+            len(get_tasks_of_status(TaskStatus.COMPLETE)),
+            4,
         )
         scheduled_tasks = get_tasks_of_status(TaskStatus.SCHEDULED)
         self.assertEqual(len(scheduled_tasks), 1)
@@ -151,7 +218,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _raising_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         raise Exception("raising")
 
     def test_schedule_raising_task(self) -> None:
@@ -165,13 +232,15 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _resumable_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         if task.result and "in_progress" in task.result:
             return TaskStatus.COMPLETE, {"success": True}, None
         else:
             await self.task_scheduler.update_task(task.id, result={"in_progress": True})
+            # Create a deferred which we will never complete
+            incomplete_d: Deferred = Deferred()
             # Await forever to simulate an aborted task because of a restart
-            await deferLater(self.reactor, 2**16, lambda: None)
+            await make_deferred_yieldable(incomplete_d)
             # This should never been called
             return TaskStatus.ACTIVE, None, None
 
@@ -184,14 +253,109 @@ class TestTaskScheduler(HomeserverTestCase):
         self.assertEqual(task.status, TaskStatus.ACTIVE)
 
         # Simulate a synapse restart by emptying the list of running tasks
-        self.task_scheduler._running_tasks = set()
-        self.reactor.advance((TaskScheduler.SCHEDULE_INTERVAL_MS / 1000))
+        self.task_scheduler._running_tasks = {}
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         task = self.get_success(self.task_scheduler.get_task(task_id))
         assert task is not None
         self.assertEqual(task.status, TaskStatus.COMPLETE)
         assert task.result is not None
         self.assertTrue(task.result.get("success"))
+
+    def _test_cancel_task(self, task_id: str) -> None:
+        task = self.get_success(self.task_scheduler.get_task(task_id))
+        assert task is not None
+        assert task.status == TaskStatus.ACTIVE
+
+        assert task.result and "counter" in task.result
+        current_counter = int(task.result["counter"])
+
+        self.reactor.advance(1)
+
+        task = self.get_success(self.task_scheduler.get_task(task_id))
+        assert task is not None
+        assert task.status == TaskStatus.ACTIVE
+
+        # At this point the task should have run at least one more time, let's check the counter
+        assert task.result and "counter" in task.result
+        new_counter = int(task.result["counter"])
+        assert new_counter > current_counter
+        current_counter = new_counter
+
+        # Cancelling active task
+        self.get_success(self.task_scheduler.cancel_task(task_id))
+
+        self.reactor.advance(1)
+
+        # Task should be marked as cancelled
+        task = self.get_success(self.task_scheduler.get_task(task_id))
+        assert task is not None
+        self.assertEqual(task.status, TaskStatus.CANCELLED)
+
+        # Task should be in the running tasks
+        assert task_id not in self.task_scheduler._running_tasks
+
+        # Counter should not increase anymore and stay the same
+        assert task.result and "counter" in task.result
+        new_counter = int(task.result["counter"])
+        assert new_counter == current_counter
+        current_counter = new_counter
+
+        # Let's check one more time to be sure that it is not increasing
+        self.reactor.advance(100)
+
+        task = self.get_success(self.task_scheduler.get_task(task_id))
+        assert task is not None
+        assert task.result and "counter" in task.result
+        new_counter = int(task.result["counter"])
+        assert new_counter == current_counter
+
+    async def _incrementing_running_task(
+        self, task: ScheduledTask
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
+        current_counter = 0
+
+        while True:
+            current_counter += 1
+            await self.task_scheduler.update_task(
+                task.id, result={"counter": current_counter}
+            )
+            await self.hs.get_clock().sleep(Duration(seconds=1))
+
+        return TaskStatus.COMPLETE, None, None  # type: ignore[unreachable]
+
+    def test_cancel_running_task(self) -> None:
+        """Schedule and then cancel a long running task that increments a counter."""
+
+        task_id = self.get_success(
+            self.task_scheduler.schedule_task(
+                "_incrementing_running_task",
+            )
+        )
+
+        self._test_cancel_task(task_id)
+
+    async def _incrementing_active_task(
+        self, task: ScheduledTask
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
+        current_counter = 0
+        if task.result and "counter" in task.result:
+            current_counter = int(task.result["counter"])
+
+        return TaskStatus.ACTIVE, {"counter": current_counter + 1}, None
+
+    def test_cancel_active_task(self) -> None:
+        """Schedule and then cancel a long active task that increments a counter,
+        but step by step, by keeping the task ACTIVE even if it is not running
+        between the steps."""
+
+        task_id = self.get_success(
+            self.task_scheduler.schedule_task(
+                "_incrementing_active_task",
+            )
+        )
+
+        self._test_cancel_task(task_id)
 
 
 class TestTaskSchedulerWithBackgroundWorker(BaseMultiWorkerStreamTestCase):
@@ -201,7 +365,7 @@ class TestTaskSchedulerWithBackgroundWorker(BaseMultiWorkerStreamTestCase):
 
     async def _test_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
         return (TaskStatus.COMPLETE, None, None)
 
     @override_config({"run_background_tasks_on": "worker1"})

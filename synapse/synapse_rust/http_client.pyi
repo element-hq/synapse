@@ -14,14 +14,32 @@ from typing import Mapping
 
 from twisted.internet.defer import Deferred
 
-from synapse.types import ISynapseReactor
+from synapse.synapse_rust.runtime import RustRuntime
 
 class HttpClient:
     """
     The returned deferreds follow Synapse logcontext rules.
     """
 
-    def __init__(self, reactor: ISynapseReactor, user_agent: str) -> None: ...
+    def __init__(
+        self,
+        runtime: RustRuntime,
+        user_agent: str,
+        http2_only: bool = False,
+    ) -> None:
+        """
+        Create a new HTTP client backed by reqwest.
+
+        Args:
+            runtime: The per-homeserver Rust state (`hs.get_rust_runtime()`)
+            user_agent: The user agent to use for requests
+            http2_only: Whether to use HTTP/2 only, even on unencrypted connections. By
+                default, it will always use HTTP/1.1 over unencrypted connections, and
+                rely on TLS ALPN to negotiate HTTP/2.
+
+                Ensure the upstream server supports HTTP/2 before enabling this.
+        """
+
     def get(self, url: str, response_limit: int) -> Deferred[bytes]: ...
     def post(
         self,

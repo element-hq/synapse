@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import AuthError
 from synapse.http.server import HttpServer
@@ -67,7 +67,7 @@ class IdTokenServlet(RestServlet):
     }
     """
 
-    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/openid/request_token")
+    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/openid/request_token$")
 
     EXPIRES_MS = 3600 * 1000
 
@@ -80,7 +80,7 @@ class IdTokenServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot request tokens for other users.")

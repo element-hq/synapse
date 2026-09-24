@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet import defer
@@ -265,7 +265,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         self.assertEqual(event.type, "m.room.message")
         self.assertEqual(event.room_id, room_id)
         self.assertFalse(hasattr(event, "state_key"))
-        self.assertDictEqual(event.content, content)
+        self.assertDictEqual(dict(event.content), content)
 
         expected_requester = create_requester(
             user_id, authenticated_entity=self.hs.hostname
@@ -282,11 +282,11 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         # Create and send a state event
         content = {
             "events_default": 0,
-            "users": {user_id: 100},
             "state_default": 50,
             "users_default": 0,
             "events": {"test.event.type": 25},
         }
+
         event_dict = {
             "room_id": room_id,
             "type": "m.room.power_levels",
@@ -301,7 +301,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         self.assertEqual(event.type, "m.room.power_levels")
         self.assertEqual(event.room_id, room_id)
         self.assertEqual(event.state_key, "")
-        self.assertDictEqual(event.content, content)
+        self.assertDictEqual(dict(event.content), content)
 
         # Check that the event was sent
         self.event_creation_handler.create_and_send_nonmember_event.assert_called_with(
@@ -758,7 +758,10 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
             access_token=access_token,
         )
         self.assertEqual(channel.code, 200, channel.result)
-        self.assertEqual(channel.json_body["creator"], user_id)
+        self.assertEqual(
+            channel.json_body["room_version"],
+            self.hs.config.server.default_room_version.identifier,
+        )
 
         # Check room alias.
         self.assertEqual(room_alias, f"#foo-bar:{self.module_api.server_name}")
@@ -768,14 +771,16 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
             self.module_api.create_room(user_id=user_id, config={}, ratelimit=False)
         )
 
-        # Check room creator.
         channel = self.make_request(
             "GET",
             f"/_matrix/client/v3/rooms/{room_id}/state/m.room.create",
             access_token=access_token,
         )
         self.assertEqual(channel.code, 200, channel.result)
-        self.assertEqual(channel.json_body["creator"], user_id)
+        self.assertEqual(
+            channel.json_body["room_version"],
+            self.hs.config.server.default_room_version.identifier,
+        )
 
         # Check room alias.
         self.assertIsNone(room_alias)
@@ -803,10 +808,10 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         )
 
         # Setup a callback counting the number of pushers.
-        number_of_pushers_in_callback: Optional[int] = None
+        number_of_pushers_in_callback: int | None = None
 
         async def _on_logged_out_mock(
-            user_id: str, device_id: Optional[str], access_token: str
+            user_id: str, device_id: str | None, access_token: str
         ) -> None:
             nonlocal number_of_pushers_in_callback
             number_of_pushers_in_callback = len(
@@ -828,6 +833,24 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         # Ensure the pushers were deleted after the callback.
         self.assertEqual(len(self.hs.get_pusherpool().pushers[user_id].values()), 0)
 
+    def test_event_deprecated_methods(self) -> None:
+        """Test that deprecated methods on events are still functional."""
+        user_id = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        room_id = self.helper.create_room_as(tok=tok)
+
+        state = self.get_success(
+            self.hs.get_storage_controllers().state.get_current_state(room_id)
+        )
+        create_event = state[(EventTypes.Create, "")]
+
+        # `.user_id` is a deprecated alias for `.sender`.
+        self.assertEqual(create_event.user_id, user_id)  # type: ignore[attr-defined]
+
+        # The event supports looking up keys via `__getitem__` although deprecated
+        self.assertEqual(create_event["type"], EventTypes.Create)  # type: ignore[index]
+
 
 class ModuleApiWorkerTestCase(BaseModuleApiTestCase, BaseMultiWorkerStreamTestCase):
     """For testing ModuleApi functionality in a multi-worker setup"""
@@ -839,7 +862,7 @@ class ModuleApiWorkerTestCase(BaseModuleApiTestCase, BaseMultiWorkerStreamTestCa
         presence.register_servlets,
     ]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         conf = super().default_config()
         conf["stream_writers"] = {"presence": ["presence_writer"]}
         conf["instance_map"] = {

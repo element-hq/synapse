@@ -22,7 +22,7 @@
 import json
 import logging
 import urllib.parse
-from typing import TYPE_CHECKING, Any, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from twisted.internet import protocol
 from twisted.internet.interfaces import ITCPTransport
@@ -51,22 +51,24 @@ logger = logging.getLogger(__name__)
 # "Hop-by-hop" headers (as opposed to "end-to-end" headers) as defined by RFC2616
 # section 13.5.1 and referenced in RFC9110 section 7.6.1. These are meant to only be
 # consumed by the immediate recipient and not be forwarded on.
-HOP_BY_HOP_HEADERS_LOWERCASE = {
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailers",
-    "transfer-encoding",
-    "upgrade",
-}
+HOP_BY_HOP_HEADERS_LOWERCASE = frozenset(
+    {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    }
+)
 assert all(header.lower() == header for header in HOP_BY_HOP_HEADERS_LOWERCASE)
 
 
 def parse_connection_header_value(
-    connection_header_value: Optional[bytes],
-) -> Set[str]:
+    connection_header_value: bytes | None,
+) -> set[str]:
     """
     Parse the `Connection` header to determine which headers we should not be copied
     over from the remote response.
@@ -86,7 +88,7 @@ def parse_connection_header_value(
         The set of header names that should not be copied over from the remote response.
         The keys are lowercased.
     """
-    extra_headers_to_remove: Set[str] = set()
+    extra_headers_to_remove: set[str] = set()
     if connection_header_value:
         extra_headers_to_remove = {
             connection_option.decode("ascii").strip().lower()
@@ -140,7 +142,7 @@ class ProxyResource(_AsyncResource):
             "Invalid Proxy-Authorization header.", Codes.UNAUTHORIZED
         )
 
-    async def _async_render(self, request: "SynapseRequest") -> Tuple[int, Any]:
+    async def _async_render(self, request: "SynapseRequest") -> tuple[int, Any]:
         uri = urllib.parse.urlparse(request.uri)
         assert uri.scheme == b"matrix-federation"
 

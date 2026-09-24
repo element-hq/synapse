@@ -23,12 +23,8 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Iterable,
     Iterator,
-    List,
-    Optional,
-    Tuple,
     cast,
 )
 
@@ -51,10 +47,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # The type of a row in the pushers table.
-PusherRow = Tuple[
+PusherRow = tuple[
     int,  # id
     str,  # user_name
-    Optional[int],  # access_token
+    int | None,  # access_token
     str,  # profile_tag
     str,  # kind
     str,  # app_id
@@ -192,7 +188,7 @@ class PusherWorkerStore(SQLBaseStore):
     async def get_pushers_by_user_id(self, user_id: str) -> Iterator[PusherConfig]:
         return await self.get_pushers_by({"user_name": user_id})
 
-    async def get_pushers_by(self, keyvalues: Dict[str, Any]) -> Iterator[PusherConfig]:
+    async def get_pushers_by(self, keyvalues: dict[str, Any]) -> Iterator[PusherConfig]:
         """Retrieve pushers that match the given criteria.
 
         Args:
@@ -202,7 +198,7 @@ class PusherWorkerStore(SQLBaseStore):
             The pushers for which the given columns have the given values.
         """
 
-        def get_pushers_by_txn(txn: LoggingTransaction) -> List[PusherRow]:
+        def get_pushers_by_txn(txn: LoggingTransaction) -> list[PusherRow]:
             # We could technically use simple_select_list here, but we need to call
             # COALESCE on the 'enabled' column. While it is technically possible to give
             # simple_select_list the whole `COALESCE(...) AS ...` as a column name, it
@@ -220,7 +216,7 @@ class PusherWorkerStore(SQLBaseStore):
 
             txn.execute(sql, list(keyvalues.values()))
 
-            return cast(List[PusherRow], txn.fetchall())
+            return cast(list[PusherRow], txn.fetchall())
 
         ret = await self.db_pool.runInteraction(
             desc="get_pushers_by",
@@ -230,7 +226,7 @@ class PusherWorkerStore(SQLBaseStore):
         return self._decode_pushers_rows(ret)
 
     async def get_enabled_pushers(self) -> Iterator[PusherConfig]:
-        def get_enabled_pushers_txn(txn: LoggingTransaction) -> List[PusherRow]:
+        def get_enabled_pushers_txn(txn: LoggingTransaction) -> list[PusherRow]:
             txn.execute(
                 """
                 SELECT id, user_name, access_token, profile_tag, kind, app_id,
@@ -240,7 +236,7 @@ class PusherWorkerStore(SQLBaseStore):
                 FROM pushers WHERE COALESCE(enabled, TRUE)
                 """
             )
-            return cast(List[PusherRow], txn.fetchall())
+            return cast(list[PusherRow], txn.fetchall())
 
         return self._decode_pushers_rows(
             await self.db_pool.runInteraction(
@@ -250,7 +246,7 @@ class PusherWorkerStore(SQLBaseStore):
 
     async def get_all_updated_pushers_rows(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple]], int, bool]:
         """Get updates for pushers replication stream.
 
         Args:
@@ -277,7 +273,7 @@ class PusherWorkerStore(SQLBaseStore):
 
         def get_all_updated_pushers_rows_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+        ) -> tuple[list[tuple[int, tuple]], int, bool]:
             sql = """
                 SELECT id, user_name, app_id, pushkey
                 FROM pushers
@@ -286,7 +282,7 @@ class PusherWorkerStore(SQLBaseStore):
             """
             txn.execute(sql, (last_id, current_id, limit))
             updates = cast(
-                List[Tuple[int, tuple]],
+                list[tuple[int, tuple]],
                 [
                     (stream_id, (user_name, app_id, pushkey, False))
                     for stream_id, user_name, app_id, pushkey in txn
@@ -368,7 +364,7 @@ class PusherWorkerStore(SQLBaseStore):
         return bool(updated)
 
     async def update_pusher_failing_since(
-        self, app_id: str, pushkey: str, user_id: str, failing_since: Optional[int]
+        self, app_id: str, pushkey: str, user_id: str, failing_since: int | None
     ) -> None:
         await self.db_pool.simple_update(
             table="pushers",
@@ -379,9 +375,9 @@ class PusherWorkerStore(SQLBaseStore):
 
     async def get_throttle_params_by_room(
         self, pusher_id: int
-    ) -> Dict[str, ThrottleParams]:
+    ) -> dict[str, ThrottleParams]:
         res = cast(
-            List[Tuple[str, Optional[int], Optional[int]]],
+            list[tuple[str, int | None, int | None]],
             await self.db_pool.simple_select_list(
                 "pusher_throttle",
                 {"pusher": pusher_id},
@@ -610,7 +606,7 @@ class PusherBackgroundUpdatesStore(SQLBaseStore):
                 (last_pusher_id, batch_size),
             )
 
-            rows = cast(List[Tuple[int, Optional[str], Optional[str]]], txn.fetchall())
+            rows = cast(list[tuple[int, str | None, str | None]], txn.fetchall())
             if len(rows) == 0:
                 return 0
 
@@ -669,13 +665,13 @@ class PusherStore(PusherWorkerStore, PusherBackgroundUpdatesStore):
         device_display_name: str,
         pushkey: str,
         pushkey_ts: int,
-        lang: Optional[str],
-        data: Optional[JsonDict],
+        lang: str | None,
+        data: JsonDict | None,
         last_stream_ordering: int,
         profile_tag: str = "",
         enabled: bool = True,
-        device_id: Optional[str] = None,
-        access_token_id: Optional[int] = None,
+        device_id: str | None = None,
+        access_token_id: int | None = None,
     ) -> None:
         async with self._pushers_id_gen.get_next() as stream_id:
             await self.db_pool.simple_upsert(
@@ -764,7 +760,7 @@ class PusherStore(PusherWorkerStore, PusherBackgroundUpdatesStore):
         # account.
         pushers = list(await self.get_pushers_by_user_id(user_id))
 
-        def delete_pushers_txn(txn: LoggingTransaction, stream_ids: List[int]) -> None:
+        def delete_pushers_txn(txn: LoggingTransaction, stream_ids: list[int]) -> None:
             self._invalidate_cache_and_stream(  # type: ignore[attr-defined]
                 txn, self.get_if_user_has_pusher, (user_id,)
             )

@@ -19,6 +19,8 @@
 #
 #
 
+from synapse.config.push_rules import PushRulesConfig
+
 from ._base import ConfigError, RootConfig
 from .account_validity import AccountValidityConfig
 from .api import ApiConfig
@@ -58,6 +60,7 @@ from .server_notices import ServerNoticesConfig
 from .spam_checker import SpamCheckerConfig
 from .sso import SSOConfig
 from .stats import StatsConfig
+from .task_scheduler import TaskSchedulerConfig
 from .third_party_event_rules import ThirdPartyRulesConfig
 from .tls import TlsConfig
 from .tracer import TracerConfig
@@ -102,6 +105,7 @@ class HomeServerConfig(RootConfig):
         EmailConfig,
         PasswordAuthProviderConfig,
         PushConfig,
+        PushRulesConfig,
         SpamCheckerConfig,
         RoomConfig,
         UserDirectoryConfig,
@@ -117,6 +121,7 @@ class HomeServerConfig(RootConfig):
         BackgroundUpdateConfig,
         AutoAcceptInvitesConfig,
         UserTypesConfig,
+        TaskSchedulerConfig,
         # This must be last, as it checks for conflicts with other config options.
         MasConfig,
     ]

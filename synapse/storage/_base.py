@@ -21,7 +21,7 @@
 #
 import logging
 from abc import ABCMeta
-from typing import TYPE_CHECKING, Any, Collection, Dict, Iterable, Optional, Union
+from typing import TYPE_CHECKING, Any, Collection, Iterable
 
 from synapse.storage.database import (
     DatabasePool,
@@ -60,7 +60,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         self.database_engine = database.engine
         self.db_pool = database
 
-        self.external_cached_functions: Dict[str, CachedFunction] = {}
+        self.external_cached_functions: dict[str, CachedFunction] = {}
 
     def process_replication_rows(  # noqa: B027 (no-op by design)
         self,
@@ -137,6 +137,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         # Purge other caches based on room state.
         self._attempt_to_invalidate_cache("get_room_summary", (room_id,))
         self._attempt_to_invalidate_cache("get_partial_current_state_ids", (room_id,))
+        self._attempt_to_invalidate_cache("_get_current_state_event_id", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
         self._attempt_to_invalidate_cache(
@@ -154,6 +155,7 @@ class SQLBaseStore(metaclass=ABCMeta):
             room_id: Room where state changed
         """
         self._attempt_to_invalidate_cache("get_partial_current_state_ids", (room_id,))
+        self._attempt_to_invalidate_cache("_get_current_state_event_id", (room_id,))
         self._attempt_to_invalidate_cache("get_users_in_room", (room_id,))
         self._attempt_to_invalidate_cache("is_host_invited", None)
         self._attempt_to_invalidate_cache("is_host_joined", None)
@@ -176,7 +178,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         )
 
     def _attempt_to_invalidate_cache(
-        self, cache_name: str, key: Optional[Collection[Any]]
+        self, cache_name: str, key: Collection[Any] | None
     ) -> bool:
         """Attempts to invalidate the cache of the given name, ignoring if the
         cache doesn't exist. Mainly used for invalidating caches on workers,
@@ -218,12 +220,18 @@ class SQLBaseStore(metaclass=ABCMeta):
         self.external_cached_functions[cache_name] = func
 
 
-def db_to_json(db_content: Union[memoryview, bytes, bytearray, str]) -> Any:
+def db_to_json(
+    db_content: memoryview | bytes | bytearray | str | dict[str, Any] | list[Any],
+) -> Any:
     """
     Take some data from a database row and return a JSON-decoded object.
 
     Args:
         db_content: The JSON-encoded contents from the database.
+            Supports TEXT columns, as well as JSON/JSONB columns containing lists or objects.
+            Note that psycopg will decode JSON/JSONB automatically but SQLite doesn't have
+            such a data type (and returns the text verbatim), so this function can help
+            paper over the difference.
 
     Returns:
         The object decoded from JSON.
@@ -237,6 +245,13 @@ def db_to_json(db_content: Union[memoryview, bytes, bytearray, str]) -> Any:
     # it only supports handling strings
     if isinstance(db_content, (bytes, bytearray)):
         db_content = db_content.decode("utf8")
+
+    if isinstance(db_content, (dict, list)):
+        # psycopg2 has already decoded this JSON or JSONB value
+        # Maybe we should be splitting this case out to a separate helper where
+        # we expect JSON/JSONB columns and switch behaviour based on
+        # the database driver
+        return db_content
 
     try:
         return json_decoder.decode(db_content)

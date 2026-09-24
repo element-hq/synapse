@@ -308,6 +308,9 @@ The following fields are possible in the JSON response body:
   If the room does not define a type, the value will be `null`.
 * `forgotten` - Whether all local users have
   [forgotten](https://spec.matrix.org/latest/client-server-api/#leaving-rooms) the room.
+* `tombstoned` - Whether the room has been tombstoned (permanently closed).
+* `replacement_room` - The room ID of the new room that users should join instead, if this room was tombstoned. Will be 
+  `null` if the room has not been tombstoned, or if it was tombstoned without designating a successor room.
 
 The API is:
 
@@ -337,7 +340,9 @@ A response body like the following is returned:
   "history_visibility": "shared",
   "state_events": 93534,
   "room_type": "m.space",
-  "forgotten": false
+  "forgotten": false,
+  "tombstoned": false,
+  "replacement_room": null
 }
 ```
 
@@ -1113,5 +1118,78 @@ Example response:
       "state_key": "@alice:example.org"
     }
   ]
+}
+```
+
+# Admin Space Hierarchy Endpoint
+
+This API allows an admin to fetch the space/room hierarchy for a given space, 
+returning details about that room and any children the room may have, paginating
+over the space tree in a depth-first manner to locate child rooms. This is
+functionally similar to the [CS Hierarchy](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1roomsroomidhierarchy) endpoint but does not check for
+room membership when returning room summaries.
+
+The endpoint does not query other servers over federation about remote rooms
+that the server has not joined. This is a deliberate trade-off: while this
+means it will leave some holes in the hierarchy that we could otherwise
+sometimes fill in, it significantly improves the endpoint's response time and
+the admin endpoint is designed for managing rooms local to the homeserver
+anyway.
+
+**Parameters**
+
+The following query parameters are available:
+
+* `from` - An optional pagination token, provided when there are more rooms to 
+    return than the limit. 
+* `limit` - Maximum amount of rooms to return. Must be a non-negative integer,
+   defaults to `50`.
+* `max_depth` - The maximum depth in the tree to explore, must be a non-negative
+   integer. 0 would correspond to just the root room, 1 would include just the
+   root room's children, etc.  If not provided will recurse into the space tree without limit.
+
+Request:
+
+```http
+GET /_synapse/admin/v1/rooms/<room_id>/hierarchy
+```
+
+Response:
+
+```json
+{
+  "rooms":
+      [
+        { "children_state": [
+            {
+              "content": {
+                "via": ["local_test_server"]
+              },
+              "origin_server_ts": 1500,
+              "sender": "@user:test",
+              "state_key": "!QrMkkqBSwYRIFNFCso:test",
+              "type": "m.space.child"
+            }
+        ],
+        "name": "space room",
+        "guest_can_join": false,
+        "join_rule": "public",
+        "num_joined_members": 1,
+        "room_id": "!sPOpNyMHbZAoAOsOFL:test",
+        "room_type": "m.space",
+        "world_readable": false
+      },
+
+      {
+        "children_state": [],
+        "guest_can_join": true,
+        "join_rule": "invite",
+        "name": "nefarious",
+        "num_joined_members": 1,
+        "room_id": "!QrMkkqBSwYRIFNFCso:test",
+        "topic": "being bad",
+        "world_readable": false}
+    ],
+  "next_batch": "KUYmRbeSpAoaAIgOKGgyaCEn"
 }
 ```

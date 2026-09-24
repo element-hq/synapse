@@ -5,6 +5,7 @@
 
 # Setup
   - [Installation](setup/installation.md)
+  - [Security](setup/security.md)
   - [Using Postgres](postgres.md)
   - [Configuring a Reverse Proxy](reverse_proxy.md)
   - [Configuring a Forward/Outbound Proxy](setup/forward_proxy.md)
@@ -49,6 +50,7 @@
         - [Background update controller callbacks](modules/background_update_controller_callbacks.md)
         - [Account data callbacks](modules/account_data_callbacks.md)
         - [Add extra fields to client events unsigned section callbacks](modules/add_extra_fields_to_client_events_unsigned.md)
+        - [Federation callbacks](modules/federation_callbacks.md)
         - [Media repository callbacks](modules/media_repository_callbacks.md)
         - [Ratelimit callbacks](modules/ratelimit_callbacks.md)
         - [Porting a legacy module to the new interface](modules/porting_legacy_module.md)
@@ -116,6 +118,8 @@
       - [The Auth Chain Difference Algorithm](auth_chain_difference_algorithm.md)
     - [Media Repository](media_repository.md)
     - [Room and User Statistics](room_and_user_statistics.md)
+    - [Releasing]()
+      - [Release Notes Review Checklist](development/internal_documentation/release_notes_review_checklist.md)
   - [Scripts]()
 
 # Other

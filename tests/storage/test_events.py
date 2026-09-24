@@ -20,20 +20,19 @@
 #
 
 import logging
-from typing import Dict, List, Optional
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
-from synapse.federation.federation_base import event_from_pdu_json
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import StateMap
 from synapse.util.clock import Clock
 
+from tests.test_utils.event_builders import make_test_pdu_event
 from tests.unittest import HomeserverTestCase
 
 logger = logging.getLogger(__name__)
@@ -54,7 +53,7 @@ class EventsTestCase(HomeserverTestCase):
     def test_get_senders_for_event_ids(self) -> None:
         """Tests the `get_senders_for_event_ids` storage function."""
 
-        users_and_tokens: Dict[str, str] = {}
+        users_and_tokens: dict[str, str] = {}
         for localpart_suffix in range(10):
             localpart = f"user_{localpart_suffix}"
             user_id = self.register_user(localpart, "rabbit")
@@ -70,7 +69,7 @@ class EventsTestCase(HomeserverTestCase):
         room_id = self.helper.create_room_as(
             room_creator_user_id, tok=room_creator_token
         )
-        event_ids_to_senders: Dict[str, str] = {}
+        event_ids_to_senders: dict[str, str] = {}
         for user_id, token in users_and_tokens.items():
             if user_id == room_creator_user_id:
                 continue
@@ -143,7 +142,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
 
         # Fudge a remote event and persist it. This will be the extremity before
         # the gap.
-        self.remote_event_1 = event_from_pdu_json(
+        self.remote_event_1 = make_test_pdu_event(
             {
                 "type": EventTypes.Message,
                 "state_key": "@user:other",
@@ -168,7 +167,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         self.assert_extremities([self.remote_event_1.event_id])
 
     def persist_event(
-        self, event: EventBase, state: Optional[StateMap[str]] = None
+        self, event: EventBase, state: StateMap[str] | None = None
     ) -> None:
         """Persist the event, with optional state"""
         context = self.get_success(
@@ -180,7 +179,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         )
         self.get_success(self._persistence.persist_event(event, context))
 
-    def assert_extremities(self, expected_extremities: List[str]) -> None:
+    def assert_extremities(self, expected_extremities: list[str]) -> None:
         """Assert the current extremities for the room"""
         extremities = self.get_success(
             self.store.get_prev_events_for_room(self.room_id)
@@ -199,7 +198,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other",
@@ -238,7 +237,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         )
 
         # Fudge a second event which points to an event we don't have.
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Message,
                 "state_key": "@user:other",
@@ -287,7 +286,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other2",
@@ -323,7 +322,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other2",
@@ -368,7 +367,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other2",
@@ -416,7 +415,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other2",
@@ -456,7 +455,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other2",
@@ -515,7 +514,7 @@ class InvalideUsersInRoomCacheTestCase(HomeserverTestCase):
 
         # Fudge a join event for a remote user.
         remote_user = "@user:other"
-        remote_event_1 = event_from_pdu_json(
+        remote_event_1 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": remote_user,
@@ -562,7 +561,7 @@ class InvalideUsersInRoomCacheTestCase(HomeserverTestCase):
 
         # Fudge a join event for a remote user.
         remote_user = "@user:other"
-        remote_event_1 = event_from_pdu_json(
+        remote_event_1 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": remote_user,

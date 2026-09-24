@@ -26,14 +26,9 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Set,
     TypeVar,
-    Union,
 )
 
 import jsonschema
@@ -128,6 +123,13 @@ USER_FILTER_SCHEMA = {
         "filter": FILTER_SCHEMA,
         "room_filter": ROOM_FILTER_SCHEMA,
         "room_event_filter": ROOM_EVENT_FILTER_SCHEMA,
+        "profile_fields_filter": {
+            "type": "object",
+            "properties": {
+                "ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": True,
+        },
     },
     "properties": {
         "presence": {"$ref": "#/definitions/filter"},
@@ -135,6 +137,9 @@ USER_FILTER_SCHEMA = {
         "room": {"$ref": "#/definitions/room_filter"},
         "event_format": {"type": "string", "enum": ["client", "federation"]},
         "event_fields": {"type": "array", "items": {"type": "string"}},
+        "org.matrix.msc4429.profile_fields": {
+            "$ref": "#/definitions/profile_fields_filter"
+        },
     },
     "additionalProperties": True,  # Allow new fields for forward compatibility
 }
@@ -158,7 +163,7 @@ class Filtering:
         self.DEFAULT_FILTER_COLLECTION = FilterCollection(hs, {})
 
     async def get_user_filter(
-        self, user_id: UserID, filter_id: Union[int, str]
+        self, user_id: UserID, filter_id: int | str
     ) -> "FilterCollection":
         result = await self.store.get_user_filter(user_id, filter_id)
         return FilterCollection(self._hs, result)
@@ -222,6 +227,13 @@ class FilterCollection:
         self.event_fields = filter_json.get("event_fields", [])
         self.event_format = filter_json.get("event_format", "client")
 
+        self.profile_fields: set[str] = set()
+        if hs.config.server.include_profile_updates_in_sync:
+            profile_fields_filter = filter_json.get("org.matrix.msc4429.profile_fields")
+
+            if isinstance(profile_fields_filter, Mapping):
+                self.profile_fields = set(profile_fields_filter.get("ids", []))
+
     def __repr__(self) -> str:
         return "<FilterCollection %s>" % (json.dumps(self._filter_json),)
 
@@ -248,34 +260,34 @@ class FilterCollection:
 
     async def filter_presence(
         self, presence_states: Iterable[UserPresenceState]
-    ) -> List[UserPresenceState]:
+    ) -> list[UserPresenceState]:
         return await self._presence_filter.filter(presence_states)
 
     async def filter_global_account_data(
         self, events: Iterable[JsonDict]
-    ) -> List[JsonDict]:
+    ) -> list[JsonDict]:
         return await self._global_account_data_filter.filter(events)
 
-    async def filter_room_state(self, events: Iterable[EventBase]) -> List[EventBase]:
+    async def filter_room_state(self, events: Iterable[EventBase]) -> list[EventBase]:
         return await self._room_state_filter.filter(
             await self._room_filter.filter(events)
         )
 
     async def filter_room_timeline(
         self, events: Iterable[EventBase]
-    ) -> List[EventBase]:
+    ) -> list[EventBase]:
         return await self._room_timeline_filter.filter(
             await self._room_filter.filter(events)
         )
 
-    async def filter_room_ephemeral(self, events: Iterable[JsonDict]) -> List[JsonDict]:
+    async def filter_room_ephemeral(self, events: Iterable[JsonDict]) -> list[JsonDict]:
         return await self._room_ephemeral_filter.filter(
             await self._room_filter.filter(events)
         )
 
     async def filter_room_account_data(
         self, events: Iterable[JsonDict]
-    ) -> List[JsonDict]:
+    ) -> list[JsonDict]:
         return await self._room_account_data_filter.filter(
             await self._room_filter.filter(events)
         )
@@ -440,7 +452,7 @@ class Filter:
 
             return True
 
-    def _check_fields(self, field_matchers: Dict[str, Callable[[str], bool]]) -> bool:
+    def _check_fields(self, field_matchers: dict[str, Callable[[str], bool]]) -> bool:
         """Checks whether the filter matches the given event fields.
 
         Args:
@@ -474,7 +486,7 @@ class Filter:
         # Otherwise, accept it.
         return True
 
-    def filter_rooms(self, room_ids: Iterable[str]) -> Set[str]:
+    def filter_rooms(self, room_ids: Iterable[str]) -> set[str]:
         """Apply the 'rooms' filter to a given list of rooms.
 
         Args:
@@ -496,7 +508,7 @@ class Filter:
 
     async def _check_event_relations(
         self, events: Collection[FilterEvent]
-    ) -> List[FilterEvent]:
+    ) -> list[FilterEvent]:
         # The event IDs to check, mypy doesn't understand the isinstance check.
         event_ids = [event.event_id for event in events if isinstance(event, EventBase)]  # type: ignore[attr-defined]
         event_ids_to_keep = set(
@@ -511,7 +523,7 @@ class Filter:
             if not isinstance(event, EventBase) or event.event_id in event_ids_to_keep
         ]
 
-    async def filter(self, events: Iterable[FilterEvent]) -> List[FilterEvent]:
+    async def filter(self, events: Iterable[FilterEvent]) -> list[FilterEvent]:
         result = [event for event in events if self._check(event)]
 
         if self.related_by_senders or self.related_by_rel_types:
@@ -534,7 +546,7 @@ class Filter:
         return newFilter
 
 
-def _matches_wildcard(actual_value: Optional[str], filter_value: str) -> bool:
+def _matches_wildcard(actual_value: str | None, filter_value: str) -> bool:
     if filter_value.endswith("*") and isinstance(actual_value, str):
         type_prefix = filter_value[:-1]
         return actual_value.startswith(type_prefix)

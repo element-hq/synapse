@@ -19,7 +19,7 @@
 #
 
 from os import path
-from typing import Any, Optional
+from typing import Any
 
 from synapse.config import ConfigError
 from synapse.types import JsonDict
@@ -33,11 +33,11 @@ class ConsentConfig(Config):
     def __init__(self, *args: Any):
         super().__init__(*args)
 
-        self.user_consent_version: Optional[str] = None
-        self.user_consent_template_dir: Optional[str] = None
-        self.user_consent_server_notice_content: Optional[JsonDict] = None
+        self.user_consent_version: str | None = None
+        self.user_consent_template_dir: str | None = None
+        self.user_consent_server_notice_content: JsonDict | None = None
         self.user_consent_server_notice_to_guests = False
-        self.block_events_without_consent_error: Optional[str] = None
+        self.block_events_without_consent_error: str | None = None
         self.user_consent_at_registration = False
         self.user_consent_policy_name = "Privacy Policy"
 

@@ -28,23 +28,19 @@ from typing import (
     AsyncContextManager,
     Awaitable,
     Callable,
-    Dict,
     Iterable,
-    List,
-    Optional,
     Sequence,
-    Tuple,
-    Type,
     cast,
 )
 
 import attr
+from pydantic import BaseModel
 
-from synapse._pydantic_compat import BaseModel
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Connection, Cursor
 from synapse.types import JsonDict, StrCollection
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 from . import engines
@@ -96,7 +92,7 @@ class ForeignKeyConstraint(Constraint):
     """
 
     referenced_table: str
-    columns: Sequence[Tuple[str, str]]
+    columns: Sequence[tuple[str, str]]
     deferred: bool
 
     def make_check_clause(self, table: str) -> str:
@@ -167,15 +163,15 @@ class _BackgroundUpdateContextManager:
 
     async def __aenter__(self) -> int:
         if self._sleep:
-            await self._clock.sleep(self._sleep_duration_ms / 1000)
+            await self._clock.sleep(Duration(milliseconds=self._sleep_duration_ms))
 
         return self._update_duration_ms
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
     ) -> None:
         pass
 
@@ -200,7 +196,7 @@ class BackgroundUpdatePerformance:
         self.avg_item_count += 0.1 * (item_count - self.avg_item_count)
         self.avg_duration_ms += 0.1 * (duration_ms - self.avg_duration_ms)
 
-    def average_items_per_ms(self) -> Optional[float]:
+    def average_items_per_ms(self) -> float | None:
         """An estimate of how long it takes to do a single update.
         Returns:
             A duration in ms as a float
@@ -216,7 +212,7 @@ class BackgroundUpdatePerformance:
             # changes in how long the update process takes.
             return float(self.avg_item_count) / float(self.avg_duration_ms)
 
-    def total_items_per_ms(self) -> Optional[float]:
+    def total_items_per_ms(self) -> float | None:
         """An estimate of how long it takes to do a single update.
         Returns:
             A duration in ms as a float
@@ -254,17 +250,21 @@ class BackgroundUpdater:
         self._database_name = database.name()
 
         # if a background update is currently running, its name.
-        self._current_background_update: Optional[str] = None
+        self._current_background_update: str | None = None
 
-        self._on_update_callback: Optional[ON_UPDATE_CALLBACK] = None
-        self._default_batch_size_callback: Optional[DEFAULT_BATCH_SIZE_CALLBACK] = None
-        self._min_batch_size_callback: Optional[MIN_BATCH_SIZE_CALLBACK] = None
+        self._on_update_callback: ON_UPDATE_CALLBACK | None = None
+        self._default_batch_size_callback: DEFAULT_BATCH_SIZE_CALLBACK | None = None
+        self._min_batch_size_callback: MIN_BATCH_SIZE_CALLBACK | None = None
 
-        self._background_update_performance: Dict[str, BackgroundUpdatePerformance] = {}
-        self._background_update_handlers: Dict[str, _BackgroundUpdateHandler] = {}
+        self._background_update_performance: dict[str, BackgroundUpdatePerformance] = {}
+        self._background_update_handlers: dict[str, _BackgroundUpdateHandler] = {}
         # TODO: all these bool flags make me feel icky---can we combine into a status
         # enum?
         self._all_done = False
+
+        # A set of background updates that we have queried the database for and
+        # found to be completed.
+        self._completed_background_updates: set[str] = set()
 
         # Whether we're currently running updates
         self._running = False
@@ -308,8 +308,8 @@ class BackgroundUpdater:
     def register_update_controller_callbacks(
         self,
         on_update: ON_UPDATE_CALLBACK,
-        default_batch_size: Optional[DEFAULT_BATCH_SIZE_CALLBACK] = None,
-        min_batch_size: Optional[DEFAULT_BATCH_SIZE_CALLBACK] = None,
+        default_batch_size: DEFAULT_BATCH_SIZE_CALLBACK | None = None,
+        min_batch_size: DEFAULT_BATCH_SIZE_CALLBACK | None = None,
     ) -> None:
         """Register callbacks from a module for each hook."""
         if self._on_update_callback is not None:
@@ -384,7 +384,7 @@ class BackgroundUpdater:
 
         return self.minimum_background_batch_size
 
-    def get_current_update(self) -> Optional[BackgroundUpdatePerformance]:
+    def get_current_update(self) -> BackgroundUpdatePerformance | None:
         """Returns the current background update, if any."""
 
         update_name = self._current_background_update
@@ -398,9 +398,15 @@ class BackgroundUpdater:
         return perf
 
     def start_doing_background_updates(self) -> None:
+        """Start doing background updates in the background.
+
+        This gets called both on startup and when the admin API is used to
+        reschedule background updates.
+        """
         if self.enabled:
             # if we start a new background update, not all updates are done.
             self._all_done = False
+            self._completed_background_updates.clear()
             sleep = self.sleep_enabled
             self.hs.run_as_background_process(
                 "background_updates",
@@ -482,6 +488,9 @@ class BackgroundUpdater:
         if update_name == self._current_background_update:
             return False
 
+        if update_name in self._completed_background_updates:
+            return True
+
         update_exists = await self.db_pool.simple_select_one_onecol(
             "background_updates",
             keyvalues={"update_name": update_name},
@@ -489,6 +498,9 @@ class BackgroundUpdater:
             desc="has_completed_background_update",
             allow_none=True,
         )
+
+        if not update_exists:
+            self._completed_background_updates.add(update_name)
 
         return not update_exists
 
@@ -530,14 +542,14 @@ class BackgroundUpdater:
             True if we have finished running all the background updates, otherwise False
         """
 
-        def get_background_updates_txn(txn: Cursor) -> List[Tuple[str, Optional[str]]]:
+        def get_background_updates_txn(txn: Cursor) -> list[tuple[str, str | None]]:
             txn.execute(
                 """
                 SELECT update_name, depends_on FROM background_updates
                 ORDER BY ordering, update_name
                 """
             )
-            return cast(List[Tuple[str, Optional[str]]], txn.fetchall())
+            return cast(list[tuple[str, str | None]], txn.fetchall())
 
         if not self._current_background_update:
             all_pending_updates = await self.db_pool.runInteraction(
@@ -673,10 +685,10 @@ class BackgroundUpdater:
         index_name: str,
         table: str,
         columns: Iterable[str],
-        where_clause: Optional[str] = None,
+        where_clause: str | None = None,
         unique: bool = False,
         psql_only: bool = False,
-        replaces_index: Optional[str] = None,
+        replaces_index: str | None = None,
     ) -> None:
         """Helper for store classes to do a background index addition
 
@@ -767,10 +779,10 @@ class BackgroundUpdater:
         index_name: str,
         table: str,
         columns: Iterable[str],
-        where_clause: Optional[str] = None,
+        where_clause: str | None = None,
         unique: bool = False,
         psql_only: bool = False,
-        replaces_index: Optional[str] = None,
+        replaces_index: str | None = None,
     ) -> None:
         """Add an index in the background.
 
@@ -866,7 +878,7 @@ class BackgroundUpdater:
                 c.execute(sql)
 
         if isinstance(self.db_pool.engine, engines.PostgresEngine):
-            runner: Optional[Callable[[LoggingDatabaseConnection], None]] = (
+            runner: Callable[[LoggingDatabaseConnection], None] | None = (
                 create_index_psql
             )
         elif psql_only:
@@ -958,14 +970,14 @@ class BackgroundUpdater:
         #      match the constraint.
         #   3. We try re-validating the constraint.
 
-        parsed_progress = ValidateConstraintProgress.parse_obj(progress)
+        parsed_progress = ValidateConstraintProgress.model_validate(progress)
 
         if parsed_progress.state == ValidateConstraintProgress.State.check:
             return_columns = ", ".join(unique_columns)
             order_columns = ", ".join(unique_columns)
 
             where_clause = ""
-            args: List[Any] = []
+            args: list[Any] = []
             if parsed_progress.lower_bound:
                 where_clause = f"""WHERE ({order_columns}) > ({", ".join("?" for _ in unique_columns)})"""
                 args.extend(parsed_progress.lower_bound)

@@ -24,12 +24,8 @@ import os
 import signal
 from types import FrameType, TracebackType
 from typing import (
-    Dict,
     Literal,
-    Optional,
-    Type,
     TypeVar,
-    Union,
     overload,
 )
 
@@ -133,17 +129,17 @@ def setupdb() -> None:
 
 @overload
 def default_config(
-    server_name: str, parse: Literal[False] = ...
-) -> Dict[str, object]: ...
+    *, server_name: str, parse: Literal[False] = ...
+) -> dict[str, object]: ...
 
 
 @overload
-def default_config(server_name: str, parse: Literal[True]) -> HomeServerConfig: ...
+def default_config(*, server_name: str, parse: Literal[True]) -> HomeServerConfig: ...
 
 
 def default_config(
-    server_name: str, parse: bool = False
-) -> Union[Dict[str, object], HomeServerConfig]:
+    *, server_name: str, parse: bool = False
+) -> dict[str, object] | HomeServerConfig:
     """
     Create a reasonable test config.
 
@@ -202,7 +198,9 @@ def default_config(
         "rc_invites": {
             "per_room": {"per_second": 10000, "burst_count": 10000},
             "per_user": {"per_second": 10000, "burst_count": 10000},
+            "per_issuer": {"per_second": 10000, "burst_count": 10000},
         },
+        "rc_room_creation": {"per_second": 10000, "burst_count": 10000},
         "rc_3pid_validation": {"per_second": 10000, "burst_count": 10000},
         "rc_presence": {"per_user": {"per_second": 10000, "burst_count": 10000}},
         "saml2_enabled": False,
@@ -283,7 +281,7 @@ async def create_room(hs: HomeServer, room_id: str, creator_id: str) -> None:
 T = TypeVar("T")
 
 
-def checked_cast(type: Type[T], x: object) -> T:
+def checked_cast(type: type[T], x: object) -> T:
     """A version of typing.cast that is checked at runtime.
 
     We have our own function for this for two reasons:
@@ -320,25 +318,49 @@ class test_timeout:
             my_checking_func()
             time.sleep(0.1)
     ```
+
+    Args:
+        seconds: How long to allow the block to run for before raising
+            `TestTimeout`.
+        error_message: Extra text to append to the `TestTimeout` message.
+        cpu_time: If `True`, `seconds` is a budget of CPU time (user + system,
+            across all threads) consumed by the process rather than wall-clock
+            time. Useful for performance-regression tests, as time spent
+            blocked on I/O (e.g. waiting on the database) or lost to a loaded
+            CI machine doesn't count against the budget. Note that a block
+            which hangs while consuming *no* CPU will never trip this variant.
     """
 
-    def __init__(self, seconds: int, error_message: Optional[str] = None) -> None:
-        self.error_message = f"Test timed out after {seconds}s"
+    def __init__(
+        self,
+        seconds: float,
+        error_message: str | None = None,
+        *,
+        cpu_time: bool = False,
+    ) -> None:
+        self.error_message = f"Test timed out after {seconds}s of {'CPU' if cpu_time else 'wall-clock'} time"
         if error_message is not None:
             self.error_message += f": {error_message}"
         self.seconds = seconds
+        self.cpu_time = cpu_time
 
-    def handle_timeout(self, signum: int, frame: Optional[FrameType]) -> None:
+    def handle_timeout(self, signum: int, frame: FrameType | None) -> None:
         raise TestTimeout(self.error_message)
 
     def __enter__(self) -> None:
-        signal.signal(signal.SIGALRM, self.handle_timeout)
-        signal.alarm(self.seconds)
+        if self.cpu_time:
+            # `ITIMER_PROF` counts down against process CPU time (user +
+            # system) and delivers `SIGPROF` when it expires.
+            signal.signal(signal.SIGPROF, self.handle_timeout)
+            signal.setitimer(signal.ITIMER_PROF, self.seconds)
+        else:
+            signal.signal(signal.SIGALRM, self.handle_timeout)
+            signal.setitimer(signal.ITIMER_REAL, self.seconds)
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
-        signal.alarm(0)
+        signal.setitimer(signal.ITIMER_PROF if self.cpu_time else signal.ITIMER_REAL, 0)

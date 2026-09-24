@@ -194,7 +194,11 @@ user_agent_suffix: ' (I''m a teapot; Linux x86_64)'
 ---
 ### `use_frozen_dicts`
 
-*(boolean)* Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive. Defaults to `false`.
+*(boolean)* Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive.
+
+> ⚠️ **Warning** – This option is known to introduce a new class of [comparison bugs](https://github.com/element-hq/synapse/issues/18117) in Synapse.
+
+Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -280,6 +284,24 @@ This setting has the following sub-options:
 
 * `include_offline_users_on_sync` (boolean): When clients perform an initial or `full_state` sync, presence results for offline users are not included by default. Setting `include_offline_users_on_sync` to `true` will always include offline users in the results. Defaults to `false`.
 
+* `last_active_granularity` (duration): How long after a user was last active that they are still shown as "currently active" to other users. Larger values reduce the rate of presence updates sent to other users and servers.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"1m"`.
+
+* `sync_online_timeout` (duration): How long after a client's last sync request their presence is switched to offline. Clients are expected to keep a sync request open at (almost) all times while online, so this only needs to cover the gap between two consecutive sync requests. Note that if `rc_presence` is set to ratelimit how often syncs can affect presence, this must be greater than the ratelimit's interval or users will incorrectly be marked as offline in between syncs.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"30s"`.
+
+* `idle_timeout` (duration): How long after a user was last active that their presence is switched to "unavailable" (idle) while they remain connected. Must be greater than `last_active_granularity`.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"5m"`.
+
 Example configuration:
 ```yaml
 presence:
@@ -289,7 +311,8 @@ presence:
 ---
 ### `require_auth_for_profile_requests`
 
-*(boolean)* Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless `allow_profile_lookup_over_federation` is set to false. Defaults to `false`.
+*(boolean)* Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless `allow_profile_lookup_over_federation` is set to false.
+This option must be enabled in order to use `limit_profile_requests_to_users_who_share_rooms`. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -298,7 +321,8 @@ require_auth_for_profile_requests: true
 ---
 ### `limit_profile_requests_to_users_who_share_rooms`
 
-*(boolean)* Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server. Defaults to `false`.
+*(boolean)* Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server.
+The check can only be applied to authenticated requests, so this option requires `require_auth_for_profile_requests` to be enabled as well. Synapse will refuse to start if this option is enabled without it. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -312,6 +336,17 @@ limit_profile_requests_to_users_who_share_rooms: true
 Example configuration:
 ```yaml
 include_profile_data_on_invite: false
+```
+---
+### `include_profile_updates_in_sync`
+
+*(boolean)* Use this option to include updates of other users' profiles in sync responses, for users who share rooms.
+For legacy sync clients, requires [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatibility. For sliding sync clients, requires [MSC4262](https://github.com/matrix-org/matrix-spec-proposals/pull/4262) compatibility. Note, profile updates via sync are currently limited to local users only.
+This feature is under development and should be used with caution on busy servers or servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring profile information doesn't leak across rooms. Defaults to `false`.
+
+Example configuration:
+```yaml
+include_profile_updates_in_sync: true
 ```
 ---
 ### `allow_public_rooms_without_auth`
@@ -341,8 +376,10 @@ Known room versions are listed [here](https://spec.matrix.org/latest/rooms/#comp
 For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
+_Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
+_Changed in Synapse 1.162:_ the default room version was increased from [11](https://spec.matrix.org/v1.16/rooms/v11/) to [12](https://spec.matrix.org/v1.16/rooms/v12/)
 
-Defaults to `"10"`.
+Defaults to `"12"`.
 
 Example configuration:
 ```yaml
@@ -653,6 +690,8 @@ This setting has the following sub-options:
 
 * `endpoint` (string): The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted. Defaults to `"http://localhost:8080"`.
 
+* `force_http2` (boolean): Force HTTP/2 over plaintext (H2C) when connecting to MAS. MAS supports this natively, but a reverse proxy between Synapse and MAS may not. Defaults to `false`.
+
 * `secret` (string|null): A shared secret that will be used to authenticate requests from and to MAS.
 
 * `secret_path` (string|null): Alternative to `secret`, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
@@ -956,7 +995,7 @@ server_context: context
 ---
 ### `limit_remote_rooms`
 
-*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. Room complexity is an arbitrary measure based on factors such as the number of users in the room.
+*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. In Synapse, the complexity of a room is measured by the number of current state events in a room, divided by 500. "Current" here means the latest state, i.e. if a user joins, then leaves, then joins, that will count as 1 current `m.room.member` state event.
 
 This setting has the following sub-options:
 
@@ -1035,6 +1074,21 @@ Defaults to `"7d"`.
 Example configuration:
 ```yaml
 redaction_retention_period: 28d
+```
+---
+### `redaction_allowed_period`
+
+How long after an `m.room.message` was sent a local user is still allowed to redact it. If a local user tries to redact a `m.room.message` older than this period Synapse responds with `403 M_FORBIDDEN` and does not redact the event.
+
+Only applies to `m.room.message` events redacted by local users.  Redactions of other event types and redactions received over federation are unaffected. When the target of the redaction is an edit (`m.replace`), the age and type are taken from the original event and not the edit.
+
+Set to `null` (the default) to disable, allowing events to be redacted at any time.
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+redaction_allowed_period: 7d
 ```
 ---
 ### `forgotten_room_retention_period`
@@ -1251,11 +1305,15 @@ Options related to federation.
 ---
 ### `federation_domain_whitelist`
 
-*(array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction. If not specified, the default is to whitelist everything.
+*(null|array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.
+
+If specified as an empty list (`[]`), federation will be denied with all servers. Specifying an empty list (`[]`) here is the recommended way of disabling federation.
+
+If unset or null, allows federation with all servers.
 
 Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist.
 
-Defaults to `[]`.
+Defaults to `null`.
 
 Example configuration:
 ```yaml
@@ -1965,7 +2023,7 @@ rc_presence:
 
 *(object)* Ratelimiting settings for delayed event management.
 
-This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account and device ID.
+This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account, or its source IP when requests are unauthenticated.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 
@@ -2041,6 +2099,46 @@ rc_room_creation:
   burst_count: 5.0
 ```
 ---
+### `rc_user_directory`
+
+*(object)* This option allows admins to ratelimit searches in the user directory.
+
+_Added in Synapse 1.145.0._
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_user_directory:
+  per_second: 0.016
+  burst_count: 200.0
+```
+---
+### `rc_profile`
+
+*(object)* This option allows admins to ratelimit profile lookups by clients.
+
+Requests are limited per user when the request is authenticated, otherwise per client IP address.
+
+_Added in Synapse 1.162.0._
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_profile:
+  per_second: 1.0
+  burst_count: 500.0
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 *(integer)* Sets outgoing federation transaction frequency for sending read-receipts, per-room.
@@ -2090,6 +2188,16 @@ enable_authenticated_media: false
 Example configuration:
 ```yaml
 enable_media_repo: false
+```
+---
+### `enable_local_media_storage`
+
+*(boolean)* Enable the local on-disk media storage provider. When disabled, media is stored only in configured `media_storage_providers` and temporary files are used for processing.
+**Warning:** If this option is set to `false` and no `media_storage_providers` are configured, all media requests will return 404 errors as there will be no storage backend available. Defaults to `true`.
+
+Example configuration:
+```yaml
+enable_local_media_storage: false
 ```
 ---
 ### `media_store_path`
@@ -2174,13 +2282,26 @@ These settings can be overridden using the `get_media_upload_limits_for_user` mo
 
 Defaults to `[]`.
 
+Options for each entry include:
+
+* `time_period` (duration): The time period over which the limit applies. Required.
+
+* `max_size` (byte size): Amount of data that can be uploaded in the time period by the user. Required.
+
+* `info_uri` (string): URI returned to the client for where the user can find information about the upload limit and how users can reduce their upload usage or request an upload limit increase. Optional. If not set, Synapse serves a built-in page (customisable via the `media_upload_limit_exceeded.html` template) and uses its URL instead.
+
+* `can_upgrade` (boolean): Value returned to the client for whether the limit can be increased. Defaults to `false`.
+
 Example configuration:
 ```yaml
 media_upload_limits:
 - time_period: 1h
   max_size: 100M
+  info_uri: https://example.com/quota#hour
 - time_period: 1w
   max_size: 500M
+  info_uri: https://example.com/quota
+  can_upgrade: true
 ```
 ---
 ### `max_image_pixels`
@@ -2585,13 +2706,20 @@ This setting has the following sub-options:
 
   * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
 
-  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+  * `url` (string): The WebSocket URL of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is required.
+
+    Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
+
+  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
+
+    Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
 Example configuration:
 ```yaml
 matrix_rtc:
   transports:
   - type: livekit
+    url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```
 ---
@@ -2834,6 +2962,8 @@ enable_3pid_changes: false
 *(array)* Users who register on this homeserver will automatically be joined to the rooms listed under this option.
 
 By default, any room aliases included in this list will be created as a publicly joinable room when the first user registers for the homeserver. If the room already exists, make certain it is a publicly joinable room, i.e. the join rule of the room must be set to `public`. You can find more options relating to auto-joining rooms below.
+
+Invite-only rooms can also be auto-joined when setting `auto_join_mxid_localpart` to a user who's part of the invite-only rooms.
 
 As Spaces are just rooms under the hood, Space aliases may also be used.
 
@@ -3753,7 +3883,10 @@ This setting has the following sub-options:
 
   Defaults to `null`.
 
-* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Currently only syncing the displayname is supported. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Defaults to `false`.
+* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Fields that will be synced:
+    * displayname
+    * picture - only if Synapse media repository is running in the main
+       process (i.e. not workerized) and media is stored locally Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -3815,7 +3948,7 @@ This setting has the following sub-options:
 
 * `localdb_enabled` (boolean): Set to false to disable authentication against the local password database. This is ignored if `enabled` is false, and is only useful if you have other `password_providers`. Defaults to `true`.
 
-* `pepper` (string|null): Set the value here to a secret random string for extra security. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
+* `pepper` (string|null): A secret random string that will be appended to user's passwords before they are hashed. This improves the security of short passwords. DO NOT CHANGE THIS AFTER INITIAL SETUP! Defaults to `null`.
 
 * `policy` (object): Define and enforce a password policy, such as minimum lengths for passwords, etc. This is an implementation of MSC2000.
 
@@ -3880,6 +4013,25 @@ push:
   jitter_delay: 10s
 ```
 ---
+### `push_rules`
+
+*(object)* Options for push rules
+
+This setting has the following sub-options:
+
+* `limits` (object): Limits on the size of push rules that users can have
+
+  This setting has the following sub-options:
+
+  * `rule_count` (integer): This is the total number of push rules that each user can have. Power users may expect to have one push rule per room. Defaults to `10000`.
+
+  * `rule_id_length` (integer): This is the maximum length of a push rule ID, in bytes. Push rule IDs need to be allowed to be at least as long as a room ID (which are [limited to 255 bytes per specification](https://spec.matrix.org/v1.19/appendices/#room-ids))
+    It's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit. Defaults to `300`.
+
+  * `rule_size` (integer): This is the maximum size of a push rule's body, in bytes.
+    The exact mechanism for calculating this size is currently an implementation detail, subject to change. This limit should be treated as a coarse sanity limit rather than something to fine-tune.
+    It's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit and a mechanism for calculating it. Defaults to `1024`.
+---
 ## Rooms
 
 Config options relating to rooms.
@@ -3896,6 +4048,8 @@ Possible options are "all", "invite", and "off". They are defined as:
 * "off": this option will take no effect
 
 Note that this option will only affect rooms created after it is set. It will also not affect rooms created by other servers.
+
+A client may supply its own `m.room.encryption` event in the `initial_state` of its `/createRoom` request. If that event is valid (it specifies an `algorithm` as a string), it takes precedence and this option will not overwrite it, allowing the client to, for example, choose a different encryption algorithm. An empty or otherwise invalid `m.room.encryption` event does not disable forced encryption: the default will still be applied on top of it.
 
 Defaults to `"off"`.
 
@@ -4252,6 +4406,16 @@ exclude_rooms_from_sync:
 - '!foo:example.com'
 ```
 ---
+### `exclude_rooms_from_presence`
+
+*(array)* A list of rooms to exclude from presence updates. Presence will not be routed between two users solely because they share one of these rooms. Users who also share a non-excluded room continue to exchange presence as normal. Defaults to `[]`.
+
+Example configuration:
+```yaml
+exclude_rooms_from_presence:
+- '!foo:example.com'
+```
+---
 ## Opentracing
 
 Configuration options related to Opentracing support.
@@ -4455,7 +4619,7 @@ stream_writers:
 ---
 ### `outbound_federation_restricted_to`
 
-*(array)* When using workers, you can restrict outbound federation traffic to only go through a specific subset of workers. Any worker specified here must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.
+*(array)* You can restrict outbound federation traffic to only go through a specific subset of workers including the [Secure Border Gateway (SBG)](https://element.io/en/server-suite/secure-border-gateways). Any worker specified here (including the SBG) must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.
 
 Also see the [worker documentation](../../workers.md#restrict-outbound-federation-traffic-to-a-specific-set-of-workers) for more info.
 
@@ -4477,6 +4641,20 @@ outbound_federation_restricted_to:
 Example configuration:
 ```yaml
 run_background_tasks_on: worker1
+```
+---
+### `task_scheduler`
+
+*(object)* Configuration for the task scheduler.
+
+This setting has the following sub-options:
+
+* `max_concurrent_tasks` (integer): The maximum number of tasks that can run concurrently in the task scheduler. Setting this too high may swamp the database connection pool. Defaults to `5`.
+
+Example configuration:
+```yaml
+task_scheduler:
+  max_concurrent_tasks: 5
 ```
 ---
 ### `update_user_directory_from_worker`
@@ -4530,6 +4708,8 @@ _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
 _Changed in Synapse 1.116.0: Added password\_path_
 
+_Changed in Synapse 1.162.0: Added username_
+
 This setting has the following sub-options:
 
 * `enabled` (boolean): Whether to use Redis support. Defaults to `false`.
@@ -4539,6 +4719,8 @@ This setting has the following sub-options:
 * `port` (integer): Optional port to use to connect to Redis. Defaults to `6379`.
 
 * `path` (string): The full path to a local Unix socket file. **If this is used, `host` and `port` are ignored.** Defaults to `"/tmp/redis.sock"`.
+
+* `username` (string|null): Optional username if configured on the Redis instance (Redis 6+ ACL authentication). Requires `password` (or `password_path`) to also be set. Defaults to `null`.
 
 * `password` (string|null): Optional password if configured on the Redis instance. Defaults to `null`.
 
@@ -4562,6 +4744,7 @@ redis:
   enabled: true
   host: localhost
   port: 6379
+  username: <username>
   password_path: <path_to_the_password_file>
   dbid: <dbid>
 ```

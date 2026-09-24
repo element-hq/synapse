@@ -19,24 +19,20 @@
 #
 #
 import logging
+from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     Any,
     Collection,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
     Sequence,
-    Tuple,
-    Union,
     cast,
 )
 
 from twisted.internet import defer
 
-from synapse.api.errors import StoreError
+from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.config.homeserver import ExperimentalConfig
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.replication.tcp.streams import PushRulesStream
@@ -69,8 +65,8 @@ logger = logging.getLogger(__name__)
 
 
 def _load_rules(
-    rawrules: List[Tuple[str, int, str, str]],
-    enabled_map: Dict[str, bool],
+    rawrules: list[tuple[str, int, str, str]],
+    enabled_map: dict[str, bool],
     experimental_config: ExperimentalConfig,
 ) -> FilteredPushRules:
     """Take the DB rows returned from the DB and convert them into a full
@@ -115,6 +111,22 @@ def _load_rules(
     )
 
     return filtered_rules
+
+
+def _push_rule_size_for_limits(*, conditions_json: str, actions_json: str) -> int:
+    """
+    Returns the size of a push rule, as used for applying the size limit.
+
+    We aren't tied to any particular definition, but currently this is
+    simply the size in bytes of the conditions and actions JSON added together,
+    so not rocket science, but this function provides a 'label' for it.
+    """
+    # This is not a very predictable way of calculating the size from the
+    # point of view of the client, but since it's an out-of-spec limit
+    # entirely at our discretion, we don't really have to worry about
+    # the exact calculation.
+    # FIXME: Spec a predictable push rule size limit
+    return len(conditions_json.encode("utf-8")) + len(actions_json.encode("utf-8"))
 
 
 class PushRulesWorkerStore(
@@ -175,6 +187,8 @@ class PushRulesWorkerStore(
         self._push_rule_id_gen = IdGenerator(db_conn, "push_rules", "id")
         self._push_rules_enable_id_gen = IdGenerator(db_conn, "push_rules_enable", "id")
 
+        self._config = hs.config.push_rules
+
     def get_max_push_rules_stream_id(self) -> int:
         """Get the position of the push rules stream.
 
@@ -206,7 +220,7 @@ class PushRulesWorkerStore(
     @cached(max_entries=5000)
     async def get_push_rules_for_user(self, user_id: str) -> FilteredPushRules:
         rows = cast(
-            List[Tuple[str, int, int, str, str]],
+            list[tuple[str, int, int, str, str]],
             await self.db_pool.simple_select_list(
                 table="push_rules",
                 keyvalues={"user_name": user_id},
@@ -232,9 +246,9 @@ class PushRulesWorkerStore(
             self.hs.config.experimental,
         )
 
-    async def get_push_rules_enabled_for_user(self, user_id: str) -> Dict[str, bool]:
+    async def get_push_rules_enabled_for_user(self, user_id: str) -> dict[str, bool]:
         results = cast(
-            List[Tuple[str, Optional[Union[int, bool]]]],
+            list[tuple[str, int | bool | None]],
             await self.db_pool.simple_select_list(
                 table="push_rules_enable",
                 keyvalues={"user_name": user_id},
@@ -257,7 +271,7 @@ class PushRulesWorkerStore(
                     " WHERE user_id = ? AND ? < stream_id"
                 )
                 txn.execute(sql, (user_id, last_id))
-                (count,) = cast(Tuple[int], txn.fetchone())
+                (count,) = cast(tuple[int], txn.fetchone())
                 return bool(count)
 
             return await self.db_pool.runInteraction(
@@ -271,7 +285,7 @@ class PushRulesWorkerStore(
         if not user_ids:
             return {}
 
-        raw_rules: Dict[str, List[Tuple[str, int, str, str]]] = {
+        raw_rules: dict[str, list[tuple[str, int, str, str]]] = {
             user_id: [] for user_id in user_ids
         }
 
@@ -280,7 +294,7 @@ class PushRulesWorkerStore(
             gather_results(
                 (
                     cast(
-                        "defer.Deferred[List[Tuple[str, str, int, int, str, str]]]",
+                        "defer.Deferred[list[tuple[str, str, int, int, str, str]]]",
                         run_in_background(
                             self.db_pool.simple_select_many_batch,
                             table="push_rules",
@@ -312,7 +326,7 @@ class PushRulesWorkerStore(
                 (rule_id, priority_class, conditions, actions)
             )
 
-        results: Dict[str, FilteredPushRules] = {}
+        results: dict[str, FilteredPushRules] = {}
 
         for user_id, rules in raw_rules.items():
             results[user_id] = _load_rules(
@@ -323,14 +337,14 @@ class PushRulesWorkerStore(
 
     async def bulk_get_push_rules_enabled(
         self, user_ids: Collection[str]
-    ) -> Dict[str, Dict[str, bool]]:
+    ) -> dict[str, dict[str, bool]]:
         if not user_ids:
             return {}
 
-        results: Dict[str, Dict[str, bool]] = {user_id: {} for user_id in user_ids}
+        results: dict[str, dict[str, bool]] = {user_id: {} for user_id in user_ids}
 
         rows = cast(
-            List[Tuple[str, str, Optional[int]]],
+            list[tuple[str, str, int | None]],
             await self.db_pool.simple_select_many_batch(
                 table="push_rules_enable",
                 column="user_name",
@@ -346,7 +360,7 @@ class PushRulesWorkerStore(
 
     async def get_all_push_rule_updates(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, Tuple[str]]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple[str]]], int, bool]:
         """Get updates for push_rules replication stream.
 
         Args:
@@ -373,7 +387,7 @@ class PushRulesWorkerStore(
 
         def get_all_push_rule_updates_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Tuple[int, Tuple[str]]], int, bool]:
+        ) -> tuple[list[tuple[int, tuple[str]]], int, bool]:
             sql = """
                 SELECT stream_id, user_id
                 FROM push_rules_stream
@@ -383,7 +397,7 @@ class PushRulesWorkerStore(
             """
             txn.execute(sql, (last_id, current_id, limit))
             updates = cast(
-                List[Tuple[int, Tuple[str]]],
+                list[tuple[int, tuple[str]]],
                 [(stream_id, (user_id,)) for stream_id, user_id in txn],
             )
 
@@ -405,15 +419,38 @@ class PushRulesWorkerStore(
         rule_id: str,
         priority_class: int,
         conditions: Sequence[Mapping[str, str]],
-        actions: Sequence[Union[Mapping[str, Any], str]],
-        before: Optional[str] = None,
-        after: Optional[str] = None,
+        actions: Sequence[Mapping[str, Any] | str],
+        before: str | None = None,
+        after: str | None = None,
     ) -> None:
         if not self._is_push_writer:
             raise Exception("Not a push writer")
 
         conditions_json = json_encoder.encode(conditions)
         actions_json = json_encoder.encode(actions)
+
+        rule_id_len = len(rule_id.encode("utf-8"))
+        if rule_id_len > self._config.limits.rule_id_length:
+            raise SynapseError(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                f"Push rule ID length exceeds server limit ({rule_id_len} bytes > {self._config.limits.rule_id_length} bytes).",
+                # FIXME: Provide a better error code.
+                # None of the existing options seem entirely correct, though.
+                Codes.UNKNOWN,
+            )
+
+        rule_body_size = _push_rule_size_for_limits(
+            conditions_json=conditions_json, actions_json=actions_json
+        )
+        if rule_body_size > self._config.limits.rule_size:
+            raise SynapseError(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                f"Push rule size exceeds server limit ({rule_body_size} bytes > {self._config.limits.rule_size} bytes).",
+                # FIXME: Provide a better error code.
+                # None of the existing options seem entirely correct, though.
+                Codes.UNKNOWN,
+            )
+
         async with self._push_rules_stream_id_gen.get_next() as stream_id:
             event_stream_ordering = self._stream_id_gen.get_current_token()
 
@@ -583,12 +620,18 @@ class PushRulesWorkerStore(
         actions_json: str,
         update_stream: bool = True,
     ) -> None:
+        """Specialised version of simple_upsert_txn that picks a push_rule_id
+        using the _push_rule_id_gen if it needs to insert the rule.
+
+        Preconditions:
+            - this worker is a push writer
+            - the "push_rules" table is locked
+            - the push rule has already been validated,
+              including for rule ID length and rule body size.
+        """
+
         if not self._is_push_writer:
             raise Exception("Not a push writer")
-
-        """Specialised version of simple_upsert_txn that picks a push_rule_id
-        using the _push_rule_id_gen if it needs to insert the rule. It assumes
-        that the "push_rules" table is locked"""
 
         sql = (
             "UPDATE push_rules"
@@ -602,6 +645,27 @@ class PushRulesWorkerStore(
         )
 
         if txn.rowcount == 0:
+            # About to add a new rule, so check our limits first.
+            txn.execute(
+                """
+                SELECT COUNT(*) FROM push_rules
+                WHERE user_name = ?
+                """,
+                (user_id,),
+            )
+            (num_push_rules,) = cast(tuple[int], txn.fetchone())
+            if num_push_rules >= self._config.limits.rule_count:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"Creating a push rule would exceed the limit on the number of push rules associated with your account ({num_push_rules + 1} rules > {self._config.limits.rule_count} rules)",
+                    # FIXME: Provide a better error code, especially for this case.
+                    # None of the existing options seem entirely correct, though.
+                    # `M_USER_LIMIT_EXCEEDED` comes closest but needs an `info_uri`.
+                    # Should follow up and add a built-in error page template, similarly to
+                    # https://github.com/element-hq/synapse/pull/18876 ?
+                    Codes.UNKNOWN,
+                )
+
             # We didn't update a row with the given rule_id so insert one
             push_rule_id = self._push_rule_id_gen.get_next()
 
@@ -794,7 +858,7 @@ class PushRulesWorkerStore(
         self,
         user_id: str,
         rule_id: str,
-        actions: List[Union[dict, str]],
+        actions: list[dict | str],
         is_default_rule: bool,
     ) -> None:
         """
@@ -844,6 +908,28 @@ class PushRulesWorkerStore(
                 )
             else:
                 try:
+                    # Before updating the push rule, we need to check that we won't exceed
+                    # the size limit on push rules.
+                    # For that, we need to fetch the `conditions` JSON.
+                    conditions_json = self.db_pool.simple_select_one_onecol_txn(
+                        txn,
+                        "push_rules",
+                        {"user_name": user_id, "rule_id": rule_id},
+                        "conditions",
+                    )
+
+                    rule_body_size = _push_rule_size_for_limits(
+                        conditions_json=conditions_json, actions_json=actions_json
+                    )
+                    if rule_body_size > self._config.limits.rule_size:
+                        raise SynapseError(
+                            HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                            f"Push rule size exceeds server limit ({rule_body_size} bytes > {self._config.limits.rule_size} bytes).",
+                            # FIXME: Provide a better error code.
+                            # None of the existing options seem entirely correct, though.
+                            Codes.UNKNOWN,
+                        )
+
                     self.db_pool.simple_update_one_txn(
                         txn,
                         "push_rules",
@@ -885,7 +971,7 @@ class PushRulesWorkerStore(
         user_id: str,
         rule_id: str,
         op: str,
-        data: Optional[JsonDict] = None,
+        data: JsonDict | None = None,
     ) -> None:
         if not self._is_push_writer:
             raise Exception("Not a push writer")

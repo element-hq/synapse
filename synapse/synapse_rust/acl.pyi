@@ -13,10 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List
-
 class ServerAclEvaluator:
     def __init__(
-        self, allow_ip_literals: bool, allow: List[str], deny: List[str]
+        self, allow_ip_literals: bool, allow: list[str], deny: list[str]
     ) -> None: ...
     def server_matches_acl_event(self, server_name: str) -> bool: ...

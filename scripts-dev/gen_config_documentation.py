@@ -4,7 +4,7 @@
 import json
 import re
 import sys
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -259,17 +259,17 @@ def indent(text: str, first_line: bool = True) -> str:
     return text
 
 
-def em(s: Optional[str]) -> str:
+def em(s: str | None) -> str:
     """Add emphasis to text."""
     return f"*{s}*" if s else ""
 
 
-def a(s: Optional[str], suffix: str = " ") -> str:
+def a(s: str | None, suffix: str = " ") -> str:
     """Appends a space if the given string is not empty."""
     return s + suffix if s else ""
 
 
-def p(s: Optional[str], prefix: str = " ") -> str:
+def p(s: str | None, prefix: str = " ") -> str:
     """Prepend a space if the given string is not empty."""
     return prefix + s if s else ""
 

@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict
 
 from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
@@ -65,7 +64,7 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
             )
         )
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         # We need to manually set the resource tree to include media, the
         # default only does `/_matrix/client` APIs.
         return {"/_matrix/media": self.hs.get_media_repository_resource()}

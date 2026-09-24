@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 from unittest.mock import AsyncMock
 
 import pymacaroons
@@ -55,7 +54,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
 
         self.user1 = self.register_user("a_user", "pass")
 
-    def token_login(self, token: str) -> Optional[str]:
+    def token_login(self, token: str) -> str | None:
         body = {
             "type": "m.login.token",
             "token": token,

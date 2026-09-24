@@ -21,7 +21,7 @@
 import importlib.resources as importlib_resources
 import json
 import re
-from typing import Any, Dict, Iterable, List, Optional, Pattern
+from typing import Any, Iterable, Pattern
 from urllib import parse as urlparse
 
 import attr
@@ -37,9 +37,9 @@ class OEmbedEndpointConfig:
     # The API endpoint to fetch.
     api_endpoint: str
     # The patterns to match.
-    url_patterns: List[Pattern[str]]
+    url_patterns: list[Pattern[str]]
     # The supported formats.
-    formats: Optional[List[str]]
+    formats: list[str] | None
 
 
 class OembedConfig(Config):
@@ -48,10 +48,10 @@ class OembedConfig(Config):
     section = "oembed"
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
-        oembed_config: Dict[str, Any] = config.get("oembed") or {}
+        oembed_config: dict[str, Any] = config.get("oembed") or {}
 
         # A list of patterns which will be used.
-        self.oembed_patterns: List[OEmbedEndpointConfig] = list(
+        self.oembed_patterns: list[OEmbedEndpointConfig] = list(
             self._parse_and_validate_providers(oembed_config)
         )
 
@@ -92,7 +92,7 @@ class OembedConfig(Config):
             )
 
     def _parse_and_validate_provider(
-        self, providers: List[JsonDict], config_path: StrSequence
+        self, providers: list[JsonDict], config_path: StrSequence
     ) -> Iterable[OEmbedEndpointConfig]:
         # Ensure it is the proper form.
         validate_config(

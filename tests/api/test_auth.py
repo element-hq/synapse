@@ -106,8 +106,44 @@ class AuthTestCase(unittest.HomeserverTestCase):
         self.assertEqual(f.code, 401)
         self.assertEqual(f.errcode, "M_MISSING_TOKEN")
 
+    def test_get_optional_user_by_req_valid_token(self) -> None:
+        user_info = TokenLookupResult(
+            user_id=self.test_user_id.to_string(), token_id=5, device_id="device"
+        )
+        self.store.get_user_by_access_token = AsyncMock(return_value=user_info)
+        self.store.mark_access_token_as_used = AsyncMock(return_value=None)
+        self.store.get_user_locked_status = AsyncMock(return_value=False)
+
+        request = Mock(args={})
+        request.args[b"access_token"] = [self.test_token]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        requester = self.get_success(self.auth.get_optional_user_by_req(request))
+        assert requester is not None
+        self.assertEqual(requester.user, self.test_user_id)
+
+    def test_get_optional_user_by_req_bad_token(self) -> None:
+        """A token that is present but invalid is still rejected."""
+        self.store.get_user_by_access_token = AsyncMock(return_value=None)
+
+        request = Mock(args={})
+        request.args[b"access_token"] = [self.test_token]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        f = self.get_failure(
+            self.auth.get_optional_user_by_req(request), InvalidClientTokenError
+        ).value
+        self.assertEqual(f.code, 401)
+        self.assertEqual(f.errcode, Codes.UNKNOWN_TOKEN)
+
+    def test_get_optional_user_by_req_missing_token(self) -> None:
+        """A request without any token yields no requester rather than an error."""
+        request = Mock(args={})
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        requester = self.get_success(self.auth.get_optional_user_by_req(request))
+        self.assertIsNone(requester)
+
     def test_get_user_by_req_appservice_valid_token(self) -> None:
         app_service = Mock(
+            id="as_id",
             token="foobar",
             url="a_url",
             sender=self.test_user_id,
@@ -132,6 +168,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             sender=self.test_user_id.to_string(),
             ip_range_whitelist=IPSet(["192.168.0.0/16"]),
         )
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
 
@@ -151,6 +188,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             sender=self.test_user_id,
             ip_range_whitelist=IPSet(["192.168.0.0/16"]),
         )
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
 
@@ -179,6 +217,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
 
     def test_get_user_by_req_appservice_missing_token(self) -> None:
         app_service = Mock(token="foobar", url="a_url", sender=self.test_user_id)
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
 
@@ -199,6 +238,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             ip_range_whitelist=None,
         )
         app_service.is_interested_in_user = Mock(return_value=True)
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
 
         class FakeUserInfo:
@@ -226,6 +266,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             ip_range_whitelist=None,
         )
         app_service.is_interested_in_user = Mock(return_value=False)
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
 
@@ -251,6 +292,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             ip_range_whitelist=None,
         )
         app_service.is_interested_in_user = Mock(return_value=True)
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         # This just needs to return a truth-y value.
         self.store.get_user_by_id = AsyncMock(return_value={"is_guest": False})
@@ -285,6 +327,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             ip_range_whitelist=None,
         )
         app_service.is_interested_in_user = Mock(return_value=True)
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         # This just needs to return a truth-y value.
         self.store.get_user_by_id = AsyncMock(return_value={"is_guest": False})
@@ -457,7 +500,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             is_guest=False,
             scope=set(),
             shadow_banned=False,
-            app_service=appservice,
+            app_service_id=appservice.id,
             authenticated_entity="@appservice:server",
         )
         self.get_success(self.auth_blocking.check_auth_blocking(requester=requester))
@@ -488,7 +531,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             is_guest=False,
             scope=set(),
             shadow_banned=False,
-            app_service=appservice,
+            app_service_id=appservice.id,
             authenticated_entity="@appservice:server",
         )
         self.get_failure(

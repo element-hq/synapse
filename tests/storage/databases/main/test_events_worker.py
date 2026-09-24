@@ -20,7 +20,7 @@
 #
 import json
 from contextlib import contextmanager
-from typing import Generator, List, Set, Tuple
+from typing import Generator
 from unittest import mock
 
 from twisted.enterprise.adbapi import ConnectionPool
@@ -28,7 +28,6 @@ from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.room_versions import EventFormatVersions, RoomVersions
-from synapse.events import make_event_from_dict
 from synapse.logging.context import LoggingContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -42,6 +41,7 @@ from synapse.util.async_helpers import yieldable_gather_results
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 from tests.test_utils.event_injection import create_event, inject_event
 
 
@@ -60,7 +60,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
         self.token = self.login(self.user, "pass")
         self.room_id = self.helper.create_room_as(self.user, tok=self.token)
 
-        self.event_ids: List[str] = []
+        self.event_ids: list[str] = []
         for i in range(3):
             event = self.get_success(
                 inject_event(
@@ -316,7 +316,7 @@ class GetEventsTestCase(unittest.HomeserverTestCase):
 
         room_id = self.helper.create_room_as(user_id, tok=user_tok)
 
-        event_ids: Set[str] = set()
+        event_ids: set[str] = set()
         for i in range(num_events):
             event = self.get_success(
                 inject_event(
@@ -371,13 +371,13 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        self.event_ids: List[str] = []
+        self.event_ids: list[str] = []
         for idx in range(1, 21):  # Stream ordering starts at 1.
             event_json = {
                 "type": f"test {idx}",
                 "room_id": self.room_id,
             }
-            event = make_event_from_dict(event_json, room_version=RoomVersions.V4)
+            event = make_test_event(event_json, room_version=RoomVersions.V4)
             event_id = event.event_id
             self.get_success(
                 self.store.db_pool.simple_upsert(
@@ -400,7 +400,7 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
                     {"event_id": event_id},
                     {
                         "room_id": self.room_id,
-                        "json": json.dumps(event_json),
+                        "json": json.dumps(event.get_dict()),
                         "internal_metadata": "{}",
                         "format_version": EventFormatVersions.ROOM_V4_PLUS,
                     },
@@ -504,7 +504,7 @@ class GetEventCancellationTestCase(unittest.HomeserverTestCase):
     def blocking_get_event_calls(
         self,
     ) -> Generator[
-        Tuple["Deferred[None]", "Deferred[None]", "Deferred[None]"], None, None
+        tuple["Deferred[None]", "Deferred[None]", "Deferred[None]"], None, None
     ]:
         """Starts two concurrent `get_event` calls for the same event.
 

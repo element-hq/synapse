@@ -21,8 +21,9 @@
 import platform
 import sqlite3
 import struct
+import sys
 import threading
-from typing import TYPE_CHECKING, Any, List, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping
 
 from synapse.storage.engines import BaseDatabaseEngine
 from synapse.storage.engines._base import AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER
@@ -45,7 +46,7 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
         # A connection to a database that has already been prepared, to use as a
         # base for an in-memory connection. This is used during unit tests to
         # speed up setting up the DB.
-        self._prepped_conn: Optional[sqlite3.Connection] = database_config.get(
+        self._prepped_conn: sqlite3.Connection | None = database_config.get(
             "_TEST_PREPPED_CONN"
         )
 
@@ -68,11 +69,6 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
         """Do we support using `a = ANY(?)` and passing a list"""
         return False
 
-    @property
-    def supports_returning(self) -> bool:
-        """Do we support the `RETURNING` clause in insert/update/delete?"""
-        return sqlite3.sqlite_version_info >= (3, 35, 0)
-
     def check_database(
         self, db_conn: sqlite3.Connection, allow_outdated_version: bool = False
     ) -> None:
@@ -80,8 +76,8 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
             # Synapse is untested against older SQLite versions, and we don't want
             # to let users upgrade to a version of Synapse with broken support for their
             # sqlite version, because it risks leaving them with a half-upgraded db.
-            if sqlite3.sqlite_version_info < (3, 27, 0):
-                raise RuntimeError("Synapse requires sqlite 3.27 or above.")
+            if sqlite3.sqlite_version_info < (3, 37, 2):
+                raise RuntimeError("Synapse requires sqlite 3.37.2 or above.")
 
     def check_new_database(self, txn: Cursor) -> None:
         """Gets called when setting up a brand new database. This allows us to
@@ -94,6 +90,20 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
     def on_new_connection(self, db_conn: "LoggingDatabaseConnection") -> None:
         # We need to import here to avoid an import loop.
         from synapse.storage.prepare_database import prepare_database
+
+        if sys.version_info >= (3, 12):
+            # Opportunistically disable the SQLITE_DBCONFIG_DEFENSIVE
+            # flag on the database, as some of our database migrations
+            # alter the schema and this is forbidden in defensive mode.
+            #
+            # This is only known to be necessary on macOS, though SQLite can
+            # in theory be configured to be defensive by default on any
+            # platform.
+            #
+            # The constant for this is only exposed in the sqlite3 module
+            # on Python >= 3.12.
+            assert isinstance(db_conn.conn, sqlite3.Connection)
+            db_conn.conn.setconfig(sqlite3.SQLITE_DBCONFIG_DEFENSIVE, False)
 
         if self._is_in_memory:
             # In memory databases need to be rebuilt each time. Ideally we'd
@@ -146,7 +156,7 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
         pass
 
     def attempt_to_set_isolation_level(
-        self, conn: sqlite3.Connection, isolation_level: Optional[int]
+        self, conn: sqlite3.Connection, isolation_level: int | None
     ) -> None:
         # All transactions are SERIALIZABLE by default in sqlite
         pass
@@ -182,7 +192,7 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
 # Following functions taken from: https://github.com/coleifer/peewee
 
 
-def _parse_match_info(buf: bytes) -> List[int]:
+def _parse_match_info(buf: bytes) -> list[int]:
     bufsize = len(buf)
     return [struct.unpack("@I", buf[i : i + 4])[0] for i in range(0, bufsize, 4)]
 

@@ -433,6 +433,28 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
             },
         )
 
+    def test_extended_opengraph(self) -> None:
+        """Ensure we pull in profile and article data from opengraph."""
+        html = b"""
+        <html>
+        <meta property="og:description" content="My description" />
+        <meta property="profile:username" content="myname">
+        <meta property="article:published_time" content="2026-04-07T10:07:37Z">
+        </html>
+        """
+        tree = decode_body(html, "http://example.com/test.html")
+        assert tree is not None
+        og = parse_html_to_open_graph(tree)
+        self.assertEqual(
+            og,
+            {
+                "og:title": None,
+                "og:description": "My description",
+                "profile:username": "myname",
+                "article:published_time": "2026-04-07T10:07:37Z",
+            },
+        )
+
     def test_nested_nodes(self) -> None:
         """A body with some nested nodes. Tests that we iterate over children
         in the right order (and don't reverse the order of the text)."""

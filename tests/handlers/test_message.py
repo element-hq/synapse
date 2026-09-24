@@ -19,7 +19,6 @@
 #
 #
 import logging
-from typing import Tuple
 
 from twisted.internet.testing import MemoryReactor
 
@@ -64,7 +63,7 @@ class EventCreationTestCase(unittest.HomeserverTestCase):
 
         self.requester = create_requester(self.user_id, device_id=device_id)
 
-    def _create_and_persist_member_event(self) -> Tuple[EventBase, EventContext]:
+    def _create_and_persist_member_event(self) -> tuple[EventBase, EventContext]:
         # Create a member event we can use as an auth_event
         memberEvent, memberEventContext = self.get_success(
             create_event(
@@ -86,7 +85,7 @@ class EventCreationTestCase(unittest.HomeserverTestCase):
 
     def _create_duplicate_event(
         self, txn_id: str
-    ) -> Tuple[EventBase, UnpersistedEventContextBase]:
+    ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """Create a new event with the given transaction ID. All events produced
         by this method will be considered duplicates.
         """
@@ -235,11 +234,6 @@ class EventCreationTestCase(unittest.HomeserverTestCase):
         )
 
     def test_call_invite_event_creation_fails_in_public_room(self) -> None:
-        # get prev_events for room
-        prev_events = self.get_success(
-            self.store.get_prev_events_for_room(self.room_id)
-        )
-
         # the invite in a public room should fail
         self.get_failure(
             self.handler.create_event(
@@ -249,8 +243,6 @@ class EventCreationTestCase(unittest.HomeserverTestCase):
                     "room_id": self.room_id,
                     "sender": self.requester.user.to_string(),
                 },
-                prev_event_ids=prev_events,
-                auth_event_ids=prev_events,
             ),
             SynapseError,
         )
@@ -264,8 +256,6 @@ class EventCreationTestCase(unittest.HomeserverTestCase):
                     "room_id": self.private_room_id,
                     "sender": self.requester.user.to_string(),
                 },
-                prev_event_ids=prev_events,
-                auth_event_ids=prev_events,
             )
         )
 

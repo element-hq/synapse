@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from twisted.web.server import Request
 
@@ -68,7 +68,7 @@ class ReplicationRemovePusherRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         app_id = content["app_id"]
         pushkey = content["pushkey"]
 
@@ -110,7 +110,7 @@ class ReplicationCopyPusherRestServlet(ReplicationEndpoint):
         user_id: str,
         old_room_id: str,
         new_room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self._store.copy_push_rules_from_room_to_room_for_user(
             old_room_id, new_room_id, user_id
         )
@@ -144,7 +144,7 @@ class ReplicationDeleteAllPushersForUserRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self._store.delete_all_pushers_for_user(user_id)
 
         return 200, {}

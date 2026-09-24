@@ -22,7 +22,7 @@ import logging
 import math
 import resource
 import sys
-from typing import TYPE_CHECKING, List, Mapping, Sized, Tuple
+from typing import TYPE_CHECKING, Mapping, Sized
 
 from prometheus_client import Gauge
 
@@ -30,32 +30,39 @@ from twisted.internet import defer
 
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
-from synapse.util.constants import (
-    MILLISECONDS_PER_SECOND,
-    ONE_HOUR_SECONDS,
-    ONE_MINUTE_SECONDS,
-)
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger("synapse.app.homeserver")
 
-INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS = 5 * ONE_MINUTE_SECONDS
+INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME = Duration(minutes=5)
 """
 We wait 5 minutes to send the first set of stats as the server can be quite busy the
 first few minutes
 """
 
-PHONE_HOME_INTERVAL_SECONDS = 3 * ONE_HOUR_SECONDS
+PHONE_HOME_INTERVAL = Duration(hours=3)
 """
 Phone home stats are sent every 3 hours
 """
 
+COUNT_USERS_INTERVAL = Duration(minutes=5)
+"""
+We recalculate synapse_non_deactivated_user_count every 5 minutes, which allows
+for a reasonable level of accuracy without consuming too much database time.
+"""
+
 # Contains the list of processes we will be monitoring
 # currently either 0 or 1
-_stats_process: List[Tuple[int, "resource.struct_rusage"]] = []
+_stats_process: list[tuple[int, "resource.struct_rusage"]] = []
 
+# FIXME: These gauges should probably be moved somewhere else as they are NOT included
+# in the phone home stats payload. It appears that they were historically organized here
+# during a refactor to ensure that we only calculate them on the workers designated to
+# `hs.config.run_background_tasks` and because they are metrics.
+#
 # Gauges to expose monthly active user control metrics
 current_mau_gauge = Gauge(
     "synapse_admin_mau_current",
@@ -77,17 +84,22 @@ registered_reserved_users_mau_gauge = Gauge(
     "Registered users with reserved threepids",
     labelnames=[SERVER_NAME_LABEL],
 )
+user_count_gauge = Gauge(
+    "synapse_non_deactivated_user_count",
+    "Total non-deactivated user count within the Synapse database, split by appservice",
+    labelnames=["app_service", SERVER_NAME_LABEL],
+)
 
 
 def phone_stats_home(
     hs: "HomeServer",
     stats: JsonDict,
-    stats_process: List[Tuple[int, "resource.struct_rusage"]] = _stats_process,
+    stats_process: list[tuple[int, "resource.struct_rusage"]] = _stats_process,
 ) -> "defer.Deferred[None]":
     async def _phone_stats_home(
         hs: "HomeServer",
         stats: JsonDict,
-        stats_process: List[Tuple[int, "resource.struct_rusage"]] = _stats_process,
+        stats_process: list[tuple[int, "resource.struct_rusage"]] = _stats_process,
     ) -> None:
         """Collect usage statistics and send them to the configured endpoint.
 
@@ -222,13 +234,13 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     # table will decrease
     clock.looping_call(
         hs.get_datastores().main.generate_user_daily_visits,
-        5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND,
+        Duration(minutes=5),
     )
 
     # monthly active user limiting functionality
     clock.looping_call(
         hs.get_datastores().main.reap_monthly_active_users,
-        ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND,
+        Duration(hours=1),
     )
     hs.get_datastores().main.reap_monthly_active_users()
 
@@ -267,14 +279,40 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
     if hs.config.server.limit_usage_by_mau or hs.config.server.mau_stats_only:
         generate_monthly_active_users()
-        clock.looping_call(generate_monthly_active_users, 5 * 60 * 1000)
+        clock.looping_call(generate_monthly_active_users, COUNT_USERS_INTERVAL)
     # End of monthly active user settings
+
+    def generate_non_deactivated_user_count() -> "defer.Deferred[None]":
+        async def _generate_total_users() -> None:
+            store = hs.get_datastores().main
+
+            result = await store.get_user_count_by_service()
+
+            # Should an appservice disappear from the results (because all of the users
+            # were deleted/deactivated), we want to ensure we don't leave behind any
+            # stale data.
+            user_count_gauge.clear()
+
+            for app_service, count in result:
+                user_count_gauge.labels(
+                    app_service=app_service,
+                    **{SERVER_NAME_LABEL: server_name},
+                ).set(float(count))
+
+        return hs.run_as_background_process(
+            "generate_total_users",
+            _generate_total_users,
+        )
+
+    if hs.config.metrics.enable_metrics:
+        generate_non_deactivated_user_count()
+        clock.looping_call(generate_non_deactivated_user_count, Duration(minutes=5))
 
     if hs.config.metrics.report_stats:
         logger.info("Scheduling stats reporting for 3 hour intervals")
         clock.looping_call(
             phone_stats_home,
-            PHONE_HOME_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND,
+            PHONE_HOME_INTERVAL,
             hs,
             stats,
         )
@@ -282,14 +320,14 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
         # We need to defer this init for the cases that we daemonize
         # otherwise the process ID we get is that of the non-daemon process
         clock.call_later(
-            0,
+            Duration(seconds=0),
             performance_stats_init,
         )
 
         # We wait 5 minutes to send the first set of stats as the server can
         # be quite busy the first few minutes
         clock.call_later(
-            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS,
+            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME,
             phone_stats_home,
             hs,
             stats,

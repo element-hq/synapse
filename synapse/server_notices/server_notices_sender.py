@@ -17,7 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Iterable, Union
+from typing import TYPE_CHECKING, Iterable
 
 from synapse.server_notices.consent_server_notices import ConsentServerNotices
 from synapse.server_notices.resource_limits_server_notices import (
@@ -39,7 +39,7 @@ class ServerNoticesSender(WorkerServerNoticesSender):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
         self._server_notices: Iterable[
-            Union[ConsentServerNotices, ResourceLimitsServerNotices]
+            ConsentServerNotices | ResourceLimitsServerNotices
         ] = (
             ConsentServerNotices(hs),
             ResourceLimitsServerNotices(hs),
