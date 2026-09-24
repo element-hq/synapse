@@ -23,10 +23,9 @@
 
 import logging
 import re
-from abc import ABC, abstractmethod
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Awaitable, NoReturn
+from typing import TYPE_CHECKING, Awaitable, NoReturn
 from urllib import parse as urlparse
 
 import attr
@@ -520,7 +519,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         )
 
 
-class RoomDelayedEventRestServletBase(ABC, TransactionRestServlet):
+class RoomDelayedEventRestServlet(TransactionRestServlet):
     CATEGORY = "Delayed event management requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -528,20 +527,13 @@ class RoomDelayedEventRestServletBase(ABC, TransactionRestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self._msc4140_enabled = hs.config.server.msc4140_enabled
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/delayed_event/$event_type[/$txn_id]
         PATTERNS = "/rooms/(?P<room_id>[^/]*)/delayed_event/(?P<event_type>[^/]*)"
         register_txn_path(self, PATTERNS, http_server, "org.matrix.msc4140")
-
-    @abstractmethod
-    async def _do(
-        self,
-        request: SynapseRequest,
-        requester: Requester,
-        room_id: str,
-        event_type: str,
-    ) -> tuple[int, JsonDict]: ...
 
     async def on_POST(
         self,
@@ -568,19 +560,8 @@ class RoomDelayedEventRestServletBase(ABC, TransactionRestServlet):
             event_type,
         )
 
-
-class RoomDelayedEventRestServletUnsupported(RoomDelayedEventRestServletBase):
-    async def _do(self, *_: Any) -> NoReturn:
-        _raise_delayed_events_unsupported()
-
-
-class RoomDelayedEventRestServlet(RoomDelayedEventRestServletBase):
-    def __init__(self, hs: "HomeServer"):
-        super().__init__(hs)
-        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
-
     class DelayedEventBodyModel(RequestBodyModel):
-        delay: PositiveInt
+        delay_ms: PositiveInt
         content: JsonDict
         state_key: StrictStr | None = None
 
@@ -591,6 +572,9 @@ class RoomDelayedEventRestServlet(RoomDelayedEventRestServletBase):
         room_id: str,
         event_type: str,
     ) -> tuple[int, JsonDict]:
+        if not self._msc4140_enabled:
+            _raise_delayed_events_unsupported()
+
         request_body = parse_and_validate_json_object_from_request(
             request, self.DelayedEventBodyModel
         )
@@ -610,7 +594,7 @@ class RoomDelayedEventRestServlet(RoomDelayedEventRestServletBase):
             state_key=request_body.state_key,
             origin_server_ts=origin_server_ts,
             content=request_body.content,
-            delay=Duration(milliseconds=request_body.delay),
+            delay=Duration(milliseconds=request_body.delay_ms),
             sticky_duration_ms=sticky_duration_ms,
         )
 
@@ -1899,11 +1883,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RoomCreateRestServlet(hs).register(http_server)
     TimestampLookupRestServlet(hs).register(http_server)
 
-    (
-        RoomDelayedEventRestServlet(hs)
-        if hs.config.server.msc4140_enabled
-        else RoomDelayedEventRestServletUnsupported(hs)
-    ).register(http_server)
+    RoomDelayedEventRestServlet(hs).register(http_server)
 
     # Some servlets only get registered for the main process.
     if hs.config.worker.worker_app is None:

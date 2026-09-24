@@ -290,6 +290,7 @@ information.
 
     # Unstable MSC4140 support
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/.*/restart)?$
+    ^/_matrix/client/unstable/org.matrix.msc4140/rooms/.*/delayed_event/
 
     # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
     ^/_synapse/mas/
