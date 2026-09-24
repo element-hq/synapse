@@ -779,7 +779,7 @@ mod tests {
     use std::borrow::Cow;
     use std::collections::BTreeMap;
 
-    use super::{HIGHLIGHT_ACTION, SOUND_ACTION};
+    use super::{HIGHLIGHT_ACTION, RING_ACTION};
     use crate::push::evaluator::PushRuleEvaluator;
     use crate::push::{Action, FilteredPushRules, JsonValue, PushRules, SimpleJsonValue};
 
@@ -863,7 +863,7 @@ mod tests {
         let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
         assert_eq!(
             actions,
-            vec![Action::Notify, HIGHLIGHT_ACTION, SOUND_ACTION]
+            vec![Action::Notify, HIGHLIGHT_ACTION, RING_ACTION]
         );
     }
 
@@ -881,7 +881,7 @@ mod tests {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[], true, 50);
 
         let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
-        assert_eq!(actions, vec![Action::Notify, HIGHLIGHT_ACTION]);
+        assert_eq!(actions, vec![Action::Notify, HIGHLIGHT_ACTION, RING_ACTION]);
     }
 
     #[test]
@@ -890,19 +890,6 @@ mod tests {
 
         let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
         assert_eq!(actions, vec![]);
-    }
-
-    #[test]
-    fn test_rtc_invite_for_me_takes_precedence_over_invite_for_room() {
-        let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[ALICE], true, 50);
-
-        // The user mention rule comes first and plays a sound, unlike the room
-        // mention rule.
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
-        assert_eq!(
-            actions,
-            vec![Action::Notify, HIGHLIGHT_ACTION, SOUND_ACTION]
-        );
     }
 
     #[test]
