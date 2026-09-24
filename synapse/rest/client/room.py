@@ -575,7 +575,7 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
             origin_server_ts = parse_integer(request, "ts")
 
         sticky_duration_ms: int | None = None
-        if self._msc4354_enabled:
+        if self._msc4354_enabled and request_body.state_key is None:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
         delay_id = await self.delayed_events_handler.add(
