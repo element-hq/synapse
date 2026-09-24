@@ -748,16 +748,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             per_user_updates,
             [
-                # FIXME: As per
-                # https://github.com/element-hq/synapse/issues/19981#issuecomment-5411650913
-                # we should clean out the old left_room rows, so this test
-                # needs modifying to not have this here, once that is done.
-                ProfileUpdate(
-                    stream_id=5,
-                    user_id="@roger:test",
-                    action="left_room",
-                    affected_fields=None,
-                ),
                 ProfileUpdate(
                     stream_id=7,
                     user_id="@roger:test",
