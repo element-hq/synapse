@@ -2944,8 +2944,9 @@ class PersistEventsStore:
                     event.sender
                 ):
                     logger.debug(
-                        "redaction of %s skipped as it required a v3 recheck and sender servers differ: %r != %r",
+                        "redaction of %s by %s skipped as it required a v3 recheck and sender servers differ: %r != %r",
                         redaction_redacts_event_id,
+                        redaction_event_id,
                         redaction_event_sender,
                         event.sender,
                     )
