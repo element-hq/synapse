@@ -338,27 +338,50 @@ class DelayedEventsTestCase(HomeserverTestCase):
             self.user2_user_id, tok=self.user2_access_token
         )
 
-        for method, path, content in (
-            ("POST", _get_path_for_delayed_send(room_id, _EVENT_TYPE, 900), {}),
-            (
-                "PUT",
-                _get_path_for_delayed_state(room_id, _EVENT_TYPE, "", 900),
-                {},
+        channel = self.make_request(
+            "POST",
+            _get_path_for_delayed_send(room_id, _EVENT_TYPE, 900),
+            {},
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
+        )
+
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(room_id, _EVENT_TYPE, "", 900),
+            {},
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
+        )
+
+        self.assertListEqual([], self._get_delayed_events())
+
+    def test_delayed_member_event_for_other_user_rejected_if_sender_not_in_room(
+        self,
+    ) -> None:
+        """Only changes to the sender's own membership are exempt."""
+        room_id = self.helper.create_room_as(
+            self.user2_user_id, tok=self.user2_access_token
+        )
+
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(
+                room_id, EventTypes.Member, self.user2_user_id, 900
             ),
-            # Only changes to the sender's own membership are exempt
-            (
-                "PUT",
-                _get_path_for_delayed_state(
-                    room_id, EventTypes.Member, self.user2_user_id, 900
-                ),
-                {"membership": Membership.LEAVE},
-            ),
-        ):
-            channel = self.make_request(method, path, content, self.user1_access_token)
-            self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
-            self.assertEqual(
-                Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
-            )
+            {"membership": Membership.LEAVE},
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
+        )
 
         self.assertListEqual([], self._get_delayed_events())
 
