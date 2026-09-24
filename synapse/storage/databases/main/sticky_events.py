@@ -234,6 +234,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             txn.database_engine, "se.room_id", room_ids
         )
         stream_clause, stream_values = make_multiwriter_sharded_token_bounds_sql(
+            self.database_engine,
             stream_id_column="se.stream_id",
             instance_name_column="se.instance_name",
             from_token_exclusive=from_token,

@@ -49,7 +49,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
-from synapse.storage.engines import PostgresEngine
+from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
 from synapse.storage.types import Cursor
 from synapse.storage.util.sequence import build_sequence_generator
 from synapse.types import MultiWriterStreamToken
@@ -1024,6 +1024,7 @@ class _MultiWriterCtxManager:
 
 
 def make_multiwriter_sharded_token_bounds_sql(
+    db_engine: BaseDatabaseEngine,
     *,
     stream_id_column: str,
     instance_name_column: str,
@@ -1092,6 +1093,13 @@ def make_multiwriter_sharded_token_bounds_sql(
           `from_token_exclusive` after the result of reading a limited set of rows.
     """
 
+    is_not_distinct_from = "IS NOT DISTINCT FROM"
+    if isinstance(db_engine, Sqlite3Engine):
+        # TODO(SQLite 3.39.0): Drop this compatibility code
+        # SQL standard `IS NOT DISTINCT FROM` was not introduced until 3.39.0
+        # https://sqlite.org/releaselog/3_39_0.html
+        is_not_distinct_from = "IS"
+
     # The SQL we build will fundamentally consist of many clauses ANDed together.
     #
     # We start with an envelope delimited by the two outermost, writer-independent, bounds.
@@ -1110,7 +1118,7 @@ def make_multiwriter_sharded_token_bounds_sql(
         # We need `IS NOT DISTINCT FROM` (analogous to `=` but treats `NULL` as a known value)
         # for legacy rows where `instance_name` is `NULL`, such as before the stream was sharded.
         clauses.append(
-            f"NOT ({instance_name_column} IS NOT DISTINCT FROM ? AND {stream_id_column} <= ?)"
+            f"NOT ({instance_name_column} {is_not_distinct_from} ? AND {stream_id_column} <= ?)"
         )
         values.extend((instance_name, pos))
 
@@ -1121,7 +1129,7 @@ def make_multiwriter_sharded_token_bounds_sql(
     # - the row's writer is explicitly visible ahead of the baseline (minimum) position
     for instance_name, pos in to_token_inclusive.instance_map.items():
         upper_or_clauses.append(
-            f"({instance_name_column} IS NOT DISTINCT FROM ? AND {stream_id_column} <= ?)"
+            f"({instance_name_column} {is_not_distinct_from} ? AND {stream_id_column} <= ?)"
         )
         upper_or_values.extend((instance_name, pos))
 

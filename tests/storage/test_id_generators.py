@@ -34,6 +34,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.engines import Sqlite3Engine
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import (
     MultiWriterIdGenerator,
@@ -933,6 +934,7 @@ class ShardedTokenHelpersPureTestCase(TestCase):
         Tests that the example in the docstring is what we actually generate.
         """
         clause, values = make_multiwriter_sharded_token_bounds_sql(
+            Sqlite3Engine({}),
             stream_id_column="se.stream_id",
             instance_name_column="se.instance_name",
             from_token_exclusive=MultiWriterStreamToken(
@@ -948,10 +950,10 @@ class ShardedTokenHelpersPureTestCase(TestCase):
             (
                 ? < se.stream_id
                 AND se.stream_id <= ?
-                AND NOT (se.instance_name IS NOT DISTINCT FROM ? AND se.stream_id <= ?)
+                AND NOT (se.instance_name IS ? AND se.stream_id <= ?)
                 AND (
                     se.stream_id <= ?
-                    OR (se.instance_name IS NOT DISTINCT FROM ? AND se.stream_id <= ?)
+                    OR (se.instance_name IS ? AND se.stream_id <= ?)
                 )
             )
             """,
@@ -1062,6 +1064,9 @@ class ShardedTokenHelpersDatabaseTestCase(TestCase):
     """(from, to) token pairs to exercise the bounds against `ROWS`."""
 
     def setUp(self) -> None:
+        # Just used for detecting SQL language support,
+        # doesn't actually connect...
+        self.database_engine = Sqlite3Engine({})
         self.conn = sqlite3.connect(":memory:")
         self.addCleanup(self.conn.close)
         self.conn.execute(
@@ -1082,6 +1087,7 @@ class ShardedTokenHelpersDatabaseTestCase(TestCase):
         Bounds: from_token < ... <= to_token
         """
         clause, values = make_multiwriter_sharded_token_bounds_sql(
+            self.database_engine,
             stream_id_column="streamtable.stream_id",
             instance_name_column="streamtable.instance_name",
             from_token_exclusive=from_token,
