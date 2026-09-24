@@ -630,7 +630,8 @@ impl FilteredPushRules {
                 }
 
                 if !self.msc4075_enabled
-                    && (rule.rule_id == "global/override/.org.matrix.msc4075.rule.rtc.invite_for_me"
+                    && (rule.rule_id
+                        == "global/override/.org.matrix.msc4075.rule.rtc.invite_for_me"
                         || rule.rule_id
                             == "global/override/.org.matrix.msc4075.rule.rtc.invite_for_room")
                 {
