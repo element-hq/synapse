@@ -30,7 +30,7 @@ use postgres_protocol::types::{
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
-use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PyString, PyTuple};
+use pyo3::types::{PyBool, PyByteArray, PyBytes, PyFloat, PyInt, PyString, PyTuple};
 use pyo3::{prelude::*, BoundObject};
 use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type, WrongType};
 
@@ -81,6 +81,13 @@ impl PgValue {
         };
 
         let obj = match obj.cast_into::<PyBytes>() {
+            Ok(s) => return Ok(PgValue::Bytea(s.into())),
+            Err(err) => err.into_inner(),
+        };
+
+        let obj = match obj.cast_into::<PyByteArray>() {
+            // Annoyingly, PyO3 needs to copy the contents of the byte array
+            // into a Vec here, so this isn't as cheap as using `PyBytes`.
             Ok(s) => return Ok(PgValue::Bytea(s.into())),
             Err(err) => err.into_inner(),
         };
