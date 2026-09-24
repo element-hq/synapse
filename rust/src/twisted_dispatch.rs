@@ -39,8 +39,8 @@
 //!                                                  └─ Execute them
 //! ```
 //!
-//! The [`TwistedDispatcher`] worker holds a queue of closures and the write end of a
-//! unix socket pair. A worker pushes a closure and writes one byte. The
+//! The [`TwistedDispatcher`] worker holds a queue of closures and the write end
+//! of a unix socket pair. A worker pushes a closure and writes one byte. The
 //! [`TwistedDispatchReader`] holds the read end and is registered with the
 //! Twisted reactor via `addReader`. The Twisted reactor is woken up and calls
 //! the `doRead` method on the Twisted reactor thread, which then reads from the

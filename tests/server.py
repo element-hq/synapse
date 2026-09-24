@@ -761,9 +761,9 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
 
         # Now poll anything registered with `addReader`. A real reactor does
         # this in its poll loop, but `MemoryReactor` only stores the readers, so
-        # results from Rust futures (see `TwistedDispatch`) would
-        # never reach their deferreds. Firing those deferreds can in turn queue
-        # more callbacks hence the recursive `advance(0)`.
+        # results from Rust futures (see `TwistedDispatch`) would never reach
+        # their deferreds. Firing those deferreds can in turn queue more
+        # callbacks hence the recursive `advance(0)`.
         readable = self._poll_readers()
         if readable:
             for reader in readable:
