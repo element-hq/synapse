@@ -19,6 +19,7 @@
 #
 #
 import base64
+import hashlib
 import json
 import os
 import re
@@ -35,7 +36,7 @@ from twisted.web.resource import Resource
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
@@ -766,6 +767,142 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         # The image should not be in the result.
         self.assertEqual(channel.code, 200)
         self.assertNotIn("og:image", channel.json_body)
+
+    def _quarantine_hash(self, content: bytes) -> None:
+        """Mark the sha256 of `content` as belonging to quarantined media."""
+        store = self.hs.get_datastores().main
+
+        # `get_is_hash_quarantined` returns False until the sha256 indexes have
+        # been built, which would make the tests below pass for the wrong reason.
+        self.wait_for_background_updates()
+
+        self.get_success(
+            store.store_local_media(
+                media_id="quarantinedmedia",
+                media_type="image/png",
+                time_now_ms=self.clock.time_msec(),
+                upload_name="quarantined.png",
+                media_length=len(content),
+                user_id=UserID.from_string(self.user_id),
+                sha256=hashlib.sha256(content).hexdigest(),
+            )
+        )
+        self.get_success(
+            store.quarantine_media_by_id("test", "quarantinedmedia", "@admin:test")
+        )
+
+    def _count_url_cache_files(self) -> int:
+        """The number of files stored in the url preview cache."""
+        return sum(
+            len(files)
+            for _, _, files in os.walk(os.path.join(self.media_store_path, "url_cache"))
+        )
+
+    def test_image_quarantined_by_hash(self) -> None:
+        """An image which matches a quarantined hash should be left out of the
+        preview entirely, rather than returned as an unfetchable mxc:// URI."""
+        self._quarantine_hash(SMALL_PNG)
+
+        self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
+        self.lookups["cdn.matrix.org"] = [(IPv4Address, "10.1.2.4")]
+
+        result = (
+            b"""<html><body><img src="http://cdn.matrix.org/foo.png"></body></html>"""
+        )
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/media/v3/preview_url?url=http://matrix.org",
+            shorthand=False,
+            await_result=False,
+        )
+        self.pump()
+
+        # Respond with the HTML.
+        client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        server = AccumulatingProtocol()
+        server.makeConnection(FakeTransport(client, self.reactor))
+        client.makeConnection(FakeTransport(server, self.reactor))
+        client.dataReceived(
+            (
+                b"HTTP/1.0 200 OK\r\nContent-Length: %d\r\n"
+                b'Content-Type: text/html; charset="utf8"\r\n\r\n'
+            )
+            % (len(result),)
+            + result
+        )
+        self.pump()
+
+        # Respond with the photo.
+        client = self.reactor.tcpClients[1][2].buildProtocol(None)
+        server = AccumulatingProtocol()
+        server.makeConnection(FakeTransport(client, self.reactor))
+        client.makeConnection(FakeTransport(server, self.reactor))
+        client.dataReceived(
+            (
+                b"HTTP/1.0 200 OK\r\nContent-Length: %d\r\n"
+                b"Content-Type: image/png\r\n\r\n"
+            )
+            % (len(SMALL_PNG),)
+            + SMALL_PNG
+        )
+        self.pump()
+
+        # The rest of the preview is returned, but without any image.
+        self.assertEqual(channel.code, 200)
+        self.assertNotIn("og:image", channel.json_body)
+        self.assertNotIn("og:image:type", channel.json_body)
+        self.assertNotIn("og:image:width", channel.json_body)
+        self.assertNotIn("og:image:height", channel.json_body)
+        self.assertNotIn("matrix:image:size", channel.json_body)
+
+        # No reference to the image should have been kept: the only url cache
+        # media is the previewed page itself.
+        media = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_onecol(
+                "local_media_repository",
+                {},
+                "url_cache",
+                desc="test_url_cache_media",
+            )
+        )
+        self.assertEqual(
+            [url for url in media if url is not None], ["http://matrix.org"]
+        )
+        self.assertEqual(self._count_url_cache_files(), 1)
+
+    def test_direct_image_quarantined_by_hash(self) -> None:
+        """Previewing an image which itself matches a quarantined hash should
+        404, in the same way as fetching the quarantined media would."""
+        self._quarantine_hash(SMALL_PNG)
+
+        self.lookups["cdn.matrix.org"] = [(IPv4Address, "10.1.2.4")]
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/media/v3/preview_url?url=http://cdn.matrix.org/foo.png",
+            shorthand=False,
+            await_result=False,
+        )
+        self.pump()
+
+        client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        server = AccumulatingProtocol()
+        server.makeConnection(FakeTransport(client, self.reactor))
+        client.makeConnection(FakeTransport(server, self.reactor))
+        client.dataReceived(
+            (
+                b"HTTP/1.0 200 OK\r\nContent-Length: %d\r\n"
+                b"Content-Type: image/png\r\n\r\n"
+            )
+            % (len(SMALL_PNG),)
+            + SMALL_PNG
+        )
+        self.pump()
+
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
+        self.assertEqual(self._count_url_cache_files(), 0)
 
     @unittest.override_config(
         {"url_preview_url_blacklist": [{"netloc": "cdn.matrix.org"}]}
