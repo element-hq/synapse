@@ -106,6 +106,41 @@ class AuthTestCase(unittest.HomeserverTestCase):
         self.assertEqual(f.code, 401)
         self.assertEqual(f.errcode, "M_MISSING_TOKEN")
 
+    def test_get_optional_user_by_req_valid_token(self) -> None:
+        user_info = TokenLookupResult(
+            user_id=self.test_user_id.to_string(), token_id=5, device_id="device"
+        )
+        self.store.get_user_by_access_token = AsyncMock(return_value=user_info)
+        self.store.mark_access_token_as_used = AsyncMock(return_value=None)
+        self.store.get_user_locked_status = AsyncMock(return_value=False)
+
+        request = Mock(args={})
+        request.args[b"access_token"] = [self.test_token]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        requester = self.get_success(self.auth.get_optional_user_by_req(request))
+        assert requester is not None
+        self.assertEqual(requester.user, self.test_user_id)
+
+    def test_get_optional_user_by_req_bad_token(self) -> None:
+        """A token that is present but invalid is still rejected."""
+        self.store.get_user_by_access_token = AsyncMock(return_value=None)
+
+        request = Mock(args={})
+        request.args[b"access_token"] = [self.test_token]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        f = self.get_failure(
+            self.auth.get_optional_user_by_req(request), InvalidClientTokenError
+        ).value
+        self.assertEqual(f.code, 401)
+        self.assertEqual(f.errcode, Codes.UNKNOWN_TOKEN)
+
+    def test_get_optional_user_by_req_missing_token(self) -> None:
+        """A request without any token yields no requester rather than an error."""
+        request = Mock(args={})
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        requester = self.get_success(self.auth.get_optional_user_by_req(request))
+        self.assertIsNone(requester)
+
     def test_get_user_by_req_appservice_valid_token(self) -> None:
         app_service = Mock(
             id="as_id",

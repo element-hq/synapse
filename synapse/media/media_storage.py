@@ -507,6 +507,12 @@ class SpamMediaException(NotFoundError):
     """
 
 
+class QuarantinedMediaException(NotFoundError):
+    """The media matched the hash of existing quarantined media, so we 404 the
+    request (in the same way as if the media itself had been quarantined).
+    """
+
+
 @attr.s(slots=True, auto_attribs=True)
 class ReadableFileWrapper:
     """Wrapper that allows reading a file in chunks, yielding to the reactor,

@@ -311,7 +311,8 @@ presence:
 ---
 ### `require_auth_for_profile_requests`
 
-*(boolean)* Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless `allow_profile_lookup_over_federation` is set to false. Defaults to `false`.
+*(boolean)* Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless `allow_profile_lookup_over_federation` is set to false.
+This option must be enabled in order to use `limit_profile_requests_to_users_who_share_rooms`. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -320,7 +321,8 @@ require_auth_for_profile_requests: true
 ---
 ### `limit_profile_requests_to_users_who_share_rooms`
 
-*(boolean)* Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server. Defaults to `false`.
+*(boolean)* Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server.
+The check can only be applied to authenticated requests, so this option requires `require_auth_for_profile_requests` to be enabled as well. Synapse will refuse to start if this option is enabled without it. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -375,8 +377,9 @@ For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
 _Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
+_Changed in Synapse 1.162:_ the default room version was increased from [11](https://spec.matrix.org/v1.16/rooms/v11/) to [12](https://spec.matrix.org/v1.16/rooms/v12/)
 
-Defaults to `"11"`.
+Defaults to `"12"`.
 
 Example configuration:
 ```yaml
@@ -2113,6 +2116,27 @@ Default configuration:
 rc_user_directory:
   per_second: 0.016
   burst_count: 200.0
+```
+---
+### `rc_profile`
+
+*(object)* This option allows admins to ratelimit profile lookups by clients.
+
+Requests are limited per user when the request is authenticated, otherwise per client IP address.
+
+_Added in Synapse 1.162.0._
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_profile:
+  per_second: 1.0
+  burst_count: 500.0
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
@@ -4617,6 +4641,20 @@ outbound_federation_restricted_to:
 Example configuration:
 ```yaml
 run_background_tasks_on: worker1
+```
+---
+### `task_scheduler`
+
+*(object)* Configuration for the task scheduler.
+
+This setting has the following sub-options:
+
+* `max_concurrent_tasks` (integer): The maximum number of tasks that can run concurrently in the task scheduler. Setting this too high may swamp the database connection pool. Defaults to `5`.
+
+Example configuration:
+```yaml
+task_scheduler:
+  max_concurrent_tasks: 5
 ```
 ---
 ### `update_user_directory_from_worker`

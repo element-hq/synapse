@@ -29,6 +29,7 @@ from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.delayed_events import (
     ReplicationAddedDelayedEventRestServlet,
+    ReplicationCancelDelayedEventsForUserRestServlet,
 )
 from synapse.storage.databases.main.delayed_events import (
     DelayedEventDetails,
@@ -129,6 +130,9 @@ class DelayedEventsHandler:
             )
         else:
             self._repl_client = ReplicationAddedDelayedEventRestServlet.make_client(hs)
+            self._cancel_all_for_user_client = (
+                ReplicationCancelDelayedEventsForUserRestServlet.make_client(hs)
+            )
 
         if hs.config.worker.run_background_tasks:
             self._clock.looping_call(
@@ -452,6 +456,30 @@ class DelayedEventsHandler:
         next_send_ts = await self._store.cancel_delayed_event(
             delay_id, self._get_current_ts()
         )
+
+        if self._next_send_ts_changed(next_send_ts):
+            self._schedule_next_at_or_none(next_send_ts)
+
+    async def cancel_all_for_user(self, user_localpart: str) -> None:
+        """
+        Cancels the scheduled delivery of all delayed events owned by the local user
+        with the given localpart, e.g. because their account is being deactivated.
+
+        Delayed events that are already being sent are left alone.
+
+        Goes through replication if this is not the main process, as only the
+        main process handles sending delayed events.
+        """
+        if not self._is_master:
+            await self._cancel_all_for_user_client(
+                instance_name=MAIN_PROCESS_INSTANCE_NAME,
+                user_localpart=user_localpart,
+            )
+            return
+
+        await make_deferred_yieldable(self._initialized_from_db)
+
+        next_send_ts = await self._store.cancel_delayed_events_for_user(user_localpart)
 
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
