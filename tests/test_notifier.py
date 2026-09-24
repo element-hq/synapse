@@ -176,8 +176,9 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         """The `wait_for_stream_token` timeout counts for this server, keyed by the
         `stream_key` label.
 
-        Useful because the Prometheus metrics are process-wide, and so shared between tests. 
-        We use this to compare against a count taken before the code under test ran.
+        Useful because the Prometheus metrics are process-wide, and so shared
+        between tests. We use this to compare against a count taken before the
+        code under test ran.
         """
 
         # Fetch all samples from the `wait_for_stream_token_timeout_counter`
