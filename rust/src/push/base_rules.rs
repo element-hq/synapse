@@ -180,7 +180,7 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
                 key: Cow::Borrowed("room"),
             }),
         ]),
-        actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_ACTION]),
+        actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_ACTION, RING_ACTION]),
         default: true,
         default_enabled: true,
     },
