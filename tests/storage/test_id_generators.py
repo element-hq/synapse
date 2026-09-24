@@ -1004,7 +1004,7 @@ class ShardedTokenHelpersDatabaseTestCase(TestCase):
         with a separate set of tables.
     """
 
-    ROWS = [
+    ROWS: list[tuple[int, str | None]] = [
         # (stream_id, instance_name)
         (6, "worker1"),
         (7, "worker1"),
@@ -1109,7 +1109,7 @@ class ShardedTokenHelpersDatabaseTestCase(TestCase):
         self,
         from_token: MultiWriterStreamToken,
         to_token: MultiWriterStreamToken,
-    ) -> list[tuple[int, str]]:
+    ) -> list[tuple[int, str | None]]:
         """
         Helper that returns the rows that ought to be within the given bounds.
         It uses `MultiWriterStreamToken.is_stream_position_in_range` as the 'ground truth'.
