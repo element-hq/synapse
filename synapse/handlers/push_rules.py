@@ -24,7 +24,9 @@ import attr
 
 from synapse.api.errors import SynapseError, UnrecognizedRequestError
 from synapse.push.clientformat import format_push_rules_for_user
+from synapse.storage.databases.main.push_rule import filter_push_rules
 from synapse.storage.push_rule import RuleNotFoundException
+from synapse.synapse_rust.push import PushRules
 from synapse.types import JsonDict, StreamKeyType, UserID
 
 if TYPE_CHECKING:
@@ -45,6 +47,13 @@ class PushRulesHandler:
     def __init__(self, hs: "HomeServer"):
         self._notifier = hs.get_notifier()
         self._main_store = hs.get_datastores().main
+
+        self._served_default_rule_ids: frozenset[str] = frozenset(
+            rule.rule_id
+            for rule, _ in filter_push_rules(
+                PushRules([]), {}, hs.config.experimental
+            ).rules()
+        )
 
     async def set_rule_attr(
         self, user_id: str, spec: RuleSpec, val: bool | JsonDict
@@ -77,16 +86,7 @@ class PushRulesHandler:
         rule_id = spec.rule_id
         is_default_rule = rule_id.startswith(".")
         if is_default_rule:
-            # Check against the rules served to the user rather than the full
-            # base rule set: server-default rules disabled by the server's
-            # configuration are not served, so must not be modifiable either.
-            # `rule.default` rejects user-created rules whose ID happens
-            # to start with ".".
-            rules = await self._main_store.get_push_rules_for_user(user_id)
-            if not any(
-                rule.rule_id == namespaced_rule_id and rule.default
-                for rule, _ in rules.rules()
-            ):
+            if namespaced_rule_id not in self._served_default_rule_ids:
                 raise RuleNotFoundException("Unknown rule %r" % (namespaced_rule_id,))
         if spec.attr == "enabled":
             if isinstance(val, dict) and "enabled" in val:

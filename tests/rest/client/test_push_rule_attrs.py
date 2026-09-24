@@ -532,19 +532,33 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
         token = self.login("bob", "pass")
         self._assert_default_rule_absent(token, rule_path)
 
-    @parameterized.expand(GATED_DEFAULT_RULES)
-    def test_gated_default_rule_enabled(self, flag: str, rule_path: str) -> None:
+    def _assert_gated_default_rule_enabled(self, flag: str) -> None:
         """
-        Tests that a server-default rule gated behind an experimental feature
-        is served and modifiable once the feature is enabled.
+        Checks that the server-default rule gated behind the given experimental
+        feature is served and modifiable once the feature is enabled.
         """
-        # `override_config` can't take the flag from a test parameter, so set it
-        # directly. The rule set is only built once the user's rules are loaded,
-        # which happens after this.
-        setattr(self.hs.config.experimental, flag, True)
         self.register_user("bob", "pass")
         token = self.login("bob", "pass")
+        rule_path = dict(self.GATED_DEFAULT_RULES)[flag]
         self._assert_default_rule_modifiable(token, rule_path)
+
+    # The served server-default rules are computed when the homeserver starts,
+    # so the flag must be set through the config rather than as a parameter.
+    @override_config({"experimental_features": {"msc3381_polls_enabled": True}})
+    def test_gated_default_rule_enabled_msc3381(self) -> None:
+        self._assert_gated_default_rule_enabled("msc3381_polls_enabled")
+
+    @override_config({"experimental_features": {"msc3664_enabled": True}})
+    def test_gated_default_rule_enabled_msc3664(self) -> None:
+        self._assert_gated_default_rule_enabled("msc3664_enabled")
+
+    @override_config({"experimental_features": {"msc4028_push_encrypted_events": True}})
+    def test_gated_default_rule_enabled_msc4028(self) -> None:
+        self._assert_gated_default_rule_enabled("msc4028_push_encrypted_events")
+
+    @override_config({"experimental_features": {"msc4306_enabled": True}})
+    def test_gated_default_rule_enabled_msc4306(self) -> None:
+        self._assert_gated_default_rule_enabled("msc4306_enabled")
 
     @parameterized.expand(MSC4210_LEGACY_MENTION_RULES)
     @override_config({"experimental_features": {"msc4210_enabled": True}})
