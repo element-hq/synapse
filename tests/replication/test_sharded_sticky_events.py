@@ -14,7 +14,7 @@ import logging
 import sqlite3
 from contextlib import contextmanager
 from typing import Iterator
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from twisted.internet.testing import MemoryReactor
 
@@ -84,9 +84,14 @@ class ShardedStickyEventsTestCase(BaseMultiWorkerStreamTestCase):
             "synapse.app.generic_worker", {"worker_name": "worker2"}
         )
 
-        # Specially selected room IDs that get persisted on different workers.
-        self.room_id1 = "!foo:test"
-        self.room_id2 = "!baz:test"
+        # Create rooms until we have at least one on each of the workers.
+        # (We can't choose the room IDs directly, so we rely on the sharding
+        # hash to route the generated rooms to different workers.)
+        room_generation_results = self._generate_rooms_on_worker(self.user_id, self.tok)
+        self.room_id1 = room_generation_results["worker1"]
+        self.room_id2 = room_generation_results["worker2"]
+
+        # Verify that the expected worker is responsible for each room.
         self.assertEqual(
             self.hs.config.worker.events_shard_config.get_instance(self.room_id1),
             "worker1",
@@ -95,19 +100,6 @@ class ShardedStickyEventsTestCase(BaseMultiWorkerStreamTestCase):
             self.hs.config.worker.events_shard_config.get_instance(self.room_id2),
             "worker2",
         )
-        self._create_room(self.room_id1)
-        self._create_room(self.room_id2)
-
-    def _create_room(self, room_id: str) -> None:
-        """
-        Create a room with the given room ID, so that we control which event
-        persister ends up owning it.
-        """
-        with patch(
-            "synapse.handlers.room.RoomCreationHandler._generate_room_id"
-        ) as mock:
-            mock.side_effect = lambda: room_id
-            self.helper.create_room_as(self.user_id, tok=self.tok)
 
     def _send_sticky_event(self, room_id: str, body: str) -> str:
         return self.helper.send_sticky_event(
