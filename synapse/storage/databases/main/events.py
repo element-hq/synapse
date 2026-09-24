@@ -2961,6 +2961,9 @@ class PersistEventsStore:
                     )
                     continue
 
+                # Unlike `_maybe_redact_event_row`, we _don't_ mutate the cached instance of the redaction event to set
+                # `recheck_redaction` to False here, as we don't actually load the redaction out of the database.
+
             redacted_event_id_map[redaction_redacts_event_id] = redaction_event_id
             logger.debug(
                 "%r redacted at persistence time by %r",
