@@ -867,10 +867,6 @@ class ProfileWorkerStore(SQLBaseStore):
         """
         Record profile updates for membership additions to a room.
 
-        This is done in two directions. First, for any members in a room that another
-        user joins. Second, for the users who joined the room, for any members in
-        the room.
-
         Currently, updates are only recorded for local users.
 
         Args:
@@ -907,17 +903,6 @@ class ProfileWorkerStore(SQLBaseStore):
             users=users,
             action=ProfileUpdateAction.JOINED_ROOM,
             target_users=target_users,
-            field_names=None,
-        )
-
-        # We also need to do this in reverse, to ensure the joined users receive
-        # the profiles of the members in the room, should they not know them from
-        # before.
-        self.record_profile_updates_txn(
-            txn=txn,
-            users=target_users,
-            action=ProfileUpdateAction.JOINED_ROOM,
-            target_users=users,
             field_names=None,
         )
 
