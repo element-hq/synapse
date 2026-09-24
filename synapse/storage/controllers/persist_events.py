@@ -653,7 +653,54 @@ class EventsPersistenceStorageController:
             state_delta_for_room = None
             new_state_dag_extrems = None
 
-            if not backfilled:
+            if all_supports_msc4242_state_dag(chunk) and backfilled:
+                # Backfilled events do not update the room DAG extremities or the
+                # current state, but a state event which is new to us still has to move
+                # the state DAG forward extremities.
+                #
+                # In practice the only thing which gets here are state events from /send_join.
+                # Those events are persisted as backfilled so that they do not appear down
+                # /sync, but the state DAG forwards extremities must be updated otherwise when
+                # we hit the join event we won't calculate the current state correctly due to having
+                # stale extremities.
+                #
+                # Catching up on a room we are already in does not come through here: the
+                # state DAG walk in /get_missing_events fetches `prev_state_events` at
+                # backfilled=False, and we refuse to persist any event whose
+                # `prev_state_events` we do not already hold, so an event cannot reach us
+                # ahead of the prev_state_events it references.
+                #
+                # There is one edge case here: when prev_events disagrees with prev_state_events. E.g:
+                #
+                #  prev_events graph             We know S1, S2, S3
+                # S1 <- S2 <- S3            Sx = state event, M = message
+                #  ^-- S4 <- S5 <- M        Backfilling M returns S4, S5 alongside it
+                #
+                # Suppose M incorrectly has prev_state_events=[S3] but prev_events=[S5]
+                # then /get_missing_events will NOT fetch S4, S5 and only when you /backfill
+                # the prev_events graph will you suddenly become aware of [S4, S5],
+                # which will hit this code path. In this case, we should be recalculating the current
+                # state to take S4,S5 into account but this code path does not.
+                # We rely on the caller (_process_pulled_events) to handle this case by checking if
+                # _backfilled_ events changed the state DAG forward extremities, and in the extremely
+                # unlikely case it did, warn in the logs and recalculate the room state.
+                seen_event_ids = await self.main_store.have_seen_events(
+                    room_id, [event.event_id for event, _ in chunk]
+                )
+                unseen_chunk = [
+                    (event, context)
+                    for event, context in chunk
+                    if event.event_id not in seen_event_ids
+                ]
+                if unseen_chunk:
+                    new_state_dag_extrems = (
+                        await self._calculate_new_state_dag_extremities(
+                            room_id,
+                            await self.main_store.get_state_dag_extremities(room_id),
+                            unseen_chunk,
+                        )
+                    )
+            elif not backfilled:
                 if all_supports_msc4242_state_dag(chunk):
                     with Measure(
                         self._clock,
