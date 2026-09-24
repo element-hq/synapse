@@ -27,6 +27,7 @@ from typing import (
     TYPE_CHECKING,
     AbstractSet,
     Any,
+    Collection,
     Mapping,
     Sequence,
 )
@@ -706,6 +707,37 @@ class SyncHandler:
             )
 
         return now_token, sticky_by_room
+
+    async def sticky_events_for_newly_joined_rooms(
+        self,
+        now_token: StreamToken,
+        newly_joined_rooms: Collection[str],
+    ) -> dict[str, list[str]]:
+        """Get all the sticky events for each newly-joined room the user is in
+        Args:
+            now_token: Where the server is currently up to.
+            newly_joined_rooms: Room IDs of rooms that are newly-joined
+        Returns:
+            Dict from room ID to list of sticky event IDs
+        """
+        now = self.clock.time_msec()
+        with Measure(
+            self.clock,
+            name="sticky_events_for_newly_joined_rooms",
+            server_name=self.server_name,
+        ):
+            _, sticky_by_room = await self.store.get_sticky_events_in_rooms(
+                newly_joined_rooms,
+                # Since the start of time
+                from_token=MultiWriterStreamToken(stream=0),
+                to_token=now_token.sticky_events_key,
+                now=now,
+                # Unfortunately, we're meant to return all sticky events in one go
+                # (we don't have a good alternative).
+                # See: https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r3021907998
+                limit=None,
+            )
+            return sticky_by_room
 
     async def _load_filtered_recents(
         self,
@@ -2734,6 +2766,16 @@ class SyncHandler:
         knocked = room_changes.knocked
         newly_joined_rooms = room_changes.newly_joined_rooms
         newly_left_rooms = room_changes.newly_left_rooms
+
+        if self.hs_config.experimental.msc4354_enabled and newly_joined_rooms:
+            # If we have any newly-joined rooms, load all sticky events from them.
+            # We then send down all the sticky events, including historical ones,
+            # rather than just the ones that are new since the `since` token.
+            sticky_by_room.update(
+                await self.sticky_events_for_newly_joined_rooms(
+                    sync_result_builder.now_token, newly_joined_rooms
+                )
+            )
 
         # 4. We need to apply further processing to `room_entries` (rooms considered
         # joined or archived).
