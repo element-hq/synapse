@@ -176,7 +176,7 @@ DEFAULT_IP_RANGE_BLOCKLIST = [
     "fec0::/10",
 ]
 
-DEFAULT_ROOM_VERSION = "11"
+DEFAULT_ROOM_VERSION = "12"
 
 # Defaults for the presence state machine timers, in milliseconds. Overridden
 # by the corresponding options in the `presence` config section.
@@ -569,6 +569,20 @@ class ServerConfig(Config):
             False,
         )
 
+        # The shared-room check needs to know who is asking, and profile requests
+        # are only authenticated when `require_auth_for_profile_requests` is set.
+        # Without it the limit would silently never apply, so refuse to start.
+        if (
+            self.limit_profile_requests_to_users_who_share_rooms
+            and not self.require_auth_for_profile_requests
+        ):
+            raise ConfigError(
+                "'limit_profile_requests_to_users_who_share_rooms' can only be"
+                " enforced on authenticated requests, so"
+                " 'require_auth_for_profile_requests' must also be enabled.",
+                ("limit_profile_requests_to_users_who_share_rooms",),
+            )
+
         # Whether to retrieve and display profile data for a user when they
         # are invited to a room
         self.include_profile_data_on_invite = config.get(
@@ -584,6 +598,12 @@ class ServerConfig(Config):
                 " 'allow_public_rooms_without_auth' and/or"
                 " 'allow_public_rooms_over_federation' is set."
             )
+
+        # Whether to support MSC4429 and MSC4262 Profile updates down sync
+        self.include_profile_updates_in_sync = config.get(
+            "include_profile_updates_in_sync",
+            False,
+        )
 
         # Check if the legacy "restrict_public_rooms_to_local_users" flag is set. This
         # flag is now obsolete but we need to check it for backward-compatibility.
@@ -652,6 +672,15 @@ class ServerConfig(Config):
             )
         else:
             self.redaction_retention_period = None
+
+        # How long to allow event redactions for on `m.room.message`
+        redaction_allowed_period = config.get("redaction_allowed_period", None)
+        if redaction_allowed_period is not None:
+            self.redaction_allowed_period: int | None = self.parse_duration(
+                redaction_allowed_period
+            )
+        else:
+            self.redaction_allowed_period = None
 
         # How long to keep locally forgotten rooms before purging them from the DB.
         forgotten_room_retention_period = config.get(

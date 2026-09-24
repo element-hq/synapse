@@ -73,7 +73,7 @@ class TagServlet(RestServlet):
     """
 
     PATTERNS = client_patterns(
-        "/user/(?P<user_id>[^/]*)/rooms/(?P<room_id>[^/]*)/tags/(?P<tag>[^/]*)"
+        "/user/(?P<user_id>[^/]*)/rooms/(?P<room_id>[^/]*)/tags/(?P<tag>[^/]*)$"
     )
     CATEGORY = "Account data requests"
 

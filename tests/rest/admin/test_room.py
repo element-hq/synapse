@@ -2549,7 +2549,7 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
 
     def test_topo_token_is_accepted(self) -> None:
         """Test Topo Token is accepted."""
-        token = "t1-0_0_0_0_0_0_0_0_0_0_0_0_0"
+        token = "t1-0_0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/rooms/%s/messages?from=%s" % (self.room_id, token),
@@ -2563,7 +2563,7 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
 
     def test_stream_token_is_accepted_for_fwd_pagianation(self) -> None:
         """Test that stream token is accepted for forward pagination."""
-        token = "s0_0_0_0_0_0_0_0_0_0_0_0_0"
+        token = "s0_0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/rooms/%s/messages?from=%s" % (self.room_id, token),
@@ -3318,14 +3318,24 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
             self.creator, tok=self.creator_tok, is_public=True
         )
 
-        # The creator drops admin rights in the room.
+        # In the case that this is a msc4289 compliant room, we can not use the room
+        # creator as the "puppeted" user. Join another user to use as a sentinel
+        # instead. The room's creator will leave the room before the command runs.
+        self.helper.join(room_id, self.second_user_id, tok=self.second_tok)
+
+        # The creator gives a placeholder of rights in the room. The power level can be
+        # 0, as long as it is present it will be considered. Having it be missing will
+        # produce a different error: "No local admin user in room" which is not what
+        # this test is supposed to check
         pl = self.helper.get_state(
             room_id, EventTypes.PowerLevels, tok=self.creator_tok
         )
-        pl["users"][self.creator] = 0
+        pl["users"][self.second_user_id] = 0
         self.helper.send_state(
             room_id, EventTypes.PowerLevels, body=pl, tok=self.creator_tok
         )
+
+        self.helper.leave(room_id, self.creator, tok=self.creator_tok)
 
         channel = self.make_request(
             "POST",

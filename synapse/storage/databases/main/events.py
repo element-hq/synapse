@@ -23,6 +23,7 @@ import collections
 import itertools
 import logging
 from collections import OrderedDict
+from collections.abc import Set
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -42,6 +43,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    ProfileUpdateAction,
     RelationTypes,
 )
 from synapse.api.errors import PartialStateConflictError
@@ -55,7 +57,6 @@ from synapse.events import (
 )
 from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventPersistencePair
-from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
@@ -76,6 +77,7 @@ from synapse.types import (
     MutableStateMap,
     StateMap,
     StrCollection,
+    UserID,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -267,6 +269,9 @@ class PersistEventsStore:
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -374,6 +379,24 @@ class PersistEventsStore:
                     )
                 )
 
+            sticky_events_to_un_soft_fail: set[str] = set()
+            if self._msc4354_enabled and state_delta_for_room is not None:
+                # When we change the room's current state with `state_delta_for_room`,
+                # that might cause some previously soft-failed sticky events to now pass
+                # the state-dependent auth checks.
+                # In other words, the sticky events could have been valid if they had
+                # waited for these state changes.
+                # For that reason, we give sticky events a second chance.
+                # We compute them here and then un-soft-fail them atomically with the
+                # persistence of the events.
+                sticky_events_to_un_soft_fail = (
+                    await self.store.compute_sticky_events_to_un_soft_fail(
+                        room_id,
+                        events_and_contexts,
+                        state_delta_for_room,
+                    )
+                )
+
             await self.db_pool.runInteraction(
                 "persist_events",
                 self._persist_events_txn,
@@ -385,6 +408,7 @@ class PersistEventsStore:
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
                 new_state_dag_forward_extremities=new_state_dag_forward_extremities,
+                sticky_events_to_un_soft_fail=sticky_events_to_un_soft_fail,
             )
             persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
                 len(events_and_contexts)
@@ -1050,6 +1074,7 @@ class PersistEventsStore:
         new_event_links: dict[str, NewEventChainLinks],
         sliding_sync_table_changes: SlidingSyncTableChanges | None,
         new_state_dag_forward_extremities: set[str] | None = None,
+        sticky_events_to_un_soft_fail: Set[str] = frozenset(),
     ) -> None:
         """Insert some number of room events into the necessary database tables.
 
@@ -1078,6 +1103,8 @@ class PersistEventsStore:
                 `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
                 derived from the given `delta_state` (see
                 `_calculate_sliding_sync_table_changes(...)`)
+            sticky_events_to_un_soft_fail:
+                Sticky events which will be un-soft-failed when persisting the events.
 
         Raises:
             PartialStateConflictError: if attempting to persist a partial state event in
@@ -1207,6 +1234,13 @@ class PersistEventsStore:
             self.store.insert_sticky_events_txn(
                 txn, [ev for ev, _ in events_and_contexts]
             )
+
+            # Un-soft-fail any sticky events that the state delta applied just above
+            # has made valid.
+            if sticky_events_to_un_soft_fail:
+                self.store.un_soft_fail_sticky_events_txn(
+                    txn, sticky_events_to_un_soft_fail
+                )
 
         # We only update the sliding sync tables for non-backfilled events.
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
@@ -1794,6 +1828,11 @@ class PersistEventsStore:
             stream_id: This is expected to be the minimum `stream_ordering` for the
                 batch of events that we are persisting; which means we do not end up in a
                 situation where workers see events before the `current_state_delta` updates.
+                Note that this stamps a row *before* its own event; readers that pair
+                deltas with the events in the same window bound each delta on its
+                event's position instead, see
+                `get_current_state_deltas_for_room_by_event_position(...)`, which stays
+                correct if this stamp is ever changed.
                 FIXME: However, this function also gets called with next upcoming
                 `stream_ordering` when we re-sync the state of a partial stated room (see
                 `update_current_state(...)`) which may be "correct" but it would be good to
@@ -2118,6 +2157,129 @@ class PersistEventsStore:
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
 
+        if self._include_profile_updates_in_sync:
+            # Handle changes to the profile updates stream.
+            # We've already done a bunch of work calculating the changes needed
+            # for the sliding sync tables, so we may as well re-use that information
+            # here to avoid parsing the state delta again, and handling various
+            # edge cases.
+            # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+            # for concerns around the current implementation of the profile
+            # updates stream.
+            profile_update_additions = {
+                c.user_id
+                for c in sliding_sync_table_changes.to_insert_membership_snapshots
+                if self.hs.is_mine_id(c.user_id)
+                # FIXME: Ideally we would filter out JOIN -> JOIN. See note below.
+                and c.membership == Membership.JOIN
+            }
+            profile_update_leaves = {
+                c.user_id
+                for c in sliding_sync_table_changes.to_insert_membership_snapshots
+                if self.hs.is_mine_id(c.user_id)
+                # Any transition from JOIN to something else counts as a leave here.
+                # Even the 'invalid' transitions might effectively happen due to
+                # state resolution.
+                and c.membership != Membership.JOIN
+            } | (
+                # We also need to consider users that get fully state reset out of the room.
+                # These should be treated as 'leave'
+                set(sliding_sync_table_changes.to_delete_membership_snapshots)
+            )
+
+            if profile_update_additions:
+                # Write the profile updates for additions to the room, from either
+                # a join, knock, invite, etc.
+                # FIXME this will add rows also when a display name changes due to
+                # the facts that `sliding_sync_table_changes` contains a JOIN
+                # membership event in that case. We should aim to filter these
+                # unnecessary rows out, as we're also generating an UPDATE profile
+                # update action row for the actual display name change itself.
+                # See https://github.com/element-hq/synapse/issues/19981
+                self.store.record_profile_updates_for_user_joined_room_txn(
+                    txn=txn,
+                    room_id=room_id,
+                    joined_users=profile_update_additions,
+                )
+            if profile_update_leaves:
+                # Write the profile updates for LEAVE events
+                for user_id in profile_update_leaves:
+                    self._record_profile_updates_for_user_left_room_txn(
+                        txn=txn,
+                        user_id=UserID.from_string(user_id),
+                        room_id=room_id,
+                    )
+
+    def _record_profile_updates_for_user_left_room_txn(
+        self,
+        txn: LoggingTransaction,
+        user_id: UserID,
+        room_id: str,
+    ) -> None:
+        """
+        Record updates into the profile updates stream for when a user leaves a room.
+
+        If this was the last shared room with a set of users, clear all old rows from
+        the `profile_updates_per_user` table relating to those users, to avoid exposing
+        any profile field changes past the point of not being in any common rooms with
+        the user.
+
+        Currently, updates are only recorded for local users.
+
+        Note, this method lives here in the events store file due to the profile
+        store not having access to the membership store (which the events store does),
+        which we need to re-use the `do_users_share_a_room_txn` method there.
+
+        Args:
+            user_id: The user who left the room.
+            room_id: The room that was left.
+        """
+        # Get the local members of the room
+        room_members = self.db_pool.simple_select_onecol_txn(
+            txn=txn,
+            table="local_current_membership",
+            retcol="user_id",
+            keyvalues={
+                "membership": Membership.JOIN,
+                "room_id": room_id,
+            },
+        )
+        # For each user check if we still share rooms
+        users_sharing_rooms = self.store.do_users_share_a_room_txn(
+            txn=txn,
+            user_id=user_id.to_string(),
+            other_user_ids=set(room_members),
+        )
+        users_no_longer_sharing_rooms = set(room_members) - set(
+            users_sharing_rooms.keys()
+        )
+
+        # First clear the previous rows from the table
+        user_clause, user_args = make_in_list_sql_clause(
+            txn.database_engine,
+            "user_id",
+            users_no_longer_sharing_rooms,
+        )
+        txn.execute(
+            f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE {user_clause}
+                    AND stream_id IN (
+                        SELECT stream_id FROM profile_updates WHERE user_id = ?
+                    )
+            """,
+            (*user_args, user_id.to_string()),
+        )
+
+        # Now record the "left room" action in the stream
+        self.store.record_profile_updates_txn(
+            txn=txn,
+            user_id=user_id,
+            action=ProfileUpdateAction.LEFT_ROOM,
+            field_names=[],
+            target_users=users_no_longer_sharing_rooms,
+        )
+
     @classmethod
     def _get_relevant_sliding_sync_current_state_event_ids_txn(
         cls, txn: LoggingTransaction, room_id: str
@@ -2252,7 +2414,7 @@ class PersistEventsStore:
             stripped_state_map: MutableStateMap[StrippedStateEvent] = {}
             if isinstance(unsigned_stripped_state_events, list):
                 for raw_stripped_event in unsigned_stripped_state_events:
-                    stripped_state_event = parse_stripped_state_event(
+                    stripped_state_event = StrippedStateEvent.from_json_dict(
                         raw_stripped_event
                     )
                     if stripped_state_event is not None:

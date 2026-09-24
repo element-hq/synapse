@@ -40,6 +40,7 @@ from synapse.api.errors import (
     NotFoundError,
     RequestSendFailed,
     SynapseError,
+    UserLimitExceededError,
     cs_error,
 )
 from synapse.api.ratelimiting import Ratelimiter
@@ -400,8 +401,20 @@ class MediaRepository:
                     sent_bytes=uploaded_media_size,
                     attempted_bytes=content_length,
                 )
-                raise SynapseError(
-                    400, "Media upload limit exceeded", Codes.RESOURCE_LIMIT_EXCEEDED
+
+                # Fall back to the static page served by Synapse when the limit
+                # doesn't specify its own `info_uri` (e.g. limits returned by a
+                # module callback without one).
+                info_uri = (
+                    limit.info_uri
+                    or self.hs.config.media.media_upload_limit_fallback_info_uri
+                )
+
+                raise UserLimitExceededError(
+                    403,
+                    "Media upload limit exceeded",
+                    info_uri=info_uri,
+                    can_upgrade=limit.can_upgrade,
                 )
 
         if is_new_media:
@@ -1374,17 +1387,23 @@ class MediaRepository:
                         self.hs.get_reactor(), thumbnailer.transpose
                     )
 
+                # JPEG has no alpha channel, so it would flatten a transparent
+                # image onto a solid color background.
+                needs_alpha = await defer_to_thread(
+                    self.hs.get_reactor(), lambda: thumbnailer.has_transparency
+                )
+
                 # We deduplicate the thumbnail sizes by ignoring the cropped versions if
                 # they have the same dimensions of a scaled one.
                 thumbnails: dict[tuple[int, int, str], str] = {}
                 for requirement in requirements:
+                    t_type = requirement.media_type
+                    if needs_alpha and t_type == "image/jpeg":
+                        t_type = "image/png"
+
                     if requirement.method == "crop":
                         thumbnails.setdefault(
-                            (
-                                requirement.width,
-                                requirement.height,
-                                requirement.media_type,
-                            ),
+                            (requirement.width, requirement.height, t_type),
                             requirement.method,
                         )
                     elif requirement.method == "scale":
@@ -1393,9 +1412,7 @@ class MediaRepository:
                         )
                         t_width = min(m_width, t_width)
                         t_height = min(m_height, t_height)
-                        thumbnails[(t_width, t_height, requirement.media_type)] = (
-                            requirement.method
-                        )
+                        thumbnails[(t_width, t_height, t_type)] = requirement.method
 
                 # Now we generate the thumbnails for each dimension, store it
                 #

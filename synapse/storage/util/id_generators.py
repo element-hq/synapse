@@ -36,9 +36,11 @@ from typing import (
 )
 
 import attr
+from prometheus_client import Gauge
 from sortedcontainers import SortedList, SortedSet
 
 from synapse.logging import issue9533_logger
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.database import (
     DatabasePool,
@@ -54,6 +56,16 @@ if TYPE_CHECKING:
     from synapse.notifier import ReplicationNotifier
 
 logger = logging.getLogger(__name__)
+
+# We report the calculated current position as seen by this worker. Note that
+# this is always positive (even for negative streams like backfill) to make
+# monitoring/alerting easier.
+stream_current_position_gauge = Gauge(
+    "synapse_storage_stream_current_position",
+    "The stream's current position as this process sees it."
+    "Note, these are always positive, even for negative streams.",
+    labelnames=["stream_name", SERVER_NAME_LABEL],
+)
 
 
 T = TypeVar("T")
@@ -232,6 +244,15 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         self._writers = writers
         self._return_factor = 1 if positive else -1
 
+        # The `instance_name` label is what separates one worker's metrics from
+        # another's when there are multiple Synapse workers for the same homeserver
+        # running in the same process. In production the scrape labels would do that
+        # too, but tests run several homeservers in one process.
+        self._current_position_gauge = stream_current_position_gauge.labels(
+            stream_name=stream_name,
+            **{SERVER_NAME_LABEL: server_name},
+        )
+
         # We lock as some functions may be called from DB threads.
         self._lock = threading.Lock()
 
@@ -339,6 +360,20 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             # write to the stream. In which case, let's pre-seed our own
             # position with the current minimum.
             self._current_positions[self._instance_name] = self._persisted_upto_position
+
+        with self._lock:
+            self._report_current_position()
+
+    def _report_current_position(self) -> None:
+        """Report the current position as a metric.
+
+        Must be called with `_lock` held.
+        """
+        assert self._lock.locked()
+
+        # Note that we always report this as a positive value, so we don't
+        # multiply by the `_return_factor`.
+        self._current_position_gauge.set(self._persisted_upto_position)
 
     def _load_current_ids(
         self,
@@ -828,6 +863,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 # do.
                 break
 
+        self._report_current_position()
+
         # Hacky debug logging to attempt to trace https://github.com/element-hq/synapse/issues/19795.
         # If this is the to-device stream, and we are a writer for that stream, log some stats
         if (
@@ -906,14 +943,44 @@ class _MultiWriterCtxManager:
     stream_ids: list[int] = attr.Factory(list)
 
     async def __aenter__(self) -> int | list[int]:
+        def _load(txn: LoggingTransaction) -> list[int]:
+            ids = self.id_gen._load_next_mult_id_txn(txn, self.multiple_ids or 1)
+            # Record the allocated IDs on the context manager as a side effect
+            # (rather than only via the return value), so that if this coroutine
+            # is cancelled after the transaction has committed we still know
+            # which IDs to release below.
+            self.stream_ids = ids
+            return ids
+
         # It's safe to run this in autocommit mode as fetching values from a
         # sequence ignores transaction semantics anyway.
-        self.stream_ids = await self.id_gen._db.runInteraction(
-            "_load_next_mult_id",
-            self.id_gen._load_next_mult_id_txn,
-            self.multiple_ids or 1,
-            db_autocommit=True,
-        )
+        try:
+            await self.id_gen._db.runInteraction(
+                "_load_next_mult_id",
+                _load,
+                db_autocommit=True,
+            )
+        except BaseException:
+            # We catch `BaseException` rather than `Exception`,
+            # because request cancellation surfaces here as exceptions that are
+            # not `Exception` subclasses: `asyncio.CancelledError`
+            # and `GeneratorExit` (raised when a paused coroutine is garbage
+            # collected).
+            #
+            # If we're interrupted (e.g. the enclosing request was cancelled)
+            # after the transaction allocated the IDs but before we returned,
+            # then `__aexit__` will never run, because Python only invokes it
+            # once `__aenter__` has returned. The allocated IDs would then be
+            # leaked into `_unfinished_ids` forever, permanently pinning the
+            # persisted stream position and, e.g., wedging presence.
+            #
+            # So mark them as finished here to unblock the position. This mirrors
+            # what `__aexit__` does on the failure path (marking the IDs finished
+            # and notifying replication, but not persisting a new position).
+            if self.stream_ids:
+                self.id_gen._mark_ids_as_finished(self.stream_ids)
+                self.notifier.notify_replication()
+            raise
 
         if self.multiple_ids is None:
             return self.stream_ids[0] * self.id_gen._return_factor

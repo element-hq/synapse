@@ -33,6 +33,7 @@ from synapse.events.utils import (
     EventFormat,
     FilteredEvent,
     SerializeEventConfig,
+    strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
@@ -55,7 +56,13 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
-from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    Requester,
+    SlidingSyncStreamToken,
+    StreamToken,
+)
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.cancellation import cancellable
@@ -123,6 +130,9 @@ class SyncRestServlet(RestServlet):
         self._event_serializer = hs.get_event_client_serializer()
         self._msc2654_enabled = hs.config.experimental.msc2654_enabled
         self._msc3773_enabled = hs.config.experimental.msc3773_enabled
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
 
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
@@ -351,6 +361,15 @@ class SyncRestServlet(RestServlet):
         if sync_result.to_device:
             response["to_device"] = {"events": sync_result.to_device}
 
+        if self._include_profile_updates_in_sync and sync_result.profile_updates:
+            # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+            # for concerns around the current implementation of the profile
+            # updates stream.
+            response["org.matrix.msc4429.users"] = {
+                user_id: {"profile_updates": updates}
+                for user_id, updates in sync_result.profile_updates.items()
+            }
+
         if sync_result.device_lists.changed:
             response["device_lists"]["changed"] = list(sync_result.device_lists.changed)
         if sync_result.device_lists.left:
@@ -459,7 +478,8 @@ class SyncRestServlet(RestServlet):
                 invited_state = []
 
             invited_state = list(invited_state)
-            invited_state.append(invite)
+            # MSC4319: Add the invite itself
+            invited_state.append(strip_event(room.invite))
             invited[room.room_id] = {"invite_state": {"events": invited_state}}
 
         return invited
@@ -505,12 +525,11 @@ class SyncRestServlet(RestServlet):
                 knocked_state = []
             knocked_state = list(knocked_state)
 
-            # Append the actual knock membership event itself as well. This provides
-            # the client with:
+            # MSC4319: Append the actual knock membership event itself as well. This
+            # provides the client with:
             #
             # * A knock state event that they can use for easier internal tracking
-            # * The rough timestamp of when the knock occurred contained within the event
-            knocked_state.append(knock)
+            knocked_state.append(strip_event(room.knock))
 
             # Build the `knock_state` dictionary, which will contain the state of the
             # room that the client has knocked on
@@ -1132,7 +1151,32 @@ class SlidingSyncRestServlet(RestServlet):
                 requester, extensions.sticky_events, ref_rooms_results
             )
 
+        if extensions.profiles:
+            serialized_extensions[
+                "org.matrix.msc4262.profiles"
+            ] = await self._serialise_profiles(
+                extensions.profiles,
+            )
+
         return serialized_extensions
+
+    async def _serialise_profiles(
+        self,
+        profiles: SlidingSyncResult.Extensions.ProfilesExtension,
+    ) -> JsonMapping:
+        """
+        Serialise the profiles extension response.
+
+        Args:
+            profiles: The generated profiles response object.
+
+        Returns:
+            A dictionary containing the response `users` with the
+            generated profile updates.
+        """
+        return {
+            "users": profiles.users,
+        }
 
     async def _serialise_sticky_events(
         self,

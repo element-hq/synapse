@@ -338,7 +338,7 @@ class RegistrationSubmitTokenServlet(RestServlet):
 
 
 class UsernameAvailabilityRestServlet(RestServlet):
-    PATTERNS = client_patterns("/register/available")
+    PATTERNS = client_patterns("/register/available$")
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -401,7 +401,7 @@ class RegistrationTokenValidityRestServlet(RestServlet):
     """
 
     PATTERNS = client_patterns(
-        f"/register/{LoginType.REGISTRATION_TOKEN}/validity",
+        f"/register/{LoginType.REGISTRATION_TOKEN}/validity$",
         releases=("v1",),
     )
     CATEGORY = "Registration/login requests"

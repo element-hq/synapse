@@ -44,11 +44,14 @@ from synapse.replication.tcp.streams import (
     UnPartialStatedRoomStream,
 )
 from synapse.replication.tcp.streams._base import (
+    ProfileUpdatesStream,
     StickyEventsStream,
     ThreadSubscriptionsStream,
 )
 from synapse.replication.tcp.streams.events import (
     EventsStream,
+    EventsStreamAllStateRow,
+    EventsStreamCurrentStateRow,
     EventsStreamEventRow,
     EventsStreamRow,
 )
@@ -190,6 +193,20 @@ class ReplicationDataHandler:
             # We shouldn't get multiple rows per token for events stream, so
             # we don't need to optimise this for multiple rows.
             for row in rows:
+                # If this is a server ACL event, clear the cache in the storage controller.
+                if row.type in (
+                    EventsStreamEventRow.TypeId,
+                    EventsStreamCurrentStateRow.TypeId,
+                ):
+                    if row.data.type == EventTypes.ServerACL:
+                        self._state_storage_controller.get_server_acl_for_room.invalidate(
+                            (row.data.room_id,)
+                        )
+                elif row.type == EventsStreamAllStateRow.TypeId:
+                    self._state_storage_controller.get_server_acl_for_room.invalidate(
+                        (row.data.room_id,)
+                    )
+
                 if row.type != EventsStreamEventRow.TypeId:
                     # The row's data is an `EventsStreamCurrentStateRow`.
                     # When we recompute the current state of a room based on forward
@@ -237,11 +254,6 @@ class ReplicationDataHandler:
                         row.data.event_id, row.data.room_id
                     )
 
-                # If this is a server ACL event, clear the cache in the storage controller.
-                if row.data.type == EventTypes.ServerACL:
-                    self._state_storage_controller.get_server_acl_for_room.invalidate(
-                        (row.data.room_id,)
-                    )
         elif stream_name == UnPartialStatedRoomStream.NAME:
             for row in rows:
                 assert isinstance(row, UnPartialStatedRoomStreamRow)
@@ -265,6 +277,23 @@ class ReplicationDataHandler:
                 token,
                 users=[row.user_id for row in rows],
             )
+        elif stream_name == ProfileUpdatesStream.NAME:
+            updated_user_ids = {row.user_id for row in rows}
+            if updated_user_ids:
+                room_ids: set[str] = set()
+                # Get all the rooms of the updated users, dict of
+                # User ID -> [Room ID]
+                users_and_rooms = await self.store.get_rooms_for_users(updated_user_ids)
+                # Loop through each user's room IDs and add to our set of rooms
+                for user_room_ids in users_and_rooms.values():
+                    room_ids.update(user_room_ids)
+
+                if room_ids:
+                    self.notifier.on_new_event(
+                        StreamKeyType.PROFILE_UPDATES,
+                        token,
+                        rooms=room_ids,
+                    )
         elif stream_name == StickyEventsStream.NAME:
             self.notifier.on_new_event(
                 StreamKeyType.STICKY_EVENTS,

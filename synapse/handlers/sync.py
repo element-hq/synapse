@@ -18,12 +18,16 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import hashlib
 import itertools
+import json
 import logging
+import os
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
     Any,
+    Collection,
     Mapping,
     Sequence,
 )
@@ -37,6 +41,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    ProfileUpdateAction,
     StickyEvent,
 )
 from synapse.api.filtering import FilterCollection
@@ -64,6 +69,7 @@ from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    JsonValue,
     MultiWriterStreamToken,
     MutableStateMap,
     Requester,
@@ -104,9 +110,24 @@ non_empty_sync_counter = Counter(
 # client for no more than 30 minutes.
 LAZY_LOADED_MEMBERS_CACHE_MAX_AGE = 30 * 60 * 1000
 
+# Store the cache that tracks which lazy-loaded profile fields have been sent to a given
+# client for no more than 30 minutes.
+LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE = 30 * 60 * 1000
+
 # Remember the last 100 members we sent to a client for the purposes of
 # avoiding redundantly sending the same lazy-loaded members to the client
 LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE = 100
+
+# Remember the last 100 profile field updates we sent to a client for the purposes of
+# avoiding redundantly sending the same lazy-loaded full profiles to the client
+LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_SIZE = 100
+
+# The digest size for the lazy loaded profile fields cache.
+LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE = 16
+
+# A random key generated on server startup, for the lazy loaded profile fields cache.
+# Since this is a per-process cache, we don't care if the key is different per process.
+LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY = os.urandom(32)
 
 
 SyncRequestKey = tuple[Any, ...]
@@ -224,6 +245,7 @@ class SyncResult:
         next_batch: Token for the next sync
         presence: List of presence events for the user.
         account_data: List of account_data events for the user.
+        profile_updates: Map of user_id to profile field updates for that user.
         joined: JoinedSyncResult for each joined room.
         invited: InvitedSyncResult for each invited room.
         knocked: KnockedSyncResult for each knocked on room.
@@ -239,6 +261,8 @@ class SyncResult:
     next_batch: StreamToken
     presence: list[UserPresenceState]
     account_data: list[JsonDict]
+    # user ID -> {profile field -> value | null if unset }
+    profile_updates: dict[str, dict[str, JsonValue | dict[str, JsonValue]] | None]
     joined: list[JoinedSyncResult]
     invited: list[InvitedSyncResult]
     knocked: list[KnockedSyncResult]
@@ -260,6 +284,7 @@ class SyncResult:
             or self.knocked
             or self.archived
             or self.account_data
+            or self.profile_updates
             or self.to_device
             or self.device_lists
         )
@@ -275,6 +300,7 @@ class SyncResult:
             next_batch=next_batch,
             presence=[],
             account_data=[],
+            profile_updates={},
             joined=[],
             invited=[],
             knocked=[],
@@ -291,6 +317,7 @@ class SyncHandler:
         self.server_name = hs.hostname
         self.hs_config = hs.config
         self.store = hs.get_datastores().main
+        self._is_mine_id = hs.is_mine_id
         self.notifier = hs.get_notifier()
         self.presence_handler = hs.get_presence_handler()
         self._relations_handler = hs.get_relations_handler()
@@ -329,6 +356,29 @@ class SyncHandler:
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
         )
+        # ExpiringCache((User, Device))
+        #   -> LruCache(
+        #       blake2b(Other User ID + Field Name) -> blake2b(Field value)
+        #   )
+        self.lazy_loaded_profile_fields_cache: ExpiringCache[
+            tuple[str, str | None], LruCache[bytes, bytes]
+        ] = ExpiringCache(
+            cache_name="lazy_loaded_profile_fields_cache",
+            server_name=self.server_name,
+            hs=hs,
+            clock=self.clock,
+            max_len=0,
+            expiry_ms=LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE,
+        )
+        """This cache contains fields and values we have sent to clients as profile
+        updates, for a particular user + device combo. The cache entry is a blake2b hash
+        of the user + field name, with the value being a blake2b hash of the field value.
+        If the field value changes for a particular user, the hash will change
+        and the cache will be missed.
+
+        We don't manually remove entries from this cache, though it may be ignored
+        in cases where the sync must send the field down to the client.
+        """
 
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
 
@@ -651,6 +701,37 @@ class SyncHandler:
             now_token = now_token.copy_and_replace(StreamKeyType.STICKY_EVENTS, to_id)
 
         return now_token, sticky_by_room
+
+    async def sticky_events_for_newly_joined_rooms(
+        self,
+        now_token: StreamToken,
+        newly_joined_rooms: Collection[str],
+    ) -> dict[str, list[str]]:
+        """Get all the sticky events for each newly-joined room the user is in
+        Args:
+            now_token: Where the server is currently up to.
+            newly_joined_rooms: Room IDs of rooms that are newly-joined
+        Returns:
+            Dict from room ID to list of sticky event IDs
+        """
+        now = self.clock.time_msec()
+        with Measure(
+            self.clock,
+            name="sticky_events_for_newly_joined_rooms",
+            server_name=self.server_name,
+        ):
+            _, sticky_by_room = await self.store.get_sticky_events_in_rooms(
+                newly_joined_rooms,
+                # Since the start of time
+                from_id=0,
+                to_id=now_token.sticky_events_key,
+                now=now,
+                # Unfortunately, we're meant to return all sticky events in one go
+                # (we don't have a good alternative).
+                # See: https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r3021907998
+                limit=None,
+            )
+            return sticky_by_room
 
     async def _load_filtered_recents(
         self,
@@ -1023,6 +1104,8 @@ class SyncHandler:
     def get_lazy_loaded_members_cache(
         self, cache_key: tuple[str, str | None]
     ) -> LruCache[str, str]:
+        # FIXME: This cache may be subject to losing members in the case that
+        # a sync is interrupted and retried, see https://github.com/element-hq/synapse/issues/19978
         cache: LruCache[str, str] | None = self.lazy_loaded_members_cache.get(cache_key)
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
@@ -1032,6 +1115,35 @@ class SyncHandler:
                 server_name=self.server_name,
             )
             self.lazy_loaded_members_cache[cache_key] = cache
+        else:
+            logger.debug("found LruCache for %r", cache_key)
+        return cache
+
+    def get_lazy_loaded_profile_fields_cache(
+        self, cache_key: tuple[str, str | None]
+    ) -> LruCache[bytes, bytes]:
+        """This cache contains fields and values we have sent to clients as profile
+        updates, for a particular user + device combo. The cache entry is a blake2b hash
+        of the user + field name, with the value being a blake2b hash of the field value.
+        If the field value changes for a particular user, the hash will change
+        and the cache will be missed.
+
+        We don't manually remove entries from this cache, though it may be ignored
+        in cases where the sync must send the field down to the client.
+        """
+        # FIXME: This cache may be subject to losing field updates in the case that
+        # a sync is interrupted and retried, see https://github.com/element-hq/synapse/issues/19978
+        cache: LruCache[bytes, bytes] | None = (
+            self.lazy_loaded_profile_fields_cache.get(cache_key)
+        )
+        if cache is None:
+            logger.debug("creating LruCache for %r", cache_key)
+            cache = LruCache(
+                max_size=LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_SIZE,
+                clock=self.clock,
+                server_name=self.server_name,
+            )
+            self.lazy_loaded_profile_fields_cache[cache_key] = cache
         else:
             logger.debug("found LruCache for %r", cache_key)
         return cache
@@ -1169,6 +1281,7 @@ class SyncHandler:
                     end_token,
                     members_to_fetch,
                     timeline_state,
+                    joined,
                 )
 
             # If we only have partial state for the room, `state_ids` may be missing the
@@ -1317,8 +1430,8 @@ class SyncHandler:
 
                 # Now roll back the state by looking at the state deltas between
                 # end_token and now.
-                deltas = await self.store.get_current_state_deltas_for_room(
-                    room_id,
+                deltas = await self.store.get_current_state_deltas_for_room_by_event_position(
+                    room_id=room_id,
                     from_token=end_token.room_key,
                     to_token=self.store.get_room_max_token(),
                 )
@@ -1391,6 +1504,7 @@ class SyncHandler:
         end_token: StreamToken,
         members_to_fetch: set[str] | None,
         timeline_state: StateMap[str],
+        joined: bool,
     ) -> StateMap[str]:
         """Calculate the state events to be included in an incremental sync response.
 
@@ -1415,6 +1529,7 @@ class SyncHandler:
                 events in the timeline. Otherwise, `None`.
             timeline_state: The contribution to the room state from state events in
                 `batch`. Only contains the last event for any given state key.
+            joined: whether the user is currently joined to the room
 
         Returns:
             A map from (type, state_key) to event_id, for each event that we believe
@@ -1440,13 +1555,28 @@ class SyncHandler:
                 # events to understand the events in this timeline. So we always
                 # fish out all the member events corresponding to the timeline
                 # here. The caller will then dedupe any redundant ones.
-                member_ids = await self._state_storage_controller.get_current_state_ids(
-                    room_id=room_id,
-                    state_filter=StateFilter.from_types(
-                        (EventTypes.Member, member) for member in members_to_fetch
-                    ),
-                    await_full_state=await_full_state,
+                member_filter = StateFilter.from_types(
+                    (EventTypes.Member, member) for member in members_to_fetch
                 )
+                if joined:
+                    member_ids = (
+                        await self._state_storage_controller.get_current_state_ids(
+                            room_id=room_id,
+                            state_filter=member_filter,
+                            await_full_state=await_full_state,
+                        )
+                    )
+                else:
+                    # The user is no longer in the room, so `end_token` points
+                    # at the user's leave/etc event, and the current state may
+                    # include state from after that point. Use state groups to
+                    # get the memberships as of `end_token` instead.
+                    member_ids = await self._state_storage_controller.get_state_ids_at(
+                        room_id,
+                        stream_position=end_token,
+                        state_filter=member_filter,
+                        await_full_state=await_full_state,
+                    )
                 delta_state_ids.update(member_ids)
 
             # We don't do LL filtering for incremental syncs - see
@@ -1456,10 +1586,12 @@ class SyncHandler:
             #
             # i.e. we return all state deltas, including membership changes that
             # we'd normally exclude due to LL.
-            deltas = await self.store.get_current_state_deltas_for_room(
-                room_id=room_id,
-                from_token=since_token.room_key,
-                to_token=end_token.room_key,
+            deltas = (
+                await self.store.get_current_state_deltas_for_room_by_event_position(
+                    room_id=room_id,
+                    from_token=since_token.room_key,
+                    to_token=end_token.room_key,
+                )
             )
             for delta in deltas:
                 if delta.event_id is None:
@@ -1863,10 +1995,18 @@ class SyncHandler:
             }
         )
 
+        # Note, this needs to be after we collect `joined`, `invited`, `knocked` and
+        # `archived` sync results since we want to utilize the work we did to collect
+        # events in those responses as a basis for which users to include profiles
+        # for when lazy loading.
+        if self.hs_config.server.include_profile_updates_in_sync:
+            await self._generate_sync_entry_for_profile_updates(sync_result_builder)
+
         logger.debug("Sync response calculation complete")
         return SyncResult(
             presence=sync_result_builder.presence,
             account_data=sync_result_builder.account_data,
+            profile_updates=sync_result_builder.profile_updates,
             joined=sync_result_builder.joined,
             invited=sync_result_builder.invited,
             knocked=sync_result_builder.knocked,
@@ -2131,6 +2271,301 @@ class SyncHandler:
 
         sync_result_builder.account_data = account_data_for_user
 
+    async def _generate_initial_sync_entry_for_profile_updates(
+        self,
+        *,
+        user_id: str,
+        sync_result_builder: "SyncResultBuilder",
+        profile_fields: set[str],
+        include_users: set[str] | None,
+    ) -> None:
+        """
+        Build an initial sync entry for profile updates and attach it to the
+        given `sync_result_builder`.
+
+        Note: Currently, only profile updates of local users are generated.
+
+        Args:
+            user_id: The Matrix ID of the user to generate the sync entry for.
+            sync_result_builder:
+            profile_fields: The list of field IDs to filter for.
+            include_users: List of users profiles to include in the sync response,
+                for when we have calculated a list of users in our lazy loading
+                sync and want to only return those.
+        """
+        # Currently, limited to only local profiles, so filter remote servers out
+        user_ids = await self.store.get_local_users_who_share_room_with_user(user_id)
+        # Ensure we're in the list even if we don't belong to any rooms
+        user_ids.add(user_id)
+        if include_users:
+            # Filter down to selected included users
+            user_ids = {user_id for user_id in user_ids if user_id in include_users}
+
+        if not user_ids:
+            return
+
+        profile_data_by_user = await self.store.get_profile_data_for_users(user_ids)
+
+        # Serialise the profile updates into the sync response format.
+        profile_updates: dict[
+            str, dict[str, JsonValue | dict[str, JsonValue]] | None
+        ] = {}
+        for other_user_id in user_ids:
+            profile_data = profile_data_by_user.get(other_user_id)
+            if profile_data is None:
+                # Don't generate anything for users with no profile data
+                # in initial sync.
+                continue
+
+            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
+            for field_name in profile_fields:
+                if field_name in profile_data.keys():
+                    per_user_updates[field_name] = profile_data[field_name]
+
+            if per_user_updates:
+                profile_updates[other_user_id] = per_user_updates
+
+        if profile_updates:
+            sync_result_builder.profile_updates = profile_updates
+
+    async def _generate_sync_entry_for_profile_updates(
+        self, sync_result_builder: "SyncResultBuilder"
+    ) -> None:
+        """
+        Build a sync entry for profile updates and attach it to the given
+        `sync_result_builder`.
+
+        Currently only local profiles updates will be included in the sync response.
+
+        Args:
+            sync_result_builder:
+        """
+        sync_config = sync_result_builder.sync_config
+        profile_fields = sync_config.filter_collection.profile_fields
+        if not profile_fields:
+            return
+
+        user_id = sync_config.user.to_string()
+        since_token = sync_result_builder.since_token
+        now_token = sync_result_builder.now_token
+
+        sync_config = sync_result_builder.sync_config
+        lazy_load_members = sync_config.filter_collection.lazy_load_members()
+        include_users = None
+        if lazy_load_members:
+            # Collect members from the existing `sync_result_builder` data.
+            # Ensure we filter out any remove users until we support profile
+            # updates for federated users.
+            include_users = set()
+            # invited
+            for invited in sync_result_builder.invited:
+                if self._is_mine_id(invited.invite.sender):
+                    include_users.add(invited.invite.sender)
+            # joined
+            for joined in sync_result_builder.joined:
+                for timeline_event in joined.timeline.events:
+                    if self._is_mine_id(timeline_event.event.sender):
+                        include_users.add(timeline_event.event.sender)
+            # knocked
+            for knocked in sync_result_builder.knocked:
+                if self._is_mine_id(knocked.knock.sender):
+                    include_users.add(knocked.knock.sender)
+            # archived
+            for archived in sync_result_builder.archived:
+                for timeline_event in archived.timeline.events:
+                    if self._is_mine_id(timeline_event.event.sender):
+                        include_users.add(timeline_event.event.sender)
+
+        if since_token is None:
+            await self._generate_initial_sync_entry_for_profile_updates(
+                user_id=user_id,
+                sync_result_builder=sync_result_builder,
+                profile_fields=profile_fields,
+                include_users=include_users,
+            )
+            return
+
+        updates = await self.store.get_profile_updates_for_user_and_fields(
+            from_id=since_token.profile_updates_key,
+            to_id=now_token.profile_updates_key,
+            user_id=user_id,
+            field_names=profile_fields,
+        )
+
+        left_room_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.LEFT_ROOM.value
+        }
+        joined_room_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.JOINED_ROOM.value
+        }
+        users = set()
+        updated_users = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.UPDATE.value
+        }
+        # Add any users in the timeline, if we collected them due to lazy loading
+        if include_users:
+            users.update(include_users)
+        # Add users with updates
+        users.update(updated_users)
+        # Add any newly joined users
+        users.update(joined_room_user_ids)
+
+        if not users and not left_room_user_ids:
+            return
+
+        # Serialise the profile updates into the sync response format.
+        # user ID -> {profile field -> value | null if unset }
+        profile_updates: dict[
+            str, dict[str, JsonValue | dict[str, JsonValue]] | None
+        ] = {}
+
+        # Process field updates and users who have events in the sync response
+        if users:
+            updated_user_fields: dict[str, set[str]] = {}
+            # Set fields from updates
+            for update in updates:
+                if (
+                    # Skip the update if there is no field update (a joined or left room action),
+                    update.action != ProfileUpdateAction.UPDATE
+                    or update.affected_fields is None
+                    # or if the client isn't interested in any of the fields
+                    or update.affected_fields.isdisjoint(profile_fields)
+                    # or we're not interested in this user.
+                    or update.user_id not in users
+                ):
+                    continue
+                updated_user_fields.setdefault(update.user_id, set()).update(
+                    # Add any fields that were affected and that we're interested in
+                    update.affected_fields & profile_fields
+                )
+
+            # Note: there's a small race condition here where a profile update may
+            # occur between fetching `now_token` above and reaching this step. In
+            # that case, the profile information will be newer than `now_token`.
+            # This is fine, as users will generally always want the latest profile
+            # information. However, it does mean that on the next sync, the same
+            # profile update will come down a second time.
+            #
+            # Hopefully clients can just filter these out.
+            profile_data_by_user = await self.store.get_profile_data_for_users(users)
+
+            # Note, we've already collected field updates above via `updates`,
+            # outside of events in the timeline when lazy loading. When lazy loading,
+            # we're already always sending the fields that have changed, regardless
+            # of the lazy loading cache.
+            for other_user_id in users:
+                profile_data = profile_data_by_user.get(other_user_id)
+                if profile_data is None:
+                    # No profile data for this user, just return a blank dictionary
+                    # in incremental sync, telling the clients to remove all profile
+                    # information for this user.
+                    profile_updates[other_user_id] = None
+                    continue
+
+                per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
+                if include_users and other_user_id in include_users:
+                    # Include all the fields the client asked for, as this user
+                    # has events in a lazy loaded sync response, except for
+                    # fields we've recently sent in a previous lazy loaded sync response.
+                    # We must include _updated_ fields even if the profile doesn't have
+                    # this field. The value will be sent down as `None`. We must do
+                    # this as currently legacy sync delivers field removals by
+                    # delivering a null value to clients, and if a field is completely
+                    # deleted, we can't otherwise do that. The fact this field has
+                    # a `ProfileUpdateAction.UPDATE` is enough to tell us it should
+                    # be sent down.
+                    # TODO once removals are sent down in a dedicated key instead of
+                    # null values, the `.union(updated_user_fields.get(other_user_id, []))`
+                    # part here can be removed.
+                    fields = (
+                        set(profile_data.keys())
+                        .union(updated_user_fields.get(other_user_id, []))
+                        .intersection(profile_fields)
+                    )
+                    for field_name in fields:
+                        cache_key = (
+                            sync_config.user.to_string(),
+                            sync_config.device_id,
+                        )
+                        cache = self.get_lazy_loaded_profile_fields_cache(cache_key)
+                        # Only send this users field if we haven't recently sent it.
+                        # Our cache contains previously set values as pairs of
+                        # blake2b(other_used_id + field_name) -> blake2b(value),
+                        # which ensures if the value changes, we'll miss the cache,
+                        # thus sending the field update to the syncing user.
+                        cache_value = hashlib.blake2b(
+                            f"{other_user_id}-{field_name}".encode("utf8"),
+                            key=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY,
+                            digest_size=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE,
+                        ).digest()
+                        value_hash = hashlib.blake2b(
+                            json.dumps(
+                                [
+                                    profile_data.get(field_name),
+                                ],
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                ensure_ascii=False,
+                            ).encode("utf8"),
+                            key=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY,
+                            digest_size=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE,
+                        ).digest()
+                        if cache.get(cache_value) != value_hash:
+                            per_user_updates[field_name] = profile_data.get(field_name)
+                            # Update our cache to indicate this user/field combo
+                            # has been recently sent.
+                            cache.set(
+                                cache_value,
+                                value_hash,
+                            )
+                else:
+                    # Include only the diff, unless the user recently joined,
+                    # then send all the fields the client asked for.
+                    # We don't use a cache here as for non-lazy sync we always
+                    # send changes and/or fields the client asked for, if relevant
+                    # as above joined condition.
+                    fields = (
+                        profile_fields
+                        if other_user_id in joined_room_user_ids
+                        else set(updated_user_fields.get(other_user_id, []))
+                    )
+                    # We must include _updated_ fields even if the profile doesn't have
+                    # this field. The value will be sent down as `None`. We must do
+                    # this as currently legacy sync delivers field removals by
+                    # delivering a null value to clients, and if a field is completely
+                    # deleted, we can't otherwise do that. The fact this field has
+                    # a `ProfileUpdateAction.UPDATE` is enough to tell us it should
+                    # be sent down.
+                    # TODO once removals are sent down in a dedicated key instead of
+                    # null values, the `.union(updated_user_fields.get(other_user_id, []))`
+                    # part here can be removed.
+                    fields = (
+                        set(profile_data.keys())
+                        .union(updated_user_fields.get(other_user_id, []))
+                        .intersection(fields)
+                    )
+                    # fields.update(set(updated_user_fields.get(other_user_id, [])))
+                    for field_name in fields:
+                        per_user_updates[field_name] = profile_data.get(field_name)
+
+                if per_user_updates:
+                    profile_updates[other_user_id] = per_user_updates
+
+        # Process left rooms
+        if left_room_user_ids:
+            for other_user_id in left_room_user_ids:
+                # Return an empty dictionary to the client
+                profile_updates[other_user_id] = None
+
+        if profile_updates:
+            sync_result_builder.profile_updates = profile_updates
+
     async def _generate_sync_entry_for_presence(
         self,
         sync_result_builder: "SyncResultBuilder",
@@ -2325,6 +2760,16 @@ class SyncHandler:
         knocked = room_changes.knocked
         newly_joined_rooms = room_changes.newly_joined_rooms
         newly_left_rooms = room_changes.newly_left_rooms
+
+        if self.hs_config.experimental.msc4354_enabled and newly_joined_rooms:
+            # If we have any newly-joined rooms, load all sticky events from them.
+            # We then send down all the sticky events, including historical ones,
+            # rather than just the ones that are new since the `since` token.
+            sticky_by_room.update(
+                await self.sticky_events_for_newly_joined_rooms(
+                    sync_result_builder.now_token, newly_joined_rooms
+                )
+            )
 
         # 4. We need to apply further processing to `room_entries` (rooms considered
         # joined or archived).
@@ -3147,6 +3592,7 @@ class SyncResultBuilder:
         # The following mirror the fields in a sync response
         presence
         account_data
+        profile_updates
         joined
         invited
         knocked
@@ -3165,6 +3611,9 @@ class SyncResultBuilder:
 
     presence: list[UserPresenceState] = attr.Factory(list)
     account_data: list[JsonDict] = attr.Factory(list)
+    profile_updates: dict[str, dict[str, JsonValue | dict[str, JsonValue]] | None] = (
+        attr.Factory(dict)
+    )
     joined: list[JoinedSyncResult] = attr.Factory(list)
     invited: list[InvitedSyncResult] = attr.Factory(list)
     knocked: list[KnockedSyncResult] = attr.Factory(list)

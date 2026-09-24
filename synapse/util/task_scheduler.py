@@ -83,8 +83,10 @@ class TaskScheduler:
     - The reconciliation loop runs every minute, so this is not a high-precision
       scheduler.
 
-    - Only 10 tasks can run at the same time. If the pool is full, tasks may be
-      delayed. Make sure your scheduled tasks can actually finish.
+    - Only a limited number of tasks can run at the same time (configured by
+      the `task_scheduler.max_concurrent_tasks` setting, defaulting to 5). If the
+      pool is full, tasks may be delayed. Make sure your scheduled tasks can
+      actually finish.
 
     - Currently, there's no way to stop a task if it gets stuck.
 
@@ -100,8 +102,9 @@ class TaskScheduler:
     CLEANUP_INTERVAL_MS = 30 * 60 * 1000
     # Time before a complete or failed task is deleted from the DB
     KEEP_TASKS_FOR_MS = 7 * 24 * 60 * 60 * 1000  # 1 week
-    # Maximum number of tasks that can run at the same time
-    MAX_CONCURRENT_RUNNING_TASKS = 5
+    # Default maximum number of tasks that can run at the same time
+    DEFAULT_MAX_CONCURRENT_RUNNING_TASKS = 5
+    MAX_CONCURRENT_RUNNING_TASKS = DEFAULT_MAX_CONCURRENT_RUNNING_TASKS
     # Time from the last task update after which we will log a warning
     LAST_UPDATE_BEFORE_WARNING_MS = 24 * 60 * 60 * 1000  # 24hrs
     # Report a running task's status and usage every so often.
@@ -112,6 +115,8 @@ class TaskScheduler:
         self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
+        self._max_concurrent_tasks = hs.config.task_scheduler.max_concurrent_tasks
+        self.MAX_CONCURRENT_RUNNING_TASKS = self._max_concurrent_tasks
         # A map between a task's ID and a deferred linked to the task
         self._running_tasks: dict[str, defer.Deferred] = {}
         # A map between action names and their registered function
@@ -366,7 +371,7 @@ class TaskScheduler:
     def _launch_scheduled_tasks(self) -> None:
         """Retrieve and launch scheduled tasks that should be running at this time."""
         # Don't bother trying to launch new tasks if we're already at capacity.
-        if len(self._running_tasks) >= TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS:
+        if len(self._running_tasks) >= self._max_concurrent_tasks:
             return
 
         if self._launching_new_tasks:
@@ -378,7 +383,7 @@ class TaskScheduler:
             try:
                 for task in await self.get_tasks(
                     statuses=[TaskStatus.ACTIVE],
-                    limit=self.MAX_CONCURRENT_RUNNING_TASKS,
+                    limit=self._max_concurrent_tasks,
                 ):
                     # _launch_task will ignore tasks that we're already running, and
                     # will also do nothing if we're already at the maximum capacity.
@@ -386,7 +391,7 @@ class TaskScheduler:
                 for task in await self.get_tasks(
                     statuses=[TaskStatus.SCHEDULED],
                     max_timestamp=self._clock.time_msec(),
-                    limit=self.MAX_CONCURRENT_RUNNING_TASKS,
+                    limit=self._max_concurrent_tasks,
                 ):
                     await self._launch_task(task)
 
@@ -400,10 +405,10 @@ class TaskScheduler:
         """Clean old complete or failed jobs to avoid clutter the DB."""
         now = self._clock.time_msec()
         for task in await self._store.get_scheduled_tasks(
-            statuses=[TaskStatus.FAILED, TaskStatus.COMPLETE],
+            statuses=[TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.COMPLETE],
             max_timestamp=now - TaskScheduler.KEEP_TASKS_FOR_MS,
         ):
-            # FAILED and COMPLETE tasks should never be running
+            # FAILED, CANCELLED and COMPLETE tasks should never be running
             assert task.id not in self._running_tasks
             await self._store.delete_scheduled_task(task.id)
 
@@ -509,7 +514,7 @@ class TaskScheduler:
                 self._launch_scheduled_tasks,
             )
 
-        if len(self._running_tasks) >= TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS:
+        if len(self._running_tasks) >= self._max_concurrent_tasks:
             return
 
         if (

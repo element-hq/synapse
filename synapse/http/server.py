@@ -33,6 +33,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Final,
     Iterable,
     Iterator,
     Pattern,
@@ -673,8 +674,33 @@ class UnrecognizedRequestResource(resource.Resource):
         # or the response bytes as a return value.
         return NOT_DONE_YET
 
-    def getChild(self, name: str, request: Request) -> resource.Resource:
-        return self
+    def getChild(self, path: str, request: Request) -> resource.Resource:
+        # The child of a catch-all unrecognised request handler
+        # is itself another unrecognised request handler.
+        # We can return any UnrecognizedRequestResource that doesn't
+        # have children.
+        assert len(_BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE.children) == 0
+        return _BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE
+
+
+class _LeafUnrecognisedRequestResource(UnrecognizedRequestResource):
+    """
+    UnrecognizedRequestResource, but with the added caveat that it can't have any children.
+    This makes it safe for it to return itself as a dynamic child.
+
+    Constructed as a singleton; use `_BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE`
+    """
+
+    def putChild(self, path: bytes, child: IResource) -> None:
+        raise RuntimeError("_LeafUnrecognisedRequestResource does not accept children")
+
+
+_BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE: Final[_LeafUnrecognisedRequestResource] = (
+    _LeafUnrecognisedRequestResource()
+)
+"""
+An UnrecognizedRequestResource that is guaranteed not to have children.
+"""
 
 
 class RootRedirect(resource.Resource):
@@ -732,10 +758,15 @@ class _ByteProducer:
         self._request: Request | None = request
         self._iterator = iterator
         self._paused = False
-        self.tracing_scope = start_active_span(
-            "write_bytes_to_request",
-        )
-        self.tracing_scope.__enter__()
+
+        # Start a span for writing bytes to the request. We manually manage its
+        # lifecycle, so set `finish_on_close=False`.
+        #
+        # Note that we cannot use `active_span()` in the functions below, as
+        # they are called from the reactor and therefore outside the request's
+        # context.
+        with start_active_span("write_bytes_to_request", finish_on_close=False):
+            self._span = active_span()
 
         try:
             self._request.registerProducer(self, True)
@@ -746,8 +777,7 @@ class _ByteProducer:
             logger.info("Connection disconnected before response was written: %r", e)
 
             # We drop our references to data we'll not use.
-            self._iterator = iter(())
-            self.tracing_scope.__exit__(type(e), None, e.__traceback__)
+            self.stopProducing()
         else:
             # Start producing if `registerProducer` was successful
             self.resumeProducing()
@@ -761,9 +791,8 @@ class _ByteProducer:
         self._request.write(b"".join(data))
 
     def pauseProducing(self) -> None:
-        opentracing_span = active_span()
-        if opentracing_span is not None:
-            opentracing_span.log_kv({"event": "producer_paused"})
+        if self._span is not None:
+            self._span.log_kv({"event": "producer_paused"})
         self._paused = True
 
     def resumeProducing(self) -> None:
@@ -774,9 +803,8 @@ class _ByteProducer:
 
         self._paused = False
 
-        opentracing_span = active_span()
-        if opentracing_span is not None:
-            opentracing_span.log_kv({"event": "producer_resumed"})
+        if self._span is not None:
+            self._span.log_kv({"event": "producer_resumed"})
 
         # Write until there's backpressure telling us to stop.
         while not self._paused:
@@ -810,9 +838,13 @@ class _ByteProducer:
             self._send_data(buffer)
 
     def stopProducing(self) -> None:
-        # Clear a circular reference.
+        # Clear a circular reference and drop references to the data.
+        self._iterator = iter(())
         self._request = None
-        self.tracing_scope.__exit__(None, None, None)
+
+        if self._span is not None:
+            self._span.finish()
+            self._span = None
 
 
 def _encode_json_bytes(json_object: object) -> bytes:

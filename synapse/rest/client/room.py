@@ -217,7 +217,6 @@ class RoomStateEventRestServlet(RestServlet):
         self.clock = hs.get_clock()
         self._event_serializer = hs.get_event_client_serializer()
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
-        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -339,10 +338,6 @@ class RoomStateEventRestServlet(RestServlet):
         if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
 
-        sticky_duration_ms: int | None = None
-        if self._msc4354_enabled:
-            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
-
         delay = _parse_request_for_delayed_event_delay(request)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
@@ -353,7 +348,7 @@ class RoomStateEventRestServlet(RestServlet):
                 origin_server_ts=origin_server_ts,
                 content=content,
                 delay=delay,
-                sticky_duration_ms=sticky_duration_ms,
+                sticky_duration_ms=None,
             )
 
             set_tag("delay_id", delay_id)
@@ -381,10 +376,6 @@ class RoomStateEventRestServlet(RestServlet):
                     "room_id": room_id,
                     "sender": requester.user.to_string(),
                 }
-                if sticky_duration_ms is not None:
-                    event_dict[StickyEvent.EVENT_FIELD_NAME] = StickyEventField(
-                        duration_ms=sticky_duration_ms
-                    )
 
                 if state_key is not None:
                     event_dict["state_key"] = state_key
@@ -1412,6 +1403,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
                         event_id=event_id,
                         initial_redaction_event=event,
                         relation_types=with_relations,
+                        room_version=room_version,
                     )
 
             event_id = event.event_id
@@ -1505,7 +1497,7 @@ class RoomAliasListServlet(RestServlet):
     PATTERNS = [
         re.compile(
             r"^/_matrix/client/unstable/org\.matrix\.msc2432"
-            r"/rooms/(?P<room_id>[^/]*)/aliases"
+            r"/rooms/(?P<room_id>[^/]*)/aliases$"
         ),
     ] + list(client_patterns("/rooms/(?P<room_id>[^/]*)/aliases$", unstable=False))
     CATEGORY = "Client API requests"
