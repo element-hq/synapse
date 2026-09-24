@@ -119,10 +119,10 @@ where
 /// items can cross the GIL-release boundary, so it can be tested against an
 /// in-memory stream as well as a [`tokio_postgres::RowStream`].
 ///
-/// The [`FusedStream`] bound matters because [`Self::get_next_if_ready`] may
-/// poll the stream again after it has finished. A bare `Stream` is allowed to
-/// panic if polled past completion; a fused stream keeps yielding `None`, so
-/// calls after exhaustion are safe.
+/// The [`FusedStream`] bound provides [`FusedStream::is_terminated`], so
+/// [`Self::block_on_next`] can return `None` after exhaustion without polling
+/// the stream again. A bare `Stream` is allowed to panic if polled past
+/// completion.
 pub trait BlockingPostgresStream
 where
     Self: FusedStream + Sized + Send + Ungil + Unpin,
