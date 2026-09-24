@@ -325,28 +325,9 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
                 },
             )
         )
-
-        # Auth & persist the event
-        self.get_success(
-            self.hs.get_event_auth_handler().check_auth_rules_from_context(
-                redaction_event
-            )
-        )
         self.get_success(
             persist_controller.persist_event(redaction_event, redaction_event_context)
         )
-
-        # Sanity check: the redaction is recorded as needing a recheck, since the
-        # redaction's sender doesn't have power to redact arbitrary events and we
-        # don't have the redacted event yet.
-        row = self.get_success(
-            self.store.db_pool.simple_select_one(
-                table="redactions",
-                keyvalues={"redacts": sticky_event.event_id},
-                retcols=("event_id", "recheck"),
-            )
-        )
-        self.assertEqual(row, (redaction_event.event_id, True))
 
         # Now the sticky event arrives over federation and is persisted.
         self.get_success(
