@@ -2884,6 +2884,14 @@ class PersistEventsStore:
         Redaction events themselves won't be redacted immediately, to avoid
         breaking circular redactions (which are tested in `test_circular_redaction`).
 
+        In general, applying redactions prior to persistence (like this method does)
+        is not required for correctness as `_maybe_redact_event_row` will do it on
+        the read path (and the event will eventually be 'censored' in the background).
+
+        However sticky events are an exception: redaction removes the field that makes
+        an event sticky (`msc4354_sticky`) and applying this prior to persistence
+        allows us to skip inserting the event into the sticky events stream.
+
         Returns a copy of the `events_and_contexts` lists with redactions applied.
         """
 
