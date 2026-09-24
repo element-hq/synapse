@@ -289,7 +289,7 @@ information.
     ^/_matrix/client/(r0|v3|unstable)/user_directory/search$
 
     # Unstable MSC4140 support
-    ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/.*/restart)?$
+    ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/[^/]+(/restart)?)?$
     ^/_matrix/client/unstable/org.matrix.msc4140/rooms/.*/delayed_event/
 
     # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
@@ -309,9 +309,6 @@ Additionally, the following REST endpoints can be handled for GET requests:
 
     # Admin API requests
     ^/_synapse/admin/v2/users/[^/]+$
-
-    # Unstable MSC4140 support
-    ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events/[^/]+$
 
 Pagination requests can also be handled, but all requests for a given
 room must be routed to the same instance. Additionally, care must be taken to
