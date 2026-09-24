@@ -1239,6 +1239,10 @@ class HomeserverTestCase(TestCase):
         Note that the metrics outlives each individual test, so it may hold
         values from previous tests.
 
+        The `metric` must return exactly one unique series name among its
+        samples, i.e. it should be a Counter or a Gauge, rather than a
+        Histogram.
+
         Automatically includes SERVER_NAME_LABEL.
         """
 
@@ -1266,6 +1270,17 @@ class HomeserverTestCase(TestCase):
                     # sample's value.
                     found_samples.append(sample)
 
+        # Ensure that there is exactly one unique series name among the found
+        # samples. This is to guard against someone passing in eg a Histogram
+        # metric, which will return multiple series (eg `_total`, `_count`,
+        # `_buckets`, etc), which is likely not what the caller intended.
+        series_names = {sample.name for sample in found_samples}
+        if len(series_names) > 1:
+            raise AssertionError(
+                f"Expected exactly one unique sample name for metric {metric}, but found:\n\n"
+                + "\n".join(series_names)
+            )
+
         return found_samples
 
     def get_prometheus_metric_current_value(
@@ -1278,6 +1293,10 @@ class HomeserverTestCase(TestCase):
 
         Note that the metrics outlives each individual test, so it may hold
         values from previous tests.
+
+        The `metric` must return exactly one unique series name among its
+        samples, i.e. it should be a Counter or a Gauge, rather than a
+        Histogram.
 
         Automatically includes SERVER_NAME_LABEL.
         """
