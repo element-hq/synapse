@@ -80,8 +80,8 @@ class PushRulesHandler:
             # Check against the rules served to the user rather than the full
             # base rule set: server-default rules disabled by the server's
             # configuration are not served, so must not be modifiable either.
-            # `rule.default` keeps rejecting user-created rules whose ID happens
-            # to start with ".", as before.
+            # `rule.default` rejects user-created rules whose ID happens
+            # to start with ".".
             rules = await self._main_store.get_push_rules_for_user(user_id)
             if not any(
                 rule.rule_id == namespaced_rule_id and rule.default
