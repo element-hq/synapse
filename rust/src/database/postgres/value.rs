@@ -217,9 +217,10 @@ pub fn pg_row_to_py<'py>(
 /// A decoded column value, ready to drop into a Python tuple. `None` represents
 /// SQL `NULL`; otherwise it holds the corresponding Python object.
 ///
-/// Must only be used on a blocking thread (i.e. not on a tokio runtime worker
-/// thread) because it attaches to the Python interpreter to build the Python
-/// object. Hence why it is private.
+/// Decoding attaches to the Python interpreter to build the object. So this
+/// must only run on a thread that already holds the GIL, and never on a tokio
+/// runtime thread. It is private so that [`pg_row_to_py`], which takes a
+/// `Python<'py>` token, is the only way to reach it.
 ///
 /// Use [`pg_row_to_py`] directly.
 struct PythonPgFromSql(pub Option<Py<PyAny>>);
