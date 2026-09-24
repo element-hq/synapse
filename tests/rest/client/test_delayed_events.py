@@ -151,6 +151,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         # Assert the stored properties of the delayed event
         event = channel.json_body
+        self._assert_delayed_since_ts(event, delayed_since_ts)
         self.assertDictEqual(
             event,
             {
@@ -158,7 +159,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
                 "room_id": self.room_id,
                 "type": _EVENT_TYPE,
                 "delay_ms": delay_ms,
-                "delayed_since_ts": delayed_since_ts,
+                "delayed_since_ts": event["delayed_since_ts"],
                 "content": content,
             },
         )
@@ -211,6 +212,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         # Assert the stored properties of the delayed event
         state_event = channel.json_body
+        self._assert_delayed_since_ts(state_event, delayed_since_ts)
         self.assertDictEqual(
             state_event,
             {
@@ -219,7 +221,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
                 "type": state_event_type,
                 "state_key": state_key,
                 "delay_ms": delay_ms,
-                "delayed_since_ts": delayed_since_ts,
+                "delayed_since_ts": state_event["delayed_since_ts"],
                 "content": content,
             },
         )
@@ -799,6 +801,17 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertIsInstance(events, list)
 
         return events
+
+    def _assert_delayed_since_ts(self, event: JsonDict, requested_ts: int) -> None:
+        """Assert that a delayed event was scheduled between `requested_ts` and now.
+
+        Scheduling reads from the database, which advances the test clock, so the
+        stored timestamp may be later than the time the request was made.
+        """
+        self.assertGreaterEqual(event["delayed_since_ts"], requested_ts, event)
+        self.assertLessEqual(
+            event["delayed_since_ts"], self.hs.get_clock().time_msec(), event
+        )
 
     def _get_delayed_event_content(self, event: JsonDict) -> JsonDict:
         key = "content"
