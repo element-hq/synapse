@@ -2951,6 +2951,7 @@ class PersistEventsStore:
                 if get_domain_from_id(redaction_event_sender) != get_domain_from_id(
                     event.sender
                 ):
+                    # Sender servers don't match, so the event isn't actually redacted
                     logger.debug(
                         "redaction of %s by %s skipped as it required a v3 recheck and sender servers differ: %r != %r",
                         redaction_redacts_event_id,

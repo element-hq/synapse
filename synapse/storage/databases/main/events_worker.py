@@ -1792,7 +1792,7 @@ class EventsWorkerStore(SQLBaseStore):
                     # This redaction event is allowed. Mark as not needing a recheck.
                     redaction_event.internal_metadata.recheck_redaction = False
                 else:
-                    # Senders don't match, so the event isn't actually redacted
+                    # Sender servers don't match, so the event isn't actually redacted
                     logger.debug(
                         "%s was redacted by %s but the senders don't match",
                         original_ev.event_id,
