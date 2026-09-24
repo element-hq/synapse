@@ -2918,18 +2918,18 @@ class PersistEventsStore:
         )
 
         # map from redacted event ID to the event ID that redacts it
-        redacted = {}
+        redacted_event_id_map = {}
         for (
             redaction_event_id,
-            redaction_redacts,
+            redaction_redacts_event_id,
             redaction_event_sender,
             redaction_event_needs_v3_recheck,
         ) in txn:
-            if redaction_redacts in redacted:
+            if redaction_redacts_event_id in redacted_event_id_map:
                 # Already redacted
                 continue
 
-            event = events_by_id[redaction_redacts]
+            event = events_by_id[redaction_redacts_event_id]
             if (
                 redaction_event_needs_v3_recheck
                 # Normally v1/v2 don't ever need rechecks because the checks are part of auth rules.
@@ -2945,24 +2945,24 @@ class PersistEventsStore:
                 ):
                     logger.debug(
                         "redaction of %s skipped as it required a v3 recheck and sender servers differ: %r != %r",
-                        redaction_redacts,
+                        redaction_redacts_event_id,
                         redaction_event_sender,
                         event.sender,
                     )
                     continue
 
-            redacted[redaction_redacts] = redaction_event_id
+            redacted_event_id_map[redaction_redacts_event_id] = redaction_event_id
             logger.debug(
                 "%r redacted at persistence time by %r",
-                redaction_redacts,
+                redaction_redacts_event_id,
                 redaction_event_id,
             )
 
         out: list[EventPersistencePair] = []
         for event, context in events_and_contexts:
-            if redacted_by := redacted.get(event.event_id):
+            if redacted_by_event_id := redacted_event_id_map.get(event.event_id):
                 redacted_event = redact_event(event)
-                redacted_event.internal_metadata.redacted_by = redacted_by
+                redacted_event.internal_metadata.redacted_by = redacted_by_event_id
                 out.append((redacted_event, context))
             else:
                 out.append((event, context))
