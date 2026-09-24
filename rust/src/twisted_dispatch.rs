@@ -25,7 +25,7 @@
 //! The implementation combines a queue of closures with the self-pipe trick,
 //! which is the same implementation as Twisted uses for `callFromThread`.
 //!
-//! ```
+//! ```text
 //! Tokio worker                          Twisted reactor
 //!      │                                      │
 //!      TwistedDispatcher                      |
@@ -56,6 +56,7 @@
 //! homeserver has been shut down.
 
 use std::{
+    any::Any,
     io::{ErrorKind, Read, Write},
     os::{
         fd::{AsRawFd, RawFd},
@@ -68,6 +69,8 @@ use std::{
 use anyhow::Context;
 use log::error;
 use pyo3::prelude::*;
+
+use crate::logging::context::with_logcontext;
 
 /// A queued closure. Runs on the Twisted reactor thread.
 type DispatchedCall = Box<dyn FnOnce(Python<'_>) + Send + 'static>;
@@ -216,11 +219,50 @@ impl TwistedDispatchReader {
             // state that the panicking code was part way through mutating.
             // Since we never read `job` after this, it is safe to catch the
             // panic. `Python` is already `UnwindSafe`.
-            let ran = catch_unwind(AssertUnwindSafe(move || job(py)));
-            if ran.is_err() {
-                log::error!("panic while running a dispatched Rust completion");
+            let ran = catch_unwind(AssertUnwindSafe(move || {
+                // Ensure the dispatched job gets run within the sentinel
+                // logcontext, and that the sentinel context is restored
+                // afterwards.
+                with_logcontext(py, None, move || {
+                    job(py);
+                    Ok(())
+                })
+            }));
+
+            match ran {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    // Log an error if setting the logcontexts in the dispatched
+                    // Rust completion fails.
+                    log::error!(
+                        "error setting logcontexts in dispatched Rust completion: {}",
+                        err
+                    );
+                }
+                Err(err) => {
+                    // Log an error if the dispatched Rust completion panicked.
+                    log::error!(
+                        "panic while running a dispatched Rust completion: {}",
+                        panic_payload_as_str(&*err)
+                    );
+                }
             }
         }
+    }
+}
+
+/// Convert a panic payload to a string for logging purposes.
+///
+/// This is the object passed to [`panic!`] and returned from [`catch_unwind`].
+/// The vast majority of panics are either a `&'static str` or a `String`, but
+/// technically they could be anything.
+fn panic_payload_as_str(payload: &dyn Any) -> &str {
+    if let Some(&s) = payload.downcast_ref::<&'static str>() {
+        s
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.as_str()
+    } else {
+        "<unknown>"
     }
 }
 
@@ -248,4 +290,46 @@ pub fn new_pair() -> PyResult<(Arc<TwistedDispatcher>, TwistedDispatchReader)> {
     };
 
     Ok((dispatcher, reader))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logging::context::{current_context, set_current_context, testing::test_context};
+
+    /// `close_and_drain` runs from the homeserver's shutdown handler, in the
+    /// caller's logcontext. Ensure that the logcontext is correctly preserved
+    /// across `close_and_drain` no matter what the dispatch job leaves it as.
+    #[test]
+    fn close_and_drain_runs_at_sentinel_and_restores_caller_logcontext() {
+        Python::initialize();
+        Python::attach(|py| {
+            let (dispatcher, reader) = new_pair().expect("creating the dispatcher pair");
+
+            // Create and set the "shutdown" log context.
+            let caller = test_context(py, "shutdown");
+            set_current_context(py, Some(caller.clone_ref(py))).expect("setting caller context");
+
+            // Dispatch a closure that changes the logcontext.
+            dispatcher
+                .dispatch(move |py| {
+                    // Mimic the dispatch job not restoring the sentinel context.
+                    let awaiter = test_context(py, "requester");
+                    set_current_context(py, Some(awaiter)).expect("switching to the awaiter");
+                })
+                .expect("dispatching while open");
+
+            // Call `close_and_drain`, which should restore the caller's
+            // context.
+            reader.close_and_drain(py);
+
+            // Check the caller's context is current again.
+            let after = current_context(py).expect("caller's context was lost");
+            assert!(after.is(&caller), "caller's context was not restored");
+
+            // Reset to the sentinel so we don't leak into another test that
+            // reuses this OS thread from the test harness's pool.
+            set_current_context(py, None).expect("resetting to the sentinel");
+        });
+    }
 }
