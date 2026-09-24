@@ -25,7 +25,7 @@
 //! The implementation combines a queue of closures with the self-pipe trick,
 //! which is the same implementation as Twisted uses for `callFromThread`.
 //!
-//! The [`TwistedDispatcher`] holds a queue of closures and the write end of a
+//! The [`TwistedDispatcher`] worker holds a queue of closures and the write end of a
 //! unix socket pair. A worker pushes a closure and writes one byte. The
 //! [`TwistedDispatchReader`] holds the read end and is registered with the
 //! Twisted reactor via `addReader`. The Twisted reactor is woken up and calls
