@@ -359,7 +359,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
 
         > When the user joins a room, the server MUST include all unexpired sticky
         > events for that room in their subsequent sync response.
-        > — https://github.com/matrix-org/matrix-spec-proposals/blob/41deb2dbd1ba2d9ee3b0d51ae9c4e2fbc5cbb2e5/proposals/4354-sticky-events.md#sync-api-changes
+        > — https://github.com/matrix-org/matrix-spec-proposals/blob/d42301b17859d046953563dc7f046edd51789a12/proposals/4354-sticky-events.md#sync-api-changes
         """
         # A filter that excludes message events, so that the sticky events come down
         # the sticky section rather than the timeline section.
