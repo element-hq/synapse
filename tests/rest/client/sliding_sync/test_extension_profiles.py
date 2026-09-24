@@ -625,6 +625,33 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             },
         )
 
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_profile_returned_if_we_left_then_rejoined(self) -> None:
+        """Mirror of test_profile_returned_if_user_left_then_rejoined, but with
+        *us* doing the leave & rejoin instead of the other user."""
+        sync_body = {
+            "lists": {
+                "all": {
+                    "ranges": [[0, 10]],
+                    "required_state": [["m.room.member", "$LAZY"]],
+                    "timeline_limit": 10,
+                }
+            },
+            "extensions": {"org.matrix.msc4262.profiles": {"enabled": True}},
+        }
+        _, from_token = self.do_sync(sync_body, tok=self.tok)
+
+        self.helper.leave(self.joined_room, self.user, tok=self.tok)
+        self.helper.join(self.joined_room, self.user, tok=self.tok)
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+        self.assertEqual(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                "@other_user:test"
+            ],
+            {"updated": {"displayname": "other_user"}},
+        )
+
     @parameterized.expand(
         [
             True,
