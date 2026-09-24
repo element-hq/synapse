@@ -1830,7 +1830,7 @@ class FederationEventHandler:
             for s in seen_remotes:
                 unseen_event_map.pop(s, None)
             rejected_event_ids = await self._store.has_rejected_event_ids(seen_remotes)
-            if rejected_event_ids:
+            if len(rejected_event_ids) > 0:
                 has_rejected_events = True
 
         # XXX: it might be possible to kick this process off in parallel with fetching
