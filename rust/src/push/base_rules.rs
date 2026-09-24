@@ -861,10 +861,7 @@ mod tests {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[ALICE], false, 0);
 
         let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
-        assert_eq!(
-            actions,
-            vec![Action::Notify, HIGHLIGHT_ACTION, RING_ACTION]
-        );
+        assert_eq!(actions, vec![Action::Notify, HIGHLIGHT_ACTION, RING_ACTION]);
     }
 
     #[test]
