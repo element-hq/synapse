@@ -83,7 +83,7 @@ where
 }
 
 /// Same as [`BlockingPostgres`], but for futures that yield a
-/// [`tokio_postgres::Result`], mapping any error into a Python exception.
+/// [`tokio_postgres::Error`], mapping any error into a Python exception.
 pub trait BlockingPostgresResult<T>
 where
     Self: Future<Output = Result<T, tokio_postgres::Error>> + Sized + Send + Ungil,
