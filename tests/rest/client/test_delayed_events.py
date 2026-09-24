@@ -20,6 +20,7 @@ from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import delayed_events, login, room, sync, versions
@@ -331,6 +332,86 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
+    def test_delayed_events_rejected_if_sender_not_in_room(self) -> None:
+        room_id = self.helper.create_room_as(
+            self.user2_user_id, tok=self.user2_access_token
+        )
+
+        for method, path, content in (
+            ("POST", _get_path_for_delayed_send(room_id, _EVENT_TYPE, 900), {}),
+            (
+                "PUT",
+                _get_path_for_delayed_state(room_id, _EVENT_TYPE, "", 900),
+                {},
+            ),
+            # Only changes to the sender's own membership are exempt
+            (
+                "PUT",
+                _get_path_for_delayed_state(
+                    room_id, EventTypes.Member, self.user2_user_id, 900
+                ),
+                {"membership": Membership.LEAVE},
+            ),
+        ):
+            channel = self.make_request(method, path, content, self.user1_access_token)
+            self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+            self.assertEqual(
+                Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
+            )
+
+        self.assertListEqual([], self._get_delayed_events())
+
+    def test_delayed_event_fails_on_timeout_if_sender_left_room(self) -> None:
+        state_key = "sender_left_room"
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(self.room_id, _EVENT_TYPE, state_key, 900),
+            {},
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        # Leaving does not cancel the delayed event, but it can no longer be sent
+        self.helper.leave(self.room_id, self.user1_user_id, tok=self.user1_access_token)
+        self.assertEqual(1, len(self._get_delayed_events()))
+
+        self.reactor.advance(1)
+        self.assertListEqual([], self._get_delayed_events())
+        self.helper.get_state(
+            self.room_id,
+            _EVENT_TYPE,
+            self.user2_access_token,
+            state_key=state_key,
+            expect_code=HTTPStatus.NOT_FOUND,
+        )
+
+    def test_delayed_self_join_accepted_if_sender_not_in_room(self) -> None:
+        room_id = self.helper.create_room_as(
+            self.user2_user_id,
+            tok=self.user2_access_token,
+            extra_content={"preset": "public_chat"},
+        )
+
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(
+                room_id, EventTypes.Member, self.user1_user_id, 900
+            ),
+            {"membership": Membership.JOIN},
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        self.reactor.advance(1)
+        self.assertListEqual([], self._get_delayed_events())
+        content = self.helper.get_state(
+            room_id,
+            EventTypes.Member,
+            self.user2_access_token,
+            state_key=self.user1_user_id,
+        )
+        self.assertEqual(Membership.JOIN, content.get("membership"), content)
 
     def test_get_delayed_events_auth(self) -> None:
         channel = self.make_request("GET", PATH_PREFIX)
