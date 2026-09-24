@@ -151,7 +151,7 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
         conditions: Cow::Borrowed(&[
             Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
                 key: Cow::Borrowed("type"),
-                pattern: Cow::Borrowed("org.matrix.msc4075.rtc.invite"),
+                pattern: Cow::Borrowed("org.matrix.msc4075.rtc.notification"),
             })),
             Condition::Known(KnownCondition::ExactEventPropertyContainsType(
                 EventPropertyIsTypeCondition {
