@@ -585,10 +585,19 @@ class FederationEventHandler:
             from_send_join=True,
         )
         if room_version.msc4242_state_dags and has_rejected_events:
-            # The state DAG must not include rejected events
-            raise SynapseError(
-                502,
-                "Unable to join because the remote server passed back a state DAG that includes rejected events (invalid)",
+            # A conformant server excludes rejected events from the state DAG it sends to
+            # new joiners, so their presence means the remote server is faulty. We log
+            # that rather than refusing the join: rejected events are excluded from the
+            # state DAG forward extremities, so they cannot contribute to the room state
+            # we calculate, and any event referencing one is rejected in turn. Refusing
+            # would cost availability without buying any safety.
+            logger.warning(
+                "Remote server %s sent a state DAG containing rejected events when we "
+                "joined %s. This is a bug in that server: rejected events must be "
+                "excluded from /send_join responses. Joining anyway; the rejected events "
+                "form no part of the room state.",
+                origin,
+                room_id,
             )
 
         # and now persist the join event itself.
@@ -899,6 +908,12 @@ class FederationEventHandler:
             backfilled: True if this is part of a historical batch of events (inhibits
                 notification to clients, and validation of device keys.)
         """
+        if not events:
+            return
+
+        # Our callers only ever pass events for a single room.
+        room_id = next(iter(events)).room_id
+
         set_tag(
             SynapseTags.FUNC_ARG_PREFIX + "event_ids",
             str([event.event_id for event in events]),
@@ -968,9 +983,49 @@ class FederationEventHandler:
             # ascending) because one backfill event is likely to be the `prev_event` of
             # the next event we're going to process.
             sorted_events = sorted(new_events, key=lambda x: x.depth)
+
+            # Backfilled events are persisted without recalculating the current state,
+            # which is right for the room DAG but not always for the state DAG. Backfill
+            # can teach us about state events we have never seen, which then belong on
+            # the state DAG frontier and so do change the current state. That happens
+            # when an event's `prev_events` reach state events which its
+            # `prev_state_events` do not, because the state DAG walk in
+            # /get_missing_events only ever follows `prev_state_events`.
+            # This is defence-in-depth: prev_events on honest servers is a superset of the state
+            # events in that event's prev_state_events, and only when they disagree (e.g. refer to
+            # an event on a fork) will this occur, but we have to handle the adversarial case too.
+            #
+            # Remember the frontier so that we can recalculate the current state if it moves.
+            state_dag_extremities_before: frozenset[str] | None = None
+            if (
+                backfilled # Non-backfilled pulled events will automatically update the current state, this check is only for /backfill
+                and sorted_events
+                and supports_msc4242_state_dag(sorted_events[0])
+            ):
+                state_dag_extremities_before = (
+                    await self._store.get_state_dag_extremities(room_id)
+                )
+
             for ev in sorted_events:
                 with nested_logging_context(ev.event_id):
                     await self._process_pulled_event(origin, ev, backfilled=backfilled)
+
+            if state_dag_extremities_before is not None:
+                state_dag_extremities_after = (
+                    await self._store.get_state_dag_extremities(room_id)
+                )
+                if state_dag_extremities_after != state_dag_extremities_before:
+                    # This is unusual because it implies the graph induced by prev_events vs prev_state_events
+                    # has diverged, so warn about it.
+                    logger.warning(
+                        "Backfill from %s moved the state DAG forward extremities of %s from %s "
+                        "to %s, recalculating the current state",
+                        origin,
+                        room_id,
+                        shortstr(state_dag_extremities_before),
+                        shortstr(state_dag_extremities_after),
+                    )
+                    await self._state_handler.update_current_state(room_id)
 
         # Check if we've already tried to process these events at some point in the
         # past. We aren't concerned with the expontntial backoff here, just whether it
@@ -1770,9 +1825,10 @@ class FederationEventHandler:
         # persister does another round of deduplication.
         has_rejected_events = False
         seen_remotes = await self._store.have_seen_events(room_id, event_map.keys())
+        unseen_event_map = dict(event_map)
         if seen_remotes:
             for s in seen_remotes:
-                event_map.pop(s, None)
+                unseen_event_map.pop(s, None)
             rejected_event_ids = await self._store.has_rejected_event_ids(seen_remotes)
             if rejected_event_ids:
                 has_rejected_events = True
@@ -1789,12 +1845,12 @@ class FederationEventHandler:
                     if supports_msc4242_state_dag(ev)
                     else ev.auth_event_ids()
                 )
-                if e_id in event_map
+                if e_id in unseen_event_map
             ]
-            for ev in event_map.values()
+            for ev in unseen_event_map.values()
         }
-        sorted_event_ids = sorted_topologically(event_map.keys(), auth_graph)
-        sorted_events = [event_map[e_id] for e_id in sorted_event_ids]
+        sorted_event_ids = sorted_topologically(unseen_event_map.keys(), auth_graph)
+        sorted_events = [unseen_event_map[e_id] for e_id in sorted_event_ids]
         logger.info(
             "Persisting %i remaining outliers: %s",
             len(sorted_events),
@@ -1922,7 +1978,10 @@ class FederationEventHandler:
         Params:
             room_id: the room that the events are meant to be in (though this has
                not yet been checked)
-            event_map: all of the events being persisted, by event ID
+            event_map: every event we were given, by event ID. This includes events we
+               have already persisted and so are not persisting again, because we may
+               still need them to work out the auth events of an event we have not seen
+               before. On /send_join this is the complete state DAG.
             sorted_events: the events being persisted, sorted so that an event's
                `prev_state_events` come before it
             from_send_join: True if `event_map` is the complete state DAG from a
@@ -1936,6 +1995,12 @@ class FederationEventHandler:
         state_group_to_state_map: dict[int, StateMap[str]] = {}
         # Tracks which events have been processed in causal order (prev_state_events first)
         processed_event_map: dict[str, EventBase] = {}
+        # The events in this batch which we have rejected, and why. Rejection cascades
+        # through `prev_state_events`, but nothing in the batch is persisted until we have
+        # processed all of it, so an event we rejected a moment ago still looks accepted
+        # both in the database and on the in-memory event. We therefore have to remember
+        # our own decisions and tell the auth rules about them.
+        rejections: dict[str, str] = {}
 
         async def process(event: EventBase) -> EventPersistencePair:
             assert supports_msc4242_state_dag(event)
@@ -1974,9 +2039,9 @@ class FederationEventHandler:
                 if from_send_join:
                     # event_map is the complete state DAG
 
-                    # The events in this batch aren't persisted yet, so pull the auth
-                    # events out of the batch, falling back to the database for events we
-                    # had already seen and hence filtered out of the batch.
+                    # The events being persisted aren't in the database yet, so pull the
+                    # auth events out of `event_map`, which holds the whole state DAG,
+                    # including the events we had already persisted before this join.
                     calculated_auth_events = {
                         event_id: event_map[event_id]
                         for event_id in calculated_auth_event_ids
@@ -2028,7 +2093,10 @@ class FederationEventHandler:
                 try:
                     validate_event_for_room_version(event)
                     await check_state_independent_auth_rules(
-                        self._store, event, batched_auth_events
+                        self._store,
+                        event,
+                        batched_auth_events,
+                        batched_rejections=rejections,
                     )
                     check_state_dependent_auth_rules(
                         event, calculated_auth_events.values()
@@ -2048,6 +2116,8 @@ class FederationEventHandler:
                     logger.warning("While validating received event %r: %s", event, e)
                     context.rejected = RejectedReason.OVERSIZED_EVENT
 
+            if context.rejected is not None:
+                rejections[event.event_id] = context.rejected
             processed_event_map[event.event_id] = event
             return event, context
 
@@ -2827,7 +2897,17 @@ class FederationEventHandler:
             )
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many prev_events")
 
-        if len(ev.auth_event_ids()) > 10:
+        if supports_msc4242_state_dag(ev) and len(ev.prev_state_events) > 20:
+            logger.warning(
+                "Rejecting event %s which has %i prev_state_events",
+                ev.event_id,
+                len(ev.prev_state_events),
+            )
+            raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many prev_state_events")
+
+        # MSC4242 State DAG events don't list their auth events (they're calculated from
+        # the state DAG), so there's nothing to bound here for them.
+        if not supports_msc4242_state_dag(ev) and len(ev.auth_event_ids()) > 10:
             logger.warning(
                 "Rejecting event %s which has %i auth_events",
                 ev.event_id,
