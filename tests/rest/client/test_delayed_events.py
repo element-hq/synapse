@@ -16,7 +16,7 @@
 
 import sqlite3
 from http import HTTPStatus
-from typing import Literal
+from typing import Literal, overload
 
 from parameterized import parameterized
 
@@ -84,7 +84,88 @@ class DelayedEventsUnstableSupportTestCase(HomeserverTestCase):
         self.assertTrue(channel.json_body["unstable_features"]["org.matrix.msc4140"])
 
 
-class DelayedEventsTestCaseBase(HomeserverTestCase):
+class DelayedEventsHelperMixin(HomeserverTestCase):
+    room_id: str
+
+    def _send_delayed_event_request(
+        self,
+        *,
+        room_id: str,
+        delay: Duration,
+        event_type: str,
+        state_key: str | None = None,
+        content: JsonDict,
+        method: Literal["PUT", "POST"] = "PUT",
+        txn_id: str | None = None,
+        access_token: str,
+    ) -> FakeChannel:
+        """Build and send a request for scheduling a delayed event via the
+        dedicated endpoint. See `_build_delayed_event_request` for the arguments.
+        """
+        return self.make_request(
+            *_build_delayed_event_request(
+                room_id=room_id,
+                delay=delay,
+                event_type=event_type,
+                state_key=state_key,
+                content=content,
+                method=method,
+                txn_id=txn_id,
+            ),
+            access_token,
+        )
+
+    @overload
+    def _check_for_delayed_event_in_sync(
+        self, access_token: str, delay_id: str, should_find: Literal[True]
+    ) -> JsonDict: ...
+
+    @overload
+    def _check_for_delayed_event_in_sync(
+        self, access_token: str, delay_id: str, should_find: Literal[False]
+    ) -> None: ...
+
+    def _check_for_delayed_event_in_sync(
+        self, access_token: str, delay_id: str, should_find: bool
+    ) -> JsonDict | None:
+        """Call /sync and look for a synced event with a specified delay_id.
+        At most one event will ever have a matching delay_id.
+
+        Args:
+            access_token: The access token of the user to call /sync for.
+            delay_id: The delay_id to search for in synced events.
+            should_find: Whether /sync should include an event with a matching delay_id.
+
+        Returns:
+            The synced event with the matching delay_id, if any.
+        """
+        channel = self.make_request("GET", "/sync", access_token=access_token)
+        self.assertEqual(HTTPStatus.OK, channel.code)
+
+        rooms = channel.json_body["rooms"]
+        events = []
+        for membership in "join", "leave":
+            if membership in rooms:
+                events += rooms[membership][self.room_id]["timeline"]["events"]
+
+        found: JsonDict | None = None
+        for event in events:
+            if event["unsigned"].get("org.matrix.msc4140.delay_id") == delay_id:
+                if not should_find:
+                    self.fail(
+                        f"Found event {event['event_id']} with matching delay_id {delay_id}, but expected to not find one"
+                    )
+                if found is not None:
+                    self.fail(
+                        f"Events {found['event_id']} & {event['event_id']} have matching delay_id {delay_id}, but delay_id should be unique"
+                    )
+                found = event
+        if should_find and found is None:
+            self.fail(f"Did not find any event with matching delay_id {delay_id}")
+        return found
+
+
+class DelayedEventsTestCaseBase(DelayedEventsHelperMixin):
     """Room and user fixtures, and request helpers, for the delayed events tests."""
 
     servlets = [
@@ -129,34 +210,6 @@ class DelayedEventsTestCaseBase(HomeserverTestCase):
         # affect the rate-limits in the test itself
         self.reactor.advance(Duration(days=1).as_secs())
 
-    def _send_delayed_event_request(
-        self,
-        *,
-        room_id: str,
-        delay: Duration,
-        event_type: str,
-        state_key: str | None = None,
-        content: JsonDict,
-        method: Literal["PUT", "POST"] = "PUT",
-        txn_id: str | None = None,
-        access_token: str,
-    ) -> FakeChannel:
-        """Build and send a request for scheduling a delayed event via the
-        dedicated endpoint. See `_build_delayed_event_request` for the arguments.
-        """
-        return self.make_request(
-            *_build_delayed_event_request(
-                room_id=room_id,
-                delay=delay,
-                event_type=event_type,
-                state_key=state_key,
-                content=content,
-                method=method,
-                txn_id=txn_id,
-            ),
-            access_token,
-        )
-
     def _get_delayed_events(self) -> list[JsonDict]:
         channel = self.make_request(
             "GET",
@@ -200,45 +253,6 @@ class DelayedEventsTestCaseBase(HomeserverTestCase):
         else:
             body["action"] = action.value
         return self.make_request("POST", path, body, access_token)
-
-    def _check_for_delayed_event_in_sync(
-        self, access_token: str, delay_id: str, should_find: bool
-    ) -> JsonDict | None:
-        """Call /sync and look for a synced event with a specified delay_id.
-        At most one event will ever have a matching delay_id.
-
-        Args:
-            access_token: The access token of the user to call /sync for.
-            delay_id: The delay_id to search for in synced events.
-            should_find: Whether /sync should include an event with a matching delay_id.
-
-        Returns:
-            The synced event with the matching delay_id, if any.
-        """
-        channel = self.make_request("GET", "/sync", access_token=access_token)
-        self.assertEqual(HTTPStatus.OK, channel.code)
-
-        rooms = channel.json_body["rooms"]
-        events = []
-        for membership in "join", "leave":
-            if membership in rooms:
-                events += rooms[membership][self.room_id]["timeline"]["events"]
-
-        found: JsonDict | None = None
-        for event in events:
-            if event["unsigned"].get("org.matrix.msc4140.delay_id") == delay_id:
-                if not should_find:
-                    self.fail(
-                        f"Found event {event['event_id']} with matching delay_id {delay_id}, but expected to not find one"
-                    )
-                if found is not None:
-                    self.fail(
-                        f"Events {found['event_id']} & {event['event_id']} have matching delay_id {delay_id}, but delay_id should be unique"
-                    )
-                found = event
-        if should_find and found is None:
-            self.fail(f"Did not find any event with matching delay_id {delay_id}")
-        return found
 
 
 class DelayedEventsTestCase(DelayedEventsTestCaseBase):
@@ -439,7 +453,6 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         event = self._check_for_delayed_event_in_sync(
             guest_access_token, delay_id, True
         )
-        assert event is not None
         self.assertEqual(guest_user_id, event["sender"], event)
 
     def test_delayed_member_events_are_sent_on_timeout(self) -> None:
@@ -1175,7 +1188,9 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         )
 
 
-class DelayedEventsWorkerTestCase(BaseMultiWorkerStreamTestCase):
+class DelayedEventsWorkerTestCase(
+    BaseMultiWorkerStreamTestCase, DelayedEventsHelperMixin
+):
     """Tests delayed events when some of the work happens off the main process."""
 
     servlets = [
@@ -1217,30 +1232,19 @@ class DelayedEventsWorkerTestCase(BaseMultiWorkerStreamTestCase):
         assert delay_id is not None
 
         self.reactor.advance(Duration(seconds=1).as_secs())
-
-        channel = self.make_request("GET", "/sync", access_token=self.access_token)
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-        timeline = channel.json_body["rooms"]["join"][self.room_id]["timeline"]
-        sent = [
-            event
-            for event in timeline["events"]
-            if event["unsigned"].get("org.matrix.msc4140.delay_id") == delay_id
-        ]
-        self.assertEqual(1, len(sent), timeline)
+        self._check_for_delayed_event_in_sync(self.access_token, delay_id, True)
 
     def test_delayed_events_are_cancelled_on_deactivation_from_worker(self) -> None:
         worker_hs = self.make_worker_hs("synapse.app.generic_worker")
         store = self.hs.get_datastores().main
         handler = self.hs.get_delayed_events_handler()
 
-        channel = self.make_request(
-            *_build_delayed_event_request(
-                room_id=self.room_id,
-                delay=Duration(milliseconds=900),
-                event_type=_EVENT_TYPE,
-                content={},
-                method="POST",
-            ),
+        channel = self._send_delayed_event_request(
+            room_id=self.room_id,
+            delay=Duration(milliseconds=900),
+            event_type=_EVENT_TYPE,
+            content={},
+            method="POST",
             access_token=self.access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
