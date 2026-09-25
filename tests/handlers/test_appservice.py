@@ -132,6 +132,56 @@ class AppServiceHandlerTestCase(unittest.TestCase):
             interested_service, events=[event]
         )
 
+    def test_notify_interested_services_only_service_without_url(self) -> None:
+        """
+        Test that an application service without a `url` does not make the handler
+        read any events, as it cannot be sent any.
+        """
+        service = self._mkservice(is_interested_in_event=True)
+        service.url = None
+        self.mock_store.get_app_services.return_value = [service]
+        self.mock_store.get_all_new_event_ids_stream = AsyncMock()
+        self.mock_store.get_events_as_list = AsyncMock()
+
+        self.handler.notify_interested_services(RoomStreamToken(stream=1))
+
+        self.mock_store.get_appservice_last_pos.assert_not_called()
+        self.mock_store.get_all_new_event_ids_stream.assert_not_called()
+        self.mock_store.get_events_as_list.assert_not_called()
+        self.mock_scheduler.enqueue_for_appservice.assert_not_called()
+        self.mock_store.set_appservice_last_pos.assert_not_called()
+
+    def test_notify_interested_services_skips_service_without_url(self) -> None:
+        """
+        Test that events are only sent to the application services that have a `url`,
+        and that the interest of a service without a `url` is not even checked.
+        """
+        service_with_url = self._mkservice(is_interested_in_event=True)
+        service_without_url = self._mkservice(is_interested_in_event=True)
+        service_without_url.url = None
+        self.mock_store.get_app_services.return_value = [
+            service_without_url,
+            service_with_url,
+        ]
+        self.mock_store.get_user_by_id = AsyncMock(
+            return_value={"name": "@someone:anywhere"}
+        )
+
+        event = Mock(
+            sender="@someone:anywhere", type="m.room.message", room_id="!foo:bar"
+        )
+        self.mock_store.get_all_new_event_ids_stream = AsyncMock(
+            return_value=(1, {event.event_id: 0})
+        )
+        self.mock_store.get_events_as_list = AsyncMock(return_value=[event])
+
+        self.handler.notify_interested_services(RoomStreamToken(stream=1))
+
+        service_without_url.is_interested_in_event.assert_not_called()
+        self.mock_scheduler.enqueue_for_appservice.assert_called_once_with(
+            service_with_url, events=[event]
+        )
+
     def test_query_user_exists_unknown_user(self) -> None:
         user_id = "@someone:anywhere"
         services = [self._mkservice(is_interested_in_event=True)]
@@ -383,6 +433,31 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         self.mock_scheduler.enqueue_for_appservice.assert_called_once_with(
             interested_service, ephemeral=[]
         )
+
+    def test_notify_interested_services_ephemeral_skips_service_without_url(
+        self,
+    ) -> None:
+        """
+        Test that no ephemeral events are gathered for an application service without
+        a `url`, and that its stream position is left alone.
+        """
+        service = self._mkservice(is_interested_in_event=True)
+        service.url = None
+        self.mock_store.get_app_services.return_value = [service]
+        self.mock_store.get_type_stream_id_for_appservice = AsyncMock(return_value=579)
+        self.event_source.sources.receipt.get_new_events_as = AsyncMock(
+            return_value=([Mock(event_id="event_1")], None)
+        )
+
+        self.handler.notify_interested_services_ephemeral(
+            StreamKeyType.RECEIPT,
+            MultiWriterStreamToken(stream=580),
+            ["@fakerecipient:example.com"],
+        )
+
+        self.event_source.sources.receipt.get_new_events_as.assert_not_called()
+        self.mock_scheduler.enqueue_for_appservice.assert_not_called()
+        self.mock_store.set_appservice_stream_type_pos.assert_not_called()
 
     def _mkservice(
         self, is_interested_in_event: bool, protocols: Iterable | None = None
@@ -1142,6 +1217,9 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
             rate_limited=False,
             namespaces=namespaces,
             supports_ephemeral=True,
+            # Must be set for Synapse to try pushing data to the AS
+            hs_token="abcde",
+            url="some_url",
         )
 
         # Register the application service
@@ -1290,6 +1368,9 @@ class ApplicationServicesHandlerOtkCountsTestCase(unittest.HomeserverTestCase):
                 ]
             },
             msc3202_transaction_extensions=True,
+            # Must be set for Synapse to try pushing data to the AS
+            hs_token="abcde",
+            url="some_url",
         )
         self.hs.get_datastores().main.services_cache = [self._service]
 
