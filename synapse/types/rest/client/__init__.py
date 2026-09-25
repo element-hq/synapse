@@ -533,3 +533,41 @@ class SlidingSyncBody(RequestBodyModel):
         if value is not None:
             assert len(value) <= 100, f"Max lists: 100 but saw {len(value)}"
         return value
+
+
+class MSC4525PaginatedSyncBody(RequestBodyModel):
+    """
+    Paginated Sync API request body (MSC4525, a dialect of MSC4186 without
+    lists/ranges/subscriptions).
+
+    Attributes:
+        conn_id: An optional string to identify this connection to the server.
+            Only one paginated sync connection is allowed per given conn_id
+            (empty or not).
+        page_size: The maximum number of rooms to return in this response.
+        limit: The maximum number of new timeline events to return per room,
+            per response. If a room has more new events than this, the most
+            recent `limit` of them are returned with `limited: true` and a
+            `prev_batch`.
+        history: The number of most-recent timeline events to return for a room
+            which has not previously been sent on this connection. Defaults to
+            `limit`.
+        required_state: Required state for each room returned, with the same
+            semantics as sliding sync's `required_state`. Applied to every
+            room. Must be identical on every request of a connection; the
+            server always uses the current request's value and never persists
+            or diffs it.
+        extensions: Extensions API. A map of extension key to extension config,
+            shared with sliding sync. The per-extension `lists`/`rooms` scoping
+            fields are accepted but ignored: an enabled extension applies to
+            the rooms in the response.
+    """
+
+    conn_id: StrictStr | None = None
+    page_size: Annotated[int, Field(ge=1, le=500, strict=True)]
+    limit: Annotated[int, Field(ge=1, le=1000, strict=True)]
+    history: Annotated[int, Field(ge=0, le=1000, strict=True)] | None = None
+    required_state: list[
+        Annotated[tuple[StrictStr, StrictStr], Field(strict=False)]
+    ] = []
+    extensions: SlidingSyncBody.Extensions | None = None
