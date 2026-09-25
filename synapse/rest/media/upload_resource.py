@@ -107,7 +107,7 @@ class BaseUploadServlet(RestServlet):
         #     disposition = headers.getRawHeaders(b"Content-Disposition")[0]
         # TODO(markjh): parse content-disposition
 
-        # Check the upload limits last which matches previous behaviour.
+        # Check the upload limits last.
         # It might make more sense to put this alongside the initial file size check.
         await self.media_repo.check_media_upload_limits(user_id, content_length)
 

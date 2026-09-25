@@ -56,8 +56,8 @@ TV = TypeVar("TV")
 
 
 def list_stored_media_files(hs: "HomeServer") -> set[str]:
-    """List the paths of every file in the media store, including the
-    directories of any file-backed storage providers.
+    """List the absolute path of every file in the media store, as well as
+    any file-backed media storage providers.
 
     Note that the media store path may be shared between tests, so compare
     against a listing taken earlier in the test rather than expecting it to

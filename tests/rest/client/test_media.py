@@ -2997,7 +2997,8 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
 
     def test_over_limit_does_not_store_file(self) -> None:
         """An upload that is rejected for exceeding the limit must not leave an
-        orphaned file on disk (see https://github.com/element-hq/synapse/issues/18915)."""
+        orphaned file on disk. Regression test for
+        https://github.com/element-hq/synapse/issues/18915)."""
 
         files_at_start = list_stored_media_files(self.hs)
 
