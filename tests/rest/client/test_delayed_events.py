@@ -40,6 +40,7 @@ from synapse.rest.client import (
     sync,
     versions,
 )
+from synapse.rest.client.delayed_events import _UpdateDelayedEventAction
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
@@ -178,16 +179,26 @@ class DelayedEventsTestCaseBase(HomeserverTestCase):
     def _update_delayed_event(
         self,
         delay_id: str,
-        action: str,
+        action: _UpdateDelayedEventAction,
         action_in_path: bool,
         access_token: str | None = None,
     ) -> FakeChannel:
+        """
+        Call the endpoint to cancel/restart/send a scheduled delayed event.
+
+        Args:
+            delay_id: The ID of the delayed event to manage.
+            action: The management action to take on the target delayed event.
+            action_in_path: If False, uses the deprecated version of this endpoint
+                that expects the action in the request body instead of the path.
+            access_token: The access token of the user to call the endpoint for.
+        """
         path = f"{_MANAGEMENT_PATH_PREFIX}/{delay_id}"
         body = {}
         if action_in_path:
-            path += f"/{action}"
+            path += f"/{action.value}"
         else:
-            body["action"] = action
+            body["action"] = action.value
         return self.make_request("POST", path, body, access_token)
 
     def _find_sent_delayed_event(
@@ -542,12 +553,14 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
     @parameterized.expand(
         (
             (action, action_in_path)
-            for action in ("cancel", "restart", "send")
+            for action in _UpdateDelayedEventAction
             for action_in_path in (True, False)
         )
     )
     def test_update_delayed_event_without_match(
-        self, action: str, action_in_path: bool
+        self,
+        action: _UpdateDelayedEventAction,
+        action_in_path: bool,
     ) -> None:
         channel = self._update_delayed_event("abc", action, action_in_path)
         self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
@@ -585,7 +598,9 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-        channel = self._update_delayed_event(delay_id, "cancel", action_in_path)
+        channel = self._update_delayed_event(
+            delay_id, _UpdateDelayedEventAction.CANCEL, action_in_path
+        )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertListEqual([], self._get_delayed_events())
 
@@ -622,22 +637,32 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             delay_ids.append(delay_id)
 
         delay_id = delay_ids.pop(0)
-        channel = self._update_delayed_event(delay_id, "cancel", action_in_path)
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-
-        delay_id = delay_ids.pop(0)
-        channel = self._update_delayed_event(delay_id, "cancel", action_in_path)
-        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
-
-        # Using auth should bypass ratelimit applied against source IP
         channel = self._update_delayed_event(
-            delay_id, "cancel", action_in_path, self.user1_access_token
+            delay_id, _UpdateDelayedEventAction.CANCEL, action_in_path
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         delay_id = delay_ids.pop(0)
         channel = self._update_delayed_event(
-            delay_id, "cancel", action_in_path, self.user1_access_token
+            delay_id, _UpdateDelayedEventAction.CANCEL, action_in_path
+        )
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+
+        # Using auth should bypass ratelimit applied against source IP
+        channel = self._update_delayed_event(
+            delay_id,
+            _UpdateDelayedEventAction.CANCEL,
+            action_in_path,
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        delay_id = delay_ids.pop(0)
+        channel = self._update_delayed_event(
+            delay_id,
+            _UpdateDelayedEventAction.CANCEL,
+            action_in_path,
+            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
@@ -650,7 +675,10 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         # Test that the request isn't ratelimited anymore.
         channel = self._update_delayed_event(
-            delay_id, "cancel", action_in_path, self.user1_access_token
+            delay_id,
+            _UpdateDelayedEventAction.CANCEL,
+            action_in_path,
+            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
@@ -694,7 +722,9 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-        channel = self._update_delayed_event(delay_id, "send", action_in_path)
+        channel = self._update_delayed_event(
+            delay_id, _UpdateDelayedEventAction.SEND, action_in_path
+        )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertListEqual([], self._get_delayed_events())
         content = self.helper.get_state(
@@ -726,10 +756,14 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             assert delay_id is not None
             delay_ids.append(delay_id)
 
-        channel = self._update_delayed_event(delay_ids.pop(0), "send", action_in_path)
+        channel = self._update_delayed_event(
+            delay_ids.pop(0), _UpdateDelayedEventAction.SEND, action_in_path
+        )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        channel = self._update_delayed_event(delay_ids.pop(0), "send", action_in_path)
+        channel = self._update_delayed_event(
+            delay_ids.pop(0), _UpdateDelayedEventAction.SEND, action_in_path
+        )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
     @parameterized.expand((True, False))
@@ -765,7 +799,9 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-        channel = self._update_delayed_event(delay_id, "restart", action_in_path)
+        channel = self._update_delayed_event(
+            delay_id, _UpdateDelayedEventAction.RESTART, action_in_path
+        )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         self.reactor.advance(Duration(seconds=1).as_secs())
@@ -815,22 +851,32 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             delay_ids.append(delay_id)
 
         delay_id = delay_ids.pop(0)
-        channel = self._update_delayed_event(delay_id, "restart", action_in_path)
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-
-        delay_id = delay_ids.pop(0)
-        channel = self._update_delayed_event(delay_id, "restart", action_in_path)
-        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
-
-        # Using auth should bypass ratelimit applied against source IP
         channel = self._update_delayed_event(
-            delay_id, "restart", action_in_path, self.user1_access_token
+            delay_id, _UpdateDelayedEventAction.RESTART, action_in_path
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         delay_id = delay_ids.pop(0)
         channel = self._update_delayed_event(
-            delay_id, "restart", action_in_path, self.user1_access_token
+            delay_id, _UpdateDelayedEventAction.RESTART, action_in_path
+        )
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+
+        # Using auth should bypass ratelimit applied against source IP
+        channel = self._update_delayed_event(
+            delay_id,
+            _UpdateDelayedEventAction.RESTART,
+            action_in_path,
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        delay_id = delay_ids.pop(0)
+        channel = self._update_delayed_event(
+            delay_id,
+            _UpdateDelayedEventAction.RESTART,
+            action_in_path,
+            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
@@ -843,7 +889,10 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         # Test that the request isn't ratelimited anymore.
         channel = self._update_delayed_event(
-            delay_id, "restart", action_in_path, self.user1_access_token
+            delay_id,
+            _UpdateDelayedEventAction.RESTART,
+            action_in_path,
+            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
