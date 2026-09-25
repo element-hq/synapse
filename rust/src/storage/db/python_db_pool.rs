@@ -174,9 +174,9 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                     // enforcing of the concept we want to represent.
                     match func(&mut txn).now_or_never() {
                         Some(Ok(value)) => {
-                            let mut callback_slot =  callback_slot
-                                .lock()
-                                .map_err(|err| anyhow::anyhow!("Failed to acquire lock on `callback_slot`: {:#}", err))?;
+                            let mut callback_slot = callback_slot.lock().map_err(|err| {
+                                anyhow::anyhow!("Failed to lock `callback_slot`: {:#}", err)
+                            })?;
                             *callback_slot = Some(Ok(value));
                             Ok(py.None())
                         }
@@ -185,20 +185,18 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                             // transaction back (and can apply its retry logic for
                             // serialization/deadlock errors).
                             let py_err = anyhow_to_pyerr(py, &err);
-                            let mut callback_slot =  callback_slot
-                                .lock()
-                                .map_err(|err| anyhow::anyhow!("Failed to acquire lock on `callback_slot`: {:#}", err))?;
+                            let mut callback_slot = callback_slot.lock().map_err(|err| {
+                                anyhow::anyhow!("Failed to lock `callback_slot`: {:#}", err)
+                            })?;
                             *callback_slot = Some(Err(err));
                             Err(py_err)
                         }
-                        None => {
-                            Err(PyAssertionError::new_err(
-                                "The `run_interaction` transaction callback future returned `Poll::Pending`, \
-                                but we expect Synapse Python database work to resolve synchronously. \
-                                This is a Synapse programming error: genuine async work is \
-                                not supported here.",
-                            ))
-                        }
+                        None => Err(PyAssertionError::new_err(
+                            "The `run_interaction` transaction callback future returned \
+                            `Poll::Pending`, but we expect Synapse Python database work to \
+                            resolve synchronously. This is a Synapse programming error: \
+                            genuine async work is not supported here.",
+                        )),
                     }
                 },
             )?;
@@ -233,11 +231,12 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                 // completed successfully and run the provided `callback` which runs the
                 // `func` and we capture a result or it fails.
                 None => Err(anyhow::anyhow!(
-                    "Expected to capture result after running `runInteraction` and seeing it succeed (but saw nothing). \
-                    This is a Synapse programming error."
+                    "Expected to capture result after running `runInteraction` and seeing it \
+                    succeed (but saw nothing). This is a Synapse programming error."
                 )),
             },
-            Err(py_err) => Err(anyhow::Error::from(py_err)).with_context(|| format!("run_interaction(name={}) failed", name)),
+            Err(py_err) => Err(anyhow::Error::from(py_err))
+                .with_context(|| format!("run_interaction(name={}) failed", name)),
         }
     }
 }
