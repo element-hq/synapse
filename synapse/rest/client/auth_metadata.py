@@ -30,17 +30,11 @@ class AuthMetadataServlet(RestServlet):
     Advertises the OAuth 2.0 server metadata for the homeserver.
     """
 
-    PATTERNS = [
-        *client_patterns(
-            "/auth_metadata$",
-            releases=("v1",),
-        ),
-        *client_patterns(
-            "/org.matrix.msc2965/auth_metadata$",
-            unstable=True,
-            releases=(),
-        ),
-    ]
+    PATTERNS = client_patterns(
+        "/auth_metadata$",
+        releases=("v1",),
+        unstable=False,
+    )
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -50,7 +44,7 @@ class AuthMetadataServlet(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # This endpoint is unauthenticated and the response only depends on
         # the metadata we get from Matrix Authentication Service. Internally,
-        # MasDelegatedAuth.issuer() is already caching the
+        # MasDelegatedAuth.auth_metadata() is already caching the
         # response in memory anyway. Ideally we would follow any Cache-Control directive
         # given by MAS, but this is fine for now.
         #

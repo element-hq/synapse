@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING
 from twisted.web.resource import Resource
 from twisted.web.server import Request
 
-from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import NotFoundError
 from synapse.http.server import DirectServeJsonResource
 from synapse.http.site import SynapseRequest
@@ -40,7 +39,6 @@ logger = logging.getLogger(__name__)
 class WellKnownBuilder:
     def __init__(self, hs: "HomeServer"):
         self._config = hs.config
-        self._auth = hs.get_auth()
 
     async def get_well_known(self) -> JsonDict | None:
         if not self._config.server.serve_client_wellknown:
@@ -51,14 +49,6 @@ class WellKnownBuilder:
         if self._config.registration.default_identity_server:
             result["m.identity_server"] = {
                 "base_url": self._config.registration.default_identity_server
-            }
-
-        if self._config.mas.enabled:
-            assert isinstance(self._auth, MasDelegatedAuth)
-
-            result["org.matrix.msc2965.authentication"] = {
-                "issuer": await self._auth.issuer(),
-                "account": await self._auth.account_management_url(),
             }
 
         if self._config.server.extra_well_known_client_content:
