@@ -229,13 +229,15 @@ class DelayedEventsTestCaseBase(HomeserverTestCase):
             if event["unsigned"].get("org.matrix.msc4140.delay_id") == delay_id:
                 if not should_find:
                     self.fail(
-                        "Found event with matching delay_id, but expected to not find one"
+                        f"Found event {event['event_id']} with matching delay_id {delay_id}, but expected to not find one"
                     )
                 if found is not None:
-                    self.fail("Found multiple events with matching delay_id")
+                    self.fail(
+                        f"Events {found['event_id']} & {event['event_id']} have matching delay_id {delay_id}, but delay_id should be unique"
+                    )
                 found = event
         if should_find and found is None:
-            self.fail("Did not find event with matching delay_id")
+            self.fail(f"Did not find any event with matching delay_id {delay_id}")
         return found
 
 
