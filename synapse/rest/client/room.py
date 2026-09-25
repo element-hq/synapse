@@ -524,7 +524,9 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/delayed_event/$event_type[/$txn_id]
         PATTERNS = "/rooms/(?P<room_id>[^/]*)/delayed_event/(?P<event_type>[^/]*)"
-        register_txn_path(self, PATTERNS, http_server, "org.matrix.msc4140")
+        register_txn_path(
+            self, PATTERNS, http_server, unstable_path_segment="org.matrix.msc4140"
+        )
 
     async def on_POST(
         self,
@@ -1671,6 +1673,7 @@ def register_txn_path(
     servlet: RestServlet,
     regex_string: str,
     http_server: HttpServer,
+    *,
     unstable_path_segment: str = "",
 ) -> None:
     """Registers a transaction-based path.
