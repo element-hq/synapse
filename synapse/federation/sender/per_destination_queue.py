@@ -47,7 +47,8 @@ from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import SynapseTags, set_tag
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
-from synapse.types import JsonDict, ReadReceipt
+from synapse.replication.tcp.streams._base import StickyEventStreamPosition
+from synapse.types import JsonDict, ReadReceipt, RoomID, unwrap
 from synapse.util.retryutils import NotRetryingDestination, get_retry_limiter
 from synapse.visibility import filter_events_for_server
 
@@ -76,6 +77,20 @@ CATCHUP_RETRY_INTERVAL = 60 * 60 * 1000
 # Limit how many presence states we add to each presence EDU, to ensure that
 # they are bounded in size.
 MAX_PRESENCE_STATES_PER_EDU = 50
+
+
+@attr.s(slots=True, auto_attribs=True, frozen=True)
+class _StickyEventsTransactionInfo:
+    room_id: RoomID
+    """
+    The room ID from which backlogged sticky events were sent.
+    """
+
+    max_sent_sticky_events_stream_position: StickyEventStreamPosition
+    """
+    The maximum sticky events stream position of the backlogged sticky events
+    sent in this transaction.
+    """
 
 
 @attr.s(slots=True, auto_attribs=True, frozen=True)
@@ -123,6 +138,16 @@ class _PreparedTransaction:
     When the transaction completes, this should be stored as our position in the events stream.
     """
 
+    pdu_count_from_main_queue: int
+    """
+    The number of PDUs that were sent from the main queue.
+    """
+
+    sticky_events: _StickyEventsTransactionInfo | None
+    """
+    Information useful for transactions sending backlogged sticky events.
+    """
+
 
 class PerDestinationQueue:
     """
@@ -151,6 +176,16 @@ class PerDestinationQueue:
         self._instance_name = hs.get_instance_name()
         self._federation_shard_config = hs.config.worker.federation_shard_config
         self._state = hs.get_state_handler()
+        self._sticky_event_backlog_tracker = StickyEventBacklogTracker(
+            destination, self._hs, self._hs.config.experimental.msc4354_enabled
+        )
+        self._sticky_backlog_turn = False
+        """
+        Whether the next transaction we attempt to prepare should be a sticky event backlog transaction.
+
+        Alternating between the main real-time queue and the sticky event backlog ensures that neither
+        can starve the other.
+        """
 
         self._should_send_on_this_instance = True
         if not self._federation_shard_config.should_handle(
@@ -416,6 +451,17 @@ class PerDestinationQueue:
                 transaction = None
                 transaction = await self._prepare_transaction()
 
+                if (
+                    transaction is not None
+                    and not transaction.pdus
+                    and not transaction.edus
+                ):
+                    # There is nothing to send, but preparing the transaction has
+                    # made progress that needs recording: the backlogged sticky
+                    # events we selected must have all gotten filtered out.
+                    await self._complete_transaction(transaction)
+                    transaction = None
+
                 if transaction is None:
                     logger.debug("TX [%s] Nothing to send", self._destination)
 
@@ -424,7 +470,14 @@ class PerDestinationQueue:
                     # Otherwise new PDUs or EDUs might arrive in the meantime,
                     # but not get sent because we currently have an
                     # `_active_transmission_loop` running.
-                    if self._new_data_to_send:
+                    #
+                    # We also keep going whilst there are backlogged sticky events
+                    # left to send, as returning here would leave the backlog
+                    # waiting for unrelated traffic to start a new transmission loop.
+                    if (
+                        self._new_data_to_send
+                        or self._sticky_event_backlog_tracker.is_backlogged
+                    ):
                         continue
                     else:
                         return
@@ -541,6 +594,8 @@ class PerDestinationQueue:
             # needs catching up — so catching up is futile; let's stop.
             self._catching_up = False
             return
+        # (We just proved above that this is not None)
+        assert self._last_successful_stream_ordering is not None
 
         last_successful_stream_ordering: int = _tmp_last_successful_stream_ordering
 
@@ -688,6 +743,20 @@ class PerDestinationQueue:
                 # We pulled this from the DB, so it'll be non-null
                 assert pdu.internal_metadata.stream_ordering
 
+                # When advancing our `last_successful_stream_ordering` position,
+                # there may be unsent sticky events 'in the gap'; note that down as a backlog.
+                await self._store.mark_backlogged_sticky_events_after_catchup_transaction(
+                    self._destination,
+                    old_last_successfully_sent_stream_ordering=self._last_successful_stream_ordering,
+                    new_last_successfully_sent_stream_ordering=pdu.internal_metadata.stream_ordering,
+                    # These are the events we actually sent in this successful catch-up transaction
+                    event_stream_orderings_sent_in_transaction={
+                        unwrap(pdu.internal_metadata.stream_ordering)
+                        for pdu in room_catchup_pdus
+                    },
+                )
+                self._sticky_event_backlog_tracker.notify_potential_new_backlog()
+
                 # Note that we mark the last successful stream ordering as that
                 # from the *original* PDU, rather than the PDU(s) we actually
                 # send. This is because we use it to mark our position in the
@@ -788,9 +857,11 @@ class PerDestinationQueue:
 
     async def _prepare_transaction(self) -> _PreparedTransaction | None:
         """
-        Work out what should go in the next transaction to this destination, by
-        calculating what we want to send and preparing the information that is
-        useful once we have completed the transaction.
+        Work out what should go in the next transaction to this destination.
+
+        Round-robin alternates between:
+          - the backlog of sticky events; and
+          - the normal real-time queue
 
         Side effects:
             - Dequeues pending EDUs
@@ -809,6 +880,46 @@ class PerDestinationQueue:
 
         Once the prepared transaction has been sent successfully,
         `_complete_transaction` must be called with it.
+        """
+
+        if self._sticky_backlog_turn:
+            # Sticky event backlog transaction
+
+            # The normal queue will have the next turn
+            self._sticky_backlog_turn = False
+
+            backlog_transaction = (
+                await self._sticky_event_backlog_tracker.prepare_transaction()
+            )
+            if backlog_transaction is not None:
+                return backlog_transaction
+
+            # Fall back to a main queue transaction
+            return await self._prepare_main_queue_transaction()
+        else:
+            # Main queue (normal) transaction
+            transaction = await self._prepare_main_queue_transaction()
+
+            # If we have a sticky event backlog, the next turn
+            # will be for the sticky event backlog
+            self._sticky_backlog_turn = self._sticky_event_backlog_tracker.is_backlogged
+
+            if transaction is not None:
+                return transaction
+
+            # Fall back to a sticky backlog turn, if it has anything
+            if self._sticky_event_backlog_tracker.is_backlogged:
+                return await self._sticky_event_backlog_tracker.prepare_transaction()
+
+            return None
+
+    async def _prepare_main_queue_transaction(self) -> _PreparedTransaction | None:
+        """
+        Prepare a transaction from the normal real-time queue, by calculating what we
+        want to send and the information that is useful once we have completed the
+        transaction.
+
+        Returns None if the normal queue has nothing to send.
         """
 
         # First we calculate the EDUs we want to send, if any.
@@ -919,6 +1030,10 @@ class PerDestinationQueue:
             to_device_message_stream_id=device_stream_id_upon_completion,
             device_list_stream_id=device_list_id_upon_completion,
             last_stream_ordering=last_stream_ordering,
+            pdu_count_from_main_queue=len(pdus),
+            # This is not part of the sticky events backlog flow,
+            # so don't advance that
+            sticky_events=None,
         )
 
     async def _complete_transaction(self, transaction: _PreparedTransaction) -> None:
@@ -929,8 +1044,10 @@ class PerDestinationQueue:
         through the various streams we have now got.
         """
         # Successfully sent transactions, so we remove pending PDUs from the queue
-        if transaction.pdus:
-            self._pending_pdus = self._pending_pdus[len(transaction.pdus) :]
+        if transaction.pdu_count_from_main_queue:
+            self._pending_pdus = self._pending_pdus[
+                transaction.pdu_count_from_main_queue :
+            ]
 
         # Succeeded to send the transaction so we record where we have sent up
         # to in the various streams
@@ -959,3 +1076,134 @@ class PerDestinationQueue:
             await self._store.set_destination_last_successful_stream_ordering(
                 self._destination, transaction.last_stream_ordering
             )
+
+        if transaction.sticky_events is not None:
+            await self._sticky_event_backlog_tracker.complete_transaction(
+                transaction.sticky_events
+            )
+
+
+class StickyEventBacklogTracker:
+    """
+    Tracks our state with sticky events.
+    """
+
+    def __init__(
+        self, destination: str, hs: "synapse.server.HomeServer", msc4354_enabled: bool
+    ) -> None:
+        # Assume backlogged by default
+        self._backlogged = True
+        """
+        Do we *potentially* have a backlog of sticky events to send out?
+        """
+
+        self._destination = destination
+        """
+        The server name of the destination we are responsible for.
+        """
+
+        self._own_server_name = hs.hostname
+
+        self._storage_controllers = hs.get_storage_controllers()
+
+        self._store = hs.get_datastores().main
+
+        self._msc4354_enabled = msc4354_enabled
+
+    @property
+    def is_backlogged(self) -> bool:
+        """
+        Whether we *potentially* have a backlog of sticky events to send out.
+
+        Always false when MSC4354 is disabled, as there is then nothing to send.
+        """
+        return self._msc4354_enabled and self._backlogged
+
+    async def prepare_transaction(self) -> _PreparedTransaction | None:
+        """
+        Try to prepare a transaction based on the sticky event backlog.
+
+        Returns None if there is no backlog to make progress on right now.
+        """
+
+        if not self._msc4354_enabled:
+            # MSC4354 Sticky Events disabled, so nothing to do.
+            return None
+
+        if not self._backlogged:
+            return None
+
+        # Select a room and get up to 50 backlogged sticky events
+        backlog = await self._store.get_backlogged_sticky_events_for_destination(
+            self._destination
+        )
+
+        if backlog is None:
+            logger.info(
+                "Completed federation sticky event backlog for destination %r",
+                self._destination,
+            )
+            self._backlogged = False
+            return None
+
+        room_id, sticky_event_stream_position, event_ids = backlog
+
+        logger.debug(
+            "Selected %d backlogged sticky events to send to destination %r in room %r up to %r",
+            len(event_ids),
+            self._destination,
+            room_id,
+            sticky_event_stream_position,
+        )
+
+        # Fetch the events from the database
+        sticky_events = await self._store.get_events_as_list(event_ids)
+
+        # Filter the sticky events
+        sticky_events = await filter_events_for_server(
+            self._storage_controllers,
+            self._destination,
+            self._own_server_name,
+            sticky_events,
+            # Omit filtered events
+            redact=False,
+            # Sticky events sent by erased users no longer need to be sent
+            # as part of catch-up
+            filter_out_erased_senders=True,
+            # These are all local events, so no need to do any extra work
+            # only relevant to remote events
+            filter_out_remote_partial_state_events=False,
+        )
+
+        return _PreparedTransaction(
+            pdus=sticky_events,
+            # No EDUs are sent alongside backlogged sticky events.
+            edus=[],
+            device_list_stream_id=None,
+            to_device_message_stream_id=None,
+            last_stream_ordering=None,
+            # These events are not from the main queue, so don't advance the main queue
+            pdu_count_from_main_queue=0,
+            # Upon completion, advance in the sticky backlog stream
+            sticky_events=_StickyEventsTransactionInfo(
+                room_id=room_id,
+                max_sent_sticky_events_stream_position=sticky_event_stream_position,
+            ),
+        )
+
+    async def complete_transaction(self, info: _StickyEventsTransactionInfo) -> None:
+        """
+        Call upon successfully sending a transaction generated by `prepare_transaction`.
+
+        Will advance the backlogged sticky events stream position in the database.
+        """
+        await self._store.mark_backlogged_sticky_events_sent(
+            self._destination, info.room_id, info.max_sent_sticky_events_stream_position
+        )
+
+    def notify_potential_new_backlog(self) -> None:
+        """
+        Call when something may have added to the sticky event backlog in the database,
+        so that we remember to check it when we next send transactions.
+        """
+        self._backlogged = True
