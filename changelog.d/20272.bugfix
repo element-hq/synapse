@@ -1,0 +1,1 @@
+Prevent `trial` tests from hanging when running with Twisted 26.4.0 against Postgres.
