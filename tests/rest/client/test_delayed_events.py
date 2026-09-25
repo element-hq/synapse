@@ -44,7 +44,7 @@ from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
-from synapse.util.stringutils import random_string
+from synapse.util.stringutils import random_string_insecure_fast
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -1237,7 +1237,7 @@ def _build_delayed_event_request(
         body["state_key"] = state_key
     if method == "PUT":
         if txn_id is None:
-            txn_id = random_string(8)
+            txn_id = random_string_insecure_fast(8)
         path += f"/{txn_id}"
     else:
         assert txn_id is None, "A transaction ID may only be given for PUT requests"
