@@ -889,9 +889,16 @@ def make_fake_db_pool(
 
     pool.runWithConnection = runWithConnection  # type: ignore[method-assign]
     pool.runInteraction = runInteraction  # type: ignore[assignment]
-    # Replace the thread pool with a threadless 'thread' pool
+
+    # First, stop the original thread pool. The reactor might already be running if it's
+    # been used before.
+    pool.threadpool.stop()
+    # Then, replace it with a threadless 'thread' pool
     pool.threadpool = ThreadPool(reactor)
+
+    # Start it up.
     pool.running = True
+
     return pool
 
 
