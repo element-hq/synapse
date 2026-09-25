@@ -486,7 +486,12 @@ class AuthHandler:
         """
 
         sid: str | None = None
-        authdict = clientdict.pop("auth", {})
+        authdict = clientdict.pop("auth", None)
+        # A null `auth` is treated the same as an omitted one.
+        if authdict is None:
+            authdict = {}
+        elif not isinstance(authdict, dict):
+            raise SynapseError(400, "'auth' must be an object", Codes.BAD_JSON)
         if "session" in authdict:
             sid = authdict["session"]
 
@@ -647,7 +652,7 @@ class AuthHandler:
                 not send a session ID, returns None.
         """
         sid = None
-        if clientdict and "auth" in clientdict:
+        if clientdict and isinstance(clientdict.get("auth"), dict):
             authdict = clientdict["auth"]
             if "session" in authdict:
                 sid = authdict["session"]

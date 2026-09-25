@@ -220,6 +220,22 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, msg=channel.result)
         self.assertLessEqual(det_data.items(), channel.json_body.items())
 
+    def test_POST_null_auth(self) -> None:
+        """A null `auth` value is treated as if it was omitted."""
+        request_data = {"username": "kermit", "password": "monkey", "auth": None}
+        channel = self.make_request(b"POST", self.url, request_data)
+
+        self.assertEqual(channel.code, 401, msg=channel.result)
+        self.assertIn("session", channel.json_body)
+
+    def test_POST_non_object_auth(self) -> None:
+        """A non-object `auth` value is rejected with a 400."""
+        request_data = {"username": "kermit", "password": "monkey", "auth": ["session"]}
+        channel = self.make_request(b"POST", self.url, request_data)
+
+        self.assertEqual(channel.code, 400, msg=channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.BAD_JSON)
+
     @override_config({"enable_registration": False})
     def test_POST_disabled_registration(self) -> None:
         request_data = {"username": "kermit", "password": "monkey"}
