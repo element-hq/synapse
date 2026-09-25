@@ -105,7 +105,7 @@ class ApplicationServicesHandler:
         # clock components.
         current_id = max_token.stream
 
-        services = self.store.get_app_services()
+        services = self._get_services_to_notify()
         if not services or not self.notify_appservices:
             return
 
@@ -826,7 +826,7 @@ class ApplicationServicesHandler:
         Returns:
             A list of services interested in this event based on the service regex.
         """
-        services = self.store.get_app_services()
+        services = self._get_services_to_notify()
 
         # we can't use a list comprehension here. Since python 3, list
         # comprehensions use a generator internally. This means you can't yield
@@ -837,6 +837,20 @@ class ApplicationServicesHandler:
                 interested_list.append(s)
 
         return interested_list
+
+    def _get_services_to_notify(self) -> list[ApplicationService]:
+        """Retrieve the application services that we can send transactions to.
+
+        A service registered with a `url` of `null` has asked for no traffic
+        (https://spec.matrix.org/v1.19/application-service-api/#registration), so
+        there is no point gathering anything to send to it. It still owns its
+        namespaces: look-ups by namespace must keep using `get_app_services`.
+        """
+        return [
+            service
+            for service in self.store.get_app_services()
+            if service.url is not None
+        ]
 
     def _get_services_for_user(self, user_id: str) -> list[ApplicationService]:
         services = self.store.get_app_services()
