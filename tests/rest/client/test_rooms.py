@@ -2549,7 +2549,8 @@ class RoomDelayedEventTestCase(RoomBase):
             state_key: The state key of the event, or None for a non-state event.
             content: The content of the event.
             method: The HTTP method to use. `PUT` requires a transaction ID,
-                except for state events on the /state endpoint.
+                except for state events on the /state endpoint;
+                and `POST` does not place a transaction ID in the request path.
             txn_id: The transaction ID for a `PUT` request. Generated if not given.
 
         Returns:
