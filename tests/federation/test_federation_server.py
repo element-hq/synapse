@@ -20,7 +20,6 @@
 #
 import logging
 from http import HTTPStatus
-from unittest import skip as skip_test
 from unittest.mock import Mock
 
 from parameterized import parameterized
@@ -1234,7 +1233,6 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         """Test send_join with USE_FROZEN_DICTS=False"""
         self._test_send_join_common(room_version)
 
-    @skip_test("requires MSC4242 inbound event auth")
     @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_send_join_state_dag(self) -> None:
         """
@@ -1246,7 +1244,6 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         """
         self._test_send_join_common(RoomVersions.MSC4242v12.identifier)
 
-    @skip_test("requires MSC4242 inbound event auth")
     @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_send_join_state_dag_ignores_partial_state(self) -> None:
         # FIXME: when we support partial joins this test can be deleted
