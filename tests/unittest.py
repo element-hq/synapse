@@ -1277,14 +1277,12 @@ class HomeserverTestCase(TestCase):
         series_names = {sample.name for sample in found_samples}
         if len(series_names) > 1:
             raise AssertionError(
-            raise AssertionError(
                 f"Expected exactly one unique sample name for metric {metric}, but found:\n\n"
                 + "\n".join(series_names)
                 + "\n\n"
                 + "This is a quirk of this test utility (`get_prometheus_metric_current_values(...)`), "
                 + "not your metric and means things like histogram metrics which have `_total`, `_count`, "
                 + "`buckets` sample names aren't compatible with this util at the moment."
-            )
             )
 
         return found_samples
