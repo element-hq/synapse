@@ -1,0 +1,1 @@
+Add foundations for a Rust backed database pool and bump minimum supported Rust version to 1.85.0.
