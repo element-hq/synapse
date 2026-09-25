@@ -372,10 +372,12 @@ def listen_manhole(
     )
 
 
+# These listener helpers do not inspect the factory's protocol type. Erase that
+# invariant type parameter, quoting the annotation for older Twisted versions.
 def listen_tcp(
     bind_addresses: StrCollection,
     port: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     reactor: IReactorTCP = reactor,
     backlog: int = 50,
 ) -> list[Port]:
@@ -400,7 +402,7 @@ def listen_tcp(
 def listen_unix(
     path: str,
     mode: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     reactor: IReactorUNIX = reactor,
     backlog: int = 50,
 ) -> list[Port]:
@@ -541,7 +543,7 @@ def listen_http(
 def listen_ssl(
     bind_addresses: StrCollection,
     port: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     context_factory: IOpenSSLContextFactory,
     reactor: IReactorSSL = reactor,
     backlog: int = 50,

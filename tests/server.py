@@ -715,7 +715,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self,
         host: str,
         port: int,
-        factory: ClientFactory,
+        factory: "ClientFactory[Any]",
         timeout: float = 30,
         bindAddress: tuple[str, int] | None = None,
     ) -> IConnector:
@@ -1146,6 +1146,7 @@ def connect_client(
     """
     factory = reactor.tcpClients.pop(client_id)[2]
     client = factory.buildProtocol(None)
+    assert client is not None
     server = AccumulatingProtocol()
     server.makeConnection(FakeTransport(client, reactor))
     client.makeConnection(FakeTransport(server, reactor))
