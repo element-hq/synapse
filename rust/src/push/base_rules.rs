@@ -160,7 +160,7 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
                 },
             )),
         ]),
-        actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_ACTION, RING_ACTION]),
+        actions: Cow::Borrowed(&[Action::Notify, RING_ACTION]),
         default: true,
         default_enabled: true,
     },
@@ -180,7 +180,7 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
                 key: Cow::Borrowed("room"),
             }),
         ]),
-        actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_ACTION, RING_ACTION]),
+        actions: Cow::Borrowed(&[Action::Notify, RING_ACTION]),
         default: true,
         default_enabled: true,
     },
@@ -779,7 +779,7 @@ mod tests {
     use std::borrow::Cow;
     use std::collections::BTreeMap;
 
-    use super::{HIGHLIGHT_ACTION, RING_ACTION};
+    use super::RING_ACTION;
     use crate::push::evaluator::PushRuleEvaluator;
     use crate::push::{Action, FilteredPushRules, JsonValue, PushRules, SimpleJsonValue};
 
@@ -861,7 +861,7 @@ mod tests {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[ALICE], false, 0);
 
         let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
-        assert_eq!(actions, vec![Action::Notify, HIGHLIGHT_ACTION, RING_ACTION]);
+        assert_eq!(actions, vec![Action::Notify, RING_ACTION]);
     }
 
     #[test]
@@ -878,7 +878,7 @@ mod tests {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[], true, 50);
 
         let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
-        assert_eq!(actions, vec![Action::Notify, HIGHLIGHT_ACTION, RING_ACTION]);
+        assert_eq!(actions, vec![Action::Notify, RING_ACTION]);
     }
 
     #[test]
