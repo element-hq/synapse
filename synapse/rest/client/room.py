@@ -1879,7 +1879,6 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SearchRestServlet(hs).register(http_server)
     RoomCreateRestServlet(hs).register(http_server)
     TimestampLookupRestServlet(hs).register(http_server)
-
     RoomDelayedEventRestServlet(hs).register(http_server)
 
     # Some servlets only get registered for the main process.
