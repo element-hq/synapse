@@ -75,6 +75,21 @@ updates:
     cooldown:
       default-days: 14
 
+  - package-ecosystem: "gomod"
+    directory: "/complement"
+    open-pull-requests-limit: 1
+    groups:
+      all-go-dependencies:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    schedule:
+      interval: "monthly"
+      time: "08:00"
+      timezone: "Europe/London"
+    cooldown:
+      default-days: 14
+
   # Note: "docker" is purposefully excluded from this list.
   #
   # Our docker containers should be kept up-to-date using container scanning
