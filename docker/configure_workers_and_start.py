@@ -270,6 +270,7 @@ WORKERS_CONFIG: dict[str, dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/join/",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/knock/",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/profile/",
+            "^/_matrix/client/unstable/org.matrix.msc4140/rooms/.*/delayed_event/",
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",

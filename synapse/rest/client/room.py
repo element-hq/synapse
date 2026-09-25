@@ -25,11 +25,12 @@ import logging
 import re
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Awaitable
+from typing import TYPE_CHECKING, Awaitable, NoReturn
 from urllib import parse as urlparse
 
 import attr
 from prometheus_client.core import Histogram
+from pydantic.types import PositiveInt, StrictStr
 
 from twisted.web.server import Request
 
@@ -63,6 +64,7 @@ from synapse.http.servlet import (
     ResolveRoomIdMixin,
     RestServlet,
     assert_params_in_dict,
+    parse_and_validate_json_object_from_request,
     parse_boolean,
     parse_enum,
     parse_integer,
@@ -81,6 +83,7 @@ from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main import DataStore
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
+from synapse.types.rest import RequestBodyModel
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
@@ -217,6 +220,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.clock = hs.get_clock()
         self._event_serializer = hs.get_event_client_serializer()
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self._msc4140_enabled = hs.config.server.msc4140_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -338,7 +342,8 @@ class RoomStateEventRestServlet(RestServlet):
         if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
 
-        delay = _parse_request_for_delayed_event_delay(request)
+        # FIXME(MSC4140): remove once RoomDelayedEventRestServlet has been stable for a suitable amount of time.
+        delay = _parse_request_for_delayed_event_delay(request, self._msc4140_enabled)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -407,6 +412,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self._msc4140_enabled = hs.config.server.msc4140_enabled
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
@@ -432,7 +438,8 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
-        delay = _parse_request_for_delayed_event_delay(request)
+        # FIXME(MSC4140): remove once RoomDelayedEventRestServlet has been stable for a suitable amount of time.
+        delay = _parse_request_for_delayed_event_delay(request, self._msc4140_enabled)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -505,7 +512,95 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         )
 
 
-def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> Duration | None:
+class RoomDelayedEventRestServlet(TransactionRestServlet):
+    CATEGORY = "Delayed event management requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+        self.event_creation_handler = hs.get_event_creation_handler()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
+        self.auth = hs.get_auth()
+        self._msc4140_enabled = hs.config.server.msc4140_enabled
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
+
+    def register(self, http_server: HttpServer) -> None:
+        # /rooms/$roomid/delayed_event/$event_type[/$txn_id]
+        PATTERNS = "/rooms/(?P<room_id>[^/]*)/delayed_event/(?P<event_type>[^/]*)"
+        register_txn_path(
+            self, PATTERNS, http_server, unstable_path_segment="org.matrix.msc4140"
+        )
+
+    async def on_POST(
+        self,
+        request: SynapseRequest,
+        room_id: str,
+        event_type: str,
+    ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        return await self._do(request, requester, room_id, event_type)
+
+    async def on_PUT(
+        self, request: SynapseRequest, room_id: str, event_type: str, txn_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        set_tag("txn_id", txn_id)
+
+        return await self.txns.fetch_or_execute_request(
+            request,
+            requester,
+            self._do,
+            request,
+            requester,
+            room_id,
+            event_type,
+        )
+
+    class DelayedEventBodyModel(RequestBodyModel):
+        delay_ms: PositiveInt
+        content: JsonDict
+        state_key: StrictStr | None = None
+
+    async def _do(
+        self,
+        request: SynapseRequest,
+        requester: Requester,
+        room_id: str,
+        event_type: str,
+    ) -> tuple[int, JsonDict]:
+        if not self._msc4140_enabled:
+            _raise_delayed_events_unsupported()
+
+        request_body = parse_and_validate_json_object_from_request(
+            request, self.DelayedEventBodyModel
+        )
+
+        origin_server_ts = None
+        if requester.app_service_id:
+            origin_server_ts = parse_integer(request, "ts")
+
+        sticky_duration_ms: int | None = None
+        if self._msc4354_enabled and request_body.state_key is None:
+            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
+
+        delay_id = await self.delayed_events_handler.add(
+            requester,
+            room_id=room_id,
+            event_type=event_type,
+            state_key=request_body.state_key,
+            origin_server_ts=origin_server_ts,
+            content=request_body.content,
+            delay=Duration(milliseconds=request_body.delay_ms),
+            sticky_duration_ms=sticky_duration_ms,
+        )
+
+        set_tag("delay_id", delay_id)
+        ret = {"delay_id": delay_id}
+        return 200, ret
+
+
+def _parse_request_for_delayed_event_delay(
+    request: SynapseRequest, msc4140_enabled: bool
+) -> Duration | None:
     """Parses from the request string the delay parameter for
         delayed event requests, and checks it for correctness.
 
@@ -517,8 +612,29 @@ def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> Duration 
     Raises:
         SynapseError: if the delay parameter is present and invalid.
     """
-    delay_ms = parse_integer(request, "org.matrix.msc4140.delay")
-    return Duration(milliseconds=delay_ms) if delay_ms is not None else None
+    delay_param_name = "org.matrix.msc4140.delay"
+    # Allow negatives here to validate the delay only if delayed events are enabled,
+    # and so that any non-positive value is rejected with the same error
+    delay_ms = parse_integer(request, delay_param_name, negative=True)
+    if delay_ms is None:
+        return None
+    if not msc4140_enabled:
+        _raise_delayed_events_unsupported()
+    if delay_ms <= 0:
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST,
+            f"Query parameter {delay_param_name} must be an integer greater than zero.",
+            Codes.INVALID_PARAM,
+        )
+    return Duration(milliseconds=delay_ms)
+
+
+def _raise_delayed_events_unsupported() -> NoReturn:
+    raise SynapseError(
+        HTTPStatus.FORBIDDEN,
+        "Sending delayed events has been disallowed",
+        Codes.FORBIDDEN,
+    )
 
 
 # TODO: Needs unit testing for room ID + alias joins
@@ -1559,6 +1675,8 @@ def register_txn_path(
     servlet: RestServlet,
     regex_string: str,
     http_server: HttpServer,
+    *,
+    unstable_path_segment: str = "",
 ) -> None:
     """Registers a transaction-based path.
 
@@ -1575,15 +1693,26 @@ def register_txn_path(
     on_PUT = getattr(servlet, "on_PUT", None)
     if on_POST is None or on_PUT is None:
         raise RuntimeError("on_POST and on_PUT must exist when using register_txn_path")
+    if unstable_path_segment:
+        get_client_patterns = lambda path_regex: client_patterns(
+            f"/{re.escape(unstable_path_segment)}{path_regex}",
+            releases=(),
+            unstable=True,
+        )
+    else:
+        get_client_patterns = lambda path_regex: client_patterns(
+            path_regex,
+            v1=True,
+        )
     http_server.register_paths(
         "POST",
-        client_patterns(regex_string + "$", v1=True),
+        get_client_patterns(regex_string + "$"),
         on_POST,
         servlet.__class__.__name__,
     )
     http_server.register_paths(
         "PUT",
-        client_patterns(regex_string + "/(?P<txn_id>[^/]*)$", v1=True),
+        get_client_patterns(regex_string + "/(?P<txn_id>[^/]*)$"),
         on_PUT,
         servlet.__class__.__name__,
     )
@@ -1750,6 +1879,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SearchRestServlet(hs).register(http_server)
     RoomCreateRestServlet(hs).register(http_server)
     TimestampLookupRestServlet(hs).register(http_server)
+    RoomDelayedEventRestServlet(hs).register(http_server)
 
     # Some servlets only get registered for the main process.
     if hs.config.worker.worker_app is None:
