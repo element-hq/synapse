@@ -460,6 +460,31 @@ class AppServiceHandlerTestCase(unittest.TestCase):
             interested_service, ephemeral=[]
         )
 
+    def test_notify_interested_services_ephemeral_skips_service_without_url(
+        self,
+    ) -> None:
+        """
+        Test that no ephemeral events are gathered for an application service without
+        a `url`, and that its stream position is left alone.
+        """
+        service = self._mkservice(is_interested_in_event=True)
+        service.url = None
+        self.mock_store.get_app_services.return_value = [service]
+        self.mock_store.get_type_stream_id_for_appservice = AsyncMock(return_value=579)
+        self.event_source.sources.receipt.get_new_events_as = AsyncMock(
+            return_value=([Mock(event_id="event_1")], None)
+        )
+
+        self.handler.notify_interested_services_ephemeral(
+            StreamKeyType.RECEIPT,
+            MultiWriterStreamToken(stream=580),
+            ["@fakerecipient:example.com"],
+        )
+
+        self.event_source.sources.receipt.get_new_events_as.assert_not_called()
+        self.mock_scheduler.enqueue_for_appservice.assert_not_called()
+        self.mock_store.set_appservice_stream_type_pos.assert_not_called()
+
     def _mkservice(
         self, is_interested_in_event: bool, protocols: Iterable | None = None
     ) -> Mock:

@@ -300,7 +300,7 @@ class ApplicationServicesHandler:
         #
         # Note that whether these events are actually relevant to these appservices
         # is decided later on.
-        services = self.store.get_app_services()
+        services = self._get_services_to_notify()
         services = [
             service
             for service in services
