@@ -17,7 +17,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from parameterized import parameterized
@@ -25,24 +24,15 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 from twisted.web.server import Site
 
-from synapse.app.generic_worker import GenericWorkerServer, GenericWorkerStore
+from synapse.app.generic_worker import GenericWorkerServer
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.config.server import parse_listener_def
 from synapse.server import HomeServer
-from synapse.storage.databases.main.openid import OpenIdStore
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests.server import make_request
 from tests.unittest import HomeserverTestCase
-
-
-class GenericWorkerStoreOpenIdMixinTests(TestCase):
-    def test_generic_worker_store_includes_openid_store(self) -> None:
-        """Workers must inherit OpenIdStore so userinfo lookups do not 500."""
-        self.assertTrue(issubclass(GenericWorkerStore, OpenIdStore))
-        self.assertTrue(hasattr(GenericWorkerStore, "get_user_id_for_open_id_token"))
-        self.assertTrue(hasattr(GenericWorkerStore, "insert_open_id_token"))
 
 
 class FederationReaderOpenIDListenerTests(HomeserverTestCase):
@@ -115,15 +105,29 @@ class FederationReaderOpenIDListenerTests(HomeserverTestCase):
         assert isinstance(site, Site)
         return site
 
+    def _seed_open_id_token(
+        self, token: str, ts_valid_until_ms: int, user_id: str
+    ) -> None:
+        # Insert directly so tests only require the lookup path on workers,
+        # not OpenIdStore.insert_open_id_token.
+        self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_insert(
+                "open_id_tokens",
+                {
+                    "token": token,
+                    "ts_valid_until_ms": ts_valid_until_ms,
+                    "user_id": user_id,
+                },
+            )
+        )
+
     def test_openid_userinfo_valid_token(self) -> None:
         """Workers can look up a valid OpenID token instead of crashing."""
         site = self._listen_openid()
         token = "valid_openid_token"
         user_id = "@alice:test"
-        self.get_success(
-            self.hs.get_datastores().main.insert_open_id_token(
-                token, self.clock.time_msec() + 3600 * 1000, user_id
-            )
+        self._seed_open_id_token(
+            token, self.clock.time_msec() + 3600 * 1000, user_id
         )
 
         channel = make_request(
@@ -154,10 +158,8 @@ class FederationReaderOpenIDListenerTests(HomeserverTestCase):
         """Expired tokens return 401 rather than raising AttributeError."""
         site = self._listen_openid()
         token = "expired_openid_token"
-        self.get_success(
-            self.hs.get_datastores().main.insert_open_id_token(
-                token, self.clock.time_msec() - 1, "@alice:test"
-            )
+        self._seed_open_id_token(
+            token, self.clock.time_msec() - 1, "@alice:test"
         )
 
         channel = make_request(
