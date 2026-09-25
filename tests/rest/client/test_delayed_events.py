@@ -164,19 +164,13 @@ class DelayedEventsTestCaseBase(HomeserverTestCase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        key = "delayed_events"
-        self.assertIn(key, channel.json_body)
-
-        events = channel.json_body[key]
+        events = channel.json_body["delayed_events"]
         self.assertIsInstance(events, list)
 
         return events
 
     def _get_delayed_event_content(self, event: JsonDict) -> JsonDict:
-        key = "content"
-        self.assertIn(key, event)
-
-        content = event[key]
+        content = event["content"]
         self.assertIsInstance(content, dict)
 
         return content
