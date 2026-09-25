@@ -17,6 +17,16 @@ appropriate locations of your installation.
 6. Verify Synapse is running: `sudo systemctl status matrix-synapse`
 7. *optional* Enable Synapse to start at system boot: `sudo systemctl enable matrix-synapse`
 
+## Systemd socket (optional)
+
+To let systemd own the listening socket instead of Synapse binding it
+directly, use `matrix-synapse.socket` alongside a `listeners` entry in
+`homeserver.yaml` with `path: "systemd:matrix-synapse"` (the name must match
+the socket unit's `FileDescriptorName=`, or its filename if unset). See the
+[listener configuration
+docs](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#listeners)
+for details.
+
 ## Logging
 
 If you use `contrib/systemd/log_config.yaml`, install `systemd-python` in the
