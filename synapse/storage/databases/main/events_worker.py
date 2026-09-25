@@ -1810,13 +1810,14 @@ class EventsWorkerStore(SQLBaseStore):
             # Starting in room version v3, some redactions need to be
             # rechecked if we didn't have the redacted event at the
             # time, so we recheck on read instead.
+            # NOTE: If this logic changes, need to update `_apply_existing_redaction_txn`
             if redaction_event.internal_metadata.need_to_check_redaction():
                 expected_domain = get_domain_from_id(original_ev.sender)
                 if get_domain_from_id(redaction_event.sender) == expected_domain:
                     # This redaction event is allowed. Mark as not needing a recheck.
                     redaction_event.internal_metadata.recheck_redaction = False
                 else:
-                    # Senders don't match, so the event isn't actually redacted
+                    # Sender servers don't match, so the event isn't actually redacted
                     logger.debug(
                         "%s was redacted by %s but the senders don't match",
                         original_ev.event_id,
