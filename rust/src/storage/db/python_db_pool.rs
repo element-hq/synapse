@@ -103,7 +103,9 @@ pub struct PythonDatabasePoolWrapper {
     /// We use a *weak* reference to ensure the homeserver can cleanly shut down as
     /// otherwise we hold onto `DatabasePool` which references the homeserver and keeps
     /// the homeserver from being garbage collected.
-    database_pool_py_ref: Py<PyWeakrefReference>,
+    ///
+    /// In an `Arc` so it can be handed to the reactor thread without the GIL.
+    database_pool_py_ref: Arc<Py<PyWeakrefReference>>,
 
     runtime: RustRuntime,
 }
@@ -113,7 +115,7 @@ impl PythonDatabasePoolWrapper {
     /// `hs.get_datastores().main.db_pool`) and the homeserver's `RustRuntime`.
     pub fn new(database_pool: &Bound<'_, PyAny>, runtime: RustRuntime) -> PyResult<Self> {
         Ok(Self {
-            database_pool_py_ref: PyWeakrefReference::new(database_pool)?.unbind(),
+            database_pool_py_ref: Arc::new(PyWeakrefReference::new(database_pool)?.unbind()),
             runtime,
         })
     }
@@ -139,88 +141,80 @@ impl DatabasePool for PythonDatabasePoolWrapper {
         let result_slot: Arc<Mutex<Option<ErasedResult>>> = Arc::new(Mutex::new(None));
 
         // Build the callback that Python's `runInteraction` invokes on a DB
-        // thread with a `LoggingTransaction`, plus owned handles we can move onto
-        // the reactor thread. We drive `func` to completion in the callback; the
+        // thread with a `LoggingTransaction`. `run_python_awaitable` runs this
+        // closure on the reactor thread, so this tokio worker never takes the
+        // GIL. We drive `func` to completion in the callback; the
         // Python query path is synchronous under the hood, so it's safe to block
         // this dedicated DB thread until the future resolves.
         let callback_slot = Arc::clone(&result_slot);
-        let (callback, database_pool_py) = Python::attach(|py| -> PyResult<_> {
-                let callback = PyCFunction::new_closure(
-                    py,
-                    None,
-                    None,
-                    move |args, _kwargs| -> PyResult<Py<PyAny>> {
-                        let py = args.py();
-                        let txn_py = args.get_item(0)?;
-                        let mut txn = txn_py.extract::<LoggingTransactionWrapper>()?;
-
-                        // Since we expect people to only call `.await` on
-                        // [`Transaction`] related methods (mentioned in the
-                        // [`Transaction`] docstring) AND because there is no actual
-                        // async work to suspend on in the Python [`Transaction`]
-                        // (resolves synchonously), we can get away with polling once as
-                        // it should immediately resolve to [`Poll::Ready`]. Getting
-                        // [`Poll::Pending`] would be considered a programming error.
-                        //
-                        // Alternatively, we could just use `futures::executor::block_on`
-                        // which is probably cleaner but a single-shot poll is more
-                        // enforcing of the concept we want to represent.
-                        match func(&mut txn).now_or_never() {
-                            Some(Ok(value)) => {
-                                let mut callback_slot =  callback_slot
-                                    .lock()
-                                    .map_err(|err| anyhow::anyhow!("Failed to acquire lock on `callback_slot`: {:#}", err))?;
-                                *callback_slot = Some(Ok(value));
-                                Ok(py.None())
-                            }
-                            Some(Err(err)) => {
-                                // Re-raise into Python so `runInteraction` rolls the
-                                // transaction back (and can apply its retry logic for
-                                // serialization/deadlock errors).
-                                let py_err = anyhow_to_pyerr(&err);
-                                let mut callback_slot =  callback_slot
-                                    .lock()
-                                    .map_err(|err| anyhow::anyhow!("Failed to acquire lock on `callback_slot`: {:#}", err))?;
-                                *callback_slot = Some(Err(err));
-                                Err(py_err)
-                            }
-                            None => {
-                                Err(PyAssertionError::new_err(
-                                    "The `run_interaction` transaction callback future returned `Poll::Pending`, \
-                                    but we expect Synapse Python database work to resolve synchronously. \
-                                    This is a Synapse programming error: genuine async work is \
-                                    not supported here.",
-                                ))
-                            }
-                        }
-                    },
-                )?
-                .unbind();
-
-                // Upgrade our weak reference to the Python `DatabasePool` into a strong
-                // one for the duration of this interaction.
-                let database_pool_py = self
-                    .database_pool_py_ref
-                    .bind(py)
-                    .upgrade()
-                    .ok_or_else(|| {
-                        PyRuntimeError::new_err(
-                            "The Python `DatabasePool` has already been dropped \
-                            (the homeserver is likely shutdown), so we cannot \
-                            run the database interaction.",
-                        )
-                    })?
-                    .unbind();
-
-                Ok((callback, database_pool_py))
-            })
-            .map_err(anyhow::Error::from)?;
-
-        // Use `runInteraction` directly
+        let func = Arc::new(func);
+        let database_pool_py_ref = Arc::clone(&self.database_pool_py_ref);
         let run_interaction_outcome = run_python_awaitable(&self.runtime, move |py| {
-            database_pool_py
-                .bind(py)
-                .call_method1(intern!(py, "runInteraction"), (name, callback.bind(py)))
+            let func = Arc::clone(&func);
+            let callback_slot = Arc::clone(&callback_slot);
+            let callback = PyCFunction::new_closure(
+                py,
+                None,
+                None,
+                move |args, _kwargs| -> PyResult<Py<PyAny>> {
+                    let py = args.py();
+                    let txn_py = args.get_item(0)?;
+                    let mut txn = txn_py.extract::<LoggingTransactionWrapper>()?;
+
+                    // Since we expect people to only call `.await` on
+                    // [`Transaction`] related methods (mentioned in the
+                    // [`Transaction`] docstring) AND because there is no actual
+                    // async work to suspend on in the Python [`Transaction`]
+                    // (resolves synchonously), we can get away with polling once as
+                    // it should immediately resolve to [`Poll::Ready`]. Getting
+                    // [`Poll::Pending`] would be considered a programming error.
+                    //
+                    // Alternatively, we could just use `futures::executor::block_on`
+                    // which is probably cleaner but a single-shot poll is more
+                    // enforcing of the concept we want to represent.
+                    match func(&mut txn).now_or_never() {
+                        Some(Ok(value)) => {
+                            let mut callback_slot =  callback_slot
+                                .lock()
+                                .map_err(|err| anyhow::anyhow!("Failed to acquire lock on `callback_slot`: {:#}", err))?;
+                            *callback_slot = Some(Ok(value));
+                            Ok(py.None())
+                        }
+                        Some(Err(err)) => {
+                            // Re-raise into Python so `runInteraction` rolls the
+                            // transaction back (and can apply its retry logic for
+                            // serialization/deadlock errors).
+                            let py_err = anyhow_to_pyerr(py, &err);
+                            let mut callback_slot =  callback_slot
+                                .lock()
+                                .map_err(|err| anyhow::anyhow!("Failed to acquire lock on `callback_slot`: {:#}", err))?;
+                            *callback_slot = Some(Err(err));
+                            Err(py_err)
+                        }
+                        None => {
+                            Err(PyAssertionError::new_err(
+                                "The `run_interaction` transaction callback future returned `Poll::Pending`, \
+                                but we expect Synapse Python database work to resolve synchronously. \
+                                This is a Synapse programming error: genuine async work is \
+                                not supported here.",
+                            ))
+                        }
+                    }
+                },
+            )?;
+
+            // Upgrade our weak reference to the Python `DatabasePool` into a strong
+            // one for the duration of this interaction.
+            let database_pool_py = database_pool_py_ref.bind(py).upgrade().ok_or_else(|| {
+                PyRuntimeError::new_err(
+                    "The Python `DatabasePool` has already been dropped \
+                    (the homeserver is likely shutdown), so we cannot \
+                    run the database interaction.",
+                )
+            })?;
+
+            // Use `runInteraction` directly
+            database_pool_py.call_method1(intern!(py, "runInteraction"), (name, callback))
         })
         .await;
 
@@ -254,9 +248,9 @@ impl DatabasePool for PythonDatabasePoolWrapper {
 /// surfaced through [`Transaction::query`]), we re-raise *that* exception so
 /// Synapse's transaction machinery can apply its retry logic
 /// (serialization/deadlock detection) on the real error.
-fn anyhow_to_pyerr(err: &anyhow::Error) -> PyErr {
+fn anyhow_to_pyerr(py: Python<'_>, err: &anyhow::Error) -> PyErr {
     if let Some(py_err) = err.downcast_ref::<PyErr>() {
-        return Python::attach(|py| py_err.clone_ref(py));
+        return py_err.clone_ref(py);
     }
     PyRuntimeError::new_err(format!("{err:#}"))
 }
