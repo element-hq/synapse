@@ -50,6 +50,7 @@ from unittest.mock import Mock, patch
 import canonicaljson
 import signedjson.key
 import unpaddedbase64
+from prometheus_client.samples import Sample
 from typing_extensions import Concatenate, Never, ParamSpec, override
 
 from twisted.internet import defer
@@ -1230,16 +1231,17 @@ class HomeserverTestCase(TestCase):
             event_injection.inject_member_event(self.hs, room, user, membership)
         )
 
-    def get_prometheus_metric_current_value(
+    def get_prometheus_metric_current_values(
         self, metric: "Collector", **labels: str
-    ) -> int:
-        """Get the value of a prometheus metric with the given labels.
-
-        This function will raise an AssertionError if there is not exactly one
-        sample with the given labels.
+    ) -> list[Sample]:
+        """Get all samples of a prometheus metric with the given labels.
 
         Note that the metrics outlives each individual test, so it may hold
         values from previous tests.
+
+        The `metric` must return exactly one unique series name among its
+        samples, i.e. it should be a Counter or a Gauge, rather than a
+        Histogram.
 
         Automatically includes SERVER_NAME_LABEL.
         """
@@ -1252,6 +1254,12 @@ class HomeserverTestCase(TestCase):
 
         for collected in metric.collect():
             for sample in collected.samples:
+                # Old versions of `prometheus_client` also emit a `_created`
+                # timestamp sample alongside each sample, which is never what we
+                # want.
+                if sample.name.endswith("_created"):
+                    continue
+
                 # Check that all the labels match. If any label doesn't match,
                 # we skip this sample.
                 for label, value in labels.items():
@@ -1261,6 +1269,43 @@ class HomeserverTestCase(TestCase):
                     # We didn't break, so all the labels matched. Return this
                     # sample's value.
                     found_samples.append(sample)
+
+        # Ensure that there is exactly one unique series name among the found
+        # samples. This is to guard against someone passing in eg a Histogram
+        # metric, which will return multiple series (eg `_total`, `_count`,
+        # `_buckets`, etc), which is likely not what the caller intended.
+        series_names = {sample.name for sample in found_samples}
+        if len(series_names) > 1:
+            raise AssertionError(
+                f"Expected exactly one unique sample name for metric {metric}, but found:\n\n"
+                + "\n".join(series_names)
+                + "\n\n"
+                + "This is a quirk of this test utility (`get_prometheus_metric_current_values(...)`), "
+                + "not your metric and means things like histogram metrics which have `_total`, `_count`, "
+                + "`buckets` sample names aren't compatible with this util at the moment."
+            )
+
+        return found_samples
+
+    def get_prometheus_metric_current_value(
+        self, metric: "Collector", **labels: str
+    ) -> int:
+        """Get the value of a prometheus metric with the given labels.
+
+        This function will raise an AssertionError if there is not exactly one
+        sample with the given labels.
+
+        Note that the metrics outlives each individual test, so it may hold
+        values from previous tests.
+
+        The `metric` must return exactly one unique series name among its
+        samples, i.e. it should be a Counter or a Gauge, rather than a
+        Histogram.
+
+        Automatically includes SERVER_NAME_LABEL.
+        """
+
+        found_samples = self.get_prometheus_metric_current_values(metric, **labels)
 
         # The caller expects there to be exactly one sample with the given
         # labels. If there are multiple (or zero) samples, we error.
