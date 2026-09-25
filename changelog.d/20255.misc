@@ -1,0 +1,1 @@
+Switch dependabot version upgrades to monthly "big bang" upgrades in a single PR per ecosystem to reduce team maintenance burden. Security update PRs remain individual and active.

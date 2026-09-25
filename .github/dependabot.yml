@@ -1,31 +1,35 @@
+# Configure general package update PRs filed by dependabot.
+# Security update PRs are generally unaffected by these settings.
 version: 2
-# As dependabot is currently only run on a weekly basis, we raise the
-# open-pull-requests-limit to 10 (from the default of 5) to better ensure we
-# don't continuously grow a backlog of updates.
+
 updates:
-  - # "pip" is the correct setting for poetry, per https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
+  - # "pip" is the correct setting for poetry, per
+    # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
     package-ecosystem: "pip"
     directory: "/"
-    open-pull-requests-limit: 10
-    versioning-strategy: "increase-if-necessary"
-    schedule:
-      interval: "weekly"
-    # Group patch updates to packages together into a single PR, as they rarely
-    # if ever contain breaking changes that need to be reviewed separately.
-    # 
-    # Less PRs means a streamlined review process.
+    # Only bump the minimum and maximum versions of dependencies in our
+    # lockfile. The maximum version in `pyproject.toml` may be bumped, but the
+    # minimum may not be.
     #
-    # Python packages follow semantic versioning, and tend to only introduce
-    # breaking changes in major version bumps. Thus, we'll group minor and patch
-    # versions together.
+    # We want to avoid bumping the minimum version in `pyproject.toml` unless
+    # necessary, as it requires our supported Linux distributions to have
+    # those versions in their repos first.
+    versioning-strategy: "increase-if-necessary"
+    # Group together all updates for this ecosystem into a single, big PR.
+    #
+    # Doing this prevents us from needing to review a PR per dependency upgrade
+    # (which can become burdensome).
+    # 
+    # Splitting up each ecosystem into their own PR (rather than putting ALL
+    # upgrades into a single PR) allows us to more quicker determine the culprit
+    # when CI fails.
     groups:
-      minor-and-patches:
+      all-python-dependencies:
         applies-to: version-updates
         patterns:
+          # Update all non-transitive dependencies.
           - "*"
-        update-types:
-          - "minor"
-          - "patch"
+    open-pull-requests-limit: 1
     # Prevent pulling packages that were recently updated to help mitigate
     # supply chain attacks. 14 days was taken from the recommendation at
     # https://blog.yossarian.net/2025/11/21/We-should-all-be-using-dependency-cooldowns
@@ -36,58 +40,42 @@ updates:
     # be pulled in as soon as possible.
     cooldown:
       default-days: 14
-
-  - package-ecosystem: "docker"
-    directory: "/docker"
-    open-pull-requests-limit: 10
     schedule:
-      interval: "weekly"
-    # For container versions, breaking changes are also typically only introduced in major
-    # package bumps.
+      interval: "monthly"
+      time: "08:00"
+      timezone: "Europe/London"
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    open-pull-requests-limit: 1
     groups:
-      minor-and-patches:
+      all-rust-dependencies:
         applies-to: version-updates
         patterns:
           - "*"
-        update-types:
-          - "minor"
-          - "patch"
+    schedule:
+      interval: "monthly"
+      time: "08:00"
+      timezone: "Europe/London"
     cooldown:
       default-days: 14
 
   - package-ecosystem: "github-actions"
     directory: "/"
-    open-pull-requests-limit: 10
-    schedule:
-      interval: "weekly"
-    # Similarly for GitHub Actions, breaking changes are typically only introduced in major
-    # package bumps.
+    open-pull-requests-limit: 1
     groups:
-      minor-and-patches:
+      all-github-actions:
         applies-to: version-updates
         patterns:
           - "*"
-        update-types:
-          - "minor"
-          - "patch"
+    schedule:
+      interval: "monthly"
+      time: "08:00"
+      timezone: "Europe/London"
     cooldown:
       default-days: 14
 
-  - package-ecosystem: "cargo"
-    directory: "/"
-    open-pull-requests-limit: 10
-    versioning-strategy: "lockfile-only"
-    schedule:
-      interval: "weekly"
-    # The Rust ecosystem is special in that breaking changes are often introduced
-    # in minor version bumps, as packages typically stay pre-1.0 for a long time.
-    # Thus we specifically keep minor version bumps separate in their own PRs.
-    groups:
-      patches:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types:
-          - "patch"
-    cooldown:
-      default-days: 14
+  # Note: "docker" is purposefully excluded from this list.
+  #
+  # Our docker containers should be kept up-to-date using container scanning
+  # technology instead of dependabot.
