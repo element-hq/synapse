@@ -201,7 +201,7 @@ class DelayedEventsTestCaseBase(HomeserverTestCase):
             body["action"] = action.value
         return self.make_request("POST", path, body, access_token)
 
-    def _find_sent_delayed_event(
+    def _check_for_delayed_event_in_sync(
         self, access_token: str, delay_id: str, should_find: bool
     ) -> JsonDict | None:
         """Call /sync and look for a synced event with a specified delay_id.
@@ -404,8 +404,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
-        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+        self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, True)
+        self._check_for_delayed_event_in_sync(self.user2_access_token, delay_id, False)
 
     @unittest.override_config({"allow_guest_access": True})
     def test_guest_can_schedule_delayed_event(self) -> None:
@@ -435,7 +435,9 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         assert delay_id is not None
 
         self.reactor.advance(Duration(seconds=1).as_secs())
-        event = self._find_sent_delayed_event(guest_access_token, delay_id, True)
+        event = self._check_for_delayed_event_in_sync(
+            guest_access_token, delay_id, True
+        )
         assert event is not None
         self.assertEqual(guest_user_id, event["sender"], event)
 
@@ -480,8 +482,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         self.assertEqual("leave", content.get("membership"), content)
         self.assertEqual("Delayed kick", content.get("reason"), content)
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
-        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+        self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, True)
+        self._check_for_delayed_event_in_sync(self.user2_access_token, delay_id, False)
 
     def test_get_delayed_events_auth(self) -> None:
         channel = self.make_request("GET", _MANAGEMENT_PATH_PREFIX)
@@ -615,8 +617,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, False)
-        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+        self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, False)
+        self._check_for_delayed_event_in_sync(self.user2_access_token, delay_id, False)
 
     @parameterized.expand((True, False))
     @unittest.override_config(
@@ -737,8 +739,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertEqual(content_value, content.get(content_property_name), content)
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
-        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+        self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, True)
+        self._check_for_delayed_event_in_sync(self.user2_access_token, delay_id, False)
 
     @parameterized.expand((True, False))
     @unittest.override_config({"rc_message": {"per_second": 2.5, "burst_count": 3}})
@@ -829,8 +831,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
-        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+        self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, True)
+        self._check_for_delayed_event_in_sync(self.user2_access_token, delay_id, False)
 
     @parameterized.expand((True, False))
     @unittest.override_config(
@@ -942,8 +944,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
-        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+        self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, True)
+        self._check_for_delayed_event_in_sync(self.user2_access_token, delay_id, False)
 
     def test_delayed_state_is_cancelled_by_new_state_from_other_user(
         self,
@@ -988,8 +990,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, False)
-        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+        self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, False)
+        self._check_for_delayed_event_in_sync(self.user2_access_token, delay_id, False)
 
     @parameterized.expand((("client_api", False), ("admin_api", True)))
     def test_delayed_events_are_cancelled_on_deactivation(
@@ -1074,7 +1076,9 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         # Nothing gets sent when user1's delayed events would have timed out.
         self.reactor.advance(Duration(seconds=1).as_secs())
         for delay_id in user1_delay_ids:
-            self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+            self._check_for_delayed_event_in_sync(
+                self.user2_access_token, delay_id, False
+            )
         self.helper.get_state(
             self.room_id,
             _EVENT_TYPE,
@@ -1084,11 +1088,17 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
 
         # user2's delayed event is unaffected, and still gets sent.
-        self._find_sent_delayed_event(self.user2_access_token, user2_delay_id, False)
+        self._check_for_delayed_event_in_sync(
+            self.user2_access_token, user2_delay_id, False
+        )
         self.reactor.advance(Duration(seconds=1).as_secs())
         for delay_id in user1_delay_ids:
-            self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
-        self._find_sent_delayed_event(self.user2_access_token, user2_delay_id, True)
+            self._check_for_delayed_event_in_sync(
+                self.user2_access_token, delay_id, False
+            )
+        self._check_for_delayed_event_in_sync(
+            self.user2_access_token, user2_delay_id, True
+        )
 
     def test_deactivation_cancels_the_timer_when_no_delayed_events_remain(
         self,
@@ -1153,7 +1163,9 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         self.reactor.advance(Duration(seconds=1).as_secs())
         self.assertListEqual([], self._get_delayed_events())
 
-        event = self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        event = self._check_for_delayed_event_in_sync(
+            self.user1_access_token, delay_id, True
+        )
         assert event is not None
         self.assertGreater(
             event["unsigned"].get(EventUnsignedContentFields.STICKY_TTL, 0),
