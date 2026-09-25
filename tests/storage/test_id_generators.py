@@ -19,7 +19,10 @@
 #
 #
 
+import sqlite3
 from unittest import mock
+
+from immutabledict import immutabledict
 
 from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
@@ -31,9 +34,12 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.engines import Sqlite3Engine
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import (
     MultiWriterIdGenerator,
+    advance_multiwriter_sharded_token_after_partial_read,
+    make_multiwriter_sharded_token_bounds_sql,
     stream_current_position_gauge,
 )
 from synapse.storage.util.sequence import (
@@ -41,9 +47,10 @@ from synapse.storage.util.sequence import (
     PostgresSequenceGenerator,
     SequenceGenerator,
 )
+from synapse.types import MultiWriterStreamToken
 from synapse.util.clock import Clock
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, TestCase
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
@@ -915,3 +922,333 @@ class MultiTableMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         self.assertEqual(second_id_gen.get_current_token_for_writer("first"), 7)
         self.assertEqual(second_id_gen.get_current_token_for_writer("second"), 7)
         self.assertEqual(second_id_gen.get_persisted_upto_position(), 7)
+
+
+class ShardedTokenHelpersPureTestCase(TestCase):
+    """
+    Non-database tests for the helpers for reading multi-writer streams.
+    """
+
+    def test_bounds_sql_documented_example(self) -> None:
+        """
+        Tests that the example in the docstring is what we actually generate.
+        """
+        clause, values = make_multiwriter_sharded_token_bounds_sql(
+            Sqlite3Engine({}),
+            stream_id_column="se.stream_id",
+            instance_name_column="se.instance_name",
+            from_token_exclusive=MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 8})
+            ),
+            to_token_inclusive=MultiWriterStreamToken(
+                stream=10, instance_map=immutabledict({"worker2": 14})
+            ),
+        )
+        self.assertEqualNormalisingWhitespace(
+            clause,
+            """
+            (
+                ? < se.stream_id
+                AND se.stream_id <= ?
+                AND NOT (se.instance_name IS ? AND se.stream_id <= ?)
+                AND (
+                    se.stream_id <= ?
+                    OR (se.instance_name IS ? AND se.stream_id <= ?)
+                )
+            )
+            """,
+        )
+        self.assertEqual(list(values), [5, 14, "worker1", 8, 10, "worker2", 14])
+
+    def test_token_after_partial_read_does_not_go_backwards(self) -> None:
+        """
+        Tests that advancing the token after a partial read doesn't let it go
+        backwards.
+
+        This is relevant because Synapse workers don't always advance their current
+        position at the same time.
+        """
+        # As a scenario: the client has already read up to a baseline position of 60,
+        # but this reader worker has only caught up to 10.
+        # It can nonetheless see that worker2 has reached 70.
+        from_token = MultiWriterStreamToken(stream=60)
+        to_token = MultiWriterStreamToken(
+            stream=10, instance_map=immutabledict({"worker2": 70})
+        )
+
+        resume_token = advance_multiwriter_sharded_token_after_partial_read(
+            from_token_exclusive=from_token,
+            to_token_inclusive=to_token,
+            last_read_stream_id=64,
+        )
+
+        # worker2 advances to what we read; everyone else stays where they were.
+        self.assertEqual(
+            resume_token,
+            MultiWriterStreamToken(
+                stream=60, instance_map=immutabledict({"worker2": 64})
+            ),
+        )
+        self.assertTrue(
+            from_token.is_before_or_eq(resume_token),
+            f"Expected {from_token} <= {resume_token}",
+        )
+
+
+class ShardedTokenHelpersDatabaseTestCase(TestCase):
+    """Tests for the helpers that read a range of a multi-writer stream.
+
+    These don't need a homeserver: they only exercise the SQL that
+    `make_multiwriter_sharded_token_bounds_sql` builds, against a throwaway
+    SQLite table.
+
+    NOTE: `ShardedTokenHelpersDatabaseNullTestCase` inherits all these tests
+        with a separate set of tables.
+    """
+
+    ROWS: list[tuple[int, str | None]] = [
+        # (stream_id, instance_name)
+        (6, "worker1"),
+        (7, "worker1"),
+        (8, "worker2"),
+        (9, "worker1"),
+        (10, "worker3"),
+        (11, "worker1"),
+        (12, "worker2"),
+        (13, "worker3"),
+        (14, "worker2"),
+    ]
+    """
+    (stream_id, instance_name) rows to insert into the example stream table.
+    """
+
+    SHARDED_TOKEN_RANGES = [
+        (
+            MultiWriterStreamToken(stream=5),
+            MultiWriterStreamToken(stream=14),
+        ),
+        (
+            MultiWriterStreamToken(stream=5),
+            MultiWriterStreamToken(
+                stream=10, instance_map=immutabledict({"worker2": 14})
+            ),
+        ),
+        (
+            MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 9})
+            ),
+            MultiWriterStreamToken(
+                stream=10, instance_map=immutabledict({"worker2": 14})
+            ),
+        ),
+        (
+            MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 7})
+            ),
+            MultiWriterStreamToken(
+                stream=8, instance_map=immutabledict({"worker1": 11, "worker3": 13})
+            ),
+        ),
+        (
+            MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 9, "worker2": 8})
+            ),
+            MultiWriterStreamToken(
+                stream=10,
+                instance_map=immutabledict(
+                    {"worker1": 11, "worker2": 14, "worker3": 13}
+                ),
+            ),
+        ),
+    ]
+    """(from, to) token pairs to exercise the bounds against `ROWS`."""
+
+    def setUp(self) -> None:
+        # Just used for detecting SQL language support,
+        # doesn't actually connect...
+        self.database_engine = Sqlite3Engine({})
+        self.conn = sqlite3.connect(":memory:")
+        self.addCleanup(self.conn.close)
+        self.conn.execute(
+            "CREATE TABLE streamtable (stream_id INTEGER PRIMARY KEY, instance_name TEXT)"
+        )
+        self.conn.executemany("INSERT INTO streamtable VALUES (?, ?)", self.ROWS)
+
+    def _select(
+        self,
+        from_token: MultiWriterStreamToken,
+        to_token: MultiWriterStreamToken,
+        limit: int | None = None,
+    ) -> list[tuple[int, str]]:
+        """
+        Helper that selects the rows within the given bounds, in stream order,
+        using `make_multiwriter_sharded_token_bounds_sql`.
+
+        Bounds: from_token < ... <= to_token
+        """
+        clause, values = make_multiwriter_sharded_token_bounds_sql(
+            self.database_engine,
+            stream_id_column="streamtable.stream_id",
+            instance_name_column="streamtable.instance_name",
+            from_token_exclusive=from_token,
+            to_token_inclusive=to_token,
+        )
+
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = f"LIMIT {limit}"
+
+        return list(
+            self.conn.execute(
+                f"""
+            SELECT stream_id, instance_name
+            FROM streamtable
+            WHERE {clause}
+            ORDER BY stream_id ASC
+            {limit_clause}
+            """,
+                values,
+            )
+        )
+
+    def _expected(
+        self,
+        from_token: MultiWriterStreamToken,
+        to_token: MultiWriterStreamToken,
+    ) -> list[tuple[int, str | None]]:
+        """
+        Helper that returns the rows that ought to be within the given bounds.
+        It uses `MultiWriterStreamToken.is_stream_position_in_range` as the 'ground truth'.
+
+        Bounds: from_token < ... <= to_token
+        """
+
+        return [
+            (stream_id, instance_name)
+            for stream_id, instance_name in self.ROWS
+            if MultiWriterStreamToken.is_stream_position_in_range(
+                from_token, to_token, instance_name, stream_id
+            )
+        ]
+
+    def test_bounds_sql_selects_expected_rows(self) -> None:
+        """
+        Tests that the `make_multiwriter_sharded_token_bounds_sql` selects the correct rows,
+        using `MultiWriterStreamToken.is_stream_position_in_range` as the 'ground truth'.
+        """
+        for from_token, to_token in self.SHARDED_TOKEN_RANGES:
+            with self.subTest(from_token=str(from_token), to_token=str(to_token)):
+                self.assertEqual(
+                    self._select(from_token, to_token),
+                    self._expected(from_token, to_token),
+                )
+
+    def test_token_after_partial_read(self) -> None:
+        """
+        Tests that when advancing the token after a partial read, the subsequent read returns all the remaining rows
+        but no more (especially not duplicates).
+        """
+        for from_token, to_token in self.SHARDED_TOKEN_RANGES:
+            all_rows = self._expected(from_token, to_token)
+            for limit in range(1, len(all_rows) + 1):
+                with self.subTest(
+                    from_token=str(from_token), to_token=str(to_token), limit=limit
+                ):
+                    read = self._select(from_token, to_token, limit=limit)
+                    resume_token = advance_multiwriter_sharded_token_after_partial_read(
+                        from_token_exclusive=from_token,
+                        to_token_inclusive=to_token,
+                        last_read_stream_id=read[-1][0],
+                    )
+
+                    # The resumption point must be somewhere within the range we
+                    # were asked to read.
+                    self.assertTrue(
+                        from_token.is_before_or_eq(resume_token),
+                        f"Expected {from_token} <= {resume_token}",
+                    )
+                    self.assertTrue(
+                        resume_token.is_before_or_eq(to_token),
+                        f"Expected {resume_token} <= {to_token}",
+                    )
+
+                    self.assertEqual(
+                        read,
+                        self._expected(from_token, resume_token),
+                        f"The rows we read between {from_token} < ... <= {resume_token} seem wrong.",
+                    )
+
+                    self.assertEqual(
+                        read + self._select(resume_token, to_token),
+                        all_rows,
+                        f"We did a limited read of {limit} rows within {from_token} < ... <= {to_token}, "
+                        f"giving us an advanced token {resume_token}. "
+                        f"We then read {resume_token} < ... <= {to_token} and expected to get "
+                        "all the rows within range (in order, no duplicates), but didn't.",
+                    )
+
+
+class ShardedTokenHelpersDatabaseNullTestCase(ShardedTokenHelpersDatabaseTestCase):
+    """
+    Variant of `ShardedTokenHelpersDatabaseTestCase` where there are rows with
+    `instance_name` being `NULL`, corresponding to rows that existed before the stream was sharded.
+    """
+
+    ROWS = [
+        # (stream_id, instance_name)
+        (4, None),
+        (5, None),
+        (6, None),
+        (7, None),
+        (8, "worker2"),
+        (9, "worker1"),
+        (10, "worker3"),
+        (11, "worker1"),
+        (12, "worker2"),
+        (13, "worker3"),
+        (14, "worker2"),
+    ]
+    """
+    (stream_id, instance_name) rows to insert into the example stream table.
+    """
+
+    SHARDED_TOKEN_RANGES = [
+        (
+            MultiWriterStreamToken(stream=5),
+            MultiWriterStreamToken(stream=14),
+        ),
+        (
+            MultiWriterStreamToken(stream=5),
+            MultiWriterStreamToken(
+                stream=10, instance_map=immutabledict({"worker2": 14})
+            ),
+        ),
+        (
+            MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 9})
+            ),
+            MultiWriterStreamToken(
+                stream=10, instance_map=immutabledict({"worker2": 14})
+            ),
+        ),
+        (
+            MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 7})
+            ),
+            MultiWriterStreamToken(
+                stream=8, instance_map=immutabledict({"worker1": 11, "worker3": 13})
+            ),
+        ),
+        (
+            MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 9, "worker2": 8})
+            ),
+            MultiWriterStreamToken(
+                stream=10,
+                instance_map=immutabledict(
+                    {"worker1": 11, "worker2": 14, "worker3": 13}
+                ),
+            ),
+        ),
+    ]
+    """(from, to) token pairs to exercise the bounds against `ROWS`."""

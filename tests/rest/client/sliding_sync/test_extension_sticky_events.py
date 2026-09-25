@@ -594,6 +594,68 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
             response_body, {room_id: sticky_event_ids[2:4]}
         )
 
+    def test_sticky_event_limit_zero_does_not_advance(self) -> None:
+        """
+        Tests that sending a limit of 0 in the Sticky Events request extension doesn't
+        advance the sticky events stream token to a future position.
+
+        'Regression' test for a bug that _almost_ existed.
+        (The `next_batch` token would be wrongly advanced internally,
+        but because no events were returned, the entire extension response was not serialised
+        and so the dodgy `next_batch` never actually got sent to a client.)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Send 2 sticky events (more than our limit of 1)
+        sticky_event_ids: list[str] = []
+        for i in range(2):
+            event_id = self.helper.send_sticky_event(
+                room_id,
+                EventTypes.Message,
+                duration=Duration(minutes=5),
+                content={"body": f"sticky message {i}", "msgtype": "m.text"},
+                tok=user2_tok,
+            )["event_id"]
+            sticky_event_ids.append(event_id)
+
+        # Initial sync
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {
+                "org.matrix.msc4354.sticky_events": {"enabled": True, "limit": 1}
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # We expect to see the first sticky event
+        next_batch = self._assert_sticky_events_response(
+            response_body, {room_id: sticky_event_ids[0:1]}
+        )
+
+        # Incremental sync with limit=0
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {
+                "org.matrix.msc4354.sticky_events": {
+                    "enabled": True,
+                    # This makes it incremental
+                    "since": next_batch,
+                    "limit": 0,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        # You could imagine a buggy system returns a `next_batch` here with no events,
+        # but Synapse just omits the response extension altogether.
+        next_batch = self._assert_sticky_events_response(response_body, None)
+
     def test_deduplication_with_timeline(self) -> None:
         """
         Test that sticky events are not included in the sticky event extension of sliding sync

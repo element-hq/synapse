@@ -297,7 +297,7 @@ class ReplicationDataHandler:
         elif stream_name == StickyEventsStream.NAME:
             self.notifier.on_new_event(
                 StreamKeyType.STICKY_EVENTS,
-                token,
+                self.store.get_sticky_events_stream_token(),
                 rooms=[row.room_id for row in rows],
             )
 
