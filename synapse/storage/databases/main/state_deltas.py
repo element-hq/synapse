@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import attr
 
@@ -59,8 +59,9 @@ class StateDelta:
 
 class StateDeltasStore(SQLBaseStore):
     # This class must be mixed in with a child class which provides the following
-    # attribute. TODO: can we get static analysis to enforce this?
+    # attributes. TODO: can we get static analysis to enforce this?
     _curr_state_delta_stream_cache: StreamChangeCache
+    _events_stream_cache: StreamChangeCache
 
     def __init__(
         self,
@@ -226,7 +227,9 @@ class StateDeltasStore(SQLBaseStore):
         to_token: RoomStreamToken | None,
     ) -> list[StateDelta]:
         """
-        Get the state deltas between two tokens.
+        Get the state deltas between two tokens, bounded on the delta rows'
+        own `stream_id`. See `get_current_state_deltas_for_room` for when that
+        is the wrong bound.
 
         (> `from_token` and <= `to_token`)
         """
@@ -272,9 +275,18 @@ class StateDeltasStore(SQLBaseStore):
         to_token: RoomStreamToken | None,
     ) -> list[StateDelta]:
         """
-        Get the state deltas between two tokens.
+        Get the state deltas between two tokens, bounded on the delta rows'
+        own `stream_id`.
 
         (> `from_token` and <= `to_token`)
+
+        Rows carry the minimum stream ordering of their persist batch as
+        `stream_id` (see `_update_current_state_txn`), so a token that falls inside
+        a batch -- which a worker reading the events stream from replication
+        routinely observes -- misses that batch's deltas here. Callers that
+        pair the deltas with the events in the same window (a timeline)
+        should use `get_current_state_deltas_for_room_by_event_position`
+        instead, which bounds each delta on its event's position.
         """
         # We can bail early if the `from_token` is after the `to_token`
         if (
@@ -295,6 +307,250 @@ class StateDeltasStore(SQLBaseStore):
         return await self.db_pool.runInteraction(
             "get_current_state_deltas_for_room",
             self.get_current_state_deltas_for_room_txn,
+            room_id,
+            from_token=from_token,
+            to_token=to_token,
+        )
+
+    def get_current_state_deltas_for_room_by_event_position_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        *,
+        from_token: RoomStreamToken | None,
+        to_token: RoomStreamToken | None,
+    ) -> list[StateDelta]:
+        """
+        Get the state deltas of a room between two tokens.
+
+        A delta is included if its position is > `from_token` and <= `to_token`
+        (a `None` token is unbounded). The position of a delta is the later of
+        the delta row's own `stream_id` and the stream ordering of its event:
+
+        * a delta whose event was persisted later in the stream than the row's
+          `stream_id` is positioned at the event, so it is reported in the same
+          window as the event itself;
+        * a delta with no event (state that was removed, e.g. when the last
+          local user left the room) is positioned at the row's `stream_id`;
+        * a delta whose row was written later than its event (existing state
+          re-announced by a partial-state resync) is positioned at the row's
+          `stream_id`.
+
+        Returns:
+            The deltas in `stream_id` order, which for any two deltas of
+            different persist batches is also position order. The order of
+            deltas within one batch is unspecified; a batch writes at most one
+            delta per state key.
+        """
+        # `current_state_delta_stream.stream_id` is not the position of the
+        # delta's event: a persist batch writes all its rows with the *first*
+        # stream ordering of the batch (see `_update_current_state_txn`), so a
+        # state event persisted mid-batch has `stream_id` < `stream_ordering`.
+        # A worker reading the events stream from replication advances one
+        # event at a time, so its tokens routinely fall inside a batch:
+        #
+        #                            stream_ordering  event          delta row `stream_id`
+        #   from-token batch           10             message
+        #     from_token = 11 ->       11             message
+        #                              12             state event X  X: 10
+        #   ...                                       any number of batches
+        #   to-token batch             90             state event Y  Y: 90
+        #     to_token = 91   ->       91             message
+        #                              92             state event Z  Z: 90
+        #
+        # On `stream_id` alone, the window (11, 91] misses X's delta (10 <= 11,
+        # though event 12 is in the window) and includes Z's (90 <= 91, though
+        # event 92 is past it). Y's delta is right either way.
+        #
+        # Batches of a room follow each other in the stream, so only two of
+        # them can be cut by a token: the one that contains `from_token` (the
+        # from-token batch) and the one that contains `to_token` (the to-token
+        # batch). Every other batch is entirely inside the window or entirely
+        # outside it, and so are its delta rows, whether judged on `stream_id`
+        # or on `stream_ordering`.
+        #
+        # The from-token batch is found without looking at `events`: its rows in
+        # `current_state_delta_stream` carry the latest `stream_id` <=
+        # `from_token` in the room, since every later batch writes its rows
+        # after `from_token`. So instead of fetching the delta rows with
+        # `from_token` < `stream_id`, fetch from that batch's `stream_id`
+        # inclusive (`from_batch_stream_id` below): the same delta rows plus
+        # those of the from-token batch. (If it changed no state, this picks the
+        # previous batch that did; its events are all before `from_token`, so
+        # its delta rows are dropped below.)
+        #
+        # Among the fetched delta rows, the from-token batch's are those at
+        # `from_batch_stream_id`, and the to-token batch's are found the same
+        # way, at the latest `stream_id` <= `to_token`. Only these need their
+        # event's `stream_ordering`, looked up in `events` by `event_id`; such a
+        # delta row is kept when
+        #     `from_token` < max(`stream_id`, `stream_ordering`) <= `to_token`.
+        # Every other delta row is kept when
+        #     `from_token` < `stream_id` <= `to_token`.
+        args: list[str | int] = [room_id]
+
+        lower_clause = ""
+        if from_token is not None:
+            # The from-token batch's `stream_id`: the latest `stream_id` <=
+            # `from_token`.
+            # (`from_token.stream` is the minimum over writers; the delta rows
+            # of a writer that is further ahead are in the range anyway and are
+            # judged against that writer's position below.)
+            txn.execute(
+                """
+                SELECT MAX(stream_id) FROM current_state_delta_stream
+                WHERE room_id = ? AND stream_id <= ?
+                """,
+                (room_id, from_token.stream),
+            )
+            row = txn.fetchone()
+            from_batch_stream_id: int | None = row[0] if row is not None else None
+            if from_batch_stream_id is not None:
+                # No delta row has `from_batch_stream_id` < `stream_id` <=
+                # `from_token.stream`, so this is the from-token batch plus
+                # everything after `from_token`.
+                lower_clause = "AND ? <= stream_id"
+                args.append(from_batch_stream_id)
+            else:
+                lower_clause = "AND ? < stream_id"
+                args.append(from_token.stream)
+
+        upper_clause = ""
+        if to_token is not None:
+            upper_clause = "AND stream_id <= ?"
+            args.append(to_token.get_max_stream_pos())
+
+        sql = f"""
+                SELECT instance_name, stream_id, type, state_key, event_id, prev_event_id
+                FROM current_state_delta_stream
+                WHERE room_id = ? {lower_clause} {upper_clause}
+                ORDER BY stream_id ASC
+            """
+        txn.execute(sql, args)
+        rows = cast(
+            list[tuple[str | None, int, str, str, str | None, str | None]],
+            txn.fetchall(),
+        )
+
+        # The `stream_id` of the from-token batch and of the to-token batch,
+        # per writer: the latest `stream_id` <= the writer's position in
+        # `from_token` and in `to_token`. Historic delta rows have no instance
+        # name and count as "master", as in `_filter_results_by_stream`.
+        token_batch_stream_ids: set[tuple[str, int]] = set()
+        for token in (from_token, to_token):
+            if token is None:
+                continue
+            latest_by_instance: dict[str, int] = {}
+            for instance_name, stream_id, _, _, _, _ in rows:
+                instance_name = instance_name or "master"
+                if stream_id <= token.get_stream_pos_for_instance(instance_name):
+                    latest_by_instance[instance_name] = max(
+                        latest_by_instance.get(instance_name, stream_id), stream_id
+                    )
+            token_batch_stream_ids.update(latest_by_instance.items())
+
+        # Only the delta rows of the two token batches need their event's
+        # position.
+        token_batch_event_ids = [
+            event_id
+            for instance_name, stream_id, _, _, event_id, _ in rows
+            if event_id is not None
+            and (instance_name or "master", stream_id) in token_batch_stream_ids
+        ]
+        event_positions: dict[str, tuple[str | None, int]] = {}
+        for chunk in batch_iter(token_batch_event_ids, 1000):
+            clause, clause_args = make_in_list_sql_clause(
+                self.database_engine, "event_id", chunk
+            )
+            txn.execute(
+                f"""
+                SELECT event_id, instance_name, stream_ordering
+                FROM events
+                WHERE {clause}
+                """,
+                clause_args,
+            )
+            for event_id, event_instance, event_stream in txn:
+                if event_stream is not None:
+                    event_positions[event_id] = (event_instance, event_stream)
+
+        deltas = []
+        for (
+            row_instance,
+            row_stream,
+            event_type,
+            state_key,
+            event_id,
+            prev_event_id,
+        ) in rows:
+            # The delta's position: its `stream_id`, unless it belongs to
+            # a token batch and its event sits later in the stream.
+            effective_instance, effective_stream = row_instance, row_stream
+            if (
+                event_id is not None
+                and (row_instance or "master", row_stream) in token_batch_stream_ids
+            ):
+                position = event_positions.get(event_id)
+                if position is not None and position[1] > row_stream:
+                    effective_instance, effective_stream = position
+
+            if _filter_results_by_stream(
+                from_token, to_token, effective_instance, effective_stream
+            ):
+                deltas.append(
+                    StateDelta(
+                        stream_id=row_stream,
+                        room_id=room_id,
+                        event_type=event_type,
+                        state_key=state_key,
+                        event_id=event_id,
+                        prev_event_id=prev_event_id,
+                    )
+                )
+
+        return deltas
+
+    @trace
+    async def get_current_state_deltas_for_room_by_event_position(
+        self,
+        room_id: str,
+        *,
+        from_token: RoomStreamToken | None,
+        to_token: RoomStreamToken | None,
+    ) -> list[StateDelta]:
+        """
+        Get the state deltas between two tokens, bounding each delta on the
+        position of its state event rather than on the delta row's `stream_id`.
+        See `get_current_state_deltas_for_room_by_event_position_txn`.
+
+        (> `from_token` and <= `to_token`)
+        """
+        # We can bail early if the `from_token` is after the `to_token`
+        if (
+            to_token is not None
+            and from_token is not None
+            and to_token.is_before_or_eq(from_token)
+        ):
+            return []
+
+        # A delta's effective position is beyond `from_token` only if the row's
+        # `stream_id` is (the delta stream cache) or its event's stream
+        # ordering is (the events stream cache); if neither cache has seen the
+        # room change there is nothing to return.
+        if (
+            from_token is not None
+            and not self._curr_state_delta_stream_cache.has_entity_changed(
+                room_id, from_token.stream
+            )
+            and not self._events_stream_cache.has_entity_changed(
+                room_id, from_token.stream
+            )
+        ):
+            return []
+
+        return await self.db_pool.runInteraction(
+            "get_current_state_deltas_for_room_by_event_position",
+            self.get_current_state_deltas_for_room_by_event_position_txn,
             room_id,
             from_token=from_token,
             to_token=to_token,

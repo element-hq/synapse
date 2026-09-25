@@ -1177,6 +1177,13 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self.joined_room = self.helper.create_room_as(self.user, tok=self.tok)
         self.get_success(
             self.store.set_profile_field(
+                UserID.from_string(self.user),
+                ProfileFields.AVATAR_URL,
+                "mxc://example.invalid/abcdef",
+            )
+        )
+        self.get_success(
+            self.store.set_profile_field(
                 user_id=UserID.from_string(self.user),
                 field_name="m.status",
                 new_value={"text": "Swimming in the Great Lakes!", "emoji": "🏊"},
@@ -1978,8 +1985,11 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         assert incremental_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            set(incremental_result.profile_updates["@other_user:test"].keys()),
-            {"avatar_url", "displayname"},
+            incremental_result.profile_updates["@other_user:test"],
+            {
+                "displayname": "other_user",
+                # avatar_url unset (user doesn't have one)
+            },
         )
 
         # If we have more events from the other_user, and do another lazy sync,
@@ -2064,7 +2074,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self,
     ) -> None:
         """Test that with `include_profile_updates_in_sync` enabled the incremental
-        sync response includes a 'null' for users who are no longer sharing rooms.
+        sync response includes a 'null' for users who are no longer sharing rooms, due
+        to the other user leaving the last room.
         """
         requester = create_requester(self.user)
         initial_result = self.get_success(
@@ -2086,6 +2097,59 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         self.helper.leave(
             room=self.joined_room, user=self.other_user, tok=self.other_tok
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertIsNone(
+            incremental_result.profile_updates["@other_user:test"],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_sends_down_null_profile_we_no_longer_sharing_rooms(
+        self,
+    ) -> None:
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync response includes a 'null' for users who are no longer sharing rooms, due
+        us leaving the last shared room.
+        """
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.helper.leave(
+            room=self.joined_room,
+            user=self.user,
+            tok=self.tok,
         )
         incremental_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
@@ -2259,7 +2323,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             user=third_user,
             tok=third_tok,
         )
-        # Set a status field we don't except to see in sync
+        # Set a status field we don't expect to see in sync
         self.get_success(
             self.profile_handler.set_field(
                 target_user=UserID.from_string(third_user),
@@ -2292,14 +2356,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             [third_user],
         )
         self.assertEqual(
-            incremental_result.profile_updates["@third_user:test"]["displayname"],
-            "third_user",
-        )
-        self.assertIsNone(
-            incremental_result.profile_updates["@third_user:test"]["avatar_url"],
-        )
-        self.assertFalse(
-            "m.status" in incremental_result.profile_updates["@third_user:test"].keys(),
+            incremental_result.profile_updates["@third_user:test"],
+            {
+                "displayname": "third_user",
+                # avatar_url unset (user doesn't have one)
+                # m.status unset (not requested in sync)
+            },
         )
 
     @parameterized.expand(
@@ -2335,6 +2397,14 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        # Sanity-check that initial sync includes the fields
+        self.assertEqual(
+            initial_result.profile_updates["@user:test"],
+            {
+                "m.status": {"text": "Swimming in the Great Lakes!", "emoji": "🏊"},
+                "avatar_url": "mxc://example.invalid/abcdef",
+            },
+        )
         self.get_success(
             self.profile_handler.set_field(
                 target_user=UserID.from_string(self.user),
@@ -2359,12 +2429,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         assert incremental_result.profile_updates["@user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@user:test"]["m.status"],
-            {"text": "On holiday", "emoji": "🏖"},
-        )
-        # We didn't ask for displayname
-        self.assertFalse(
-            "displayname" in incremental_result.profile_updates["@user:test"].keys(),
+            incremental_result.profile_updates["@user:test"],
+            {
+                "m.status": {"text": "On holiday", "emoji": "🏖"},
+                # avatar_url not included (it didn't change during this sync window)
+                # displayname not included (we didn't request it in sync)
+            },
         )
 
     @parameterized.expand([[True, False], [True, True], [False, False], [False, True]])

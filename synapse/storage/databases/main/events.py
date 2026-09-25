@@ -57,7 +57,6 @@ from synapse.events import (
 )
 from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventPersistencePair
-from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
@@ -1829,6 +1828,11 @@ class PersistEventsStore:
             stream_id: This is expected to be the minimum `stream_ordering` for the
                 batch of events that we are persisting; which means we do not end up in a
                 situation where workers see events before the `current_state_delta` updates.
+                Note that this stamps a row *before* its own event; readers that pair
+                deltas with the events in the same window bound each delta on its
+                event's position instead, see
+                `get_current_state_deltas_for_room_by_event_position(...)`, which stays
+                correct if this stamp is ever changed.
                 FIXME: However, this function also gets called with next upcoming
                 `stream_ordering` when we re-sync the state of a partial stated room (see
                 `update_current_state(...)`) which may be "correct" but it would be good to
@@ -2215,7 +2219,13 @@ class PersistEventsStore:
         """
         Record updates into the profile updates stream for when a user leaves a room.
 
-        If this was the last shared room with a set of users, clear all old rows from
+        This handles two distinct cases when a user leaves a room:
+          1) we find users in the the room who no longer share rooms with the user that
+            left the room, and record a `LEFT_ROOM` action for them.
+          2) we check for the user who left the room if they no longer share rooms with
+            some users of the room that was left, and do the same in reverse.
+
+        In both cases, when recording a `LEFT_ROOM` action, we clear all old rows from
         the `profile_updates_per_user` table relating to those users, to avoid exposing
         any profile field changes past the point of not being in any common rooms with
         the user.
@@ -2267,13 +2277,37 @@ class PersistEventsStore:
             (*user_args, user_id.to_string()),
         )
 
-        # Now record the "left room" action in the stream
+        # Now record the "left room" action in the stream for each user
+        # in the room that no longer shares a room with the user who left the room.
         self.store.record_profile_updates_txn(
             txn=txn,
-            user_id=user_id,
+            users={user_id.to_string()},
             action=ProfileUpdateAction.LEFT_ROOM,
             field_names=[],
             target_users=users_no_longer_sharing_rooms,
+        )
+
+        # We also need to record things in reverse. The user, who left the
+        # room, needs to get profile update rows for every user they no longer
+        # share a room with.
+        # First clear old rows between these users.
+        txn.execute(
+            f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE user_id = ?
+                    AND stream_id IN (
+                        SELECT stream_id FROM profile_updates WHERE {user_clause}
+                    )
+            """,
+            (user_id.to_string(), *user_args),
+        )
+        # Then add the left room action rows in the stream.
+        self.store.record_profile_updates_txn(
+            txn=txn,
+            users=users_no_longer_sharing_rooms,
+            action=ProfileUpdateAction.LEFT_ROOM,
+            field_names=[],
+            target_users={user_id.to_string()},
         )
 
     @classmethod
@@ -2410,7 +2444,7 @@ class PersistEventsStore:
             stripped_state_map: MutableStateMap[StrippedStateEvent] = {}
             if isinstance(unsigned_stripped_state_events, list):
                 for raw_stripped_event in unsigned_stripped_state_events:
-                    stripped_state_event = parse_stripped_state_event(
+                    stripped_state_event = StrippedStateEvent.from_json_dict(
                         raw_stripped_event
                     )
                     if stripped_state_event is not None:

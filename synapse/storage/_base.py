@@ -137,6 +137,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         # Purge other caches based on room state.
         self._attempt_to_invalidate_cache("get_room_summary", (room_id,))
         self._attempt_to_invalidate_cache("get_partial_current_state_ids", (room_id,))
+        self._attempt_to_invalidate_cache("_get_current_state_event_id", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
         self._attempt_to_invalidate_cache(
@@ -154,6 +155,7 @@ class SQLBaseStore(metaclass=ABCMeta):
             room_id: Room where state changed
         """
         self._attempt_to_invalidate_cache("get_partial_current_state_ids", (room_id,))
+        self._attempt_to_invalidate_cache("_get_current_state_event_id", (room_id,))
         self._attempt_to_invalidate_cache("get_users_in_room", (room_id,))
         self._attempt_to_invalidate_cache("is_host_invited", None)
         self._attempt_to_invalidate_cache("is_host_joined", None)
