@@ -1,0 +1,1 @@
+Stop gathering events for application services registered with `url: null`, so that registering one on a homeserver without other application services no longer makes Synapse read through its whole event history.
