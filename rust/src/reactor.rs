@@ -15,7 +15,7 @@
 
 //! A typed wrapper around the Twisted reactor.
 
-use pyo3::{call::PyCallArgs, intern, prelude::*};
+use pyo3::{intern, prelude::*};
 
 /// The Twisted reactor, as seen from Rust.
 ///
@@ -32,23 +32,6 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Reactor {
 }
 
 impl Reactor {
-    /// `reactor.callFromThread(f, *args)`: schedule a call on the reactor
-    /// thread. This is the only reactor method that is safe to call from
-    /// other threads (e.g. tokio workers).
-    ///
-    /// `args` is the full argument tuple, starting with the callable itself.
-    pub fn call_from_thread<'py>(
-        &self,
-        py: Python<'py>,
-        args: impl PyCallArgs<'py>,
-    ) -> PyResult<()> {
-        self.0
-            .bind(py)
-            .call_method1(intern!(py, "callFromThread"), args)?;
-
-        Ok(())
-    }
-
     /// `reactor.addReader(reader)`: have the reactor poll `reader.fileno()`
     /// and call `reader.doRead()` when it is readable.
     ///
