@@ -1,0 +1,1 @@
+Fix schema deltas and background updates containing a literal `%` failing on PostgreSQL. Broken since Synapse v1.82.0.

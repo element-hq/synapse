@@ -21,6 +21,7 @@
 
 import argparse
 import logging
+import sys
 from typing import cast
 
 import yaml
@@ -49,16 +50,28 @@ class MockHomeserver(HomeServer):
         )
 
 
-def run_background_updates(hs: HomeServer) -> None:
+def run_background_updates(hs: HomeServer) -> bool:
+    """Run all pending background updates. Returns True if they all succeeded."""
     main = hs.get_datastores().main
     state = hs.get_datastores().state
+    succeeded = True
 
     async def run_background_updates() -> None:
-        await main.db_pool.updates.run_background_updates(sleep=False)
-        if state:
-            await state.db_pool.updates.run_background_updates(sleep=False)
-        # Stop the reactor to exit the script once every background update is run.
-        reactor.stop()
+        nonlocal succeeded
+        try:
+            await main.db_pool.updates.run_background_updates(sleep=False)
+            if state:
+                await state.db_pool.updates.run_background_updates(sleep=False)
+        except Exception:
+            # `run_background_updates` gives up after repeated failures. Without
+            # this the exception would be swallowed by the background process
+            # wrapper, the reactor would never be stopped and the script would
+            # hang rather than report the failure.
+            logger.exception("Background updates failed")
+            succeeded = False
+        finally:
+            # Stop the reactor to exit the script once every background update is run.
+            reactor.stop()
 
     def run() -> None:
         # Apply all background updates on the database.
@@ -72,6 +85,8 @@ def run_background_updates(hs: HomeServer) -> None:
     hs.get_clock().call_when_running(run)
 
     reactor.run()
+
+    return succeeded
 
 
 def main() -> None:
@@ -123,7 +138,8 @@ def main() -> None:
     hs.get_storage_controllers()
 
     if args.run_background_updates:
-        run_background_updates(hs)
+        if not run_background_updates(hs):
+            sys.exit(1)
 
 
 if __name__ == "__main__":
