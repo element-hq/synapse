@@ -342,6 +342,7 @@ class RoomStateEventRestServlet(RestServlet):
         if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
 
+        # FIXME(MSC4140): remove once RoomDelayedEventRestServlet has been stable for a suitable amount of time.
         delay = _parse_request_for_delayed_event_delay(request, self._msc4140_enabled)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
@@ -437,6 +438,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
+        # FIXME(MSC4140): remove once RoomDelayedEventRestServlet has been stable for a suitable amount of time.
         delay = _parse_request_for_delayed_event_delay(request, self._msc4140_enabled)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
