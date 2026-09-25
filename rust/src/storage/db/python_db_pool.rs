@@ -40,7 +40,7 @@ use pyo3::{
 };
 
 use crate::deferred::run_python_awaitable;
-use crate::reactor::Reactor;
+use crate::runtime::RustRuntime;
 use crate::storage::db::{
     DatabasePool, DbRow, DbValue, ErasedInteraction, ErasedResult, Transaction,
 };
@@ -105,24 +105,16 @@ pub struct PythonDatabasePoolWrapper {
     /// the homeserver from being garbage collected.
     database_pool_py_ref: Py<PyWeakrefReference>,
 
-    /// The Twisted reactor. We need this to marshal database work back onto the
-    /// reactor thread (via `callFromThread`) when starting transactions, since
-    /// Twisted's thread pool machinery must be driven from there.
-    ///
-    /// A strong reference is fine here: the reactor is a process-global singleton that
-    /// never gets garbage collected and never points back at the homeserver, so it is
-    /// not part of any reference cycle. Ideally, we could worry about it but
-    /// practically probably doesn't matter.
-    reactor: Reactor,
+    runtime: RustRuntime,
 }
 
 impl PythonDatabasePoolWrapper {
     /// Build a wrapper around the Python `DatabasePool` (e.g.
-    /// `hs.get_datastores().main.db_pool`) and the Twisted `reactor`.
-    pub fn new(database_pool: &Bound<'_, PyAny>, reactor: Reactor) -> PyResult<Self> {
+    /// `hs.get_datastores().main.db_pool`) and the homeserver's `RustRuntime`.
+    pub fn new(database_pool: &Bound<'_, PyAny>, runtime: RustRuntime) -> PyResult<Self> {
         Ok(Self {
             database_pool_py_ref: PyWeakrefReference::new(database_pool)?.unbind(),
-            reactor,
+            runtime,
         })
     }
 }
@@ -152,7 +144,7 @@ impl DatabasePool for PythonDatabasePoolWrapper {
         // Python query path is synchronous under the hood, so it's safe to block
         // this dedicated DB thread until the future resolves.
         let callback_slot = Arc::clone(&result_slot);
-        let (callback, database_pool_py, reactor) = Python::attach(|py| -> PyResult<_> {
+        let (callback, database_pool_py) = Python::attach(|py| -> PyResult<_> {
                 let callback = PyCFunction::new_closure(
                     py,
                     None,
@@ -220,16 +212,12 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                     })?
                     .unbind();
 
-                Ok((
-                    callback,
-                    database_pool_py,
-                    self.reactor.clone_ref(py),
-                ))
+                Ok((callback, database_pool_py))
             })
             .map_err(anyhow::Error::from)?;
 
         // Use `runInteraction` directly
-        let run_interaction_outcome = run_python_awaitable(reactor, move |py| {
+        let run_interaction_outcome = run_python_awaitable(&self.runtime, move |py| {
             database_pool_py
                 .bind(py)
                 .call_method1(intern!(py, "runInteraction"), (name, callback.bind(py)))

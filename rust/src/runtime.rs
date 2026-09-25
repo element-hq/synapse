@@ -70,11 +70,6 @@ pub struct RustRuntimeInner {
 }
 
 impl RustRuntimeInner {
-    /// The Twisted reactor this homeserver runs on.
-    pub fn reactor(&self) -> &Reactor {
-        &self.reactor
-    }
-
     /// Queue `f` to run on the Twisted reactor thread with the GIL held, and
     /// wake the reactor. Never takes the GIL itself, so a tokio task can call
     /// it to hand a result back to Twisted. See [`crate::twisted_dispatch`].
