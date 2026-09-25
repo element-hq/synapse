@@ -662,3 +662,43 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         self.expect_unrecognized("GET", "/_synapse/admin/v1/users/foo/admin")
         self.expect_unrecognized("PUT", "/_synapse/admin/v1/users/foo/admin")
         self.expect_unrecognized("POST", "/_synapse/admin/v1/account_validity/validity")
+
+    def _mock_admin_requester(self) -> None:
+        self.hs.get_auth().get_user_by_req = AsyncMock(  # type: ignore[method-assign]
+            return_value=create_requester(user_id=USER_ID, device_id=DEVICE)
+        )
+        self.hs.get_auth().is_server_admin = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+    def test_admin_api_create_user_rejected(self) -> None:
+        """MAS never learns about a user created through the admin API, so the
+        account would be unusable."""
+        self._mock_admin_requester()
+
+        channel = self.make_request(
+            "PUT",
+            "/_synapse/admin/v2/users/@newuser:test",
+            {"password": "hunter2"},
+            access_token="token",
+        )
+
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.FORBIDDEN, channel.json_body
+        )
+
+    def test_admin_api_modify_existing_user_allowed(self) -> None:
+        """Only creation is rejected: modifying a user MAS already knows about
+        has to keep working, since MAS has no equivalent endpoint."""
+        self._mock_admin_requester()
+        self.get_success(
+            self.hs.get_datastores().main.register_user(f"@existing:{SERVER_NAME}")
+        )
+
+        channel = self.make_request(
+            "PUT",
+            "/_synapse/admin/v2/users/@existing:test",
+            {"displayname": "Existing User"},
+            access_token="token",
+        )
+
+        self.assertEqual(channel.code, 200, channel.json_body)
