@@ -49,6 +49,30 @@ impl Reactor {
         Ok(())
     }
 
+    /// `reactor.addReader(reader)`: have the reactor poll `reader.fileno()`
+    /// and call `reader.doRead()` when it is readable.
+    ///
+    /// Must be called on the reactor thread.
+    pub fn add_reader(&self, py: Python<'_>, reader: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.0
+            .bind(py)
+            .call_method1(intern!(py, "addReader"), (reader,))?;
+
+        Ok(())
+    }
+
+    /// `reactor.removeReader(reader)`: stop polling a reader added with
+    /// [`Reactor::add_reader`]. A no-op if it was never added.
+    ///
+    /// Must be called on the reactor thread.
+    pub fn remove_reader(&self, py: Python<'_>, reader: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.0
+            .bind(py)
+            .call_method1(intern!(py, "removeReader"), (reader,))?;
+
+        Ok(())
+    }
+
     pub fn clone_ref(&self, py: Python<'_>) -> Reactor {
         Reactor(self.0.clone_ref(py))
     }
