@@ -108,7 +108,8 @@ where
     handle.spawn(async move {
         let res = task.await;
 
-        Python::attach(move |py| {
+        // Once done pass the result to the Twisted reactor thread for handling.
+        runtime.dispatch_to_twisted(move |py| {
             // Flatten the panic into standard python error
             let res = match res {
                 Ok(r) => r,
@@ -119,21 +120,18 @@ where
             };
 
             // Send the result to the deferred, via `.callback(..)` or `.errback(..)`
-            match res {
-                Ok(obj) => {
-                    runtime
-                        .reactor()
-                        .call_from_thread(py, (deferred_callback, obj))
-                        .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
-                }
-                Err(err) => {
-                    runtime
-                        .reactor()
-                        .call_from_thread(py, (deferred_errback, err))
-                        .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
-                }
+            let fired = match res {
+                Ok(obj) => deferred_callback.call1(py, (obj,)),
+                Err(err) => deferred_errback.call1(py, (err,)),
+            };
+
+            if let Err(err) = fired {
+                // There is nowhere to propagate this to. The closure runs from
+                // the dispatch reader's `doRead`, and an exception out of that
+                // makes Twisted drop the reader. Log it instead.
+                log::error!("Failed to fire a deferred from a Rust future: {err}");
             }
-        });
+        })
     });
 
     // Make the deferred follow the Synapse logcontext rules
