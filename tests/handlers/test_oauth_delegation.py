@@ -665,55 +665,22 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         self.expect_unrecognized("PUT", "/_synapse/admin/v1/users/foo/admin")
         self.expect_unrecognized("POST", "/_synapse/admin/v1/account_validity/validity")
 
+    def _mock_admin_requester(self) -> None:
+        self.hs.get_auth().get_user_by_req = AsyncMock(  # type: ignore[method-assign]
+            return_value=create_requester(user_id=USER_ID, device_id=DEVICE)
+        )
+        self.hs.get_auth().is_server_admin = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
-@skip_unless(HAS_AUTHLIB, "requires authlib")
-class AdminUserCreationRejectedWhenMasEnabledTestCase(HomeserverTestCase):
-    """The admin API must not create local users behind MAS's back: MAS never
-    learns about an account created this way, leaving it permanently unusable
-    through MAS (review on #18993)."""
-
-    servlets = [admin.register_servlets]
-
-    def default_config(self) -> dict[str, Any]:
-        config = super().default_config()
-        config["matrix_authentication_service"] = {
-            "enabled": True,
-            "endpoint": self.server.endpoint,
-            "secret": self.server.secret,
-        }
-        return config
-
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.server = FakeMasServer()
-        hs = self.setup_test_homeserver()
-        # This triggers the server startup hooks, which starts the Tokio thread pool
-        reactor.run()
-        return hs
-
-    def tearDown(self) -> None:
-        self.server.shutdown()
-        # MemoryReactor doesn't trigger the shutdown phases, and we want the
-        # Tokio thread pool to be stopped
-        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
-        for phase in ["before", "during", "after"]:
-            triggers = shutdown_triggers.get(phase, [])
-            for callbable, args, kwargs in triggers:
-                callbable(*args, **kwargs)
-
-    def test_create_user_rejected(self) -> None:
-        self.server.introspection_response = {
-            "active": True,
-            "sub": SUBJECT,
-            "scope": " ".join([SYNAPSE_ADMIN_SCOPE, "urn:matrix:client:api:*"]),
-            "username": USERNAME,
-            "expires_in": 60,
-        }
+    def test_admin_api_create_user_rejected(self) -> None:
+        """MAS never learns about a user created through the admin API, so the
+        account would be unusable."""
+        self._mock_admin_requester()
 
         channel = self.make_request(
             "PUT",
-            f"/_synapse/admin/v2/users/@newuser:{SERVER_NAME}",
+            "/_synapse/admin/v2/users/@newuser:test",
             {"password": "hunter2"},
-            access_token="some_token",
+            access_token="token",
         )
 
         self.assertEqual(channel.code, 403, channel.json_body)
@@ -721,27 +688,19 @@ class AdminUserCreationRejectedWhenMasEnabledTestCase(HomeserverTestCase):
             channel.json_body["errcode"], Codes.FORBIDDEN, channel.json_body
         )
 
-    def test_modify_existing_user_still_allowed(self) -> None:
-        """The restriction is on creation. Modifying a user MAS already knows
-        about (e.g. deactivating one) has to keep working through the admin
-        API, since MAS itself has no such endpoint."""
+    def test_admin_api_modify_existing_user_allowed(self) -> None:
+        """Only creation is rejected: modifying a user MAS already knows about
+        has to keep working, since MAS has no equivalent endpoint."""
+        self._mock_admin_requester()
         self.get_success(
             self.hs.get_datastores().main.register_user(f"@existing:{SERVER_NAME}")
         )
 
-        self.server.introspection_response = {
-            "active": True,
-            "sub": SUBJECT,
-            "scope": " ".join([SYNAPSE_ADMIN_SCOPE, "urn:matrix:client:api:*"]),
-            "username": USERNAME,
-            "expires_in": 60,
-        }
-
         channel = self.make_request(
             "PUT",
-            f"/_synapse/admin/v2/users/@existing:{SERVER_NAME}",
+            "/_synapse/admin/v2/users/@existing:test",
             {"displayname": "Existing User"},
-            access_token="some_token",
+            access_token="token",
         )
 
         self.assertEqual(channel.code, 200, channel.json_body)
