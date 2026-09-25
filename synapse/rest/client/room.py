@@ -1692,6 +1692,7 @@ def register_txn_path(
         get_client_patterns = lambda path_regex: client_patterns(
             f"/{re.escape(unstable_path_segment)}{path_regex}",
             releases=(),
+            unstable=True,
         )
     else:
         get_client_patterns = lambda path_regex: client_patterns(
