@@ -1279,7 +1279,8 @@ def _build_delayed_event_request(
         event_type: The type of the event to send.
         state_key: The state key of the event, or None for a non-state event.
         content: The content of the event.
-        method: The HTTP method to use. `PUT` requires a transaction ID.
+        method: The HTTP method to use. `PUT` requires a transaction ID;
+            and `POST` does not place a transaction ID in the request path.
         txn_id: The transaction ID for a `PUT` request. Generated if not given.
 
     Returns:
