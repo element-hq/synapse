@@ -610,10 +610,10 @@ def _parse_request_for_delayed_event_delay(
     Raises:
         SynapseError: if the delay parameter is present and invalid.
     """
-    param_name = "org.matrix.msc4140.delay"
+    delay_param_name = "org.matrix.msc4140.delay"
     # Allow negatives here to validate the delay only if delayed events are enabled,
     # and so that any non-positive value is rejected with the same error
-    delay_ms = parse_integer(request, param_name, negative=True)
+    delay_ms = parse_integer(request, delay_param_name, negative=True)
     if delay_ms is None:
         return None
     if not msc4140_enabled:
@@ -621,7 +621,7 @@ def _parse_request_for_delayed_event_delay(
     if delay_ms <= 0:
         raise SynapseError(
             HTTPStatus.BAD_REQUEST,
-            f"Query parameter {param_name} must be an integer greater than zero.",
+            f"Query parameter {delay_param_name} must be an integer greater than zero.",
             Codes.INVALID_PARAM,
         )
     return Duration(milliseconds=delay_ms)
