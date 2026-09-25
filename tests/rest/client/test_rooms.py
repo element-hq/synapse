@@ -1613,7 +1613,7 @@ class RoomAppserviceTsParamTestCase(unittest.HomeserverTestCase):
 
         # Wait for the delayed event to be sent, then ensure it was persisted
         # with the custom timestamp.
-        self.reactor.advance(2)
+        self.reactor.advance(Duration(seconds=2).as_secs())
         (event_id,) = self.get_success(
             self.main_store.get_latest_event_ids_in_room(self.room)
         )
@@ -2533,7 +2533,7 @@ class RoomDelayedEventTestCase(RoomBase):
         cls,
         *,
         room_id: str,
-        delay_ms: int,
+        delay: Duration,
         event_type: str,
         state_key: str | None = None,
         content: JsonDict,
@@ -2544,7 +2544,7 @@ class RoomDelayedEventTestCase(RoomBase):
 
         Args:
             room_id: The room to send the event to.
-            delay_ms: How long to wait before sending the event.
+            delay: How long to wait before sending the event.
             event_type: The type of the event to send.
             state_key: The state key of the event, or None for a non-state event.
             content: The content of the event.
@@ -2565,7 +2565,7 @@ class RoomDelayedEventTestCase(RoomBase):
                 path += f"/{txn_id}"
         if method == "POST":
             assert txn_id is None, "A transaction ID may only be given for PUT requests"
-        path += f"?org.matrix.msc4140.delay={delay_ms}"
+        path += f"?org.matrix.msc4140.delay={delay.as_millis()}"
         return method, path, content
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -2576,7 +2576,7 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test sending a delayed event with invalid content."""
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=2000,
+            delay=Duration(milliseconds=2000),
             event_type="m.room.message",
             content={},
         )
@@ -2597,7 +2597,7 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test that sending a delayed event is unsupported with the default config."""
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=2000,
+            delay=Duration(milliseconds=2000),
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
         )
@@ -2625,7 +2625,7 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test that delayed events are disabled by configuring the per-user limit to 0."""
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=2000,
+            delay=Duration(milliseconds=2000),
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
         )
@@ -2646,7 +2646,7 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test that sending a delayed event fails if its delay is longer than allowed."""
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=2000,
+            delay=Duration(milliseconds=2000),
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
         )
@@ -2679,7 +2679,7 @@ class RoomDelayedEventTestCase(RoomBase):
 
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=15000,
+            delay=Duration(milliseconds=15000),
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
             method="POST",
@@ -2734,7 +2734,7 @@ class RoomDelayedEventTestCase(RoomBase):
         send_after = Duration(seconds=1)
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=send_after.as_millis(),
+            delay=send_after,
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
             method="POST",
@@ -2799,7 +2799,7 @@ class RoomDelayedEventTestCase(RoomBase):
         def make_delayed_event_request() -> FakeChannel:
             method, path, body = self.build_delayed_event_request(
                 room_id=self.room_id,
-                delay_ms=send_after.as_millis(),
+                delay=send_after,
                 event_type="m.room.message",
                 content={
                     "body": f"test (send after {send_after.as_secs()}s)",
@@ -2843,17 +2843,17 @@ class RoomDelayedEventTestCase(RoomBase):
     @parameterized.expand(
         (
             # A negative delay would put the send time in the past.
-            -2000,
+            Duration(milliseconds=-2000),
             # A zero delay is no delay at all; the regular send endpoints are for that.
-            0,
+            Duration(),
         )
     )
     @unittest.override_config({"max_event_delay_duration": "24h"})
-    def test_delayed_event_with_invalid_delay(self, invalid_delay: int) -> None:
+    def test_delayed_event_with_invalid_delay(self, invalid_delay: Duration) -> None:
         """Test that sending a delayed event fails if its delay is not positive."""
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=invalid_delay,
+            delay=invalid_delay,
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
         )
@@ -2872,20 +2872,20 @@ class RoomDelayedEventTestCase(RoomBase):
     @parameterized.expand(
         (
             # A negative delay would put the send time in the past.
-            -2000,
+            Duration(milliseconds=-2000),
             # A zero delay is no delay at all; the regular send endpoints are for that.
-            0,
+            Duration(),
         )
     )
     @unittest.override_config({"max_event_delay_duration": None})
     def test_delayed_event_unsupported_with_invalid_delay(
         self,
-        invalid_delay: int,
+        invalid_delay: Duration,
     ) -> None:
         """Test that delayed events being unsupported takes precedence over an invalid delay."""
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=invalid_delay,
+            delay=invalid_delay,
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
         )
@@ -2906,7 +2906,7 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test sending a valid delayed message event."""
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=2000,
+            delay=Duration(milliseconds=2000),
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
         )
@@ -2922,7 +2922,7 @@ class RoomDelayedEventTestCase(RoomBase):
         """Test sending a valid delayed state event."""
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=2000,
+            delay=Duration(milliseconds=2000),
             event_type="m.room.topic",
             state_key="",
             content={"topic": "This is a topic"},
@@ -2948,7 +2948,7 @@ class RoomDelayedEventTestCase(RoomBase):
 
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=2000,
+            delay=Duration(milliseconds=2000),
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
             method="POST",
@@ -2984,7 +2984,7 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         cls,
         *,
         room_id: str,
-        delay_ms: int,
+        delay: Duration,
         event_type: str,
         state_key: str | None = None,
         content: JsonDict,
@@ -2992,7 +2992,7 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         txn_id: str | None = None,
     ) -> tuple[str, str, JsonDict]:
         body = {
-            "delay_ms": delay_ms,
+            "delay_ms": delay.as_millis(),
             "content": content,
         }
         if state_key is not None:
@@ -3012,7 +3012,7 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         content = {"body": "test", "msgtype": "m.text"}
         method, path, _ = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=2000,
+            delay=Duration(milliseconds=2000),
             event_type="m.room.message",
             content=content,
         )
@@ -3034,7 +3034,7 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         """Test that the dedicated endpoint fails with a body missing a required key."""
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=2000,
+            delay=Duration(milliseconds=2000),
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
         )
@@ -3056,7 +3056,7 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         """Test that the dedicated endpoint fails with a body missing all required keys."""
         method, path, _ = self.build_delayed_event_request(
             room_id=self.room_id,
-            delay_ms=2000,
+            delay=Duration(milliseconds=2000),
             event_type="m.room.topic",
             state_key="",
             content={"topic": "This is a topic"},
