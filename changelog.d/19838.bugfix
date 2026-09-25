@@ -1,0 +1,1 @@
+Fix a bug where a threaded read receipt could incorrectly win over a clashing unthreaded one (MSC4102) when the two were served in separate `/sync` responses, e.g. when received over federation as separate EDUs.
