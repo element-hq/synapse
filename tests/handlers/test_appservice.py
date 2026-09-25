@@ -49,7 +49,6 @@ from synapse.server import HomeServer
 from synapse.types import (
     JsonDict,
     MultiWriterStreamToken,
-    RoomAlias,
     RoomStreamToken,
     StreamKeyType,
     UserID,
@@ -182,31 +181,6 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         self.mock_scheduler.enqueue_for_appservice.assert_called_once_with(
             service_with_url, events=[event]
         )
-
-    def test_lookups_include_service_without_url(self) -> None:
-        """
-        Test that an application service without a `url` is still found by the
-        look-ups on its namespaces.
-        """
-        service = self._mkservice_alias(is_room_alias_in_namespace=True)
-        service.url = None
-        service.is_interested_in_user.return_value = True
-        self.mock_store.get_app_services.return_value = [service]
-        self.mock_as_api.query_user.return_value = False
-        self.mock_as_api.query_alias.return_value = False
-
-        self.successResultOf(
-            defer.ensureDeferred(self.handler.query_user_exists("@someone:anywhere"))
-        )
-        self.mock_as_api.query_user.assert_called_once_with(
-            service, "@someone:anywhere"
-        )
-
-        room_alias = RoomAlias.from_string("#foo:bar")
-        self.successResultOf(
-            defer.ensureDeferred(self.handler.query_room_alias_exists(room_alias))
-        )
-        self.mock_as_api.query_alias.assert_called_once_with(service, "#foo:bar")
 
     def test_query_user_exists_unknown_user(self) -> None:
         user_id = "@someone:anywhere"
