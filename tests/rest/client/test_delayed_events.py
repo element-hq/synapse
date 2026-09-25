@@ -434,6 +434,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
+        # Advance time enough so the delayed event is sent
         self.reactor.advance(Duration(seconds=1).as_secs())
         event = self._check_for_delayed_event_in_sync(
             guest_access_token, delay_id, True
