@@ -819,12 +819,15 @@ class ApplicationServicesHandler:
     async def _get_services_for_event(
         self, event: EventBase
     ) -> list[ApplicationService]:
-        """Retrieve a list of application services interested in this event.
+        """Retrieve the application services interested in this event that we can
+        send it to. Services without a `url` are skipped: see
+        `_get_services_to_notify`.
 
         Args:
             event: The event to check.
         Returns:
-            A list of services interested in this event based on the service regex.
+            A list of services with a `url` interested in this event based on the
+            service regex.
         """
         services = self._get_services_to_notify()
 
