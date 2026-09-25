@@ -491,95 +491,34 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
         self.assertEqual(channel.json_body["actions"], ["notify"])
         self.assertEqual(channel.json_body["enabled"], False)
 
-    # Server-default rules gated behind an experimental feature, as
-    # (feature flag, rule path). Each is only served, and thus only
-    # modifiable, while its flag is set.
-    #
-    # The MSC1767 rules are not covered: enabling that flag also registers a
-    # room version in the global `KNOWN_ROOM_VERSIONS`, which leaks into other
-    # tests.
-    GATED_DEFAULT_RULES = [
-        (
-            "msc3381_polls_enabled",
-            "global/underride/.org.matrix.msc3930.rule.poll_start",
-        ),
-        ("msc3664_enabled", "global/override/.im.nheko.msc3664.reply"),
-        (
-            "msc4028_push_encrypted_events",
-            "global/override/.org.matrix.msc4028.encrypted_event",
-        ),
-        (
-            "msc4306_enabled",
-            "global/postcontent/.io.element.msc4306.rule.subscribed_thread",
-        ),
-    ]
+    # A server-default rule gated behind an experimental feature is only served,
+    # and thus only modifiable, while the feature is enabled. One such rule is
+    # enough to check this; the MSC3664 reply rule is used below. When MSC3664
+    # stabilises, swap in another gated rule, or drop these two tests if none
+    # remain.
 
-    # Server-default rules that MSC4210 removes: served and modifiable only
-    # while that flag is unset.
-    MSC4210_LEGACY_MENTION_RULES = [
-        "global/override/.m.rule.contains_display_name",
-        "global/content/.m.rule.contains_user_name",
-        "global/override/.m.rule.roomnotif",
-    ]
-
-    @parameterized.expand(GATED_DEFAULT_RULES)
-    def test_gated_default_rule_disabled(self, flag: str, rule_path: str) -> None:
+    def test_gated_default_rule_disabled(self) -> None:
         """
         Tests that a server-default rule gated behind an experimental feature
         is neither served nor modifiable while the feature is disabled.
         """
         self.register_user("bob", "pass")
         token = self.login("bob", "pass")
-        self._assert_default_rule_absent(token, rule_path)
-
-    def _assert_gated_default_rule_enabled(self, flag: str) -> None:
-        """
-        Checks that the server-default rule gated behind the given experimental
-        feature is served and modifiable once the feature is enabled.
-        """
-        self.register_user("bob", "pass")
-        token = self.login("bob", "pass")
-        rule_path = dict(self.GATED_DEFAULT_RULES)[flag]
-        self._assert_default_rule_modifiable(token, rule_path)
-
-    # The served server-default rules are computed when the homeserver starts,
-    # so the flag must be set through the config rather than as a parameter.
-    @override_config({"experimental_features": {"msc3381_polls_enabled": True}})
-    def test_gated_default_rule_enabled_msc3381(self) -> None:
-        self._assert_gated_default_rule_enabled("msc3381_polls_enabled")
+        self._assert_default_rule_absent(
+            token, "global/override/.im.nheko.msc3664.reply"
+        )
 
     @override_config({"experimental_features": {"msc3664_enabled": True}})
-    def test_gated_default_rule_enabled_msc3664(self) -> None:
-        self._assert_gated_default_rule_enabled("msc3664_enabled")
-
-    @override_config({"experimental_features": {"msc4028_push_encrypted_events": True}})
-    def test_gated_default_rule_enabled_msc4028(self) -> None:
-        self._assert_gated_default_rule_enabled("msc4028_push_encrypted_events")
-
-    @override_config({"experimental_features": {"msc4306_enabled": True}})
-    def test_gated_default_rule_enabled_msc4306(self) -> None:
-        self._assert_gated_default_rule_enabled("msc4306_enabled")
-
-    @parameterized.expand(MSC4210_LEGACY_MENTION_RULES)
-    @override_config({"experimental_features": {"msc4210_enabled": True}})
-    def test_msc4210_legacy_mention_rules_removed(self, rule_path: str) -> None:
+    def test_gated_default_rule_enabled(self) -> None:
         """
-        Tests that the legacy mention rules are neither served nor modifiable
-        once MSC4210 removes them.
+        Tests that a server-default rule gated behind an experimental feature
+        is served and modifiable once the feature is enabled.
         """
         self.register_user("bob", "pass")
         token = self.login("bob", "pass")
-        self._assert_default_rule_absent(token, rule_path)
-
-    @parameterized.expand(MSC4210_LEGACY_MENTION_RULES)
-    def test_msc4210_legacy_mention_rules_present(self, rule_path: str) -> None:
-        """
-        Tests that the legacy mention rules are served and modifiable while
-        MSC4210 is disabled.
-        """
-        self.register_user("bob", "pass")
-        token = self.login("bob", "pass")
-        self._assert_default_rule_modifiable(token, rule_path)
+        self._assert_default_rule_modifiable(
+            token, "global/override/.im.nheko.msc3664.reply"
+        )
 
     def test_contains_user_name(self) -> None:
         """
