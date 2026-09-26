@@ -57,6 +57,23 @@ class SlidingSyncThreadSubscriptionsExtensionTestCase(SlidingSyncBase):
         self.storage_controllers = hs.get_storage_controllers()
         super().prepare(reactor, clock, hs)
 
+    def test_backpagination_no_data(self) -> None:
+        """The backpagination endpoint returns both empty subscription maps."""
+        user_id = self.register_user("user", "pass")
+        access_token = self.login(user_id, "pass")
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/unstable/io.element.msc4308/thread_subscriptions?dir=b",
+            access_token=access_token,
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(
+            channel.json_body,
+            {"subscribed": {}, "unsubscribed": {}},
+        )
+
     def test_no_data_initial_sync(self) -> None:
         """
         Test enabling thread subscriptions extension during initial sync with no data.
