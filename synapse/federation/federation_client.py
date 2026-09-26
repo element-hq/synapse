@@ -68,6 +68,7 @@ from synapse.federation.federation_base import (
     parse_events_from_pdu_json,
 )
 from synapse.federation.transport.client import SendJoinResponse
+from synapse.federation.user_directory import UserDirectoryResponseModel
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
@@ -2069,6 +2070,32 @@ class FederationClient(FederationBase):
         filtered_failures = list(filter(filter_user_id, failures))
 
         return filtered_statuses, filtered_failures
+
+    async def user_directory_fetch(
+        self,
+        destination: str,
+        next_token: str | None,
+        timeout: int,
+    ) -> UserDirectoryResponseModel:
+        """Fetch a page of the user directory on a remote server.
+
+        Args:
+            destination: The server to query.
+            next_token: Opaque pagination token. None for the first page.
+            timeout: Timeout in milliseconds for the request.
+
+        Returns:
+            The results containing a page of users from the remote directory.
+
+        Raises:
+            HttpResponseException: The remote server returned an HTTP error.
+            RequestSendFailed: The request to the remote server failed.
+        """
+        response = await self.transport_layer.user_directory_fetch(
+            destination, next_token, timeout
+        )
+
+        return UserDirectoryResponseModel.model_validate(response)
 
     async def federation_download_media(
         self,

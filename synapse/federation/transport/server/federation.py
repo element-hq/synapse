@@ -48,7 +48,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
-from synapse.types import JsonDict
+from synapse.types import JsonDict, JsonMapping
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -909,6 +909,44 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         self.media_repo.mark_recently_accessed(None, media_id)
 
 
+class FederationUserDirectoryFetchServlet(BaseFederationServerServlet):
+    """
+    Implements a federation API endpoint for fetching a server's user directory.
+
+    The endpoint takes no parameters and always returns the responding server's
+    full local directory, so it is a plain GET without a request body.
+
+    The user_id field is required. Unset display_name and avatar_url fields are
+    omitted to keep the response compact. This is a full snapshot, missing
+    or explicit null profile fields mean no current value and clear cached values.
+
+    GET /_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/fetch
+    Response:
+    {
+        "results": [
+            {
+                "user_id": "@user:example.com",
+                "display_name": "Display Name",
+                "avatar_url": "mxc://example.com/avatar"
+            }
+        ]
+    }
+    """
+
+    PATH = "/user_directory/fetch"
+    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/de.bwi.federated_user_dir"
+    RATELIMIT = True
+
+    async def on_GET(
+        self,
+        origin: str,
+        content: Literal[None],
+        query: dict[bytes, list[bytes]],
+    ) -> tuple[int, JsonMapping]:
+        start_token = parse_string_from_args(query, "start_token")
+        return await self.handler.on_user_directory_fetch_request(origin, start_token)
+
+
 FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationSendServlet,
     FederationEventServlet,
@@ -941,4 +979,5 @@ FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
+    FederationUserDirectoryFetchServlet,
 )

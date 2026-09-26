@@ -21,7 +21,7 @@
 import logging
 from http import HTTPStatus
 from unittest import skip as skip_test
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized
 
@@ -56,6 +56,19 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         room.register_servlets,
         login.register_servlets,
     ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["user_directory"] = {
+            "enabled": True,
+            "search_all_users": True,
+        }
+        # The federation user directory fetch responder is only registered when
+        # the experimental feature is enabled.
+        config["experimental_features"] = {
+            "bwi_federated_user_dir_enabled": True,
+        }
+        return config
 
     @parameterized.expand([(b"",), (b"foo",), (b'{"limit": Infinity}',)])
     def test_bad_request(self, query_content: bytes) -> None:
@@ -94,6 +107,93 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
         )
         self.assertEqual(500, channel.code, channel.result)
+
+    @parameterized.expand(
+        [
+            ({},),
+            ({"display_name": "Local user"},),
+            ({"avatar_url": "mxc://test/avatar"},),
+            ({"display_name": "Local user", "avatar_url": "mxc://test/avatar"},),
+            ({"display_name": "", "avatar_url": ""},),
+        ]
+    )
+    def test_federation_user_directory_fetch_servlet(self, profile: JsonDict) -> None:
+        """Only local entries are exposed, with unset profile fields omitted."""
+        user_id = self.register_user("userlambda", "password")
+        store = self.hs.get_datastores().main
+        self.get_success(
+            store.update_profile_in_user_dir(
+                user_id, profile.get("display_name"), profile.get("avatar_url")
+            )
+        )
+        self.get_success(
+            store.update_profile_in_user_dir("@remote:elsewhere", "Remote user", None)
+        )
+
+        # Make a request to the servlet
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/fetch",
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.json_body, {"results": [{"user_id": user_id, **profile}]}
+        )
+
+    @parameterized.expand([(False,), (True,)])
+    def test_federation_user_directory_fetch_servlet_no_results(
+        self, include_remote: bool
+    ) -> None:
+        """An empty local directory yields no results."""
+        if include_remote:
+            self.get_success(
+                self.hs.get_datastores().main.update_profile_in_user_dir(
+                    "@remote:elsewhere", "Remote user", None
+                )
+            )
+
+        # Make a request to the servlet
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/fetch",
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertNotIn("limited", channel.json_body)
+        results = channel.json_body.get("results", [])
+        self.assertEqual(len(results), 0)
+
+    def test_federation_user_directory_fetch_servlet_internal_error(self) -> None:
+        """A server failure is returned as an error, not an empty directory."""
+        with patch.object(
+            self.hs.get_datastores().main,
+            "get_local_users_in_user_dir",
+            new=AsyncMock(side_effect=RuntimeError("database unavailable")),
+        ):
+            channel = self.make_signed_federation_request(
+                "GET",
+                "/_matrix/federation/unstable/de.bwi.federated_user_dir/"
+                "user_directory/fetch",
+            )
+
+        self.assertEqual(channel.code, HTTPStatus.INTERNAL_SERVER_ERROR)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN")
+
+
+class FederationUserDirectoryDisabledTests(unittest.FederatingHomeserverTestCase):
+    def test_federation_user_directory_fetch_servlet_disabled(self) -> None:
+        """A disabled endpoint is exposed as an unrecognized endpoint."""
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/"
+            "user_directory/fetch",
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
+        self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
 
 
 class GetMissingEventsRoomCheckTests(unittest.FederatingHomeserverTestCase):

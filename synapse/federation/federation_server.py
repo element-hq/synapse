@@ -66,6 +66,7 @@ from synapse.federation.federation_base import (
 )
 from synapse.federation.persistence import TransactionActions
 from synapse.federation.units import Edu, Transaction, serialize_and_filter_pdus
+from synapse.federation.user_directory import UserDirectoryResponseModel
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import (
@@ -90,7 +91,13 @@ from synapse.replication.http.federation import (
 from synapse.storage.databases.main.lock import Lock
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.roommember import MemberSummary
-from synapse.types import JsonDict, StateMap, UserID, get_domain_from_id
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    StateMap,
+    UserID,
+    get_domain_from_id,
+)
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import Linearizer, concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
@@ -1611,6 +1618,42 @@ class FederationServer(FederationBase):
             server_name
         ):
             raise AuthError(code=403, msg="Server is banned from room")
+
+    async def on_user_directory_fetch_request(
+        self,
+        origin: str,
+        next_token: str | None,
+    ) -> tuple[int, JsonMapping]:
+        """Handle a user directory request from a remote server.
+
+        Returns a page of searchable local users from the user directory. Only
+        registered local directory entries are returned, excluding cached remote
+        users.
+
+        Pagination does not guarantee temporal consistency of the returned
+        results, i.e., each following page is from a newer snapshots of the user
+        directory. The returned pages are guaranteed to not contain duplicate
+        entries, though.
+
+        Args:
+            origin: The server that sent the request.
+            next_token: Opaque pagination token. None for the first page.
+
+        Returns:
+            A tuple of (response code, response json)
+        """
+        page_size = 1000
+        results = await self.store.get_local_users_in_user_dir_paginated(
+            next_token, page_size
+        )
+        has_next_page = len(results) >= page_size
+        next_token = results[-1]["user_id"] if has_next_page else None
+
+        response = UserDirectoryResponseModel.model_validate(
+            {"results": results, "next_token": next_token}
+        )
+        # Keep full-directory responses compact by omitting unset profile fields.
+        return 200, response.model_dump(mode="json", exclude_none=True)
 
 
 class FederationHandlerRegistry:

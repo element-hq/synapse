@@ -19,9 +19,13 @@
 #
 #
 
+import asyncio
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Sequence
+
+from pydantic import ValidationError, ValidationInfo, model_validator
+from typing_extensions import Self
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -33,13 +37,24 @@ from synapse.api.constants import (
     Membership,
     ProfileFields,
 )
-from synapse.api.errors import Codes, SynapseError
+from synapse.api.errors import (
+    Codes,
+    HttpResponseException,
+    RequestSendFailed,
+    SynapseError,
+)
+from synapse.federation.user_directory import (
+    UserDirectoryEntryModel,
+    UserDirectoryResponseModel,
+)
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
+from synapse.http.client import is_unknown_endpoint
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import UserID
+from synapse.types import JsonDict, RemoteUserDirectoryEntry, UserID
 from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
@@ -62,6 +77,34 @@ MAX_SERVERS_TO_REFRESH_PROFILES_FOR_IN_ONE_GO = 5
 # As long as we have servers to refresh (without backoff), keep adding more
 # every 15 seconds.
 INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES = Duration(seconds=15)
+
+
+class _RemoteUserDirectoryResponseModel(UserDirectoryResponseModel):
+    """A directory snapshot whose user IDs are validated against the destination."""
+
+    @model_validator(mode="after")
+    def validate_user_ids(self, info: ValidationInfo) -> Self:
+        destination = info.context.get("destination") if info.context else None
+        if not isinstance(destination, str):
+            raise ValueError("A destination is required to validate the response")
+
+        seen_user_ids: set[str] = set()
+        for entry in self.results:
+            if not UserID.is_valid(entry.user_id):
+                raise ValueError(f"Invalid Matrix user ID: {entry.user_id!r}")
+
+            user = UserID.from_string(entry.user_id)
+            if user.domain != destination:
+                raise ValueError(
+                    f"User {entry.user_id!r} does not belong to {destination!r}"
+                )
+
+            if entry.user_id in seen_user_ids:
+                raise ValueError(f"Duplicate user ID: {entry.user_id!r}")
+
+            seen_user_ids.add(entry.user_id)
+
+        return self
 
 
 def calculate_time_of_next_retry(now_ts: int, retry_count: int) -> int:
@@ -114,7 +157,12 @@ class UserDirectoryHandler(StateDeltasHandler):
         )
         self.show_locked_users = hs.config.userdirectory.show_locked_users
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self.hs = hs  # nb must be called this for @wrap_as_background_process. #NOTE Why do we use _hs instead of hs? # Must be named `hs` for @wrap_as_background_process
         self._hs = hs
+        self._federation_client = hs.get_federation_client()
+        self._federated_user_directory_fetch_timeout = (
+            hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout
+        )
 
         # The current position in the current_state_delta stream
         self.pos: int | None = None
@@ -146,6 +194,19 @@ class UserDirectoryHandler(StateDeltasHandler):
             self._refresh_remote_profiles_call_later = self.clock.call_later(
                 Duration(seconds=10),
                 self.kick_off_remote_profile_refresh_process,
+            )
+
+        # Periodically sync remote homeservers' user directories into our own,
+        # but only on the worker that runs background tasks.
+        if (
+            hs.config.experimental.bwi_federated_user_dir_enabled
+            and hs.config.worker.run_background_tasks
+        ):
+            self.clock.looping_call(
+                self._sync_federated_user_directory,
+                Duration(
+                    milliseconds=hs.config.experimental.bwi_federated_user_dir_sync_interval_ms
+                ),
             )
 
     async def search_users(
@@ -512,7 +573,10 @@ class UserDirectoryHandler(StateDeltasHandler):
         if not self.is_mine_id(user_id):
             rooms_user_is_in = await self.store.get_user_dir_rooms_user_is_in(user_id)
 
-            if len(rooms_user_is_in) == 0:
+            if (
+                not rooms_user_is_in
+                and not await self.store.is_user_in_federated_search(user_id)
+            ):
                 logger.debug("Removing user %r from directory", user_id)
                 await self.store.remove_from_user_dir(user_id)
 
@@ -784,3 +848,187 @@ class UserDirectoryHandler(StateDeltasHandler):
                         profile.get(ProfileFields.AVATAR_URL)
                     ),
                 )
+
+    @staticmethod
+    def _parse_remote_user_directory_results(
+        response: JsonDict,
+        destination: str,
+    ) -> list[RemoteUserDirectoryEntry]:
+        """Parse a remote user directory fetch response into typed entries.
+
+        The response is validated atomically. If any entry is malformed, belongs
+        to another homeserver, or duplicates another user ID, validation fails so
+        that the caller can skip reconciliation for the destination.
+        """
+        parsed_response = _RemoteUserDirectoryResponseModel.model_validate(
+            response,
+            context={"destination": destination},
+        )
+
+        return [
+            RemoteUserDirectoryEntry(
+                user_id=user.user_id,
+                display_name=user.display_name,
+                avatar_url=user.avatar_url,
+            )
+            for user in parsed_response.results
+        ]
+
+    @wrap_as_background_process("federated_user_directory_sync")
+    async def _sync_federated_user_directory(self) -> None:
+        """Sync federated user directories from whitelisted homeservers.
+
+        Fetch and reconcile each remote directory.
+
+        Prune removes previous federation imports from homeservers no longer in the whitelist.
+        """
+        whitelist = self.hs.config.federation.federation_domain_whitelist or {}
+        destinations: list[str] = [
+            destination for destination in whitelist if destination != self.server_name
+        ]
+
+        if self.update_user_directory:
+            # Clean up removed sources even when no destinations remain.
+            # An empty or unset whitelist clears all federation imports.
+            await self.store.prune_federated_remote_users(destinations)
+
+        if not destinations:
+            logger.debug(
+                "Ending federated user directory sync: "
+                "no remote destinations configured in federation_domain_whitelist"
+            )
+            return
+
+        async def sync_destination(destination: str) -> None:
+            async with asyncio.TaskGroup() as tg:
+                total_reconciled = 0
+                start_token = None  # Start with first page
+                while True:
+                    response = await self._federation_client.user_directory_fetch(
+                        destination,
+                        start_token,
+                        self._federated_user_directory_fetch_timeout,
+                    )
+                    end_token = response.next_token
+
+                    # Ensure loop progress.
+                    if start_token and end_token and end_token <= start_token:
+                        raise ValueError(
+                            "next_token from response references previous page"
+                        )
+
+                    # TODO: Deduplicate models and move validation to user_directory_fetch
+                    # results: list[UserDirectoryEntryModel] = response.results
+                    entries: list[RemoteUserDirectoryEntry] = (
+                        self._parse_remote_user_directory_results(response, destination)
+                    )
+
+                    # Update user dir with new data in the background.
+                    tg.create_task(
+                        self.reconcile_remote_users(
+                            destination,
+                            entries,
+                            start_token,
+                            end_token,
+                        )
+                    )
+                    total_reconciled += len(entries)
+
+                    # Exit loop if last page was reached.
+                    if not end_token:
+                        break
+
+                    start_token = end_token
+
+            logger.debug(
+                "Federated user directory sync reconciled %d remote users for destination `%s`",
+                total_reconciled,
+                destination,
+            )
+
+        # TODO: Make concurrent. Maybe use Semaphore?
+        for destination in destinations:
+            try:
+                await sync_destination(destination)
+            except* RequestSendFailed as e:
+                logger.warning(
+                    "Failed to fetch federated user directory [destination=%s]: %s",
+                    destination,
+                    e,
+                )
+            except* HttpResponseException as e:
+                if e.code == HTTPStatus.NOT_FOUND or is_unknown_endpoint(e):
+                    logger.info(
+                        "Federated user directory is unsupported or disabled "
+                        "[destination=%s]",
+                        destination,
+                    )
+                else:
+                    logger.warning(
+                        "Remote federated user directory returned an HTTP error "
+                        "[destination=%s, code=%d]: %s",
+                        destination,
+                        e.code,
+                        e,
+                    )
+            except* ValidationError as e:
+                logger.warning(
+                    "Invalid federated user directory response [destination=%s]: %s",
+                    destination,
+                    e,
+                )
+            except* Exception:
+                logger.exception(
+                    "Unexpected error fetching or validating federated user "
+                    "directory [destination=%s]",
+                    destination,
+                )
+
+    async def reconcile_remote_users(
+        self,
+        homeserver: str,
+        users: Sequence[UserDirectoryEntryModel],
+        start_token: str | None,
+        end_token: str | None,
+    ) -> None:
+        """Reconcile the remote users made visible via federated search for a
+        single remote homeserver.
+
+        Users present in ``users`` are upserted. Users previously visible for
+        ``homeserver`` but absent from ``users`` are pruned.
+        It must therefore only be called with the full result set of a
+        successful sync for that homeserver.
+        """
+        if not self.update_user_directory:
+            # Only the worker that owns the user directory should write to it.
+            return
+
+        # TODO: Make sure these checks and conversions are necessary.
+        profiles: list[tuple[str, str | None, str | None]] = []
+        for entry in users:
+            try:
+                user = UserID.from_string(entry.user_id)
+            except SynapseError:
+                logger.warning(
+                    "Ignoring malformed user ID returned by federated user "
+                    "directory [homeserver=%s, user_id=%r]",
+                    homeserver,
+                    entry.user_id,
+                )
+                continue
+
+            # Check if the user is from the same homeserver (we don`t want to sync 3rd party users.)
+            if user.domain != homeserver:
+                logger.warning(
+                    "Ignoring user from another homeserver returned by federated "
+                    "user directory [homeserver=%s, user_id=%s]",
+                    homeserver,
+                    entry.user_id,
+                )
+                continue
+
+            profiles.append((entry.user_id, entry.display_name, entry.avatar_url))
+
+        await self.store.reconcile_federated_remote_users(
+            homeserver, profiles, start_token, end_token
+        )
