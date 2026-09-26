@@ -1254,6 +1254,12 @@ class SyncHandler:
             # sync's timeline and the start of the current sync's timeline.
             # See the docstring above for details.
             state_ids: StateMap[str]
+            # With `state_after`, the entries of `state_ids` that are state
+            # deltas since `since_token` must always be sent: the client does
+            # not apply timeline state, so nothing else would tell it. Only the
+            # lazy-loaded fill-ins for timeline senders may be deduplicated
+            # against the members cache. `None` means "everything may be".
+            deduplicable_keys: set[tuple[str, str]] | None = None
             # We need to know whether the state we fetch may be partial, so check
             # whether the room is partial stated *before* fetching it.
             is_partial_state_room = await self.store.is_partial_state_room(room_id)
@@ -1273,16 +1279,28 @@ class SyncHandler:
                 # is indeed the case.
                 assert since_token is not None
 
-                state_ids = await self._compute_state_delta_for_incremental_sync(
-                    room_id,
-                    sync_config,
-                    batch,
-                    since_token,
-                    end_token,
-                    members_to_fetch,
-                    timeline_state,
-                    joined,
-                )
+                if sync_config.use_state_after:
+                    (
+                        state_ids,
+                        deduplicable_keys,
+                    ) = await self._compute_state_after_for_incremental_sync(
+                        room_id,
+                        since_token,
+                        end_token,
+                        members_to_fetch,
+                        joined,
+                    )
+                else:
+                    state_ids = await self._compute_state_delta_for_incremental_sync(
+                        room_id,
+                        sync_config,
+                        batch,
+                        since_token,
+                        end_token,
+                        members_to_fetch,
+                        timeline_state,
+                        joined,
+                    )
 
             # If we only have partial state for the room, `state_ids` may be missing the
             # memberships we wanted. We attempt to find some by digging through the auth
@@ -1323,7 +1341,10 @@ class SyncHandler:
                     state_ids = {
                         t: event_id
                         for t, event_id in state_ids.items()
-                        if cache.get(t[1]) != event_id
+                        if (
+                            deduplicable_keys is not None and t not in deduplicable_keys
+                        )
+                        or cache.get(t[1]) != event_id
                     }
                     logger.debug("...to %r", state_ids)
 
@@ -1495,6 +1516,99 @@ class SyncHandler:
         )
         return state_ids
 
+    async def _compute_state_after_for_incremental_sync(
+        self,
+        room_id: str,
+        since_token: StreamToken,
+        end_token: StreamToken,
+        members_to_fetch: set[str] | None,
+        joined: bool,
+    ) -> tuple[StateMap[str], set[tuple[str, str]]]:
+        """Calculate the `state_after` (MSC4222) events for an incremental sync.
+
+        This is the state delta between `since_token` and `end_token`, plus, when
+        lazy-loading, the memberships of `members_to_fetch` so the client can
+        render the timeline.
+
+        Args:
+            room_id: The room we are calculating for.
+            since_token: Token of the end of the previous batch.
+            end_token: Token of the end of the current batch. Normally this will be
+                the same as the global "now_token", but if the user has left the room,
+                the point just after their leave event.
+            members_to_fetch: If lazy-loading is enabled, the memberships needed for
+                events in the timeline. Otherwise, `None`.
+            joined: whether the user is currently joined to the room
+
+        Returns:
+            A map from (type, state_key) to event_id of the events to include in
+            `state_after`, and the subset of its keys that are lazy-loaded
+            fill-ins rather than state deltas. Only those may be omitted if the
+            client has already been sent them: a delta must always be sent,
+            since a `state_after` client never applies state from the timeline
+            and would otherwise never learn of the change (e.g. a client that
+            resumes from a `since` token older than the one the change was
+            first delivered on).
+        """
+        delta_state_ids: MutableStateMap[str] = {}
+        deduplicable_keys: set[tuple[str, str]] = set()
+
+        if members_to_fetch:
+            # We're lazy-loading, so the client might need some more member
+            # events to understand the events in this timeline. So we always
+            # fish out all the member events corresponding to the timeline
+            # here. The caller will then dedupe any redundant ones.
+            member_filter = StateFilter.from_types(
+                (EventTypes.Member, member) for member in members_to_fetch
+            )
+            if joined:
+                member_ids = await self._state_storage_controller.get_current_state_ids(
+                    room_id=room_id,
+                    state_filter=member_filter,
+                    await_full_state=False,
+                )
+            else:
+                # The user is no longer in the room, so `end_token` points
+                # at the user's leave/etc event, and the current state may
+                # include state from after that point. Use state groups to
+                # get the memberships as of `end_token` instead.
+                member_ids = await self._state_storage_controller.get_state_ids_at(
+                    room_id,
+                    stream_position=end_token,
+                    state_filter=member_filter,
+                    await_full_state=False,
+                )
+            delta_state_ids.update(member_ids)
+            deduplicable_keys.update(member_ids.keys())
+
+        # We don't do LL filtering for incremental syncs - see
+        # https://github.com/vector-im/riot-web/issues/7211#issuecomment-419976346
+        # N.B. this slows down incr syncs as we are now processing way more
+        # state in the server than if we were LLing.
+        #
+        # i.e. we return all state deltas, including membership changes that
+        # we'd normally exclude due to LL.
+        deltas = await self.store.get_current_state_deltas_for_room_by_event_position(
+            room_id=room_id,
+            from_token=since_token.room_key,
+            to_token=end_token.room_key,
+        )
+        for delta in deltas:
+            if delta.event_id is None:
+                # There was a state reset and this state entry is no longer
+                # present, but we have no way of informing the client about
+                # this, so we just skip it for now.
+                continue
+
+            # Note that deltas are in stream ordering, so if there are
+            # multiple deltas for a given type/state_key we'll always pick
+            # the latest one.
+            key = (delta.event_type, delta.state_key)
+            delta_state_ids[key] = delta.event_id
+            deduplicable_keys.discard(key)
+
+        return delta_state_ids, deduplicable_keys
+
     async def _compute_state_delta_for_incremental_sync(
         self,
         room_id: str,
@@ -1514,8 +1628,8 @@ class SyncHandler:
         (`compute_state_delta`) is responsible for keeping track of which membership
         events we have already sent to the client, and hence ripping them out.
 
-        Note that whether this returns the state at the start or the end of the
-        batch depends on `sync_config.use_state_after` (c.f. MSC4222).
+        This returns the state at the start of the batch; `state_after`
+        (MSC4222) is computed by `_compute_state_after_for_incremental_sync`.
 
         Args:
             room_id: The room we are calculating for.
@@ -1545,67 +1659,10 @@ class SyncHandler:
             await_full_state = True
             lazy_load_members = False
 
-        # Check if we are wanting to return the state at the start or end of the
-        # timeline. If at the end we can just use the current state delta stream.
-        if sync_config.use_state_after:
-            delta_state_ids: MutableStateMap[str] = {}
-
-            if members_to_fetch:
-                # We're lazy-loading, so the client might need some more member
-                # events to understand the events in this timeline. So we always
-                # fish out all the member events corresponding to the timeline
-                # here. The caller will then dedupe any redundant ones.
-                member_filter = StateFilter.from_types(
-                    (EventTypes.Member, member) for member in members_to_fetch
-                )
-                if joined:
-                    member_ids = (
-                        await self._state_storage_controller.get_current_state_ids(
-                            room_id=room_id,
-                            state_filter=member_filter,
-                            await_full_state=await_full_state,
-                        )
-                    )
-                else:
-                    # The user is no longer in the room, so `end_token` points
-                    # at the user's leave/etc event, and the current state may
-                    # include state from after that point. Use state groups to
-                    # get the memberships as of `end_token` instead.
-                    member_ids = await self._state_storage_controller.get_state_ids_at(
-                        room_id,
-                        stream_position=end_token,
-                        state_filter=member_filter,
-                        await_full_state=await_full_state,
-                    )
-                delta_state_ids.update(member_ids)
-
-            # We don't do LL filtering for incremental syncs - see
-            # https://github.com/vector-im/riot-web/issues/7211#issuecomment-419976346
-            # N.B. this slows down incr syncs as we are now processing way more
-            # state in the server than if we were LLing.
-            #
-            # i.e. we return all state deltas, including membership changes that
-            # we'd normally exclude due to LL.
-            deltas = (
-                await self.store.get_current_state_deltas_for_room_by_event_position(
-                    room_id=room_id,
-                    from_token=since_token.room_key,
-                    to_token=end_token.room_key,
-                )
-            )
-            for delta in deltas:
-                if delta.event_id is None:
-                    # There was a state reset and this state entry is no longer
-                    # present, but we have no way of informing the client about
-                    # this, so we just skip it for now.
-                    continue
-
-                # Note that deltas are in stream ordering, so if there are
-                # multiple deltas for a given type/state_key we'll always pick
-                # the latest one.
-                delta_state_ids[(delta.event_type, delta.state_key)] = delta.event_id
-
-            return delta_state_ids
+        # `state_after` (MSC4222) is handled by
+        # `_compute_state_after_for_incremental_sync`; this method returns the
+        # state at the start of the timeline.
+        assert not sync_config.use_state_after
 
         # For a non-gappy sync if the events in the timeline are simply a linear
         # chain (i.e. no merging/branching of the graph), then we know the state

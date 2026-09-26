@@ -1,0 +1,1 @@
+Fix membership changes being omitted from `state_after` (MSC4222) for lazy-loading clients that resume `/sync` from a token older than the one the change was first delivered on, leaving e.g. a kicked user shown as still joined.

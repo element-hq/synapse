@@ -1571,6 +1571,49 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
             f"state_after when the since token splits a persist batch: {room}",
         )
 
+    # ------------------------------------------------------------------
+    # Lazy-loaded members cache
+    # ------------------------------------------------------------------
+
+    def test_membership_delta_resent_on_resync_from_older_token(self) -> None:
+        """A membership change must be in `state_after` every time the sync
+        window covers it, even if the members cache has already seen it.
+
+        Clients do not persist every `since` token (matrix-js-sdk saves its
+        sync store every few minutes), so after a reload they resume from a
+        token older than the one the change was first delivered on. The
+        lazy-loaded members cache would then strip the membership event from
+        `state_after` as "already sent", and since a `state_after` client never
+        applies state from the timeline, it would keep the stale membership
+        until it cleared its cache (a kicked user shown as still joined).
+        """
+        sync_url = self._sync_url(lazy_load_members=True)
+        t0 = self._sync(sync_url)["next_batch"]
+
+        # A sync window ending after a message, so t1 > t0 and the members
+        # cache is warm for bob.
+        self.helper.send(self.room_id, body="hello", tok=self.bob_tok)
+        t1 = self._sync(sync_url, t0)["next_batch"]
+
+        kick = self.helper.change_membership(
+            self.room_id, self.alice, self.bob, "leave", tok=self.alice_tok
+        )
+
+        # The live client sees the kick, and the members cache now records
+        # bob's leave as sent.
+        room = self._joined_room(self._sync(sync_url, t1))
+        self.assertIn(kick["event_id"], self._state_after_ids(room))
+
+        # The client reloads from the older persisted token.
+        room = self._joined_room(self._sync(sync_url, t0))
+        self.assertIn(kick["event_id"], self._timeline_ids(room))
+        self.assertIn(
+            kick["event_id"],
+            self._state_after_ids(room),
+            f"membership change stripped from state_after by the lazy-loaded "
+            f"members cache on re-sync from an older token: {room}",
+        )
+
 
 class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
     """Tests MSC4222 `state_after` behaviour for rooms the syncing user has
