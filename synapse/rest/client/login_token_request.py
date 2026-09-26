@@ -25,10 +25,15 @@ from typing import TYPE_CHECKING
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.ratelimiting import RatelimitSettings
 from synapse.http.server import HttpServer
-from synapse.http.servlet import RestServlet, parse_json_object_from_request
+from synapse.http.servlet import (
+    RestServlet,
+    parse_json_object_from_request,
+    validate_json_object,
+)
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
 from synapse.types import JsonDict
+from synapse.types.rest.client import UserInteractiveAuthBody
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -92,6 +97,7 @@ class LoginTokenRequestServlet(RestServlet):
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         body = parse_json_object_from_request(request)
+        validate_json_object(body, UserInteractiveAuthBody)
 
         if self._require_ui_auth:
             await self.auth_handler.validate_user_via_ui_auth(

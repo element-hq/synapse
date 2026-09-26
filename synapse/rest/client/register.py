@@ -54,11 +54,13 @@ from synapse.http.servlet import (
     assert_params_in_dict,
     parse_json_object_from_request,
     parse_string,
+    validate_json_object,
 )
 from synapse.http.site import SynapseRequest
 from synapse.metrics import SERVER_NAME_LABEL, threepid_send_requests
 from synapse.push.mailer import Mailer
 from synapse.types import JsonDict
+from synapse.types.rest.client import UserInteractiveAuthBody
 from synapse.util.duration import Duration
 from synapse.util.msisdn import phone_number_to_msisdn
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -469,6 +471,7 @@ class RegisterRestServlet(RestServlet):
     @interactive_auth_handler
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_json_object_from_request(request)
+        validate_json_object(body, UserInteractiveAuthBody)
 
         client_addr = request.getClientAddress().host
 
