@@ -48,6 +48,7 @@ from synapse.logging.opentracing import set_tag
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
 from synapse.types import JsonDict, StreamToken
 from synapse.types.rest import RequestBodyModel
+from synapse.types.rest.client import UserInteractiveAuthBody
 from synapse.util.cancellation import cancellable
 
 if TYPE_CHECKING:
@@ -518,6 +519,7 @@ class SigningKeyUploadServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
         body = parse_json_object_from_request(request)
+        validate_json_object(body, UserInteractiveAuthBody)
 
         (
             is_cross_signing_setup,
