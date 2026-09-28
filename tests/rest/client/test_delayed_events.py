@@ -862,7 +862,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
-            {"users": {self.user1_user_id: 100}, "events": {_EVENT_TYPE: 50}},
+            {"events": {_EVENT_TYPE: 50}},
             self.user1_access_token,
         )
 
@@ -885,7 +885,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
-            {"users": {self.user1_user_id: 100}, "events": {_EVENT_TYPE: 0}},
+            {"events": {_EVENT_TYPE: 0}},
             self.user1_access_token,
         )
         self.reactor.advance(2)
