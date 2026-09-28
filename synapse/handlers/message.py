@@ -509,8 +509,6 @@ class EventCreationHandler:
         self._worker_lock_handler = hs.get_worker_locks_handler()
         self._policy_handler = hs.get_room_policy_handler()
 
-        self.room_prejoin_state_types = self.hs.config.api.room_prejoin_state
-
         self.send_events = ReplicationSendEventsRestServlet.make_client(hs)
 
         self.request_ratelimiter = hs.get_request_ratelimiter()
@@ -703,6 +701,9 @@ class EventCreationHandler:
                         "Sending messages while account is suspended is not allowed.",
                         Codes.USER_ACCOUNT_SUSPENDED,
                     )
+
+            if event_dict["type"] == EventTypes.Redaction:
+                await self._check_redaction_allowed_period(event_dict)
 
         is_create_event = (
             event_dict["type"] == EventTypes.Create and event_dict["state_key"] == ""
@@ -2078,9 +2079,8 @@ class EventCreationHandler:
                         event.unsigned,
                         "invite_room_state",
                         await self.store.get_stripped_room_state_from_event_context(
+                            event,
                             context,
-                            self.room_prejoin_state_types,
-                            membership_user_id=event.sender,
                         ),
                     )
 
@@ -2091,7 +2091,7 @@ class EventCreationHandler:
                         # to get them to sign the event.
 
                         returned_invite = await federation_handler.send_invite(
-                            invitee.domain, event
+                            invitee.domain, event, context
                         )
 
                         # TODO: Make sure the signatures actually are correct.
@@ -2103,8 +2103,8 @@ class EventCreationHandler:
                         event.unsigned,
                         "knock_room_state",
                         await self.store.get_stripped_room_state_from_event_context(
+                            event,
                             context,
-                            self.room_prejoin_state_types,
                         ),
                     )
 
@@ -2235,6 +2235,48 @@ class EventCreationHandler:
         )
 
         return bool(original_event and sender != original_event.sender)
+
+    async def _check_redaction_allowed_period(self, event_dict: dict) -> None:
+        """Reject a redaction of an `m.room.message` older than the configured period.
+
+        Only applies to `m.room.message` targets. Enforced for local users only
+        (federated redactions bypass `create_event`). When the target is an edit
+        (`m.replace`), the age and type of the original event are used, not the
+        edit.
+        """
+        period = self.config.server.redaction_allowed_period
+        if period is None:
+            return
+
+        redacts = event_dict["content"].get("redacts") or event_dict.get("redacts")
+        room_id = event_dict["room_id"]
+
+        if redacts is None:
+            return
+
+        target = await self.store.get_event(
+            redacts, check_room_id=room_id, allow_none=True
+        )
+        if target is None:
+            return
+
+        relation = relation_from_event(target)
+        if relation is not None and relation.rel_type == RelationTypes.REPLACE:
+            original = await self.store.get_event(
+                relation.parent_id, check_room_id=room_id, allow_none=True
+            )
+            if original is not None:
+                target = original
+
+        if target.type != EventTypes.Message:
+            return
+
+        if target.origin_server_ts < self.clock.time_msec() - period:
+            raise SynapseError(
+                403,
+                f"Events older than {period}ms cannot be redacted.",
+                Codes.FORBIDDEN,
+            )
 
     async def _maybe_kick_guest_users(
         self, event: EventBase, context: EventContext
@@ -2404,11 +2446,15 @@ class EventCreationHandler:
                 original_event.room_version, third_party_result
             )
             self.validator.validate_builder(builder)
-            assert builder.room_id is not None
+
         except SynapseError as e:
-            raise Exception(
-                "Third party rules module created an invalid event: " + e.msg,
-            )
+            # Prepend the error message with some context. This will be raised as a
+            # `400` since assumption of the validator is that it came directly from a
+            # client. Change this to a `500`, as the module will have changed something
+            # and that is a fault of the server
+            e.msg = "Third party rules module created an invalid event: " + e.msg
+            e.code = HTTPStatus.INTERNAL_SERVER_ERROR
+            raise
 
         immutable_fields = [
             # changing the room is going to break things: we've already checked that the
@@ -2439,12 +2485,25 @@ class EventCreationHandler:
         for k, v in original_event.internal_metadata.get_dict().items():
             setattr(builder.internal_metadata, k, v)
 
-        # modules can send new state events, so we re-calculate the auth events just in
-        # case.
-        prev_event_ids = await self.store.get_prev_events_for_room(builder.room_id)
+        # Creation events using msc4242 and msc4291 rooms will not have a room_id, and
+        # will also not have prev_events nor prev_state_events(below).
+        prev_event_ids = []
+        if builder.room_id is not None and not (
+            builder.type == EventTypes.Create
+            and original_event.room_version.msc4291_room_ids_as_hashes
+        ):
+            prev_event_ids = await self.store.get_prev_events_for_room(builder.room_id)
 
-        prev_state_events = None
-        if original_event.room_version.msc4242_state_dags:
+        prev_state_events: list[str] | None = (
+            [] if original_event.room_version.msc4242_state_dags else None
+        )
+        if (
+            original_event.room_version.msc4242_state_dags
+            and builder.type != EventTypes.Create
+            and builder.room_id is not None
+        ):
+            # modules can send new state events, so we re-calculate the auth events just
+            # in case.
             prev_state_events = list(
                 await self.store.get_state_dag_extremities(builder.room_id)
             )

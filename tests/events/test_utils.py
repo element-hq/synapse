@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from synapse.api.constants import EventContentFields
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase
+from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.utils import (
     FilteredEvent,
     PowerLevelsContent,
@@ -1001,6 +1001,113 @@ class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):
     def test_invalid_nesting_raises_type_error(self) -> None:
         with self.assertRaises(TypeError):
             copy_and_fixup_power_levels_contents({"a": {"b": {"c": 1}}})  # type: ignore[dict-item]
+
+
+class TestStrippedStateEvent(stdlib_unittest.TestCase):
+    def test_valid_dict(self) -> None:
+        """A valid dict should be parsed into a StrippedStateEvent."""
+        raw = {
+            "type": "m.room.member",
+            "state_key": "@alice:example.com",
+            "sender": "@alice:example.com",
+            "content": {"membership": "join"},
+        }
+        result = StrippedStateEvent.from_json_dict(raw)
+        self.assertEqual(
+            result,
+            StrippedStateEvent(
+                type="m.room.member",
+                state_key="@alice:example.com",
+                sender="@alice:example.com",
+                content={"membership": "join"},
+            ),
+        )
+
+    def test_missing_fields(self) -> None:
+        """Dicts with missing required fields should return None."""
+        self.assertIsNone(
+            StrippedStateEvent.from_json_dict(
+                {
+                    "state_key": "@alice:example.com",
+                    "sender": "@alice:example.com",
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        self.assertIsNone(
+            StrippedStateEvent.from_json_dict(
+                {
+                    "type": "m.room.member",
+                    "sender": "@alice:example.com",
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        self.assertIsNone(
+            StrippedStateEvent.from_json_dict(
+                {
+                    "type": "m.room.member",
+                    "state_key": "@alice:example.com",
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        self.assertIsNone(
+            StrippedStateEvent.from_json_dict(
+                {
+                    "type": "m.room.member",
+                    "state_key": "@alice:example.com",
+                    "sender": "@alice:example.com",
+                }
+            )
+        )
+
+    def test_invalid_field_types(self) -> None:
+        """Dicts with invalid field types should return None."""
+        # Type must be string
+        self.assertIsNone(
+            StrippedStateEvent.from_json_dict(
+                {
+                    "type": 123,
+                    "state_key": "@alice:example.com",
+                    "sender": "@alice:example.com",
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        # State key must be string
+        self.assertIsNone(
+            StrippedStateEvent.from_json_dict(
+                {
+                    "type": "m.room.member",
+                    "state_key": 123,
+                    "sender": "@alice:example.com",
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        # Sender must be string
+        self.assertIsNone(
+            StrippedStateEvent.from_json_dict(
+                {
+                    "type": "m.room.member",
+                    "state_key": "@alice:example.com",
+                    "sender": 123,
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        # Content must be dict
+        self.assertIsNone(
+            StrippedStateEvent.from_json_dict(
+                {
+                    "type": "m.room.member",
+                    "state_key": "@alice:example.com",
+                    "sender": "@alice:example.com",
+                    "content": "membership_join",
+                }
+            )
+        )
 
 
 class FormatEventForClientTestCase(stdlib_unittest.TestCase):

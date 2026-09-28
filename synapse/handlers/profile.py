@@ -247,8 +247,11 @@ class ProfileHandler:
         if not by_admin and not self.hs.config.registration.enable_set_displayname:
             profile = await self.store.get_profileinfo(target_user)
             if profile.display_name:
+                # The spec reserves 400 for malformed input; disabled profile
+                # modifications are covered by the 403 response of
+                # https://spec.matrix.org/v1.19/client-server-api/#put_matrixclientv3profileuseridkeyname
                 raise SynapseError(
-                    400,
+                    403,
                     "Changing display name is disabled on this server",
                     Codes.FORBIDDEN,
                 )
@@ -369,8 +372,11 @@ class ProfileHandler:
         if not by_admin and not self.hs.config.registration.enable_set_avatar_url:
             profile = await self.store.get_profileinfo(target_user)
             if profile.avatar_url:
+                # The spec reserves 400 for malformed input; disabled profile
+                # modifications are covered by the 403 response of
+                # https://spec.matrix.org/v1.19/client-server-api/#put_matrixclientv3profileuseridkeyname
                 raise SynapseError(
-                    400, "Changing avatar is disabled on this server", Codes.FORBIDDEN
+                    403, "Changing avatar is disabled on this server", Codes.FORBIDDEN
                 )
 
         if not isinstance(new_avatar_url, str):
@@ -714,6 +720,11 @@ class ProfileHandler:
         if not by_admin and target_user != requester.user:
             raise AuthError(403, "Cannot set another user's profile")
 
+        # Don't recreate a profile row for a user that does not exist at all;
+        # deactivated (e.g. erased) users do exist, so are allowed through.
+        if await self.store.get_user_by_id(target_user.to_string()) is None:
+            raise SynapseError(404, "User not found", Codes.NOT_FOUND)
+
         stream_id = await self.store.set_profile_field(
             target_user,
             field_name,
@@ -974,9 +985,9 @@ class ProfileHandler:
         self, target_user: UserID, requester: UserID | None = None
     ) -> None:
         """Checks whether a profile query is allowed. If the
-        'require_auth_for_profile_requests' config flag is set to True and a
-        'requester' is provided, the query is only allowed if the two users
-        share a room.
+        'limit_profile_requests_to_users_who_share_rooms' config flag is set to
+        True and a 'requester' is provided, the query is only allowed if the two
+        users share a room.
 
         Args:
             target_user: The owner of the queried profile.

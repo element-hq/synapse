@@ -31,6 +31,7 @@ from synapse.api.errors import Codes, NotFoundError, SynapseError, cs_error
 from synapse.config.repository import THUMBNAIL_SUPPORTED_MEDIA_FORMAT_MAP
 from synapse.http.server import respond_with_json
 from synapse.http.site import SynapseRequest
+from synapse.logging.context import defer_to_thread
 from synapse.logging.opentracing import trace
 from synapse.media._base import (
     FileInfo,
@@ -533,10 +534,11 @@ class ThumbnailProvider:
             assert file_info.thumbnail is not None
 
             if for_federation:
+                f = await defer_to_thread(self.hs.get_reactor(), open, file_path, "rb")
                 await respond_with_multipart_responder(
                     self.hs.get_clock(),
                     request,
-                    FileResponder(self.hs, open(file_path, "rb")),
+                    FileResponder(self.hs, f),
                     file_info.thumbnail.type,
                     file_info.thumbnail.length,
                     None,

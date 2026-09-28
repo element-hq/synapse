@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.160/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.162/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -252,6 +252,9 @@ properties:
       display names) of other users through the client API. Note that profile
       data is also available via the federation API, unless
       `allow_profile_lookup_over_federation` is set to false.
+
+      This option must be enabled in order to use
+      `limit_profile_requests_to_users_who_share_rooms`.
     default: false
     examples:
       - true
@@ -262,6 +265,10 @@ properties:
       order to retrieve their profile information. Only checked on Client-Server
       requests. Profile requests from other servers should be checked by the
       requesting server.
+
+      The check can only be applied to authenticated requests, so this option
+      requires `require_auth_for_profile_requests` to be enabled as well.
+      Synapse will refuse to start if this option is enabled without it.
     default: false
     examples:
       - true
@@ -330,7 +337,11 @@ properties:
       _Changed in Synapse 1.157:_ the default version room version was increased
       from [10](https://spec.matrix.org/v1.12/rooms/v10/) to
       [11](https://spec.matrix.org/v1.12/rooms/v11/).
-    default: "11"
+
+      _Changed in Synapse 1.162:_ the default room version was increased from
+      [11](https://spec.matrix.org/v1.16/rooms/v11/) to
+      [12](https://spec.matrix.org/v1.16/rooms/v12/)
+    default: "12"
     examples:
       - "8"
   gc_thresholds:
@@ -1278,6 +1289,28 @@ properties:
     default: 7d
     examples:
       - 28d
+  redaction_allowed_period:
+    oneOf:
+      - $ref: "#/$defs/duration"
+      - type: "null"
+    description: >-
+      How long after an `m.room.message` was sent a local user is still allowed
+      to redact it. If a local user tries to redact a `m.room.message` older
+      than this period Synapse responds with `403 M_FORBIDDEN`
+      and does not redact the event.
+
+
+      Only applies to `m.room.message` events redacted by local users. 
+      Redactions of other event types and redactions received over federation
+      are unaffected. When the target of the redaction is an edit (`m.replace`),
+      the age and type are taken from the original event and not the edit.
+
+
+      Set to `null` (the default) to disable, allowing events to be redacted at
+      any time.
+    default: null
+    examples:
+      - 7d
   forgotten_room_retention_period:
     oneOf:
       - $ref: "#/$defs/duration"
@@ -2365,6 +2398,20 @@ properties:
     default:
       per_second: 0.016
       burst_count: 200.0
+  rc_profile:
+    $ref: "#/$defs/rc"
+    description: >-
+      This option allows admins to ratelimit profile lookups by clients.
+
+
+      Requests are limited per user when the request is authenticated,
+      otherwise per client IP address.
+
+
+      _Added in Synapse 1.162.0._
+    default:
+      per_second: 1.0
+      burst_count: 500.0
   federation_rr_transactions_per_room_per_second:
     type: integer
     description: >-
@@ -5005,6 +5052,15 @@ properties:
 
       Note that this option will only affect rooms created after it is set. It
       will also not affect rooms created by other servers.
+
+
+      A client may supply its own `m.room.encryption` event in the
+      `initial_state` of its `/createRoom` request. If that event is valid (it
+      specifies an `algorithm` as a string), it takes precedence and this option
+      will not overwrite it, allowing the client to, for example, choose a
+      different encryption algorithm. An empty or otherwise invalid
+      `m.room.encryption` event does not disable forced encryption: the default
+      will still be applied on top of it.
     enum:
       - all
       - invite
@@ -5736,6 +5792,20 @@ properties:
     default: null
     examples:
       - worker1
+  task_scheduler:
+    type: object
+    description: >-
+      Configuration for the task scheduler.
+    properties:
+      max_concurrent_tasks:
+        type: integer
+        minimum: 1
+        description: >-
+          The maximum number of tasks that can run concurrently in the task
+          scheduler. Setting this too high may swamp the database connection pool.
+        default: 5
+    examples:
+      - max_concurrent_tasks: 5
   update_user_directory_from_worker:
     type: ["string", "null"]
     description: >-
@@ -5792,6 +5862,9 @@ properties:
 
 
       _Changed in Synapse 1.116.0: Added password\_path_
+
+
+      _Changed in Synapse 1.162.0: Added username_
     properties:
       enabled:
         type: boolean
@@ -5811,6 +5884,13 @@ properties:
           The full path to a local Unix socket file. **If this is used, `host`
           and `port` are ignored.**
         default: /tmp/redis.sock
+      username:
+        type: ["string", "null"]
+        description: >-
+          Optional username if configured on the Redis instance (Redis 6+
+          ACL authentication). Requires `password` (or `password_path`) to
+          also be set.
+        default: null
       password:
         type: ["string", "null"]
         description: Optional password if configured on the Redis instance.
@@ -5854,6 +5934,7 @@ properties:
       - enabled: true
         host: localhost
         port: 6379
+        username: "<username>"
         password_path: "<path_to_the_password_file>"
         dbid: "<dbid>"
   worker_app:

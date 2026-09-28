@@ -289,7 +289,10 @@ information.
     ^/_matrix/client/(r0|v3|unstable)/user_directory/search$
 
     # Unstable MSC4140 support
-    ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/.*/restart)?$
+    ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/[^/]+(/restart)?)?$
+
+    # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
+    ^/_synapse/mas/
 
 Additionally, the following REST endpoints can be handled for GET requests:
 
@@ -315,7 +318,7 @@ for the room are in flight:
 
 Additionally, the following endpoints should be included if Synapse is configured
 to use SSO (you only need to include the ones for whichever SSO provider you're
-using):
+using) and delegated authentication isn't enabled:
 
     # for all SSO providers
     ^/_matrix/client/(api/v1|r0|v3|unstable)/login/sso/redirect

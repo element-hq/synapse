@@ -229,6 +229,30 @@ class ServerConfigTestCase(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 _read_config(generate_config(disallowed_value))
 
+    def test_limit_profile_requests_requires_auth(self) -> None:
+        """
+        Test that `limit_profile_requests_to_users_who_share_rooms` can only be
+        enabled together with `require_auth_for_profile_requests`, as the shared-room
+        check is only applied to authenticated requests
+        """
+
+        def generate_config(limit: bool, require_auth: bool) -> JsonDict:
+            return {
+                "limit_profile_requests_to_users_who_share_rooms": limit,
+                "require_auth_for_profile_requests": require_auth,
+            }
+
+        _read_config(generate_config(limit=False, require_auth=False))
+        _read_config(generate_config(limit=False, require_auth=True))
+        _read_config(generate_config(limit=True, require_auth=True))
+
+        with self.assertRaises(ConfigError):
+            _read_config(generate_config(limit=True, require_auth=False))
+
+        # `require_auth_for_profile_requests` defaults to false
+        with self.assertRaises(ConfigError):
+            _read_config({"limit_profile_requests_to_users_who_share_rooms": True})
+
     @parameterized.expand(
         [
             [
