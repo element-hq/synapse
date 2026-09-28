@@ -456,7 +456,7 @@ class DelayedEventsStore(SQLBaseStore):
         user_localpart: str,
     ) -> list[DelayedEventResponseLegacyCompat]:
         """
-        Return all pending delayed events owned by the given user.
+        Return all scheduled delayed events owned by the given user.
         Includes fields from earlier revisions of MSC4140 for
         compatibility with clients that still expect them.
         """
