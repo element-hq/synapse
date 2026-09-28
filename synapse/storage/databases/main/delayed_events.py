@@ -586,17 +586,20 @@ class DelayedEventsStore(SQLBaseStore):
     async def process_target_delayed_event(
         self,
         delay_id: str,
-    ) -> tuple[
-        DelayedEventDetails | None,
-        Timestamp | None,
-    ]:
+    ) -> (
+        tuple[
+            DelayedEventDetails,
+            Timestamp | None,
+        ]
+        | None
+    ):
         """
         Marks for processing the matching delayed event, regardless of its timeout time,
         as long as it has not already been marked as such.
 
-        Returns: The details of the matching delayed event,
-            and the send time of the next delayed event to be sent, if any.
-            The details are None if the delayed event has already been sent.
+        Returns: A tuple of the details of the matching delayed event,
+            and the send time of the next delayed event to be sent, if any;
+            or None if the delayed event has already been sent.
 
         Raises:
             NotFoundError: if there is no matching delayed event.
@@ -605,10 +608,13 @@ class DelayedEventsStore(SQLBaseStore):
 
         def process_target_delayed_event_txn(
             txn: LoggingTransaction,
-        ) -> tuple[
-            DelayedEventDetails | None,
-            Timestamp | None,
-        ]:
+        ) -> (
+            tuple[
+                DelayedEventDetails,
+                Timestamp | None,
+            ]
+            | None
+        ):
             txn.execute(
                 """
                 UPDATE delayed_events
@@ -646,7 +652,7 @@ class DelayedEventsStore(SQLBaseStore):
                         HTTPStatus.CONFLICT,
                         "Delayed event has already been cancelled",
                     )
-                return None, self._get_next_delayed_event_send_ts_txn(txn)
+                return None
 
             event = DelayedEventDetails(
                 RoomID.from_string(row[0]),

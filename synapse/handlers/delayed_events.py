@@ -525,10 +525,11 @@ class DelayedEventsHandler:
         await self._mgmt_ratelimit(request)
         await make_deferred_yieldable(self._initialized_from_db)
 
-        event, next_send_ts = await self._store.process_target_delayed_event(delay_id)
-        if event is None:
+        ret = await self._store.process_target_delayed_event(delay_id)
+        if ret is None:
             return
 
+        event, next_send_ts = ret
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
 
