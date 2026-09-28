@@ -443,7 +443,9 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
                 # Based on a measured value of ~9.17 deletes/second on the `user_ips`
                 # table on `matrix.org`. If we prune every 120 seconds, this query will
                 # pick-up ~1100 rows which is under the query limit set (5000) with some
-                # head-room to catch-up from downtime or heavy traffic.
+                # head-room to catch-up from downtime or peak/heavy traffic. On
+                # `matrix.org` peak vs lows is only ~60% different for activity with the
+                # `user_ips` table.
                 #
                 # Running this more often seems good as that means we pick up a smaller
                 # number of rows each time (less work), therefore less disruptive the
