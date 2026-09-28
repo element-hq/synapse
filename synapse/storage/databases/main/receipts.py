@@ -602,9 +602,12 @@ class ReceiptsWorkerStore(SQLBaseStore):
             A two-tuple containing the following:
                 * A dictionary of roomids to receipt EDUs.
                 * The stream token up to which receipts were actually fetched.
-                  This is earlier than `to_key` (per writer) if the limit was
-                  hit; callers must call this method again from the returned
-                  token to fetch the remaining receipts.
+                  With `Direction.FORWARDS`, this is earlier than `to_key` (per
+                  writer) if the limit was hit; callers must call this method
+                  again from the returned token to fetch the remaining
+                  receipts. With `Direction.BACKWARDS`, it is always `to_key`,
+                  even if the limit was hit: older receipts are skipped, not
+                  left for a later call.
         """
         sql_order = "DESC" if order == Direction.BACKWARDS else "ASC"
 
