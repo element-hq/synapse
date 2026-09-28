@@ -204,6 +204,78 @@ class ReadMultipartResponseTests(TestCase):
         # The data is never consumed.
         self.assertEqual(result.getvalue(), b"")
 
+    def _parse_chunks(self, chunks: list[bytes]) -> tuple[object, bytes]:
+        """Feed `chunks` one `dataReceived` call at a time; returns (response or error, file)."""
+        result, deferred, protocol = self._build_multipart_response(
+            UNKNOWN_LENGTH, 10_000
+        )
+        for chunk in chunks:
+            protocol.dataReceived(chunk)
+        protocol.connectionLost(Failure(ResponseDone()))
+
+        outcome: list[object] = []
+        deferred.addBoth(outcome.append)
+        parsed = outcome[0]
+        if isinstance(parsed, Failure):
+            parsed = repr(parsed.value)
+        return parsed, result.getvalue()
+
+    def _assert_all_splits_match(self, data: bytes) -> None:
+        """Parsing `data` split at any offset, or byte by byte, matches the unsplit parse."""
+        expected, expected_file = self._parse_chunks([data])
+
+        bad_splits = [
+            i
+            for i in range(1, len(data))
+            if self._parse_chunks([data[:i], data[i:]]) != (expected, expected_file)
+        ]
+        self.assertEqual(bad_splits, [])
+
+        byte_by_byte = self._parse_chunks([data[i : i + 1] for i in range(len(data))])
+        self.assertEqual(byte_by_byte, (expected, expected_file))
+
+    def test_parse_file_split_across_chunks(self) -> None:
+        """The JSON and file parts are captured intact however the body is chunked."""
+        data = (
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Content-Type: application/json\r\n\r\n"
+            b'{"some": "metadata", "n": 12345}\r\n'
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Content-Type: text/plain\r\n"
+            b"Content-Disposition: inline; filename=test_upload\r\n\r\n"
+            b"file_to_stream\r\n"
+            b"--6067d4698f8d40a0a794ea7d7379d53a--\r\n"
+        )
+        expected, expected_file = self._parse_chunks([data])
+        assert isinstance(expected, MultipartResponse)
+        self.assertEqual(expected.json, b'{"some": "metadata", "n": 12345}')
+        self.assertEqual(expected.content_type, b"text/plain")
+        self.assertEqual(expected.disposition, b"inline; filename=test_upload")
+        self.assertEqual(expected.length, len(b"file_to_stream"))
+        self.assertEqual(expected_file, b"file_to_stream")
+
+        self._assert_all_splits_match(data)
+
+    def test_parse_redirect_split_across_chunks(self) -> None:
+        """The redirect Location is captured intact however the body is chunked."""
+        url = b"https://cdn.example.org/attachments/1234/5678/image.png?ex=6a71620d&is=6a70108d&hm=6e2a5760c6"
+        data = (
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Content-Type: application/json\r\n\r\n"
+            b"{}\r\n"
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Location: " + url + b"\r\n\r\n"
+            b"\r\n"
+            b"--6067d4698f8d40a0a794ea7d7379d53a--\r\n"
+        )
+        expected, expected_file = self._parse_chunks([data])
+        assert isinstance(expected, MultipartResponse)
+        self.assertEqual(expected.url, url)
+        self.assertEqual(expected.json, b"{}")
+        self.assertEqual(expected_file, b"")
+
+        self._assert_all_splits_match(data)
+
 
 class ReadBodyWithMaxSizeTests(TestCase):
     def _build_response(
