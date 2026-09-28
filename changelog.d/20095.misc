@@ -1,0 +1,1 @@
+Add a `synapse_notifier_wait_for_stream_token_timeouts` metric, counting the times a request gave up waiting for a worker to catch up to a stream token, labelled by the lagging stream.
