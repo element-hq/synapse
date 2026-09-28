@@ -1577,7 +1577,7 @@ class FederationServer(FederationBase):
     async def on_user_directory_fetch_request(
         self,
         origin: str,
-        next_token: str | None,
+        start_token: str | None,
     ) -> tuple[int, JsonMapping]:
         """Handle a user directory request from a remote server.
 
@@ -1592,14 +1592,23 @@ class FederationServer(FederationBase):
 
         Args:
             origin: The server that sent the request.
-            next_token: Opaque pagination token. None for the first page.
+            start_token: Last user ID from the previous page. None for the first page.
 
         Returns:
             A tuple of (response code, response json)
         """
-        page_size = 1000
+        if start_token is not None and (
+            not UserID.is_valid(start_token)
+            or UserID.from_string(start_token).domain != self.server_name
+        ):
+            raise SynapseError(
+                400, "Invalid user directory start token", Codes.INVALID_PARAM
+            )
+
+        # Small pages for exercising pagination in the example deployment.
+        page_size = 10
         results = await self.store.get_local_users_in_user_dir_paginated(
-            next_token, page_size
+            start_token, page_size
         )
         has_next_page = len(results) >= page_size
         next_token = results[-1]["user_id"] if has_next_page else None
@@ -1607,7 +1616,7 @@ class FederationServer(FederationBase):
         response = UserDirectoryResponseModel.model_validate(
             {"results": results, "next_token": next_token}
         )
-        # Keep full-directory responses compact by omitting unset profile fields.
+        # Omit unset profile fields and the continuation token on the final page.
         return 200, response.model_dump(mode="json", exclude_none=True)
 
 

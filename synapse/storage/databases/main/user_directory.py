@@ -658,6 +658,24 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             [_UserDirProfile(user_id, display_name, avatar_url)],
         )
 
+    def _upsert_federated_remote_users_txn(
+        self,
+        txn: LoggingTransaction,
+        profiles: Sequence[_UserDirProfile],
+    ) -> None:
+        """Update profiles, search entries and federation visibility together."""
+        self._update_profiles_in_user_dir_txn(txn, profiles)
+        self.db_pool.simple_upsert_many_txn(
+            txn,
+            table="users_in_federated_search",
+            key_names=("user_id",),
+            key_values=[(profile.user_id,) for profile in profiles],
+            value_names=("homeserver",),
+            value_values=[
+                (get_domain_from_id(profile.user_id),) for profile in profiles
+            ],
+        )
+
     def _update_profiles_in_user_dir_txn(
         self,
         txn: LoggingTransaction,
@@ -895,27 +913,41 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             "remove_from_user_dir", self._remove_from_user_dir_txn, user_id
         )
 
+    def _remove_federated_remote_users_txn(
+        self, txn: LoggingTransaction, user_ids: Iterable[str]
+    ) -> None:
+        """Remove federation visibility using the existing room-retention check."""
+        for user_id in user_ids:
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="users_in_federated_search",
+                keyvalues={"user_id": user_id},
+            )
+
+            if not self._get_user_dir_rooms_user_is_in_txn(txn, user_id):
+                self._remove_from_user_dir_txn(txn, user_id)
+
     async def prune_federated_remote_users(
         self, allowed_homeservers: Collection[str]
     ) -> None:
         """Remove imports from homeservers absent from the current whitelist.
 
-        An empty collection removes all federated-search visibility. Profiles
-        and search entries are retained for users still visible through rooms.
-        Selection and removal happen in the same transaction.
+        An empty collection removes all federated-search visibility. Profile and
+        search cleanup uses the existing room-retention check. Selection and
+        removal happen in the same transaction.
         """
 
         def _prune_txn(txn: LoggingTransaction) -> None:
             clause, values = make_in_list_sql_clause(
                 txn.database_engine, "homeserver", allowed_homeservers, negative=True
             )
-            where_clause = "WHERE " + clause
-            where_args = values
-
             txn.execute(
-                f"DELETE FROM users_in_federated_search {where_clause}",
-                where_args,
+                f"SELECT user_id FROM users_in_federated_search WHERE {clause}",
+                values,
             )
+            # Materialize the IDs before the cleanup reuses this transaction's cursor.
+            user_ids = [row[0] for row in txn]
+            self._remove_federated_remote_users_txn(txn, user_ids)
 
         await self.db_pool.runInteraction("prune_federated_remote_users", _prune_txn)
 
@@ -929,35 +961,45 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
         """Reconcile a range of remote users made visible via federated search
         for a single remote homeserver.
 
-        All users profiles in `users_in_federated_search` for the given
-        ``homeserver`` with IDs in range (``start_token``, ``end_token``] are
-        deleted and replaced by the profiles given in ``users``.
+        The caller must supply a complete, validated page for ``homeserver``.
+        Profiles, search entries and federation visibility are upserted together.
+        Previously imported users missing from the range (``start_token``,
+        ``end_token``] lose their federation visibility and are cleaned up using
+        the existing room-retention check. None represents an unbounded endpoint.
+        Users outside this range are left untouched.
         """
 
+        profiles = [
+            _UserDirProfile(user_id, display_name, avatar_url)
+            for user_id, display_name, avatar_url in users
+        ]
+        new_user_ids = {profile.user_id for profile in profiles}
+
         def _reconcile_txn(txn: LoggingTransaction) -> None:
-            # First delete all user IDs in the given range for the given homeserver.
+            # Capture old membership before updating it, so missing users can be
+            # removed from the directory and search index as well.
             where_clauses = ["homeserver = ?"]
             where_args = [homeserver]
-            if start_token:
+            if start_token is not None:
                 where_clauses += ["user_id > ?"]
                 where_args += [start_token]
-            if end_token:
+            if end_token is not None:
                 where_clauses += ["user_id <= ?"]
                 where_args += [end_token]
 
             where_clause = "WHERE " + " AND ".join(where_clauses)
 
-            delete_sql = f"""DELETE FROM users_in_federated_search {where_clause}"""
-            txn.execute(delete_sql, where_args)
-
-            # Then insert the new users into the now-freed range.
-            # TODO: Trim or check for inserts outside the given range or with wrong homeserver.
-            self.db_pool.simple_insert_many_txn(
-                txn,
-                "users_in_federated_search",
-                ("user_id", "homeserver"),
-                [(user_id, homeserver) for (user_id, _, _) in users],
+            txn.execute(
+                f"SELECT user_id FROM users_in_federated_search {where_clause}",
+                where_args,
             )
+            existing_user_ids = {row[0] for row in txn}
+
+            if profiles:
+                self._upsert_federated_remote_users_txn(txn, profiles)
+
+            stale_user_ids = existing_user_ids - new_user_ids
+            self._remove_federated_remote_users_txn(txn, stale_user_ids)
 
         await self.db_pool.runInteraction(
             "reconcile_federated_remote_users", _reconcile_txn
@@ -1262,16 +1304,13 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
     async def get_local_users_in_user_dir_paginated(
         self, start_token: str | None, page_size: int
     ) -> list[UserProfile]:
-        """Paginates through all registered local users in the user directory.
+        """Return local directory profiles in user ID order, after start_token.
 
-        Unlike `search_user_dir`, this does not match a search term: it
-        returns all local profiles in the `user_directory` table. Joining
-        with `users`, which only contains local accounts, excludes cached
-        remote profiles. It is used by the federation responder to hand a
-        server's full local directory to a remote homeserver.
+        Joining with registered accounts excludes cached remote profiles.
+        The federation responder uses the last ID as the next page's cursor.
         """
-        where_clause = "WHERE d.user_ui > ?" if start_token else ""
-        args = [start_token] if start_token else []
+        where_clause = "WHERE d.user_id > ?" if start_token is not None else ""
+        args = [start_token] if start_token is not None else []
         sql = f"""
             SELECT d.user_id, d.display_name, d.avatar_url
             FROM user_directory AS d
@@ -1283,7 +1322,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
         rows = cast(
             list[tuple[str, str | None, str | None]],
             await self.db_pool.execute(
-                "get_local_users_in_user_dir", sql, *(args + [page_size])
+                "get_local_users_in_user_dir_paginated", sql, *(args + [page_size])
             ),
         )
 

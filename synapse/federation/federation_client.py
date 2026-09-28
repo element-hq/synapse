@@ -66,17 +66,12 @@ from synapse.federation.federation_base import (
     parse_events_from_pdu_json,
 )
 from synapse.federation.transport.client import SendJoinResponse
-from synapse.federation.user_directory import UserDirectoryResponseModel
+from synapse.federation.user_directory import RemoteUserDirectoryResponseModel
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.types import (
-    JsonDict,
-    StrCollection,
-    UserID,
-    get_domain_from_id,
-)
+from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
@@ -1977,28 +1972,32 @@ class FederationClient(FederationBase):
     async def user_directory_fetch(
         self,
         destination: str,
-        next_token: str | None,
+        start_token: str | None,
         timeout: int,
-    ) -> UserDirectoryResponseModel:
-        """Fetch a page of the user directory on a remote server.
+    ) -> RemoteUserDirectoryResponseModel:
+        """Fetch and validate a page of the user directory on a remote server.
 
         Args:
             destination: The server to query.
-            next_token: Opaque pagination token. None for the first page.
+            start_token: Last user ID from the previous page. None for the first page.
             timeout: Timeout in milliseconds for the request.
 
         Returns:
-            The results containing a page of users from the remote directory.
+            The validated directory page.
 
         Raises:
             HttpResponseException: The remote server returned an HTTP error.
             RequestSendFailed: The request to the remote server failed.
+            ValidationError: The response is malformed or violates the page boundaries.
         """
         response = await self.transport_layer.user_directory_fetch(
-            destination, next_token, timeout
+            destination, start_token, timeout
         )
 
-        return UserDirectoryResponseModel.model_validate(response)
+        return RemoteUserDirectoryResponseModel.model_validate(
+            response,
+            context={"destination": destination, "start_token": start_token},
+        )
 
     async def federation_download_media(
         self,

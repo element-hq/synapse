@@ -909,15 +909,16 @@ class FederationUserDirectoryFetchServlet(BaseFederationServerServlet):
     """
     Implements a federation API endpoint for fetching a server's user directory.
 
-    The endpoint takes no parameters and always returns the responding server's
-    full local directory, so it is a plain GET without a request body.
+    The optional start_token is the last user ID from the previous page. Each
+    response contains up to 10 local users in ascending user ID order. Pass
+    next_token as start_token to continue; an absent next_token ends the sync.
 
     The user_id field is required. Unset display_name and avatar_url fields are
-    omitted to keep the response compact. This is a full snapshot, missing
-    or explicit null profile fields mean no current value and clear cached values.
+    omitted to keep the response compact. Each entry contains a complete profile:
+    missing or explicit null profile fields clear previously cached values.
 
     GET /_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/fetch
-    Response:
+    Example final-page response:
     {
         "results": [
             {

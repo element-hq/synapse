@@ -859,31 +859,29 @@ class TransportLayerClient:
     async def user_directory_fetch(
         self,
         destination: str,
-        next_token: str | None,
+        start_token: str | None,
         timeout: int,
     ) -> JsonDict:
         """
-        Fetch users from the user directory of a remote server.
-
-        The federation endpoint always returns the remote server's full local
-        directory.
+        Fetch a page of the user directory of a remote server.
 
         Args:
             destination: The server to query.
-            timeout: timeout in milliseconds to get the response from destination.
+            start_token: Last user ID from the previous page. None for the first page.
+            timeout: Timeout in milliseconds.
 
         Returns:
-            The directory entries.
+            The directory entries and, if more pages may follow, a next_token.
         """
         path = _create_path(
             FEDERATION_UNSTABLE_PREFIX,
-            "/de.bwi.federated_user_dir" + "/user_directory/fetch",
+            "/de.bwi.federated_user_dir/user_directory/fetch",
         )
 
         return await self.client.get_json(
             destination,
             path=path,
-            args={"next_token": next_token},
+            args={"start_token": start_token} if start_token is not None else {},
             # Ignore backoff because this fetch uses a small, dedicated timeout.
             ignore_backoff=True,
             timeout=timeout,
