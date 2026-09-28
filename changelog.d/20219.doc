@@ -1,1 +1,0 @@
-Replace the stale minimum `poetry` version in the contributing docs with a pointer to the minimum defined in `pyproject.toml`.

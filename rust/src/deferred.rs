@@ -26,7 +26,8 @@ use pyo3::{
 use tokio::sync::oneshot;
 
 use crate::logging::context::with_logcontext;
-use crate::tokio_runtime::runtime;
+use crate::reactor::Reactor;
+use crate::runtime::RustRuntime;
 
 create_exception!(
     synapse.synapse_rust.http_client,
@@ -81,7 +82,7 @@ fn logging_context_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// but the work itself is wasted.
 pub fn create_deferred<'py, F, O>(
     py: Python<'py>,
-    reactor: &Bound<'py, PyAny>,
+    runtime: &RustRuntime,
     fut: F,
 ) -> PyResult<Bound<'py, PyAny>>
 where
@@ -98,16 +99,17 @@ where
     // current when the caller invoked us. See `crate::logging::context`.
     let logcontext = crate::logging::context::LogContextHandle::capture(py);
 
-    let rt = runtime(reactor)?;
-    let handle = rt.handle()?;
+    let handle = runtime.tokio_handle()?;
     let task = handle.spawn(logcontext.scope(fut));
 
-    // Unbind the reactor so that we can pass it to the task
-    let reactor = reactor.clone().unbind();
+    // Keep the runtime state (and, through it, the reactor) alive while the
+    // task is in flight.
+    let runtime = runtime.clone();
     handle.spawn(async move {
         let res = task.await;
 
-        Python::attach(move |py| {
+        // Once done pass the result to the Twisted reactor thread for handling.
+        runtime.dispatch_to_twisted(move |py| {
             // Flatten the panic into standard python error
             let res = match res {
                 Ok(r) => r,
@@ -117,23 +119,19 @@ where
                 },
             };
 
-            // Re-bind the reactor
-            let reactor = reactor.bind(py);
-
             // Send the result to the deferred, via `.callback(..)` or `.errback(..)`
-            match res {
-                Ok(obj) => {
-                    reactor
-                        .call_method("callFromThread", (deferred_callback, obj), None)
-                        .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
-                }
-                Err(err) => {
-                    reactor
-                        .call_method("callFromThread", (deferred_errback, err), None)
-                        .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
-                }
+            let fired = match res {
+                Ok(obj) => deferred_callback.call1(py, (obj,)),
+                Err(err) => deferred_errback.call1(py, (err,)),
+            };
+
+            if let Err(err) = fired {
+                // There is nowhere to propagate this to. The closure runs from
+                // the dispatch reader's `doRead`, and an exception out of that
+                // makes Twisted drop the reader. Log it instead.
+                log::error!("Failed to fire a deferred from a Rust future: {err}");
             }
-        });
+        })
     });
 
     // Make the deferred follow the Synapse logcontext rules
@@ -150,7 +148,7 @@ where
 /// the Twisted reactor and runs to completion regardless of whether the returned Rust
 /// future is ever polled; awaiting it only observes the result.
 pub(crate) async fn run_python_awaitable<F>(
-    reactor: Py<PyAny>,
+    reactor: Reactor,
     make_awaitable: F,
 ) -> PyResult<Py<PyAny>>
 where
@@ -265,9 +263,7 @@ where
             },
         )?;
 
-        reactor
-            .bind(py)
-            .call_method1(intern!(py, "callFromThread"), (starter,))?;
+        reactor.call_from_thread(py, (starter,))?;
 
         Ok(())
     })?;
