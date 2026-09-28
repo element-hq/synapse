@@ -1,0 +1,1 @@
+Fix a bug where downloading remote media over federation could fail when the multipart response was split across network chunks, for example with a long redirect URL. Contributed by @ankit373.
