@@ -107,6 +107,8 @@ pub struct PythonDatabasePoolWrapper {
     /// In an `Arc` so it can be handed to the reactor thread without the GIL.
     database_pool_py_ref: Arc<Py<PyWeakrefReference>>,
 
+    /// A strong reference is fine here, the runtime does not reference the
+    /// homeserver and so does not cause a reference cycle.
     runtime: RustRuntime,
 }
 
@@ -140,16 +142,22 @@ impl DatabasePool for PythonDatabasePoolWrapper {
         // failed.
         let result_slot: Arc<Mutex<Option<ErasedResult>>> = Arc::new(Mutex::new(None));
 
-        // Build the callback that Python's `runInteraction` invokes on a DB
-        // thread with a `LoggingTransaction`. `run_python_awaitable` runs this
-        // closure on the reactor thread, so this tokio worker never takes the
-        // GIL. We drive `func` to completion in the callback; the
-        // Python query path is synchronous under the hood, so it's safe to block
-        // this dedicated DB thread until the future resolves.
+        // Call Python's `runInteraction` with the callback and wait for the
+        // result.
+        //
+        // First we need to build a Python callable that can be passed to
+        // `runInteraction`, which wraps the given `func`. This requires the GIL
+        // and so we build the callable within `run_python_awaitable` (which is
+        // run on the Twisted reactor thread).
+        //
+        // Once we have built the Python callable, we can pass it to
+        // `runInteraction` and wait for the result.
         let callback_slot = Arc::clone(&result_slot);
         let func = Arc::new(func);
         let database_pool_py_ref = Arc::clone(&self.database_pool_py_ref);
         let run_interaction_outcome = run_python_awaitable(&self.runtime, move |py| {
+            // Build a Python callable that wraps the Rust `func` and stores its
+            // result in the callback slot.
             let func = Arc::clone(&func);
             let callback_slot = Arc::clone(&callback_slot);
             let callback = PyCFunction::new_closure(
