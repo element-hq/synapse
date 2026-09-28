@@ -14,7 +14,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, NewType
+from typing import TYPE_CHECKING, Literal, NewType
 
 import attr
 
@@ -674,11 +674,12 @@ class DelayedEventsStore(SQLBaseStore):
 
     async def cancel_delayed_event(
         self, delay_id: str, finalised_ts: Timestamp
-    ) -> Timestamp | None:
+    ) -> Timestamp | None | Literal[False]:
         """
         Cancels the matching delayed event, i.e. remove it as long as it hasn't been processed.
 
-        Returns: The send time of the next delayed event to be sent, if any.
+        Returns: The send time of the next delayed event to be sent, if any,
+            or False if the matching delayed event has already been cancelled.
 
         Raises:
             NotFoundError: if there is no matching delayed event.
@@ -687,7 +688,7 @@ class DelayedEventsStore(SQLBaseStore):
 
         def cancel_delayed_event_txn(
             txn: LoggingTransaction,
-        ) -> Timestamp | None:
+        ) -> Timestamp | None | Literal[False]:
             txn.execute(
                 """
                 UPDATE delayed_events
@@ -719,6 +720,7 @@ class DelayedEventsStore(SQLBaseStore):
                         HTTPStatus.CONFLICT,
                         "Delayed event has already been sent",
                     )
+                return False
             return self._get_next_delayed_event_send_ts_txn(txn)
 
         return await self.db_pool.runInteraction(

@@ -457,6 +457,8 @@ class DelayedEventsHandler:
         next_send_ts = await self._store.cancel_delayed_event(
             delay_id, self._get_current_ts()
         )
+        if next_send_ts is False:
+            return
 
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
