@@ -22,6 +22,7 @@
 import datetime
 import importlib.resources as importlib_resources
 import os
+from http import HTTPStatus
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -225,7 +226,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         request_data = {"username": "kermit", "password": "monkey", "auth": None}
         channel = self.make_request(b"POST", self.url, request_data)
 
-        self.assertEqual(channel.code, 401, msg=channel.result)
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, msg=channel.result)
         self.assertIn("session", channel.json_body)
 
     def test_POST_non_object_auth(self) -> None:
@@ -233,7 +234,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         request_data = {"username": "kermit", "password": "monkey", "auth": ["session"]}
         channel = self.make_request(b"POST", self.url, request_data)
 
-        self.assertEqual(channel.code, 400, msg=channel.result)
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, msg=channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.BAD_JSON)
 
     @override_config({"enable_registration": False})

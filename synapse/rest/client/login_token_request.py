@@ -97,6 +97,8 @@ class LoginTokenRequestServlet(RestServlet):
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         body = parse_json_object_from_request(request)
+        # Only the `auth` field is validated here. The raw body is kept because
+        # `check_ui_auth` stores it when it creates a new UIA session.
         validate_json_object(body, UserInteractiveAuthBody)
 
         if self._require_ui_auth:
