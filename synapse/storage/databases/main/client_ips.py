@@ -440,12 +440,12 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
         if hs.config.worker.run_background_tasks and self.user_ips_max_age:
             self.clock.looping_call(
                 self._prune_old_user_ips,
-                # Based on a measured value of ~9.17 deletes/second on the `user_ips`
-                # table on `matrix.org`. If we prune every 60 seconds, this query will
-                # pick-up ~550 rows which is under the query limit set (5000) with about
-                # an order of magnitude head-room to catch-up from downtime or
-                # peak/heavy traffic. On `matrix.org` peak vs lows is only ~60%
-                # different for activity with the `user_ips` table.
+                # Based on a measured value of ~9.17 average deletes/second on the
+                # `user_ips` table on `matrix.org`. If we prune every 60 seconds, this
+                # query will pick-up ~550 rows which is under the query `LIMIT` set
+                # (5000) with about an order of magnitude head-room to catch-up from
+                # downtime or peak/heavy traffic. On `matrix.org`, the peak delete
+                # activity on the `user_ips` table is ~2x the daily low.
                 #
                 # Running this more often seems good as that means we pick up a smaller
                 # number of rows each time (less work), therefore less disruptive the
@@ -453,7 +453,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
                 # it has to scan through dead tuples left behind by all of the previous
                 # prunes until the table is vacuumed which isn't free so just run this a
                 # reasonable amount.
-                Duration(seconds=120),
+                Duration(seconds=60),
             )
 
         if self._update_on_this_worker:
