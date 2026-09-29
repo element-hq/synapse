@@ -832,6 +832,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Respond with the HTML.
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -847,6 +848,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Respond with the photo.
         client = self.reactor.tcpClients[1][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -899,6 +901,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
