@@ -1573,7 +1573,17 @@ class SyncHandler:
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
                 if delta.event_id is None:
-                    if key in timeline_state:
+                    # When the server leaves, every key in the room gets such a
+                    # delta, so we only look up the keys that need it. A key
+                    # that changed earlier in the window already has its own
+                    # delta with an event ID; only the events persisted together
+                    # with the leave lack one, and those end the timeline. The
+                    # syncing user's own membership is always looked up, as the
+                    # timeline filter may have removed their leave.
+                    if key in timeline_state or key == (
+                        EventTypes.Member,
+                        sync_config.user.to_string(),
+                    ):
                         cleared_state_keys.add(key)
                     continue
 
