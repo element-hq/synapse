@@ -1605,8 +1605,7 @@ class FederationServer(FederationBase):
                 400, "Invalid user directory start token", Codes.INVALID_PARAM
             )
 
-        # Small pages for exercising pagination in the example deployment.
-        page_size = 10
+        page_size = 1_000
         results = await self.store.get_local_users_in_user_dir_paginated(
             start_token, page_size
         )
