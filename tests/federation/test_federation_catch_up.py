@@ -150,7 +150,7 @@ class FederationCatchUpTestCases(_FederationCatchUpTestCaseBase):
     """
     Tests cases of catching up over federation.
 
-    By default for test cases federation sending is disabled. This Test class has it
+    By default, federation is disabled for test cases. `_FederationCatchUpTestCaseBase` has it
     re-enabled for the main process.
     """
 
