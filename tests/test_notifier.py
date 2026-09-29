@@ -11,10 +11,12 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 import logging
+from collections import Counter
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
+from synapse.notifier import wait_for_stream_token_timeout_counter
 from synapse.server import HomeServer
 from synapse.types import MultiWriterStreamToken, StreamKeyType, StreamToken
 from synapse.util.clock import Clock
@@ -134,3 +136,60 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         # Make sure we gave up waiting and not caught-up (False)
         wait_result = self.get_success(wait_d)
         self.assertEqual(wait_result, False)
+
+    def test_wait_for_stream_token_timeout_counts_each_lagging_stream(self) -> None:
+        """
+        Test that a timeout while lagging on more than one stream is counted against
+        each of them.
+        """
+
+        lagging_stream_keys = [StreamKeyType.RECEIPT, StreamKeyType.DEVICE_LIST]
+
+        # Create a new token with the stream IDs artificially advanced far into
+        # the future.
+        token = StreamToken.START
+        token = token.copy_and_advance(
+            StreamKeyType.RECEIPT,
+            MultiWriterStreamToken(stream=10000000000),  # arbitrarily large
+        )
+        token = token.copy_and_advance(
+            StreamKeyType.DEVICE_LIST,
+            MultiWriterStreamToken(stream=10000000000),  # arbitrarily large
+        )
+
+        counts_before = self._get_timeout_counts_from_metric()
+
+        wait_d = defer.ensureDeferred(self.notifier.wait_for_stream_token(token))
+
+        # Advance time to make the `wait_for_stream_token(...)` timeout.
+        self.reactor.advance(Duration(seconds=11).as_secs())
+
+        # Make sure we gave up waiting and not caught-up (False)
+        self.assertEqual(self.get_success(wait_d), False)
+
+        self.assertEqual(
+            self._get_timeout_counts_from_metric() - counts_before,
+            Counter({stream_key.value: 1 for stream_key in lagging_stream_keys}),
+        )
+
+    def _get_timeout_counts_from_metric(self) -> "Counter[str]":
+        """The `wait_for_stream_token` timeout counts for this server, keyed by the
+        `stream_key` label.
+
+        Useful because the Prometheus metrics are process-wide, and so shared
+        between tests. We use this to compare against a count taken before the
+        code under test ran.
+        """
+
+        # Fetch all samples from the `wait_for_stream_token_timeout_counter`
+        # metric. The only label (other than the automatic `server_name` label)
+        # is `stream_key`.
+        samples = self.get_prometheus_metric_current_values(
+            wait_for_stream_token_timeout_counter,
+        )
+
+        counts: Counter[str] = Counter()
+        for sample in samples:
+            counts[sample.labels["stream_key"]] = int(sample.value)
+
+        return counts

@@ -38,6 +38,7 @@ class RedisProtocol(protocol.Protocol):
 
 class SubscriberProtocol(RedisProtocol):
     def __init__(self, *args: object, **kwargs: object): ...
+    username: str | None
     password: str | None
     def subscribe(self, channels: str | list[str]) -> "Deferred[None]": ...
     def connectionMade(self) -> None: ...
@@ -56,6 +57,7 @@ def lazyConnection(
     connectTimeout: int | None = ...,
     replyTimeout: int | None = ...,
     convertNumbers: bool = ...,
+    username: str | None = ...,
 ) -> RedisProtocol: ...
 
 # ConnectionHandler doesn't actually inherit from RedisProtocol, but it proxies
@@ -82,6 +84,7 @@ class RedisFactory(protocol.ReconnectingClientFactory):
         password: str | None = None,
         replyTimeout: int | None = None,
         convertNumbers: int | None = True,
+        username: str | None = None,
     ): ...
     def buildProtocol(self, addr: IAddress) -> RedisProtocol: ...
 

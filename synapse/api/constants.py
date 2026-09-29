@@ -316,6 +316,9 @@ class EventContentFields:
     M_TOPIC: Final = "m.topic"
     M_TEXT: Final = "m.text"
 
+    # `m.room.join_rules` `join_rule` field
+    JOIN_RULE: Final = "join_rule"
+
 
 class EventUnsignedContentFields:
     """Fields found inside the 'unsigned' data on events"""
@@ -499,6 +502,8 @@ class StickyEvent:
     Maximum number of sticky events to include in /sync.
 
     This is the default specified in the MSC. Chosen arbitrarily.
+
+    Does not apply when joining a new room, see https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r3021907998
     """
 
 

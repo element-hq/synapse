@@ -2542,10 +2542,19 @@ class RoomShutdownHandler:
                 result["kicked_users"].append(user_id)
                 if update_result_fct:
                     await update_result_fct(result)
-            except Exception:
-                logger.exception(
-                    "Failed to leave old room and join new room for %r", user_id
-                )
+            except Exception as exc:
+                if (
+                    isinstance(exc, SynapseError)
+                    and exc.errcode == Codes.USER_ACCOUNT_SUSPENDED
+                ):
+                    logger.warning(
+                        "Failed to leave old room and join new room for suspended user (probably expected) %r",
+                        user_id,
+                    )
+                else:
+                    logger.exception(
+                        "Failed to leave old room and join new room for %r", user_id
+                    )
                 result["failed_to_kick_users"].append(user_id)
                 if update_result_fct:
                     await update_result_fct(result)
