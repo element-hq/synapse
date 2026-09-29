@@ -733,8 +733,8 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # skips over, so it must end up backlogged.
         sticky_id_3 = self._send_sticky(room_3, "sticky in the gap", u1_token)
         (event_id_4,) = self.helper.send_messages(room_2, num_events=1, tok=u1_token)
-        # This one is itself a forward extremity, so it will get sent as catch-up and
-        # must _not_ be backlogged.
+        # This event will be a forward extremity itself at the time of catch-up,
+        # so it will get sent as part of regular catch-up and must _not_ be backlogged.
         sticky_id_5 = self._send_sticky(room_1, "sticky extremity", u1_token)
         (event_id_6,) = self.helper.send_messages(room_3, num_events=1, tok=u1_token)
         # Advance for the federation sender to trigger on those newly-sent events
@@ -745,7 +745,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
 
         # First sanity-check what got sent and what the state of the 'regular'
         # catch-up is.
-        # Each room's latest local event was sent, oldest first.
+        # Each room's latest local event (forward extremity) was sent, oldest first.
         self.assertEqual(
             [pdu.event_id for pdu in sent_pdus],
             [event_id_4, sticky_id_5, event_id_6],
@@ -808,6 +808,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         self.reactor.advance(0)
 
         # Do a 'regular' catch-up transaction.
+        # (As a reminder, regular catch-up transactions only send the forward extremities.)
         # This is also what records the sticky event backlog
         self.get_success(per_dest_queue._catch_up_transmission_loop())
         self.assertEqual(
