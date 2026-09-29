@@ -1584,13 +1584,11 @@ class SyncHandler:
             # This ensures the leave event is included in state_after.
             if cleared_state_keys:
                 cleared_state_filter = StateFilter.from_types(cleared_state_keys)
-                state_at_end = (
-                    await self._state_storage_controller.get_state_ids_at(
-                        room_id,
-                        stream_position=end_token,
-                        state_filter=cleared_state_filter,
-                        await_full_state=await_full_state,
-                    )
+                state_at_end = await self._state_storage_controller.get_state_ids_at(
+                    room_id,
+                    stream_position=end_token,
+                    state_filter=cleared_state_filter,
+                    await_full_state=await_full_state,
                 )
                 # Only include state that wasn't already covered by a later
                 # delta with a proper event_id.
