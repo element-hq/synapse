@@ -1,0 +1,1 @@
+Fix a bug where read receipts could be permanently skipped and never sent to application services if more than 100 read receipts arrived in a single stream update.
