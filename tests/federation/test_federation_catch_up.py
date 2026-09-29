@@ -870,7 +870,8 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # to go into catch-up mode
         self.reactor.advance(0)
 
-        # Trigger federation catch-up
+        # Trigger regular federation catch-up and then the sticky event catch-up
+        # (2 transactions, without having to retrigger)
         per_dest_queue.attempt_new_transaction()
         assert per_dest_queue.active_transmission_loop is not None
         self.get_success(per_dest_queue.active_transmission_loop)
