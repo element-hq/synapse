@@ -1104,10 +1104,6 @@ class _MultipartParserProtocol(protocol.Protocol):
             def on_part_begin() -> None:
                 self.part_count += 1
 
-            def on_header_begin() -> None:
-                self.header_field.clear()
-                self.header_value.clear()
-
             def on_header_field(data: bytes, start: int, end: int) -> None:
                 self.header_field += data[start:end]
 
@@ -1117,6 +1113,9 @@ class _MultipartParserProtocol(protocol.Protocol):
             def on_header_end() -> None:
                 field = bytes(self.header_field).lower()
                 value = bytes(self.header_value)
+                # python-multipart 0.0.9 never calls on_header_begin, so reset here.
+                self.header_field.clear()
+                self.header_value.clear()
                 # the first part should be the application/json metadata
                 if self.part_count == 1:
                     if field == b"content-type":
@@ -1153,7 +1152,6 @@ class _MultipartParserProtocol(protocol.Protocol):
 
             callbacks: "multipart.MultipartCallbacks" = {
                 "on_part_begin": on_part_begin,
-                "on_header_begin": on_header_begin,
                 "on_header_field": on_header_field,
                 "on_header_value": on_header_value,
                 "on_header_end": on_header_end,

@@ -19,8 +19,12 @@
 #
 #
 
+import importlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from io import BytesIO
-from unittest.mock import Mock
+from typing import Any
+from unittest.mock import Mock, patch
 
 from netaddr import IPSet
 
@@ -154,6 +158,56 @@ class ReadMultipartResponseTests(TestCase):
         protocol.dataReceived(self.redirect_data)
         # Close the connection.
         protocol.connectionLost(Failure(ResponseDone()))
+
+        multipart_response: MultipartResponse = deferred.result  # type: ignore[assignment]
+
+        self.assertEqual(multipart_response.json, b"{}")
+        self.assertEqual(result.getvalue(), b"")
+        self.assertEqual(
+            multipart_response.url, b"https://cdn.example.org/ab/c1/2345.txt"
+        )
+
+    @contextmanager
+    def _parser_without_on_header_begin(self) -> Iterator[None]:
+        """Make the parser skip `on_header_begin`, as python-multipart 0.0.9 does."""
+        real_parser = importlib.import_module("synapse.http.client").MultipartParser
+
+        def parser(boundary: Any, callbacks: dict[str, Any]) -> Any:
+            callbacks = {k: v for k, v in callbacks.items() if k != "on_header_begin"}
+            return real_parser(boundary, callbacks)
+
+        with patch("synapse.http.client.MultipartParser", parser):
+            yield
+
+    def test_parse_file_without_on_header_begin(self) -> None:
+        """
+        Headers of the file part are still captured when the parser never calls
+        `on_header_begin`, which the oldest supported python-multipart does not.
+        """
+        with self._parser_without_on_header_begin():
+            result, deferred, protocol = self._build_multipart_response(249, 250)
+            protocol.dataReceived(self.multipart_response_data1)
+            protocol.dataReceived(self.multipart_response_data2)
+            protocol.connectionLost(Failure(ResponseDone()))
+
+        multipart_response: MultipartResponse = deferred.result  # type: ignore[assignment]
+
+        self.assertEqual(multipart_response.json, b"{}")
+        self.assertEqual(result.getvalue(), b"file_to_stream")
+        self.assertEqual(multipart_response.content_type, b"text/plain")
+        self.assertEqual(
+            multipart_response.disposition, b"inline; filename=test_upload"
+        )
+
+    def test_parse_redirect_without_on_header_begin(self) -> None:
+        """
+        The `Location` header of a redirect part is still captured when the parser
+        never calls `on_header_begin`, and no file data is written.
+        """
+        with self._parser_without_on_header_begin():
+            result, deferred, protocol = self._build_multipart_response(249, 250)
+            protocol.dataReceived(self.redirect_data)
+            protocol.connectionLost(Failure(ResponseDone()))
 
         multipart_response: MultipartResponse = deferred.result  # type: ignore[assignment]
 
