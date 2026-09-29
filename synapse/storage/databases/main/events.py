@@ -1154,7 +1154,17 @@ class PersistEventsStore:
         # From this point onwards the events are only events that we haven't
         # seen before.
 
-        self._store_event_txn(txn, events_and_contexts=events_and_contexts)
+        # Must be computed before the events are inserted, as it reads the
+        # room's current maximum ordering.
+        topological_orderings = self._compute_topological_orderings_txn(
+            txn, events_and_contexts
+        )
+
+        self._store_event_txn(
+            txn,
+            events_and_contexts=events_and_contexts,
+            topological_orderings=topological_orderings,
+        )
 
         if new_forward_extremities:
             self._update_forward_extremities_txn(
@@ -1192,6 +1202,7 @@ class PersistEventsStore:
             events_and_contexts=events_and_contexts,
             all_events_and_contexts=all_events_and_contexts,
             inhibit_local_membership_updates=inhibit_local_membership_updates,
+            topological_orderings=topological_orderings,
         )
 
         # We call this last as it assumes we've inserted the events into
@@ -2840,9 +2851,9 @@ class PersistEventsStore:
         with depth == MAX_DEPTH, which would pile them all onto one ordering
         and reduce /messages to arrival order. We store such events just above
         the room's current maximum ordering instead, so a room repaired by the
-        fixup_max_depth_tie_ordering background update stays in chronological
-        order. Until that update runs, the room's maximum is itself MAX_DEPTH
-        and this reduces to the old behaviour.
+        fixup_max_depth_tie_ordering background update stays correctly ordered.
+        Until that update runs, the room's maximum is itself MAX_DEPTH and this
+        reduces to the old behaviour.
 
         Only events appended to the live timeline (positive stream ordering)
         get this treatment. A backfilled at-cap event is older than the room's
@@ -2883,6 +2894,7 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         events_and_contexts: Collection[EventPersistencePair],
+        topological_orderings: dict[str, int],
     ) -> None:
         """Insert new events into the event, event_json, redaction and
         state_events tables.
@@ -2912,10 +2924,6 @@ class PersistEventsStore:
                 )
                 for event, _ in events_and_contexts
             ],
-        )
-
-        topological_orderings = self._compute_topological_orderings_txn(
-            txn, events_and_contexts
         )
 
         self.db_pool.simple_insert_many_txn(
@@ -3021,6 +3029,7 @@ class PersistEventsStore:
         events_and_contexts: list[EventPersistencePair],
         all_events_and_contexts: list[EventPersistencePair],
         inhibit_local_membership_updates: bool = False,
+        topological_orderings: dict[str, int],
     ) -> None:
         """Update all the miscellaneous tables for new events
 
@@ -3034,6 +3043,9 @@ class PersistEventsStore:
                 from being updated by these events. This should be set to True
                 for backfilled events because backfilled events in the past do
                 not affect the current local state.
+            topological_orderings: the ordering stored in `events` for each
+                event. The tables here that also hold a topological_ordering
+                must match it, or joins against `events` miss.
         """
 
         # Insert all the push actions into the event_push_actions table.
@@ -3041,6 +3053,7 @@ class PersistEventsStore:
             txn,
             events_and_contexts=events_and_contexts,
             all_events_and_contexts=all_events_and_contexts,
+            topological_orderings=topological_orderings,
         )
 
         if not events_and_contexts:
@@ -3081,7 +3094,9 @@ class PersistEventsStore:
                 # Update the room_retention table.
                 self._store_retention_policy_for_room_txn(txn, event)
 
-            self._handle_event_relations(txn, event)
+            self._handle_event_relations(
+                txn, event, topological_orderings[event.event_id]
+            )
 
             if supports_msc4242_state_dag(event) and event_exists_in_state_dag(event):
                 self._store_state_dag_edges(txn, event)
@@ -3090,7 +3105,11 @@ class PersistEventsStore:
             labels = event.content.get(EventContentFields.LABELS)
             if labels:
                 self.insert_labels_for_event_txn(
-                    txn, event.event_id, labels, event.room_id, event.depth
+                    txn,
+                    event.event_id,
+                    labels,
+                    event.room_id,
+                    topological_orderings[event.event_id],
                 )
 
             if self._ephemeral_messages_enabled:
@@ -3387,13 +3406,14 @@ class PersistEventsStore:
                 )
 
     def _handle_event_relations(
-        self, txn: LoggingTransaction, event: EventBase
+        self, txn: LoggingTransaction, event: EventBase, topological_ordering: int
     ) -> None:
         """Handles inserting relation data during persistence of events
 
         Args:
             txn: The current database transaction.
             event: The event which might have relations.
+            topological_ordering: the ordering stored for this event in `events`.
         """
         relation = relation_from_event(event)
         if not relation:
@@ -3438,7 +3458,7 @@ class PersistEventsStore:
                     event.room_id,
                     relation.parent_id,
                     event.event_id,
-                    event.depth,
+                    topological_ordering,
                     event.internal_metadata.stream_ordering,
                 ),
             )
@@ -3622,6 +3642,7 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         events_and_contexts: list[EventPersistencePair],
         all_events_and_contexts: list[EventPersistencePair],
+        topological_orderings: dict[str, int],
     ) -> None:
         """Handles moving push actions from staging table to main
         event_push_actions table for all events in `events_and_contexts`.
@@ -3634,6 +3655,7 @@ class PersistEventsStore:
             all_events_and_contexts: all events that we were going to persist.
                 This includes events we've already persisted, etc, that wouldn't
                 appear in events_and_context.
+            topological_orderings: the ordering stored for each event in `events`.
         """
 
         # Only notifiable events will have push actions associated with them,
@@ -3662,7 +3684,7 @@ class PersistEventsStore:
                     (
                         event.room_id,
                         event.internal_metadata.stream_ordering,
-                        event.depth,
+                        topological_orderings[event.event_id],
                         event.event_id,
                     )
                     for event in notifiable_events

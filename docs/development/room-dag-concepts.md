@@ -14,10 +14,24 @@ A (oldest) <---- B <---- C (most recent)
 ## Depth and stream ordering
 
 Events are normally sorted by `(topological_ordering, stream_ordering)` where
-`topological_ordering` is just `depth`. In other words, we first sort by `depth`
-and then tie-break based on `stream_ordering`. `depth` is incremented as new
-messages are added to the DAG. Normally, `stream_ordering` is an auto
-incrementing integer, but backfilled events start with `stream_ordering=-1` and decrement.
+`topological_ordering` is seeded from `depth`. In other words, we first sort
+by `depth` and then tie-break based on `stream_ordering`. `depth` is
+incremented as new messages are added to the DAG. Normally, `stream_ordering`
+is an auto incrementing integer, but backfilled events start with
+`stream_ordering=-1` and decrement.
+
+Do not assume `topological_ordering` equals `depth`. `depth` comes from the event
+itself and never changes. `topological_ordering` is local to each server, and
+Synapse rewrites it where `depth` cannot be trusted. Take a room that was sent an
+event with a huge `depth` (see
+[GHSA-v56r-hwv5-mxg6](https://github.com/advisories/GHSA-v56r-hwv5-mxg6)): every
+event after it carries a `depth` capped at `MAX_DEPTH`, so the
+`fixup_max_depth_tie_ordering` background update spreads those events back out
+over the unused ordering range.
+
+`event_labels`, `event_push_actions` and `threads` each hold a copy of an event's
+`topological_ordering`. Keep them in step with `events` when you write them,
+because queries join them against `events` or compare the two values.
 
 ---
 

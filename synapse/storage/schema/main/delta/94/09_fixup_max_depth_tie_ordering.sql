@@ -11,7 +11,7 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Background update that restores chronological ordering for events whose
+-- Background update that repairs the ordering of events whose
 -- topological_ordering collapsed onto MAX_DEPTH (or above it, in room versions
 -- without strict canonical JSON).
 INSERT INTO background_updates (ordering, update_name, progress_json, depends_on) VALUES

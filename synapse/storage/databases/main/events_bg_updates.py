@@ -870,7 +870,8 @@ class EventsBackgroundUpdatesStore(
         def _event_store_labels_txn(txn: LoggingTransaction) -> int:
             txn.execute(
                 """
-                SELECT event_id, json FROM event_json
+                SELECT event_id, json, events.topological_ordering FROM event_json
+                INNER JOIN events USING (event_id)
                 LEFT JOIN event_labels USING (event_id)
                 WHERE event_id > ? AND label IS NULL
                 ORDER BY event_id LIMIT ?
@@ -882,7 +883,7 @@ class EventsBackgroundUpdatesStore(
 
             nbrows = 0
             last_row_event_id = ""
-            for event_id, event_json_raw in results:
+            for event_id, event_json_raw, topological_ordering in results:
                 try:
                     event_json = db_to_json(event_json_raw)
 
@@ -895,7 +896,7 @@ class EventsBackgroundUpdatesStore(
                                 event_id,
                                 label,
                                 event_json["room_id"],
-                                event_json["depth"],
+                                topological_ordering,
                             )
                             for label in event_json["content"].get(
                                 EventContentFields.LABELS, []
@@ -2751,6 +2752,8 @@ class EventsBackgroundUpdatesStore(
         unused ordering range above the room's highest real depth, ranked by
         origin_server_ts. topological_ordering is local to this server, so
         nothing changes over federation.
+
+        The other tables that hold a topological_ordering are updated to match.
         """
 
         room_id_bound = progress.get("room_id", "")
@@ -2800,8 +2803,26 @@ class EventsBackgroundUpdatesStore(
         """Re-spread this room's events at or above MAX_DEPTH by
         origin_server_ts. Returns True if anything changed."""
 
+        # The queries below filter on `depth`, which has no index. Check the
+        # indexed column first so untouched rooms cost one range scan of
+        # `events_order_room` instead of a scan of every event in the room.
         txn.execute(
-            "SELECT count(*) FROM events WHERE room_id = ? AND topological_ordering >= ?",
+            """
+            SELECT 1 FROM events
+            WHERE room_id = ? AND topological_ordering >= ?
+            LIMIT 1
+            """,
+            (room_id, MAX_DEPTH),
+        )
+        if txn.fetchone() is None:
+            return False
+
+        # Select on `depth` rather than `topological_ordering`. The bomb capped
+        # `depth` and we never rewrite it, so it still identifies the affected
+        # events after their orderings have moved, and re-running this update
+        # over a room finds the same set again.
+        txn.execute(
+            "SELECT count(*) FROM events WHERE room_id = ? AND depth >= ?",
             (room_id, MAX_DEPTH),
         )
         row = txn.fetchone()
@@ -2814,7 +2835,7 @@ class EventsBackgroundUpdatesStore(
         txn.execute(
             """
             SELECT COALESCE(max(topological_ordering), 0) FROM events
-            WHERE room_id = ? AND topological_ordering < ?
+            WHERE room_id = ? AND depth < ?
             """,
             (room_id, MAX_DEPTH),
         )
@@ -2826,15 +2847,7 @@ class EventsBackgroundUpdatesStore(
         # block so newly persisted at-cap events can continue past it.
         stride = max(1, (MAX_DEPTH - base) // (2 * (count + 1)))
 
-        txn.execute(
-            """
-            SELECT event_id FROM events
-            WHERE room_id = ? AND topological_ordering >= ?
-            ORDER BY COALESCE(origin_server_ts, 0) ASC, stream_ordering ASC
-            """,
-            (room_id, MAX_DEPTH),
-        )
-        event_ids = [event_id for (event_id,) in txn]
+        event_ids = self._depth_repair_order_txn(txn, room_id)
 
         txn.execute_batch(
             "UPDATE events SET topological_ordering = ? WHERE event_id = ?",
@@ -2843,7 +2856,73 @@ class EventsBackgroundUpdatesStore(
                 for i, event_id in enumerate(event_ids)
             ],
         )
+
+        self._sync_satellite_orderings_txn(txn, room_id)
+
         return True
+
+    def _depth_repair_order_txn(
+        self, txn: LoggingTransaction, room_id: str
+    ) -> list[str]:
+        """Return this room's at-cap events in the order they should be laid
+        out, oldest first."""
+
+        txn.execute(
+            """
+            SELECT event_id FROM events
+            WHERE room_id = ? AND depth >= ?
+            ORDER BY COALESCE(origin_server_ts, 0) ASC, stream_ordering ASC
+            """,
+            (room_id, MAX_DEPTH),
+        )
+        return [event_id for (event_id,) in txn]
+
+    def _sync_satellite_orderings_txn(
+        self, txn: LoggingTransaction, room_id: str
+    ) -> None:
+        """Copy the repaired orderings into the other tables that hold a
+        topological_ordering for this room's events.
+
+        Filtered /messages joins `event_labels` on the column, so a stale value
+        drops the event from the response. `/notifications` compares
+        `event_push_actions` against a live read of `events` to decide whether a
+        notification has been read, so a stale value leaves it unread forever.
+        `threads` orders a room's thread list by it, so a stale value pins the
+        thread to the top of the list.
+        """
+
+        for table in ("event_labels", "event_push_actions"):
+            # Both tables index room_id first, so match on it rather than on
+            # event_id alone.
+            txn.execute(
+                f"""
+                UPDATE {table} SET topological_ordering = (
+                    SELECT e.topological_ordering FROM events AS e
+                    WHERE e.event_id = {table}.event_id
+                )
+                WHERE room_id = ? AND event_id IN (
+                    SELECT event_id FROM events
+                    WHERE room_id = ? AND depth >= ?
+                )
+                """,
+                (room_id, room_id, MAX_DEPTH),
+            )
+
+        # `threads` holds one row per thread, keyed on the thread's latest
+        # event, so it needs its own statement.
+        txn.execute(
+            """
+            UPDATE threads SET topological_ordering = (
+                SELECT e.topological_ordering FROM events AS e
+                WHERE e.event_id = threads.latest_event_id
+            )
+            WHERE room_id = ? AND latest_event_id IN (
+                SELECT event_id FROM events
+                WHERE room_id = ? AND depth >= ?
+            )
+            """,
+            (room_id, room_id, MAX_DEPTH),
+        )
 
     async def _resign_events(self, progress: dict, batch_size: int) -> int:
         """Retroactively re-sign events signed with a different key than the

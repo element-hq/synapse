@@ -21,7 +21,7 @@ from canonicaljson import encode_canonical_json
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import MAX_DEPTH
+from synapse.api.constants import MAX_DEPTH, EventContentFields, RelationTypes
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -207,6 +207,14 @@ class TestFixupMaxDepthTieOrderingBgUpdate(HomeserverTestCase):
             )
         )
 
+        self.create_room_events(room_id, events)
+
+    def create_room_events(
+        self, room_id: str, events: list[tuple[str, int, int]]
+    ) -> None:
+        """Insert events into an existing room, given as
+        (event_id, topological_ordering, origin_server_ts)."""
+
         for event_id, topological_ordering, origin_server_ts in events:
             self.get_success(
                 self.db_pool.simple_insert(
@@ -332,6 +340,138 @@ class TestFixupMaxDepthTieOrderingBgUpdate(HomeserverTestCase):
         self.assertEqual(orderings["$normal1:e"], 1)
         self.assertEqual(orderings["$normal2:e"], 2)
         self.assertEqual(orderings["$single:e"], MAX_DEPTH)
+
+    def test_rerunning_does_not_push_the_block_higher(self) -> None:
+        """A second pass must rank the whole block from the room's last real
+        depth again, not from the top of the block the first pass wrote."""
+
+        room_id = "!rerun:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V6,
+            [
+                ("$normal:e", 1, 1000),
+                ("$capped1:e", MAX_DEPTH, 4000),
+                ("$capped2:e", MAX_DEPTH, 5000),
+            ],
+        )
+
+        self.assertEqual(self.run_update(), 1)
+        first_pass_floor = min(
+            o for e, o in self.get_orderings(room_id).items() if e != "$normal:e"
+        )
+
+        # A backfilled at-cap event keeps the cap, which is what brings a
+        # repaired room back through here.
+        self.create_room_events(room_id, [("$capped3:e", MAX_DEPTH, 4500)])
+
+        self.assertEqual(self.run_update(), 1)
+
+        orderings = self.get_orderings(room_id)
+        self.assertEqual(orderings["$normal:e"], 1)
+
+        capped = [(o, e) for e, o in orderings.items() if e != "$normal:e"]
+        self.assertEqual(
+            [e for _, e in sorted(capped)],
+            ["$capped1:e", "$capped3:e", "$capped2:e"],
+        )
+
+        # Spreading three events from the same base starts lower than spreading
+        # two did. A base that crept up to the old block would start higher.
+        self.assertLess(min(o for o, _ in capped), first_pass_floor)
+        self.assertGreater(min(o for o, _ in capped), 1)
+
+    def test_satellite_tables_follow_the_respread(self) -> None:
+        """The update also brings the other tables holding a
+        topological_ordering back into step with `events`."""
+
+        room_id = "!satellites:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V6,
+            [
+                ("$normal:e", 1, 1000),
+                ("$capped1:e", MAX_DEPTH, 4000),
+                ("$capped2:e", MAX_DEPTH, 5000),
+            ],
+        )
+
+        for event_id in ("$capped1:e", "$capped2:e"):
+            self.get_success(
+                self.db_pool.simple_insert(
+                    table="event_labels",
+                    values={
+                        "event_id": event_id,
+                        "label": "#fun",
+                        "room_id": room_id,
+                        "topological_ordering": MAX_DEPTH,
+                    },
+                )
+            )
+            self.get_success(
+                self.db_pool.simple_insert(
+                    table="event_push_actions",
+                    values={
+                        "room_id": room_id,
+                        "event_id": event_id,
+                        "user_id": "@user:test",
+                        "actions": "[]",
+                        "stream_ordering": self._next_stream_ordering,
+                        "topological_ordering": MAX_DEPTH,
+                        "notif": 1,
+                        "highlight": 0,
+                        "unread": 0,
+                        "thread_id": "main",
+                    },
+                )
+            )
+            self._next_stream_ordering += 1
+
+        # One thread whose latest event was capped, and one from before the bomb
+        # that must not move.
+        for thread_id, latest_event_id, ordering in (
+            ("$capped1:e", "$capped2:e", MAX_DEPTH),
+            ("$normal:e", "$normal:e", 1),
+        ):
+            self.get_success(
+                self.db_pool.simple_insert(
+                    table="threads",
+                    values={
+                        "room_id": room_id,
+                        "thread_id": thread_id,
+                        "latest_event_id": latest_event_id,
+                        "topological_ordering": ordering,
+                        "stream_ordering": self._next_stream_ordering,
+                    },
+                )
+            )
+            self._next_stream_ordering += 1
+
+        self.assertEqual(self.run_update(), 1)
+
+        orderings = self.get_orderings(room_id)
+        for table in ("event_labels", "event_push_actions"):
+            rows = self.get_success(
+                self.db_pool.simple_select_list(
+                    table=table,
+                    keyvalues={"room_id": room_id},
+                    retcols=["event_id", "topological_ordering"],
+                )
+            )
+            self.assertEqual(len(rows), 2, table)
+            for event_id, topological_ordering in rows:
+                self.assertEqual(topological_ordering, orderings[event_id], table)
+
+        threads = self.get_success(
+            self.db_pool.simple_select_list(
+                table="threads",
+                keyvalues={"room_id": room_id},
+                retcols=["thread_id", "topological_ordering"],
+            )
+        )
+        self.assertEqual(
+            dict(threads), {"$capped1:e": orderings["$capped2:e"], "$normal:e": 1}
+        )
 
 
 class TestCappedDepthTopologicalPlacement(HomeserverTestCase):
@@ -720,4 +860,150 @@ class TestResignEventsBgUpdate(HomeserverTestCase):
         )
         self.assertIn(
             new_key_id, new_event.signatures[self.hs.config.server.server_name]
+        )
+
+
+class TestCappedDepthSatelliteTables(HomeserverTestCase):
+    """Every table that stores an event's topological_ordering must agree with
+    `events`, including in rooms whose depth reached the cap."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = self.hs.get_datastores().main
+        self.db_pool = self.store.db_pool
+
+        self.creator = self.register_user("creator", "pass")
+        self.creator_tok = self.login("creator", "pass")
+        self.other = self.register_user("other", "pass")
+        self.other_tok = self.login("other", "pass")
+
+        self.room_id = self.helper.create_room_as(
+            self.creator, tok=self.creator_tok, is_public=True
+        )
+        self.helper.join(self.room_id, self.other, tok=self.other_tok)
+
+        # Bomb the room. Once the latest event sits at the cap, every event
+        # built on top of it is capped too.
+        self.root_id = self.helper.send(
+            self.room_id, body="root", tok=self.creator_tok
+        )["event_id"]
+        self.get_success(
+            self.db_pool.simple_update_one(
+                table="events",
+                keyvalues={"event_id": self.root_id},
+                updatevalues={"depth": MAX_DEPTH},
+            )
+        )
+
+    def get_ordering(self, event_id: str, table: str = "events") -> int:
+        """The topological_ordering `table` holds, keyed by event_id."""
+
+        return self.get_success(
+            self.db_pool.simple_select_one_onecol(
+                table=table,
+                keyvalues={"event_id": event_id},
+                retcol="topological_ordering",
+            )
+        )
+
+    def send_labelled(self) -> str:
+        return self.helper.send_event(
+            self.room_id,
+            "m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "labelled",
+                EventContentFields.LABELS: ["#fun"],
+            },
+            tok=self.creator_tok,
+        )["event_id"]
+
+    def test_every_table_agrees_with_events(self) -> None:
+        """Labels, threads and push actions record the ordering `events` holds,
+        not the capped depth."""
+
+        labelled_id = self.send_labelled()
+
+        threaded_id = self.helper.send_event(
+            self.room_id,
+            "m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "threaded",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": self.root_id,
+                },
+            },
+            tok=self.creator_tok,
+        )["event_id"]
+
+        # Both events must really be at the cap, or this test proves nothing.
+        for event_id in (labelled_id, threaded_id):
+            depth = self.get_success(
+                self.db_pool.simple_select_one_onecol(
+                    table="events",
+                    keyvalues={"event_id": event_id},
+                    retcol="depth",
+                )
+            )
+            self.assertEqual(depth, MAX_DEPTH)
+            # Stored above the room's real maximum instead of on the cap, so
+            # ordering and depth differ.
+            self.assertLess(self.get_ordering(event_id), MAX_DEPTH)
+
+        self.assertEqual(
+            self.get_ordering(labelled_id, table="event_labels"),
+            self.get_ordering(labelled_id),
+        )
+
+        self.assertEqual(
+            self.get_success(
+                self.db_pool.simple_select_one_onecol(
+                    table="threads",
+                    keyvalues={"room_id": self.room_id, "thread_id": self.root_id},
+                    retcol="topological_ordering",
+                )
+            ),
+            self.get_ordering(threaded_id),
+        )
+
+        # `other` is in the room, so these messages notify them.
+        rows = self.get_success(
+            self.db_pool.simple_select_list(
+                table="event_push_actions",
+                keyvalues={"room_id": self.room_id, "user_id": self.other},
+                retcols=["event_id", "topological_ordering"],
+            )
+        )
+        self.assertGreater(len(rows), 0)
+        for event_id, topological_ordering in rows:
+            self.assertEqual(topological_ordering, self.get_ordering(event_id))
+
+    def test_label_filter_still_finds_capped_events(self) -> None:
+        """Filtered /messages joins event_labels on topological_ordering, so a
+        mismatch drops labelled events from the response."""
+
+        labelled_id = self.send_labelled()
+
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/messages?access_token=%s&dir=b&filter=%s"
+            % (
+                self.room_id,
+                self.creator_tok,
+                json.dumps({"org.matrix.labels": ["#fun"]}),
+            ),
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(
+            [event["event_id"] for event in channel.json_body["chunk"]],
+            [labelled_id],
         )

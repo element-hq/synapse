@@ -438,12 +438,15 @@ class EventChainStoreTestCase(HomeserverTestCase):
             # We need to persist the events to the events and state_events
             # tables.
             assert persist_events_store is not None
+            events_and_contexts = [
+                (e, EventContext(self.hs.get_storage_controllers(), {})) for e in events
+            ]
             persist_events_store._store_event_txn(
                 txn,
-                [
-                    (e, EventContext(self.hs.get_storage_controllers(), {}))
-                    for e in events
-                ],
+                events_and_contexts,
+                topological_orderings=persist_events_store._compute_topological_orderings_txn(
+                    txn, events_and_contexts
+                ),
             )
 
             # Actually call the function that calculates the auth chain stuff.
