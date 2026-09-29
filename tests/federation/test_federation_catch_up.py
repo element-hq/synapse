@@ -751,10 +751,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
             [event_id_4, sticky_id_5, event_id_6],
         )
         self.assertFalse(per_dest_queue._catching_up, "should have completed catch-up")
-        self.assertEqual(
-            per_dest_queue._last_successful_stream_ordering,
-            self._stream_ordering_for(event_id_6),
-        )
+        self._assert_remote_host_was_last_sent_event_id(event_id_6)
 
         # Check the state of the sticky event backlog
         # - `sticky_id_3` fell in the gap that got skipped over by the catch-up
