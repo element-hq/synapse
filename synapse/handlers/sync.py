@@ -1559,24 +1559,25 @@ class SyncHandler:
                 from_token=since_token.room_key,
                 to_token=end_token.room_key,
             )
-            # Track state keys whose deltas have event_id=None, indicating
+            # Track state keys whose latest delta has event_id=None, indicating
             # the server has left the room and current_state_events was cleared.
-            cleared_state_keys: list[tuple[str, str]] = []
+            cleared_state_keys: set[tuple[str, str]] = set()
             for delta in deltas:
+                key = (delta.event_type, delta.state_key)
                 if delta.event_id is None:
                     # The state entry was cleared (server left the room). We
                     # need to look up the actual state at the end of the
                     # timeline via state groups instead.
                     # See https://github.com/element-hq/synapse/issues/18793
-                    key = (delta.event_type, delta.state_key)
                     if key in timeline_state:
-                        cleared_state_keys.append(key)
+                        cleared_state_keys.add(key)
                     continue
 
                 # Note that deltas are in stream ordering, so if there are
                 # multiple deltas for a given type/state_key we'll always pick
                 # the latest one.
-                delta_state_ids[(delta.event_type, delta.state_key)] = delta.event_id
+                delta_state_ids[key] = delta.event_id
+                cleared_state_keys.discard(key)
 
             # If there were state keys cleared because the server left the room,
             # fall back to looking up the state at end_token via state groups
@@ -1590,11 +1591,10 @@ class SyncHandler:
                     state_filter=cleared_state_filter,
                     await_full_state=await_full_state,
                 )
-                # Only include state that wasn't already covered by a later
-                # delta with a proper event_id.
-                for key, event_id in state_at_end.items():
-                    if key not in delta_state_ids:
-                        delta_state_ids[key] = event_id
+                # The latest delta for these keys was the clear, so the state at
+                # end_token replaces any earlier delta for the same key (e.g. a
+                # display name change before the leave).
+                delta_state_ids.update(state_at_end)
 
             return delta_state_ids
 
