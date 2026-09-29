@@ -70,14 +70,12 @@ pub struct RustRuntimeInner {
 }
 
 impl RustRuntimeInner {
-    /// The Twisted reactor this homeserver runs on.
-    pub fn reactor(&self) -> &Reactor {
-        &self.reactor
-    }
-
     /// Queue `f` to run on the Twisted reactor thread with the GIL held, and
     /// wake the reactor. Never takes the GIL itself, so a tokio task can call
     /// it to hand a result back to Twisted. See [`crate::twisted_dispatch`].
+    ///
+    /// This is the equivalent of calling `reactor.callFromThread` in Python and
+    /// should be used by Rust code instead of `callFromThread`.
     ///
     /// Returns an error once the homeserver has shut down.
     pub fn dispatch_to_twisted<F>(&self, f: F) -> anyhow::Result<()>
