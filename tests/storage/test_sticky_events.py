@@ -664,32 +664,36 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         # The event immediately before the gap.
         # Suppose that this is where the destination had
         # successfully been caught up to.
-        before_gap = self.helper.send(room1, "before the gap", tok=self.token)[
+        before_gap_event_id = self.helper.send(room1, "before the gap", tok=self.token)[
             "event_id"
         ]
 
         # Send 2 sticky events into room1
-        room1_sticky1 = self._send_sticky(room1, "sticky 1")
-        _room1_sticky2 = self._send_sticky(room1, "sticky 2")
+        room1_sticky1_event_id = self._send_sticky(room1, "sticky 1")
+        _room1_sticky2_event_id = self._send_sticky(room1, "sticky 2")
 
         # Send a sticky event into room2
-        room2_sticky3 = self._send_sticky(room2, "sticky 3")
+        room2_sticky3_event_id = self._send_sticky(room2, "sticky 3")
 
         # Send a couple of events for the the catch-up transaction to advance us to.
-        (room1_after_gap,) = self.helper.send_messages(room1, 1, tok=self.token)
-        (room2_after_gap,) = self.helper.send_messages(room2, 1, tok=self.token)
+        (room1_after_gap_event_id,) = self.helper.send_messages(
+            room1, 1, tok=self.token
+        )
+        (room2_after_gap_event_id,) = self.helper.send_messages(
+            room2, 1, tok=self.token
+        )
 
         # We store destination rooms entries for those:
         # this is how the outstanding events to be sent are tracked.
         # It's also a necessary prerequisite for the backlog marking calculation.
         self.get_success(
             self.store.store_destination_rooms_entries(
-                {"host2"}, room1, self._stream_ordering_for(room1_after_gap)
+                {"host2"}, room1, self._stream_ordering_for(room1_after_gap_event_id)
             )
         )
         self.get_success(
             self.store.store_destination_rooms_entries(
-                {"host2"}, room2, self._stream_ordering_for(room2_after_gap)
+                {"host2"}, room2, self._stream_ordering_for(room2_after_gap_event_id)
             )
         )
 
@@ -700,13 +704,13 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             self.store.mark_backlogged_sticky_events_after_catchup_transaction(
                 "host2",
                 old_last_successfully_sent_stream_ordering=self._stream_ordering_for(
-                    before_gap
+                    before_gap_event_id
                 ),
                 new_last_successfully_sent_stream_ordering=self._stream_ordering_for(
-                    room1_after_gap
+                    room1_after_gap_event_id
                 ),
                 event_stream_orderings_sent_in_transaction={
-                    self._stream_ordering_for(room1_after_gap)
+                    self._stream_ordering_for(room1_after_gap_event_id)
                 },
             )
         )
@@ -715,9 +719,9 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             self._sticky_backlog_rows(),
             {
                 # In room1: we need to catch up from the first sticky event
-                ("host2", room1, self._sticky_stream_id_for(room1_sticky1)),
+                ("host2", room1, self._sticky_stream_id_for(room1_sticky1_event_id)),
                 # In room2: we need to catch up from the first sticky event in that room
-                ("host2", room2, self._sticky_stream_id_for(room2_sticky3)),
+                ("host2", room2, self._sticky_stream_id_for(room2_sticky3_event_id)),
             },
         )
 
@@ -730,20 +734,20 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         room_id = self.helper.create_room_as(self.user_id, tok=self.token)
 
         # Send a sticky event. Suppose we had already delivered this one to the destination.
-        event1_sticky = self._send_sticky(room_id, "already sent")
+        event1_id_sticky = self._send_sticky(room_id, "already sent")
 
         # Send 2 regular events that we suppose we had _not_ delivered to the destination yet.
-        (_event2_nonsticky, _event3_nonsticky) = self.helper.send_messages(
+        (_event2_id_nonsticky, _event3_id_nonsticky) = self.helper.send_messages(
             room_id, 2, tok=self.token
         )
         # Send a sticky event. This is the one we'll treat as the forward extremity
-        event4_sticky = self._send_sticky(room_id, "not yet due to be sent")
+        event4_id_sticky = self._send_sticky(room_id, "not yet due to be sent")
 
         # Note down that we have events up to `event4_sticky` that need to be
         # sent out.
         self.get_success(
             self.store.store_destination_rooms_entries(
-                {"host2"}, room_id, self._stream_ordering_for(event4_sticky)
+                {"host2"}, room_id, self._stream_ordering_for(event4_id_sticky)
             )
         )
 
@@ -752,10 +756,10 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             self.store.mark_backlogged_sticky_events_after_catchup_transaction(
                 "host2",
                 old_last_successfully_sent_stream_ordering=self._stream_ordering_for(
-                    event1_sticky
+                    event1_id_sticky
                 ),
                 new_last_successfully_sent_stream_ordering=self._stream_ordering_for(
-                    event4_sticky
+                    event4_id_sticky
                 ),
                 # Really we 'should' put `event4_sticky` here to match reality
                 # However we're interested in testing the range being correct without
@@ -776,17 +780,19 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         room_id = self.helper.create_room_as(self.user_id, tok=self.token)
 
         # First of all, suppose we had already sent out an event
-        event1_start = self.helper.send(room_id, "gap start", tok=self.token)[
+        event1_start_id = self.helper.send(room_id, "gap start", tok=self.token)[
             "event_id"
         ]
         # then send a sticky event that we will lose in the gap
-        event2_sticky = self._send_sticky(room_id, "early sticky")
+        event2_sticky_id = self._send_sticky(room_id, "early sticky")
         # Send a 'middle' event that we will send out in a catch-up transaction
-        event3_middle = self.helper.send(room_id, "middle", tok=self.token)["event_id"]
+        event3_middle_id = self.helper.send(room_id, "middle", tok=self.token)[
+            "event_id"
+        ]
 
         self.get_success(
             self.store.store_destination_rooms_entries(
-                {"host2"}, room_id, self._stream_ordering_for(event3_middle)
+                {"host2"}, room_id, self._stream_ordering_for(event3_middle_id)
             )
         )
 
@@ -796,29 +802,29 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             self.store.mark_backlogged_sticky_events_after_catchup_transaction(
                 "host2",
                 old_last_successfully_sent_stream_ordering=self._stream_ordering_for(
-                    event1_start
+                    event1_start_id
                 ),
                 new_last_successfully_sent_stream_ordering=self._stream_ordering_for(
-                    event3_middle
+                    event3_middle_id
                 ),
                 event_stream_orderings_sent_in_transaction={
-                    self._stream_ordering_for(event3_middle)
+                    self._stream_ordering_for(event3_middle_id)
                 },
             )
         )
         self.assertEqual(
             self._sticky_backlog_rows(),
-            {("host2", room_id, self._sticky_stream_id_for(event2_sticky))},
+            {("host2", room_id, self._sticky_stream_id_for(event2_sticky_id))},
         )
 
         # Now send another sticky event and 'lose' it in a gap again.
         # Send a final event that we will send out in a catch-up transaction
         # (in order to create a gap for this event to sit in)
-        event5_end = self.helper.send(room_id, "gap end", tok=self.token)["event_id"]
+        event5_end_id = self.helper.send(room_id, "gap end", tok=self.token)["event_id"]
 
         self.get_success(
             self.store.store_destination_rooms_entries(
-                {"host2"}, room_id, self._stream_ordering_for(event5_end)
+                {"host2"}, room_id, self._stream_ordering_for(event5_end_id)
             )
         )
 
@@ -826,13 +832,13 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             self.store.mark_backlogged_sticky_events_after_catchup_transaction(
                 "host2",
                 old_last_successfully_sent_stream_ordering=self._stream_ordering_for(
-                    event3_middle
+                    event3_middle_id
                 ),
                 new_last_successfully_sent_stream_ordering=self._stream_ordering_for(
-                    event5_end
+                    event5_end_id
                 ),
                 event_stream_orderings_sent_in_transaction={
-                    self._stream_ordering_for(event5_end)
+                    self._stream_ordering_for(event5_end_id)
                 },
             )
         )
@@ -841,7 +847,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         # because it's the earliest sticky event that needs catching up.
         self.assertEqual(
             self._sticky_backlog_rows(),
-            {("host2", room_id, self._sticky_stream_id_for(event2_sticky))},
+            {("host2", room_id, self._sticky_stream_id_for(event2_sticky_id))},
         )
 
     def test_get_backlogged_sticky_events_returns_none_when_no_backlog(self) -> None:
@@ -878,10 +884,10 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         """
         room_id = self.helper.create_room_as(self.user_id, tok=self.token)
 
-        _sticky_1 = self._send_sticky(room_id, "sticky 1")
-        sticky_2 = self._send_sticky(room_id, "sticky 2")
-        sticky_3 = self._send_sticky(room_id, "sticky 3")
-        sticky_4 = self._send_sticky(room_id, "sticky 4")
+        _sticky_1_event_id = self._send_sticky(room_id, "sticky 1")
+        sticky_2_event_id = self._send_sticky(room_id, "sticky 2")
+        sticky_3_event_id = self._send_sticky(room_id, "sticky 3")
+        sticky_4_event_id = self._send_sticky(room_id, "sticky 4")
 
         # Pretend a catch-up transaction left a gap of unsent sticky events,
         # starting from sticky_2 onwards.
@@ -892,7 +898,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
                     "destination": "host2",
                     "room_id": room_id,
                     "sticky_events_stream_position": self._sticky_stream_id_for(
-                        sticky_2
+                        sticky_2_event_id
                     ),
                 },
                 desc="test:insert_backlog",
@@ -907,9 +913,9 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             result,
             (
                 RoomID.from_string(room_id),
-                self._sticky_stream_id_for(sticky_4),
+                self._sticky_stream_id_for(sticky_4_event_id),
                 # We see sticky 2 events up to and including 4, in that order
-                [sticky_2, sticky_3, sticky_4],
+                [sticky_2_event_id, sticky_3_event_id, sticky_4_event_id],
             ),
         )
 
@@ -919,9 +925,9 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         """
         room_id = self.helper.create_room_as(self.user_id, tok=self.token)
 
-        sticky_1 = self._send_sticky(room_id, "sticky 1")
-        sticky_2 = self._send_sticky(room_id, "sticky 2")
-        _sticky_3 = self._send_sticky(room_id, "sticky 3")
+        sticky_1_event_id = self._send_sticky(room_id, "sticky 1")
+        sticky_2_event_id = self._send_sticky(room_id, "sticky 2")
+        _sticky_3_event_id = self._send_sticky(room_id, "sticky 3")
 
         # Pretend a catch-up transaction left a gap of unsent sticky events,
         # starting from sticky_1 onwards.
@@ -932,7 +938,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
                     "destination": "host2",
                     "room_id": room_id,
                     "sticky_events_stream_position": self._sticky_stream_id_for(
-                        sticky_1
+                        sticky_1_event_id
                     ),
                 },
                 desc="test:insert_backlog",
@@ -949,9 +955,9 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
                 RoomID.from_string(room_id),
                 # We get the sticky event stream ID of sticky_2 as that's the last one we received
                 # in this window
-                self._sticky_stream_id_for(sticky_2),
+                self._sticky_stream_id_for(sticky_2_event_id),
                 # We limit to 2 so we don't see sticky_3 here
-                [sticky_1, sticky_2],
+                [sticky_1_event_id, sticky_2_event_id],
             ),
         )
 
@@ -968,7 +974,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             inject_member_event(self.hs, room_id, "@remote:host3", Membership.JOIN)
         )
 
-        remote_sticky = self.get_success(
+        remote_sticky_event_id = self.get_success(
             inject_event(
                 self.hs,
                 room_id=room_id,
@@ -981,7 +987,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
                 ),
             )
         ).event_id
-        local_sticky = self._send_sticky(room_id, "local sticky")
+        local_sticky_event_id = self._send_sticky(room_id, "local sticky")
 
         # Sanity check our test: the remote event _is_ in the sticky events table.
         self.assertEqual(
@@ -995,12 +1001,12 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
                     )
                 )
             ),
-            {remote_sticky, local_sticky},
+            {remote_sticky_event_id, local_sticky_event_id},
         )
 
-        assert self._sticky_stream_id_for(remote_sticky) < self._sticky_stream_id_for(
-            local_sticky
-        )
+        assert self._sticky_stream_id_for(
+            remote_sticky_event_id
+        ) < self._sticky_stream_id_for(local_sticky_event_id)
 
         self.get_success(
             self.store.db_pool.simple_insert(
@@ -1009,7 +1015,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
                     "destination": "host2",
                     "room_id": room_id,
                     "sticky_events_stream_position": self._sticky_stream_id_for(
-                        remote_sticky
+                        remote_sticky_event_id
                     ),
                 },
                 desc="test:insert_backlog",
@@ -1022,8 +1028,8 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             ),
             (
                 RoomID.from_string(room_id),
-                self._sticky_stream_id_for(local_sticky),
-                [local_sticky],
+                self._sticky_stream_id_for(local_sticky_event_id),
+                [local_sticky_event_id],
             ),
         )
 
@@ -1038,7 +1044,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         room_id = self.helper.create_room_as(self.user_id, tok=self.token)
 
         # A sticky event that expires almost immediately.
-        short_lived = self.helper.send_sticky_event(
+        short_lived_event_id = self.helper.send_sticky_event(
             room_id,
             EventTypes.Message,
             duration=Duration(milliseconds=1),
@@ -1053,7 +1059,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
                     "destination": "host2",
                     "room_id": room_id,
                     "sticky_events_stream_position": self._sticky_stream_id_for(
-                        short_lived
+                        short_lived_event_id
                     ),
                 },
                 desc="test:insert_backlog",
@@ -1082,9 +1088,9 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         """
         room_id = self.helper.create_room_as(self.user_id, tok=self.token)
 
-        sticky_1 = self._send_sticky(room_id, "sticky 1")
-        sticky_2 = self._send_sticky(room_id, "sticky 2")
-        sticky_3 = self._send_sticky(room_id, "sticky 3")
+        sticky_1_event_id = self._send_sticky(room_id, "sticky 1")
+        sticky_2_event_id = self._send_sticky(room_id, "sticky 2")
+        sticky_3_event_id = self._send_sticky(room_id, "sticky 3")
 
         self.get_success(
             self.store.db_pool.simple_insert(
@@ -1093,7 +1099,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
                     "destination": "host2",
                     "room_id": room_id,
                     "sticky_events_stream_position": self._sticky_stream_id_for(
-                        sticky_1
+                        sticky_1_event_id
                     ),
                 },
                 desc="test:insert_backlog",
@@ -1104,7 +1110,9 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             self.store.mark_backlogged_sticky_events_sent(
                 "host2",
                 RoomID.from_string(room_id),
-                StickyEventStreamPosition(self._sticky_stream_id_for(sticky_2)),
+                StickyEventStreamPosition(
+                    self._sticky_stream_id_for(sticky_2_event_id)
+                ),
             )
         )
 
@@ -1112,7 +1120,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         # exactly one past the highest event we sent.
         self.assertEqual(
             self._sticky_backlog_rows(),
-            {("host2", room_id, self._sticky_stream_id_for(sticky_2) + 1)},
+            {("host2", room_id, self._sticky_stream_id_for(sticky_2_event_id) + 1)},
         )
 
         # And the next batch is just the remaining event.
@@ -1122,7 +1130,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             ),
             (
                 RoomID.from_string(room_id),
-                self._sticky_stream_id_for(sticky_3),
-                [sticky_3],
+                self._sticky_stream_id_for(sticky_3_event_id),
+                [sticky_3_event_id],
             ),
         )
