@@ -1559,16 +1559,20 @@ class SyncHandler:
                 from_token=since_token.room_key,
                 to_token=end_token.room_key,
             )
-            # Track state keys whose latest delta has event_id=None, indicating
-            # the server has left the room and current_state_events was cleared.
+            # A delta with `event_id=None` means the key was removed from the
+            # current state. Two things cause this:
+            #  - A state reset removed the key. State groups don't have it
+            #    either, and MSC4222 has no way to tell the client that a key
+            #    was removed, so there is nothing to send.
+            #  - The server left the room and we deleted every
+            #    `current_state_events` row for it. State groups still have
+            #    the real state at `end_token`, so we look the key up there
+            #    instead of skipping it.
+            # See https://github.com/element-hq/synapse/issues/18793
             cleared_state_keys: set[tuple[str, str]] = set()
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
                 if delta.event_id is None:
-                    # The state entry was cleared (server left the room). We
-                    # need to look up the actual state at the end of the
-                    # timeline via state groups instead.
-                    # See https://github.com/element-hq/synapse/issues/18793
                     if key in timeline_state:
                         cleared_state_keys.add(key)
                     continue
@@ -1579,21 +1583,16 @@ class SyncHandler:
                 delta_state_ids[key] = delta.event_id
                 cleared_state_keys.discard(key)
 
-            # If there were state keys cleared because the server left the room,
-            # fall back to looking up the state at end_token via state groups
-            # (which are preserved even after current_state_events is cleared).
-            # This ensures the leave event is included in state_after.
             if cleared_state_keys:
-                cleared_state_filter = StateFilter.from_types(cleared_state_keys)
                 state_at_end = await self._state_storage_controller.get_state_ids_at(
                     room_id,
                     stream_position=end_token,
-                    state_filter=cleared_state_filter,
+                    state_filter=StateFilter.from_types(cleared_state_keys),
                     await_full_state=await_full_state,
                 )
-                # The latest delta for these keys was the clear, so the state at
-                # end_token replaces any earlier delta for the same key (e.g. a
-                # display name change before the leave).
+                # The latest delta for these keys was the removal, so the state
+                # at `end_token` replaces any earlier delta for the same key
+                # (e.g. a display name change before the leave).
                 delta_state_ids.update(state_at_end)
 
             return delta_state_ids

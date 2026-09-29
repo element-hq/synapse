@@ -885,8 +885,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         Regression test for https://github.com/element-hq/synapse/issues/18793
         """
         if not self.use_state_after:
-            # This test is only relevant for state_after (MSC4222).
-            return
+            self.skipTest("Only relevant for `state_after` (MSC4222)")
 
         # Alice is the sole local user. She creates a room and joins.
         alice = self.register_user("alice", "password")
