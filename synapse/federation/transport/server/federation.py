@@ -491,7 +491,11 @@ class FederationV1InviteServlet(BaseFederationServerServlet):
         # state resolution algorithm, and we don't use that for processing
         # invites
         result = await self.handler.on_invite_request(
-            origin, content, room_version_id=RoomVersions.V1.identifier
+            origin=origin,
+            expected_room_id=room_id,
+            expected_event_id=event_id,
+            event_json=content,
+            room_version_id=RoomVersions.V1.identifier,
         )
 
         # V1 federation API is defined to return a content of `[200, {...}]`
@@ -513,9 +517,6 @@ class FederationV2InviteServlet(BaseFederationServerServlet):
         room_id: str,
         event_id: str,
     ) -> tuple[int, JsonDict]:
-        # TODO(paul): assert that room_id/event_id parsed from path actually
-        #   match those given in content
-
         room_version = content["room_version"]
         event = content["event"]
         invite_room_state = content.get("invite_room_state", [])
@@ -524,12 +525,15 @@ class FederationV2InviteServlet(BaseFederationServerServlet):
             invite_room_state = []
 
         # Synapse expects invite_room_state to be in unsigned, as it is in v1
-        # API
-
+        # API. We will sanitize this inside `on_invite_request(...)`
         event.setdefault("unsigned", {})["invite_room_state"] = invite_room_state
 
         result = await self.handler.on_invite_request(
-            origin, event, room_version_id=room_version
+            origin=origin,
+            expected_room_id=room_id,
+            expected_event_id=event_id,
+            event_json=event,
+            room_version_id=room_version,
         )
 
         # We only store invite_room_state for internal use, so remove it before

@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.161/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.162/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -252,6 +252,9 @@ properties:
       display names) of other users through the client API. Note that profile
       data is also available via the federation API, unless
       `allow_profile_lookup_over_federation` is set to false.
+
+      This option must be enabled in order to use
+      `limit_profile_requests_to_users_who_share_rooms`.
     default: false
     examples:
       - true
@@ -262,6 +265,10 @@ properties:
       order to retrieve their profile information. Only checked on Client-Server
       requests. Profile requests from other servers should be checked by the
       requesting server.
+
+      The check can only be applied to authenticated requests, so this option
+      requires `require_auth_for_profile_requests` to be enabled as well.
+      Synapse will refuse to start if this option is enabled without it.
     default: false
     examples:
       - true
@@ -5785,6 +5792,20 @@ properties:
     default: null
     examples:
       - worker1
+  task_scheduler:
+    type: object
+    description: >-
+      Configuration for the task scheduler.
+    properties:
+      max_concurrent_tasks:
+        type: integer
+        minimum: 1
+        description: >-
+          The maximum number of tasks that can run concurrently in the task
+          scheduler. Setting this too high may swamp the database connection pool.
+        default: 5
+    examples:
+      - max_concurrent_tasks: 5
   update_user_directory_from_worker:
     type: ["string", "null"]
     description: >-

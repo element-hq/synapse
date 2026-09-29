@@ -27,6 +27,7 @@ pub mod room_versions;
 pub mod runtime;
 pub mod segmenter;
 pub mod storage;
+pub mod twisted_dispatch;
 pub mod types;
 
 lazy_static! {
