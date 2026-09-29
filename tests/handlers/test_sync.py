@@ -943,6 +943,67 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             },
         )
 
+    def test_state_after_leave_last_local_user_after_own_membership_change(
+        self,
+    ) -> None:
+        """When the last local user changes their own membership event (e.g. their
+        display name) and then leaves within the same incremental sync window, the
+        leave event (not the earlier membership event) must appear in state_after.
+        """
+        if not self.use_state_after:
+            self.skipTest("Only relevant for `state_after` (MSC4222)")
+
+        # Alice is the sole local user. She creates a room and joins.
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+
+        room_id = self.helper.create_room_as(alice, tok=alice_tok)
+
+        # Sync up to get a since_token.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+            )
+        )
+
+        # Alice changes her display name. This membership event has a delta of
+        # its own for her `m.room.member` state key.
+        self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            {"membership": "join", "displayname": "Alice"},
+            tok=alice_tok,
+            state_key=alice,
+        )
+
+        # Alice leaves. She is the last local user, so the server clears
+        # current_state_events for this room.
+        leave_event = self.helper.leave(room_id, alice, tok=alice_tok)["event_id"]
+
+        # Incremental sync. A newly left room is sent down in the archived section.
+        sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The room must appear in the archived section.
+        self.assertEqual(len(sync_result.archived), 1)
+        sync_room_result = sync_result.archived[0]
+        self.assertEqual(sync_room_result.room_id, room_id)
+
+        # state_after must have Alice's leave, not her display name change.
+        self.assertEqual(
+            {key: event.event_id for key, event in sync_room_result.state.items()},
+            {("m.room.member", alice): leave_event},
+        )
+
     def _patch_get_latest_events(self, latest_events: list[str]) -> ContextManager:
         """Monkey-patch `get_prev_events_for_room`
 
