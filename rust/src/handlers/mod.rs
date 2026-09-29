@@ -43,10 +43,8 @@ impl RustHandlers {
         // and the Twisted reactor.
         let runtime = homeserver.get_rust_runtime(py)?;
 
-        let db_pool = PythonDatabasePoolWrapper::new(
-            &homeserver.main_database_pool(py)?,
-            runtime.reactor().clone_ref(py),
-        )?;
+        let db_pool =
+            PythonDatabasePoolWrapper::new(&homeserver.main_database_pool(py)?, runtime.clone())?;
 
         // Store is shared across all of the handlers so let's use an `Arc`
         let store = Arc::new(Store {
