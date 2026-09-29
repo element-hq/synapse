@@ -50,6 +50,13 @@ ma1sd, SSL support, etc.).
 For more details, see
 <https://github.com/spantaleev/matrix-docker-ansible-deploy>
 
+[Easypanel](https://easypanel.io) is a self-hosted Docker deployment platform with a one-click deployment template for Synapse (with a Postgres database pre-wired):
+
+[![Deploy on Easypanel][easypanel-btn]][easypanel-deploy]
+
+[easypanel-btn]: https://easypanel.io/img/deploy-on-easypanel-40.svg
+[easypanel-deploy]: https://easypanel.io/templates/matrix-synapse
+
 #### Debian/Ubuntu
 
 ##### Matrix.org packages
