@@ -700,6 +700,8 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         room_1 = self.helper.create_room_as("u1", tok=u1_token)
         room_2 = self.helper.create_room_as("u1", tok=u1_token)
         room_3 = self.helper.create_room_as("u1", tok=u1_token)
+        # Make a remote user join each of the rooms, so that we consider them
+        # for sending events over federation
         for room_id in (room_1, room_2, room_3):
             self.get_success(
                 event_injection.inject_member_event(
