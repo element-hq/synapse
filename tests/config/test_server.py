@@ -229,6 +229,48 @@ class ServerConfigTestCase(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 _read_config(generate_config(disallowed_value))
 
+    def test_finalised_delayed_events_retention_period_enforces_non_negative(
+        self,
+    ) -> None:
+        """
+        Test that the configured retention period of finalised delayed events
+        must be a non-negative duration if set, as per documentation
+        """
+
+        def generate_config(value: Any) -> JsonDict:
+            return {
+                "experimental_features": {"msc4140_finalised_retention_period": value}
+            }
+
+        for allowed_value in (0, 1, "7d"):
+            _read_config(generate_config(allowed_value))
+
+        for disallowed_value in (-1, "-1d", "1x", None):
+            with self.assertRaises((ConfigError, TypeError, ValueError)):
+                _read_config(generate_config(disallowed_value))
+
+    def test_finalised_delayed_events_retention_limit_per_user_enforces_non_negative_int(
+        self,
+    ) -> None:
+        """
+        Test that the configured retention limit of finalised delayed events per user
+        must be a non-negative integer if set, as per documentation
+        """
+
+        def generate_config(value: Any) -> JsonDict:
+            return {
+                "experimental_features": {
+                    "msc4140_finalised_retention_limit_per_user": value
+                }
+            }
+
+        for allowed_value in (0, 1):
+            _read_config(generate_config(allowed_value))
+
+        for disallowed_value in (-1, 0.5, "1"):
+            with self.assertRaises(ConfigError):
+                _read_config(generate_config(disallowed_value))
+
     @parameterized.expand(
         [
             [
@@ -236,6 +278,16 @@ class ServerConfigTestCase(unittest.TestCase):
                 {
                     "experimental_features": {
                         "msc4140_max_delayed_events_per_user": 3,
+                    }
+                },
+            ],
+            [
+                "all_msc4140",
+                {
+                    "experimental_features": {
+                        "msc4140_max_delayed_events_per_user": 3,
+                        "msc4140_finalised_retention_period": "1d",
+                        "msc4140_finalised_retention_limit_per_user": 10,
                     }
                 },
             ],

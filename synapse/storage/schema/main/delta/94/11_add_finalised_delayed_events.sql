@@ -12,9 +12,10 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 -- Store when delayed events have either been sent, cancelled, or not sent due to an error (MSC4140)
-ALTER TABLE delayed_events ADD COLUMN finalised_error bytea;
+ALTER TABLE delayed_events ADD COLUMN finalised_error TEXT;
 ALTER TABLE delayed_events ADD COLUMN finalised_event_id TEXT;
 ALTER TABLE delayed_events ADD COLUMN finalised_ts BIGINT;
 
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (9411, 'delayed_events_finalised_ts', '{}');
+  (9411, 'delayed_events_finalised_ts', '{}'),
+  (9411, 'delayed_events_finalised_rank', '{}');
