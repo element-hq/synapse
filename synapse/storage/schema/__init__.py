@@ -179,6 +179,7 @@ Changes in SCHEMA_VERSION = 94
     - Add an `inserted_ts` column to the `state_groups_persisting` table.
     - MSC4140: Add columns to the `delayed_events` table to keep track of delayed events
       that have been sent, cancelled, or failed to be sent due to an error.
+    - MSC4140: Add an index on `delayed_events` to rank finalised delayed events per user.
 """
 
 

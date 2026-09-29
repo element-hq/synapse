@@ -129,6 +129,14 @@ class DelayedEventsStore(SQLBaseStore):
             columns=("finalised_ts",),
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="delayed_events_finalised_rank",
+            index_name="delayed_events_finalised_rank",
+            table="delayed_events",
+            columns=("user_localpart", "finalised_ts DESC", "delay_id ASC"),
+            where_clause="finalised_ts IS NOT NULL",
+        )
+
     async def get_delayed_events_stream_pos(self) -> int:
         """
         Gets the stream position of the background process to watch for state events
@@ -385,13 +393,14 @@ class DelayedEventsStore(SQLBaseStore):
             txn.execute(
                 """
                 DELETE FROM delayed_events
-                WHERE delay_id IN (
-                    SELECT delay_id FROM (
+                WHERE (user_localpart, delay_id) IN (
+                    SELECT user_localpart, delay_id FROM (
                         SELECT
+                            user_localpart,
                             delay_id,
                             ROW_NUMBER() OVER (
                                 PARTITION BY user_localpart
-                                ORDER BY finalised_ts DESC
+                                ORDER BY finalised_ts DESC, delay_id ASC
                             ) AS finalised_rank
                         FROM delayed_events
                         WHERE finalised_ts IS NOT NULL
