@@ -2950,7 +2950,7 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
 
         # Calculating the incrementals state will return the second state, and not the
         # first.
-        state = self.get_success(
+        state, _ = self.get_success(
             self.sync_handler._compute_state_delta_for_incremental_sync(
                 room_id=joined_room,
                 sync_config=generate_sync_config(user, use_state_after=True),
@@ -2982,7 +2982,7 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
         since_token = self.hs.get_event_sources().get_current_token()
         end_stream_token = self.hs.get_event_sources().get_current_token()
 
-        state = self.get_success(
+        state, _ = self.get_success(
             self.sync_handler._compute_state_delta_for_incremental_sync(
                 room_id=joined_room,
                 sync_config=generate_sync_config(user, use_state_after=True),

@@ -1703,7 +1703,8 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.alice = self.register_user("alice", "password")
-        self.alice_tok = self.login("alice", "password")
+        self.alice_device = "alice_device"
+        self.alice_tok = self.login("alice", "password", device_id=self.alice_device)
         self.bob = self.register_user("bob", "password")
         self.bob_tok = self.login("bob", "password")
 
@@ -1978,3 +1979,39 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         response = channel.json_body
         self.assertEqual(len(self._timeline_ids(response)), 1)
         self.assertEqual(self._members_in_state(response, use_state_after), [])
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_membership_change_sent_when_cache_claims_it_was(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A membership change since `since` is sent even when the cache says
+        the client already has it.
+
+        The cache only decides whether to leave out the memberships fetched for
+        timeline senders. It can be wrong: a retry of a request can run while
+        the original is still being built, and the original then marks members
+        the retry has to send. A change must never depend on it.
+        """
+        t0 = self._sync(use_state_after, timeline_limit=1)["next_batch"]
+
+        kick = self.helper.change_membership(
+            self.room_id, self.alice, self.bob, "leave", tok=self.alice_tok
+        )
+        # A later message, so that the kick falls into the gap of the
+        # one-event timeline and only `state` can carry it.
+        self.helper.send(self.room_id, body="after the kick", tok=self.alice_tok)
+
+        # Claim the kick was already sent in the response that ended at `t0`.
+        # Syncing from `t0` does not forget this, as the client has acknowledged
+        # that response.
+        t0_token = self.get_success(
+            StreamToken.from_string(self.hs.get_datastores().main, t0)
+        )
+        cache = self.hs.get_sync_handler().get_lazy_loaded_members_cache(
+            (self.alice, self.alice_device)
+        )
+        cache.mark_sent(self.bob, kick["event_id"], t0_token)
+
+        response = self._sync(use_state_after, t0, timeline_limit=1)
+        self.assertNotIn(kick["event_id"], self._timeline_ids(response))
+        self.assertIn(kick["event_id"], self._state_ids(response, use_state_after))

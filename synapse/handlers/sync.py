@@ -75,6 +75,7 @@ from synapse.types import (
     MutableStateMap,
     Requester,
     RoomStreamToken,
+    StateKey,
     StateMap,
     StrCollection,
     StreamKeyType,
@@ -1341,6 +1342,11 @@ class SyncHandler:
             # sync's timeline and the start of the current sync's timeline.
             # See the docstring above for details.
             state_ids: StateMap[str]
+            # The keys in `state_ids` whose state changed since `since_token`.
+            # These are sent whether or not the lazy-loaded members cache says
+            # the client has them. The rest are memberships fetched for
+            # timeline senders, which the client may already have.
+            changed_keys: set[StateKey] = set()
             # We need to know whether the state we fetch may be partial, so check
             # whether the room is partial stated *before* fetching it.
             is_partial_state_room = await self.store.is_partial_state_room(room_id)
@@ -1360,7 +1366,10 @@ class SyncHandler:
                 # is indeed the case.
                 assert since_token is not None
 
-                state_ids = await self._compute_state_delta_for_incremental_sync(
+                (
+                    state_ids,
+                    changed_keys,
+                ) = await self._compute_state_delta_for_incremental_sync(
                     room_id,
                     sync_config,
                     batch,
@@ -1400,11 +1409,15 @@ class SyncHandler:
                 # they're new to this client or have been pushed out of the
                 # cache). For an initial sync the cache has already been
                 # cleared.
+                #
+                # A state change since `since_token` is always sent, regardless
+                # of whether it was previously sent to the client (e.g due to a
+                # client retrying the request).
                 logger.debug("filtering state from %r...", state_ids)
                 state_ids = {
                     t: event_id
                     for t, event_id in state_ids.items()
-                    if not cache.was_sent(t[1], event_id)
+                    if t in changed_keys or not cache.was_sent(t[1], event_id)
                 }
                 logger.debug("...to %r", state_ids)
 
@@ -1586,14 +1599,16 @@ class SyncHandler:
         members_to_fetch: set[str] | None,
         timeline_state: StateMap[str],
         joined: bool,
-    ) -> StateMap[str]:
+    ) -> tuple[StateMap[str], set[StateKey]]:
         """Calculate the state events to be included in an incremental sync response.
 
         If lazy-loading of membership events is enabled (as indicated by
         `members_to_fetch` being not-`None`), the result will include the membership
         events for each member in `members_to_fetch`. The caller
         (`compute_state_delta`) is responsible for keeping track of which membership
-        events we have already sent to the client, and hence ripping them out.
+        events we have already sent to the client, and hence ripping them out. It
+        may only rip out entries that are not state changes, so this also returns
+        the keys whose state changed since `since_token`.
 
         Note that whether this returns the state at the start or the end of the
         batch depends on `sync_config.use_state_after` (c.f. MSC4222).
@@ -1614,7 +1629,10 @@ class SyncHandler:
 
         Returns:
             A map from (type, state_key) to event_id, for each event that we believe
-            should be included in the `state` or `state_after` part of the sync response.
+            should be included in the `state` or `state_after` part of the sync
+            response, and the subset of its keys whose state changed since
+            `since_token`. The other keys are memberships fetched for timeline
+            senders, which the client may have been sent before.
         """
         if members_to_fetch is not None:
             # Lazy-loading is enabled. Only return the state that is needed.
@@ -1630,6 +1648,7 @@ class SyncHandler:
         # timeline. If at the end we can just use the current state delta stream.
         if sync_config.use_state_after:
             delta_state_ids: MutableStateMap[str] = {}
+            changed_keys: set[StateKey] = set()
 
             if members_to_fetch:
                 # We're lazy-loading, so the client might need some more member
@@ -1684,9 +1703,11 @@ class SyncHandler:
                 # Note that deltas are in stream ordering, so if there are
                 # multiple deltas for a given type/state_key we'll always pick
                 # the latest one.
-                delta_state_ids[(delta.event_type, delta.state_key)] = delta.event_id
+                key = (delta.event_type, delta.state_key)
+                delta_state_ids[key] = delta.event_id
+                changed_keys.add(key)
 
-            return delta_state_ids
+            return delta_state_ids, changed_keys
 
         # For a non-gappy sync if the events in the timeline are simply a linear
         # chain (i.e. no merging/branching of the graph), then we know the state
@@ -1734,7 +1755,9 @@ class SyncHandler:
                             await_full_state=False,
                         )
                     )
-            return state_ids
+            # A linear, non-gappy timeline means the only changes to the `state`
+            # are lazy-loaded members.
+            return state_ids, set()
 
         if batch:
             state_at_timeline_start = (
@@ -1793,7 +1816,16 @@ class SyncHandler:
             lazy_load_members=lazy_load_members,
         )
 
-        return state_ids
+        # Everything that differs from the state at the previous sync is a
+        # change. What is left is the memberships of timeline senders that
+        # `_calculate_state` adds back for lazy loading.
+        changed_keys = {
+            key
+            for key, event_id in state_ids.items()
+            if state_at_previous_sync.get(key) != event_id
+        }
+
+        return state_ids, changed_keys
 
     async def _find_missing_partial_state_memberships(
         self,
