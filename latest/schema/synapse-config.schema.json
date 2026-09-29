@@ -1,6 +1,6 @@
 {
   "$schema": "https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json",
-  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.161/synapse-config.schema.json",
+  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.162/synapse-config.schema.json",
   "type": "object",
   "properties": {
     "modules": {
@@ -245,8 +245,8 @@
     },
     "default_room_version": {
       "type": "string",
-      "description": "The default room version for newly created rooms on this server.\n\nKnown room versions are listed [here](https://spec.matrix.org/latest/rooms/#complete-list-of-room-versions)\n\nFor example, for room version 1, `default_room_version` should be set to \"1\".\n\n_Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).\n_Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).",
-      "default": "11",
+      "description": "The default room version for newly created rooms on this server.\n\nKnown room versions are listed [here](https://spec.matrix.org/latest/rooms/#complete-list-of-room-versions)\n\nFor example, for room version 1, `default_room_version` should be set to \"1\".\n\n_Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).\n_Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).\n_Changed in Synapse 1.162:_ the default room version was increased from [11](https://spec.matrix.org/v1.16/rooms/v11/) to [12](https://spec.matrix.org/v1.16/rooms/v12/)",
+      "default": "12",
       "examples": [
         "8"
       ]
@@ -2039,6 +2039,14 @@
       "default": {
         "per_second": 0.016,
         "burst_count": 200.0
+      }
+    },
+    "rc_profile": {
+      "$ref": "#/$defs/rc",
+      "description": "This option allows admins to ratelimit profile lookups by clients.\n\nRequests are limited per user when the request is authenticated, otherwise per client IP address.\n\n_Added in Synapse 1.162.0._",
+      "default": {
+        "per_second": 1.0,
+        "burst_count": 500.0
       }
     },
     "federation_rr_transactions_per_room_per_second": {
@@ -4788,7 +4796,7 @@
     },
     "redis": {
       "type": "object",
-      "description": "Configuration for Redis when using workers. This *must* be enabled when using workers.\n\n_Added in Synapse 1.78.0._\n\n_Changed in Synapse 1.84.0: Added use\\_tls, certificate\\_file, private\\_key\\_file, ca\\_file and ca\\_path attributes_\n\n_Changed in Synapse 1.85.0: Added path option to use a local Unix socket_\n\n_Changed in Synapse 1.116.0: Added password\\_path_",
+      "description": "Configuration for Redis when using workers. This *must* be enabled when using workers.\n\n_Added in Synapse 1.78.0._\n\n_Changed in Synapse 1.84.0: Added use\\_tls, certificate\\_file, private\\_key\\_file, ca\\_file and ca\\_path attributes_\n\n_Changed in Synapse 1.85.0: Added path option to use a local Unix socket_\n\n_Changed in Synapse 1.116.0: Added password\\_path_\n\n_Changed in Synapse 1.162.0: Added username_",
       "properties": {
         "enabled": {
           "type": "boolean",
@@ -4809,6 +4817,14 @@
           "type": "string",
           "description": "The full path to a local Unix socket file. **If this is used, `host` and `port` are ignored.**",
           "default": "/tmp/redis.sock"
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional username if configured on the Redis instance (Redis 6+ ACL authentication). Requires `password` (or `password_path`) to also be set.",
+          "default": null
         },
         "password": {
           "type": [
@@ -4877,6 +4893,7 @@
           "enabled": true,
           "host": "localhost",
           "port": 6379,
+          "username": "<username>",
           "password_path": "<path_to_the_password_file>",
           "dbid": "<dbid>"
         }

@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-cd06e18a.js";
+            window.path_to_searchindex_js = "../../searchindex-5430d330.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-64310643.js"></script>
@@ -474,8 +474,9 @@ This feature is under development and should be used with caution on busy server
 <p>Known room versions are listed <a href="https://spec.matrix.org/latest/rooms/#complete-list-of-room-versions">here</a></p>
 <p>For example, for room version 1, <code>default_room_version</code> should be set to “1”.</p>
 <p><em>Changed in Synapse 1.76:</em> the default version room version was increased from <a href="https://spec.matrix.org/v1.5/rooms/v9/">9</a> to <a href="https://spec.matrix.org/v1.5/rooms/v10/">10</a>.
-<em>Changed in Synapse 1.157:</em> the default version room version was increased from <a href="https://spec.matrix.org/v1.12/rooms/v10/">10</a> to <a href="https://spec.matrix.org/v1.12/rooms/v11/">11</a>.</p>
-<p>Defaults to <code>"11"</code>.</p>
+<em>Changed in Synapse 1.157:</em> the default version room version was increased from <a href="https://spec.matrix.org/v1.12/rooms/v10/">10</a> to <a href="https://spec.matrix.org/v1.12/rooms/v11/">11</a>.
+<em>Changed in Synapse 1.162:</em> the default room version was increased from <a href="https://spec.matrix.org/v1.16/rooms/v11/">11</a> to <a href="https://spec.matrix.org/v1.16/rooms/v12/">12</a></p>
+<p>Defaults to <code>"12"</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">default_room_version: '8'
 </code></pre>
@@ -2040,6 +2041,25 @@ Setting this to a high value allows users to report content quickly, possibly in
 <pre><code class="language-yaml">rc_user_directory:
   per_second: 0.016
   burst_count: 200.0
+</code></pre>
+<hr>
+<h3 id="rc_profile"><a class="header" href="#rc_profile"><code>rc_profile</code></a></h3>
+<p><em>(object)</em> This option allows admins to ratelimit profile lookups by clients.</p>
+<p>Requests are limited per user when the request is authenticated, otherwise per client IP address.</p>
+<p><em>Added in Synapse 1.162.0.</em></p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>per_second</code> (number): Maximum number of requests a client can send per second.</p>
+</li>
+<li>
+<p><code>burst_count</code> (number): Maximum number of requests a client can send before being throttled.</p>
+</li>
+</ul>
+<p>Default configuration:</p>
+<pre><code class="language-yaml">rc_profile:
+  per_second: 1.0
+  burst_count: 500.0
 </code></pre>
 <hr>
 <h3 id="federation_rr_transactions_per_room_per_second"><a class="header" href="#federation_rr_transactions_per_room_per_second"><code>federation_rr_transactions_per_room_per_second</code></a></h3>
@@ -4156,6 +4176,7 @@ It’s recommended to leave this option as it is. We expect to remove this optio
 <p><em>Changed in Synapse 1.84.0: Added use_tls, certificate_file, private_key_file, ca_file and ca_path attributes</em></p>
 <p><em>Changed in Synapse 1.85.0: Added path option to use a local Unix socket</em></p>
 <p><em>Changed in Synapse 1.116.0: Added password_path</em></p>
+<p><em>Changed in Synapse 1.162.0: Added username</em></p>
 <p>This setting has the following sub-options:</p>
 <ul>
 <li>
@@ -4169,6 +4190,9 @@ It’s recommended to leave this option as it is. We expect to remove this optio
 </li>
 <li>
 <p><code>path</code> (string): The full path to a local Unix socket file. <strong>If this is used, <code>host</code> and <code>port</code> are ignored.</strong> Defaults to <code>"/tmp/redis.sock"</code>.</p>
+</li>
+<li>
+<p><code>username</code> (string|null): Optional username if configured on the Redis instance (Redis 6+ ACL authentication). Requires <code>password</code> (or <code>password_path</code>) to also be set. Defaults to <code>null</code>.</p>
 </li>
 <li>
 <p><code>password</code> (string|null): Optional password if configured on the Redis instance. Defaults to <code>null</code>.</p>
@@ -4200,6 +4224,7 @@ It’s recommended to leave this option as it is. We expect to remove this optio
   enabled: true
   host: localhost
   port: 6379
+  username: &lt;username&gt;
   password_path: &lt;path_to_the_password_file&gt;
   dbid: &lt;dbid&gt;
 </code></pre>
