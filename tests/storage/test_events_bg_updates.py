@@ -15,6 +15,7 @@
 
 
 import json
+from unittest.mock import patch
 
 import signedjson.key
 from canonicaljson import encode_canonical_json
@@ -167,7 +168,7 @@ class TestFixupMaxDepthCapBgUpdate(HomeserverTestCase):
 
 class TestFixupMaxDepthTieOrderingBgUpdate(HomeserverTestCase):
     """Test the background update that re-spreads events tied at (or above)
-    MAX_DEPTH by origin_server_ts."""
+    MAX_DEPTH, ranked by the depth they would have had without the cap."""
 
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -235,10 +236,35 @@ class TestFixupMaxDepthTieOrderingBgUpdate(HomeserverTestCase):
             )
             self._next_stream_ordering += 1
 
+    def create_edges(self, edges: list[tuple[str, str]]) -> None:
+        """Insert prev_event edges given as (event_id, prev_event_id)."""
+
+        for event_id, prev_event_id in edges:
+            self.get_success(
+                self.db_pool.simple_insert(
+                    table="event_edges",
+                    values={
+                        "event_id": event_id,
+                        "prev_event_id": prev_event_id,
+                        "is_state": False,
+                    },
+                )
+            )
+
     def run_update(self) -> int:
         return self.get_success(
             self.store.fixup_max_depth_tie_ordering_bg_update({"room_id": ""}, 10)
         )
+
+    def get_capped_order(self, room_id: str, normal: str) -> list[str]:
+        """This room's at-cap events, in stored ordering."""
+
+        capped = {
+            event_id: ordering
+            for event_id, ordering in self.get_orderings(room_id).items()
+            if event_id != normal
+        }
+        return sorted(capped, key=capped.__getitem__)
 
     def get_orderings(self, room_id: str) -> dict[str, int]:
         rows = self.get_success(
@@ -340,6 +366,164 @@ class TestFixupMaxDepthTieOrderingBgUpdate(HomeserverTestCase):
         self.assertEqual(orderings["$normal1:e"], 1)
         self.assertEqual(orderings["$normal2:e"], 2)
         self.assertEqual(orderings["$single:e"], MAX_DEPTH)
+
+    def test_dag_order_beats_timestamp(self) -> None:
+        """A chain is laid out in DAG order even when the timestamps disagree,
+        which is what they do when a sender lies or its clock is wrong."""
+
+        room_id = "!chain:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V6,
+            [
+                ("$normal:e", 1, 1000),
+                ("$a:e", MAX_DEPTH, 5000),
+                ("$b:e", MAX_DEPTH, 4000),
+                ("$c:e", MAX_DEPTH, 3000),
+            ],
+        )
+        self.create_edges([("$b:e", "$a:e"), ("$c:e", "$b:e")])
+
+        self.assertEqual(self.run_update(), 1)
+
+        # Timestamps alone would have given c, b, a.
+        self.assertEqual(
+            self.get_capped_order(room_id, "$normal:e"), ["$a:e", "$b:e", "$c:e"]
+        )
+
+    def test_concurrent_events_are_ordered_by_timestamp(self) -> None:
+        """Events the DAG says happened at the same time share a rank, so the
+        timestamp decides their order and nothing else moves."""
+
+        room_id = "!fork:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V6,
+            [
+                ("$normal:e", 1, 1000),
+                ("$a:e", MAX_DEPTH, 2000),
+                ("$b:e", MAX_DEPTH, 5000),
+                ("$c:e", MAX_DEPTH, 4000),
+                # d comes last in the DAG but carries the earliest timestamp of
+                # the three, so timestamps alone would put it second.
+                ("$d:e", MAX_DEPTH, 3000),
+            ],
+        )
+        # a is the parent of both b and c, which d then joins back together.
+        self.create_edges(
+            [
+                ("$b:e", "$a:e"),
+                ("$c:e", "$a:e"),
+                ("$d:e", "$b:e"),
+                ("$d:e", "$c:e"),
+            ]
+        )
+
+        self.assertEqual(self.run_update(), 1)
+
+        self.assertEqual(
+            self.get_capped_order(room_id, "$normal:e"),
+            ["$a:e", "$c:e", "$b:e", "$d:e"],
+        )
+
+    def test_edges_out_of_the_set_are_ignored(self) -> None:
+        """An event whose prev_events we never received still gets ranked, from
+        the bottom of the block."""
+
+        room_id = "!gappy:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V6,
+            [
+                ("$normal:e", 1, 1000),
+                ("$a:e", MAX_DEPTH, 5000),
+                ("$b:e", MAX_DEPTH, 4000),
+            ],
+        )
+        # a hangs off an event we do not have, and off one from before the bomb.
+        self.create_edges(
+            [("$a:e", "$missing:e"), ("$a:e", "$normal:e"), ("$b:e", "$a:e")]
+        )
+
+        self.assertEqual(self.run_update(), 1)
+
+        orderings = self.get_orderings(room_id)
+        self.assertEqual(orderings["$normal:e"], 1)
+        self.assertLess(orderings["$a:e"], orderings["$b:e"])
+        self.assertGreater(orderings["$a:e"], 1)
+        self.assertLess(orderings["$b:e"], MAX_DEPTH)
+
+    def test_cycle_still_gets_ordered(self) -> None:
+        """A cycle cannot be ranked, but the events still have to come out with
+        usable orderings. These events come from other servers."""
+
+        room_id = "!cycle:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V6,
+            [
+                ("$normal:e", 1, 1000),
+                ("$a:e", MAX_DEPTH, 5000),
+                ("$b:e", MAX_DEPTH, 4000),
+            ],
+        )
+        self.create_edges([("$a:e", "$b:e"), ("$b:e", "$a:e")])
+
+        self.assertEqual(self.run_update(), 1)
+
+        orderings = self.get_orderings(room_id)
+        self.assertEqual(orderings["$normal:e"], 1)
+        self.assertNotEqual(orderings["$a:e"], orderings["$b:e"])
+        for event_id in ("$a:e", "$b:e"):
+            self.assertGreater(orderings[event_id], 1)
+            self.assertLess(orderings[event_id], MAX_DEPTH)
+
+    def test_runs_to_completion_under_the_updater(self) -> None:
+        """Driven by the real background updater rather than by calling the
+        handler, the update repairs the room and then stops."""
+
+        room_id = "!driven:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V6,
+            [
+                ("$normal:e", 1, 1000),
+                ("$a:e", MAX_DEPTH, 5000),
+                ("$b:e", MAX_DEPTH, 4000),
+            ],
+        )
+        self.create_edges([("$b:e", "$a:e")])
+
+        self.db_pool.updates._all_done = False
+        # Hangs rather than fails if the update never ends.
+        self.wait_for_background_updates()
+
+        self.assertEqual(self.get_capped_order(room_id, "$normal:e"), ["$a:e", "$b:e"])
+
+    def test_reads_page_without_losing_edges(self) -> None:
+        """The same chain must come out right when the reads need several
+        batches. An event has several prev_events, so a batch boundary can fall
+        in the middle of one event's edges."""
+
+        room_id = "!paged:example.com"
+        chain = [("$normal:e", 1, 1000)] + [
+            # Descending timestamps, so only the DAG can put these in order.
+            (f"$e{i}:e", MAX_DEPTH, 9000 - i)
+            for i in range(20)
+        ]
+        self.create_room(room_id, RoomVersions.V6, chain)
+        self.create_edges([(f"$e{i}:e", f"$e{i - 1}:e") for i in range(1, 20)])
+
+        with patch(
+            "synapse.storage.databases.main.events_bg_updates._DEPTH_REPAIR_READ_BATCH",
+            3,
+        ):
+            self.assertEqual(self.run_update(), 1)
+
+        self.assertEqual(
+            self.get_capped_order(room_id, "$normal:e"),
+            [f"$e{i}:e" for i in range(20)],
+        )
 
     def test_rerunning_does_not_push_the_block_higher(self) -> None:
         """A second pass must rank the whole block from the room's last real
@@ -471,6 +655,67 @@ class TestFixupMaxDepthTieOrderingBgUpdate(HomeserverTestCase):
         )
         self.assertEqual(
             dict(threads), {"$capped1:e": orderings["$capped2:e"], "$normal:e": 1}
+        )
+
+    def test_interrupted_satellite_sync_leaves_the_room_repairable(self) -> None:
+        """A room stops being selected once its events move off MAX_DEPTH, so
+        the satellite sync has to land with the last of the orderings. If it
+        went in on its own and we died in between, the stale rows would be left
+        behind for good."""
+
+        room_id = "!interrupted:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V6,
+            [
+                ("$normal:e", 1, 1000),
+                ("$capped1:e", MAX_DEPTH, 4000),
+                ("$capped2:e", MAX_DEPTH, 5000),
+            ],
+        )
+
+        for event_id in ("$capped1:e", "$capped2:e"):
+            self.get_success(
+                self.db_pool.simple_insert(
+                    table="event_labels",
+                    values={
+                        "event_id": event_id,
+                        "label": "#fun",
+                        "room_id": room_id,
+                        "topological_ordering": MAX_DEPTH,
+                    },
+                )
+            )
+
+        with patch.object(
+            self.store,
+            "_sync_satellite_orderings_txn",
+            side_effect=Exception("interrupted"),
+        ):
+            self.get_failure(
+                self.store.fixup_max_depth_tie_ordering_bg_update({"room_id": ""}, 10),
+                Exception,
+            )
+
+        # Rolled back with the sync, so the next pass still finds the room.
+        self.assertEqual(self.get_orderings(room_id)["$capped2:e"], MAX_DEPTH)
+
+        self.assertEqual(self.run_update(), 1)
+
+        orderings = self.get_orderings(room_id)
+        labels = self.get_success(
+            self.db_pool.simple_select_list(
+                table="event_labels",
+                keyvalues={"room_id": room_id},
+                retcols=["event_id", "topological_ordering"],
+            )
+        )
+        self.assertEqual(
+            dict(labels),
+            {
+                "$capped1:e": orderings["$capped1:e"],
+                "$capped2:e": orderings["$capped2:e"],
+            },
         )
 
 

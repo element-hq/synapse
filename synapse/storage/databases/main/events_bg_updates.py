@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Collection, Mapping, cast
 
 import attr
 from signedjson.key import decode_verify_key_base64, get_verify_key
@@ -67,13 +67,54 @@ from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
-from synapse.util.iterutils import batch_iter
+from synapse.util.iterutils import batch_iter, sorted_topologically
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+# How many rows to pull per query when reading a room's at-cap events and the
+# edges between them.
+_DEPTH_REPAIR_READ_BATCH = 5000
+
+
+def _rank_depth_repair_events(
+    event_ids: Collection[str], prev_events: Mapping[str, Collection[str]]
+) -> dict[str, int]:
+    """Work out the depth each of these events would have had without the cap.
+
+    `depth` is one more than the greatest depth of an event's prev_events, so
+    the edges are enough to recover it. The bomb corrupted the number but not
+    the graph. Events with no prev_events in the set rank 0.
+
+    This is only a partial order. Events the DAG says happened concurrently
+    share a rank, and the caller has to break those ties itself.
+    """
+
+    ranks: dict[str, int] = {}
+
+    # An event is only yielded once everything it points at has been, so its
+    # prev_events already have a rank here.
+    for event_id in sorted_topologically(event_ids, prev_events):
+        ranks[event_id] = 1 + max(
+            (
+                ranks[prev_id]
+                for prev_id in prev_events.get(event_id, ())
+                if prev_id in ranks
+            ),
+            default=-1,
+        )
+
+    # Anything left unranked is in a cycle, which remote servers can put there.
+    # Sort it above everything we could order and let the tie-break handle it.
+    if len(ranks) < len(event_ids):
+        unorderable_rank = max(ranks.values(), default=-1) + 1
+        for event_id in event_ids:
+            ranks.setdefault(event_id, unorderable_rank)
+
+    return ranks
 
 
 _REPLACE_STREAM_ORDERING_SQL_COMMANDS = (
@@ -2738,8 +2779,8 @@ class EventsBackgroundUpdatesStore(
     async def fixup_max_depth_tie_ordering_bg_update(
         self, progress: JsonDict, batch_size: int
     ) -> int:
-        """Restore chronological ordering for events whose topological
-        ordering collapsed onto (or above) MAX_DEPTH.
+        """Restore DAG ordering for events whose topological ordering collapsed
+        onto (or above) MAX_DEPTH.
 
         In a room that was sent events with a huge depth (see
         GHSA-v56r-hwv5-mxg6), every later event is created with its depth
@@ -2749,16 +2790,17 @@ class EventsBackgroundUpdatesStore(
         above the capped ones, inverting the timeline.
 
         This update re-spreads all events at or above MAX_DEPTH across the
-        unused ordering range above the room's highest real depth, ranked by
-        origin_server_ts. topological_ordering is local to this server, so
-        nothing changes over federation.
+        unused ordering range above the room's highest real depth, ordered by
+        the depth they would have had if the cap had not been applied.
+        topological_ordering is local to this server, so nothing changes over
+        federation.
 
         The other tables that hold a topological_ordering are updated to match.
         """
 
         room_id_bound = progress.get("room_id", "")
 
-        def fixup_tie_ordering_txn(txn: LoggingTransaction) -> tuple[bool, int]:
+        def get_rooms_txn(txn: LoggingTransaction) -> list[str]:
             txn.execute(
                 """
                 SELECT room_id FROM rooms
@@ -2768,42 +2810,106 @@ class EventsBackgroundUpdatesStore(
                 """,
                 (room_id_bound, batch_size),
             )
-            room_ids = [room_id for (room_id,) in txn]
+            return [room_id for (room_id,) in txn]
 
-            if not room_ids:
-                return True, 0
-
-            self.db_pool.updates._background_update_progress_txn(
-                txn,
-                _BackgroundUpdates.FIXUP_MAX_DEPTH_TIE_ORDERING,
-                progress={"room_id": room_ids[-1]},
-            )
-
-            num_fixed = 0
-            for room_id in room_ids:
-                if self._fixup_depth_ties_in_room_txn(txn, room_id):
-                    num_fixed += 1
-
-            return False, num_fixed
-
-        done, num_fixed = await self.db_pool.runInteraction(
-            "fixup_max_depth_tie_ordering", fixup_tie_ordering_txn
+        room_ids = await self.db_pool.runInteraction(
+            "fixup_max_depth_tie_ordering_rooms", get_rooms_txn
         )
 
-        if done:
+        if not room_ids:
             await self.db_pool.updates._end_background_update(
                 _BackgroundUpdates.FIXUP_MAX_DEPTH_TIE_ORDERING
             )
+            return 0
+
+        num_fixed = 0
+        for room_id in room_ids:
+            if not await self._fixup_depth_ties_in_room(room_id):
+                continue
+
+            num_fixed += 1
+
+            # Checkpoint after a room we actually repaired, so an interrupted
+            # batch doesn't redo the expensive part. A room that is redone from
+            # the start lands on the same events either way, because we pick
+            # them out by `depth` and never rewrite it.
+            await self.db_pool.updates._background_update_progress(
+                _BackgroundUpdates.FIXUP_MAX_DEPTH_TIE_ORDERING,
+                {"room_id": room_id},
+            )
+
+        await self.db_pool.updates._background_update_progress(
+            _BackgroundUpdates.FIXUP_MAX_DEPTH_TIE_ORDERING,
+            {"room_id": room_ids[-1]},
+        )
 
         return num_fixed
 
-    def _fixup_depth_ties_in_room_txn(
-        self, txn: LoggingTransaction, room_id: str
-    ) -> bool:
-        """Re-spread this room's events at or above MAX_DEPTH by
-        origin_server_ts. Returns True if anything changed."""
+    async def _fixup_depth_ties_in_room(self, room_id: str) -> bool:
+        """Re-spread this room's events at or above MAX_DEPTH. Returns True if
+        anything changed.
 
-        # The queries below filter on `depth`, which has no index. Check the
+        The ranking needs the room's whole affected subgraph at once, so this
+        runs outside a transaction and batches its reads and writes instead.
+        Nothing holds a lock while we walk the graph. Events persisted in
+        between are missed, and the next pass over the room picks them up.
+        """
+
+        base = await self.db_pool.runInteraction(
+            "fixup_max_depth_tie_ordering_base",
+            self._depth_repair_base_txn,
+            room_id,
+        )
+        if base is None:
+            return False
+
+        events = await self._get_depth_repair_events(room_id)
+        # A single event at the cap cannot be mis-ordered relative to the tie.
+        if len(events) <= 1:
+            return False
+
+        prev_events = await self._get_depth_repair_edges(room_id)
+        ranks = _rank_depth_repair_events(
+            [event_id for event_id, _, _ in events], prev_events
+        )
+
+        # Order by the recovered depth, then by wall-clock time within a set of
+        # events the DAG says happened concurrently.
+        events.sort(key=lambda event: (ranks[event[0]], event[1], event[2]))
+
+        # Spread over at most half the free range, leaving headroom above the
+        # block so newly persisted at-cap events can continue past it.
+        stride = max(1, (MAX_DEPTH - base) // (2 * (len(events) + 1)))
+
+        orderings = [
+            (min(base + stride * (i + 1), MAX_DEPTH), event_id)
+            for i, (event_id, _, _) in enumerate(events)
+        ]
+
+        batches = list(batch_iter(orderings, 1000))
+        for batch in batches[:-1]:
+            await self.db_pool.runInteraction(
+                "fixup_max_depth_tie_ordering_write",
+                self._write_depth_repair_orderings_txn,
+                batch,
+            )
+
+        await self.db_pool.runInteraction(
+            "fixup_max_depth_tie_ordering_finish",
+            self._finish_depth_repair_txn,
+            batches[-1],
+            room_id,
+        )
+
+        return True
+
+    def _depth_repair_base_txn(
+        self, txn: LoggingTransaction, room_id: str
+    ) -> int | None:
+        """The ordering to spread this room's at-cap events above, or None if the
+        room has nothing at the cap."""
+
+        # The query below filters on `depth`, which has no index. Check the
         # indexed column first so untouched rooms cost one range scan of
         # `events_order_room` instead of a scan of every event in the room.
         txn.execute(
@@ -2815,23 +2921,12 @@ class EventsBackgroundUpdatesStore(
             (room_id, MAX_DEPTH),
         )
         if txn.fetchone() is None:
-            return False
+            return None
 
         # Select on `depth` rather than `topological_ordering`. The bomb capped
         # `depth` and we never rewrite it, so it still identifies the affected
         # events after their orderings have moved, and re-running this update
         # over a room finds the same set again.
-        txn.execute(
-            "SELECT count(*) FROM events WHERE room_id = ? AND depth >= ?",
-            (room_id, MAX_DEPTH),
-        )
-        row = txn.fetchone()
-        assert row is not None
-        count = row[0]
-        # A single event at the cap cannot be mis-ordered relative to the tie.
-        if count <= 1:
-            return False
-
         txn.execute(
             """
             SELECT COALESCE(max(topological_ordering), 0) FROM events
@@ -2841,41 +2936,114 @@ class EventsBackgroundUpdatesStore(
         )
         row = txn.fetchone()
         assert row is not None
-        base = row[0]
+        return row[0]
 
-        # Spread over at most half the free range, leaving headroom above the
-        # block so newly persisted at-cap events can continue past it.
-        stride = max(1, (MAX_DEPTH - base) // (2 * (count + 1)))
+    async def _get_depth_repair_events(
+        self, room_id: str
+    ) -> list[tuple[str, int, int]]:
+        """This room's at-cap events as (event_id, origin_server_ts,
+        stream_ordering), read in batches."""
 
-        event_ids = self._depth_repair_order_txn(txn, room_id)
+        def get_events_txn(
+            txn: LoggingTransaction, event_id_bound: str
+        ) -> list[tuple[str, int, int]]:
+            txn.execute(
+                """
+                SELECT event_id, COALESCE(origin_server_ts, 0),
+                    COALESCE(stream_ordering, 0)
+                FROM events
+                WHERE room_id = ? AND depth >= ? AND event_id > ?
+                ORDER BY event_id
+                LIMIT ?
+                """,
+                (room_id, MAX_DEPTH, event_id_bound, _DEPTH_REPAIR_READ_BATCH),
+            )
+            return cast(list[tuple[str, int, int]], txn.fetchall())
 
+        events: list[tuple[str, int, int]] = []
+        event_id_bound = ""
+        while True:
+            batch = await self.db_pool.runInteraction(
+                "fixup_max_depth_tie_ordering_events", get_events_txn, event_id_bound
+            )
+            if not batch:
+                return events
+
+            events.extend(batch)
+            event_id_bound = batch[-1][0]
+
+    async def _get_depth_repair_edges(self, room_id: str) -> dict[str, list[str]]:
+        """Map each at-cap event to the prev_events that are also at the cap,
+        read in batches.
+
+        Edges pointing out of the set, to events from before the bomb or to ones
+        we never received, are left out. Their children have no ranked parent
+        left and so start at the bottom of the block, which is where the room's
+        real depths stop.
+        """
+
+        def get_edges_txn(
+            txn: LoggingTransaction, bound: tuple[str, str]
+        ) -> list[tuple[str, str]]:
+            # An event has several prev_events, so page on the whole edge rather
+            # than on event_id, which would cut an event's edges in half.
+            clause, clause_args = make_tuple_comparison_clause(
+                [("ee.event_id", bound[0]), ("ee.prev_event_id", bound[1])]
+            )
+            # Legacy state edges are only removed by a background update that
+            # may not have run, so they have to be filtered out here.
+            txn.execute(
+                f"""
+                SELECT ee.event_id, ee.prev_event_id
+                FROM event_edges AS ee
+                INNER JOIN events AS child ON child.event_id = ee.event_id
+                INNER JOIN events AS parent ON parent.event_id = ee.prev_event_id
+                WHERE NOT ee.is_state
+                    AND child.room_id = ? AND child.depth >= ?
+                    AND parent.room_id = ? AND parent.depth >= ?
+                    AND {clause}
+                ORDER BY ee.event_id, ee.prev_event_id
+                LIMIT ?
+                """,
+                [room_id, MAX_DEPTH, room_id, MAX_DEPTH]
+                + clause_args
+                + [_DEPTH_REPAIR_READ_BATCH],
+            )
+            return cast(list[tuple[str, str]], txn.fetchall())
+
+        prev_events: dict[str, list[str]] = {}
+        bound = ("", "")
+        while True:
+            batch = await self.db_pool.runInteraction(
+                "fixup_max_depth_tie_ordering_edges", get_edges_txn, bound
+            )
+            if not batch:
+                return prev_events
+
+            for event_id, prev_event_id in batch:
+                prev_events.setdefault(event_id, []).append(prev_event_id)
+
+            bound = batch[-1]
+
+    def _write_depth_repair_orderings_txn(
+        self, txn: LoggingTransaction, orderings: Collection[tuple[int, str]]
+    ) -> None:
         txn.execute_batch(
             "UPDATE events SET topological_ordering = ? WHERE event_id = ?",
-            [
-                (min(base + stride * (i + 1), MAX_DEPTH), event_id)
-                for i, event_id in enumerate(event_ids)
-            ],
+            list(orderings),
         )
 
+    def _finish_depth_repair_txn(
+        self,
+        txn: LoggingTransaction,
+        orderings: Collection[tuple[int, str]],
+        room_id: str,
+    ) -> None:
+        """The room stops being selected once its events move off MAX_DEPTH, so
+        a separate sync would be lost if we died in between."""
+
+        self._write_depth_repair_orderings_txn(txn, orderings)
         self._sync_satellite_orderings_txn(txn, room_id)
-
-        return True
-
-    def _depth_repair_order_txn(
-        self, txn: LoggingTransaction, room_id: str
-    ) -> list[str]:
-        """Return this room's at-cap events in the order they should be laid
-        out, oldest first."""
-
-        txn.execute(
-            """
-            SELECT event_id FROM events
-            WHERE room_id = ? AND depth >= ?
-            ORDER BY COALESCE(origin_server_ts, 0) ASC, stream_ordering ASC
-            """,
-            (room_id, MAX_DEPTH),
-        )
-        return [event_id for (event_id,) in txn]
 
     def _sync_satellite_orderings_txn(
         self, txn: LoggingTransaction, room_id: str
