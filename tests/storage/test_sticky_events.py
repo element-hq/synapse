@@ -329,7 +329,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             persist_controller.persist_event(redaction_event, redaction_event_context)
         )
 
-        # Now the sticky event arrives over federation and is persisted.
+        # Now the sticky event arrives over federation and is persisted *after* the redaction
         self.get_success(
             persist_controller.persist_event(sticky_event, sticky_event_context)
         )
