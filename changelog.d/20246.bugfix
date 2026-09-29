@@ -1,0 +1,1 @@
+Fix spurious `Closing scope ... which is not the currently-active one` errors being logged when writing large responses with tracing enabled.

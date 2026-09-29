@@ -12,12 +12,18 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import logging
 import random
+from collections.abc import Set
 from dataclasses import dataclass
+from itertools import chain
 from typing import TYPE_CHECKING, Collection, cast
 
 from twisted.internet.defer import Deferred
 
+from synapse import event_auth
+from synapse.api.constants import EventTypes
+from synapse.api.errors import AuthError
 from synapse.events import EventBase
+from synapse.events.snapshot import EventPersistencePair
 from synapse.replication.tcp.streams._base import StickyEventsStream
 from synapse.storage.database import (
     DatabasePool,
@@ -26,10 +32,14 @@ from synapse.storage.database import (
     make_in_list_sql_clause,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
+from synapse.storage.databases.main.events import DeltaState
 from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.types import StateKey
+from synapse.types.state import StateFilter
 from synapse.util.duration import Duration
+from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -127,7 +137,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         super().process_replication_position(stream_name, instance_name, token)
 
     def get_max_sticky_events_stream_id(self) -> int:
-        """Get the current maximum stream_id for thread subscriptions.
+        """Get the current maximum stream_id for sticky events.
 
         Returns:
             The maximum stream_id
@@ -388,6 +398,335 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                     expires_at,
                 )
                 for (ev, expires_at), stream_id in sticky_events_with_ids
+            ],
+        )
+
+    async def compute_sticky_events_to_un_soft_fail(
+        self,
+        room_id: str,
+        events_and_contexts: list[EventPersistencePair],
+        state_delta_for_room: DeltaState,
+    ) -> set[str]:
+        """
+        Determine which soft-failed sticky events in the given room will become
+        un-soft-failed once `state_delta_for_room` has been applied to the current state.
+
+        As per MSC4354:
+        > **Re-evaluate soft-failure** of soft-failed unexpired sticky events when the membership state of the sender changes.[^softfail]
+        >
+        > [^softfail]: Not all servers will agree on soft-failure status due to the check considering the “current state” of the room.
+        > To ensure all servers agree on which events are sticky, we need to re-evaluate soft-failed status when the current room state changes.
+        > This becomes particularly important when room state is rolled back. For example, if Charlie sends some sticky event E and
+        > then Bob kicks Charlie, but concurrently Alice kicks Bob then whether or not a receiving server would accept E would depend
+        > on whether they saw “Alice kicks Bob” or “Bob kicks Charlie”. If they saw “Alice kicks Bob” then E would be accepted. If they
+        > saw “Bob kicks Charlie” then E would be rejected, and would need to be rolled back when they see “Alice kicks Bob”.
+        >
+        > — https://github.com/matrix-org/matrix-spec-proposals/blob/4ad14b0cd3b09205dcba59e45cbf1cab1e75edf7/proposals/4354-sticky-events.md#L95
+
+        Must be called from within the per-room event persistence critical section (see
+        `_EventPeristenceQueue`) and immediately before the persist transaction, so that
+        nothing else can change the room's current state in the meantime.
+
+        Args:
+            room_id: The room that all of the events belong to
+            events_and_contexts: The events about to be persisted. These are not eligible
+                for re-evaluation.
+            state_delta_for_room: The changes about to be made to the current state, used
+                to detect if we need to re-evaluate soft-failed sticky events.
+
+        Returns:
+            The event IDs of sticky events which are currently recorded as soft-failed
+            but which pass auth against the new current state.
+        """
+        assert self._can_write_to_sticky_events
+
+        # Fetch the soft-failed sticky events to recheck
+        event_ids_to_check = await self._get_soft_failed_sticky_events_to_recheck(
+            room_id, state_delta_for_room
+        )
+        # Defensively filter out soft-failed events in events_and_contexts: they haven't been
+        # inserted into `sticky_events` yet, but be defensive in case we are asked to
+        # re-persist an event which is already there (e.g. de-outliering), as their
+        # soft failure status won't have changed for them.
+        persisting_event_ids = {ev.event_id for ev, _ in events_and_contexts}
+        event_ids_to_check = [
+            event_id
+            for event_id in event_ids_to_check
+            if event_id not in persisting_event_ids
+        ]
+        if not event_ids_to_check:
+            return set()
+
+        events_to_check = await self.get_events(
+            event_ids_to_check, allow_rejected=False
+        )
+
+        # Calculate what (state event type, state key) tuples are needed as auth events for the
+        # soft-failed events we are reconsidering?
+        # e.g. [('m.room.member', '@user:example.org'), ('m.room.power_levels', ''), ...]
+        needed_state_tuples_for_auth: set[StateKey] = set()
+        for soft_failed_event in events_to_check.values():
+            needed_state_tuples_for_auth.update(
+                event_auth.auth_types_for_event(
+                    soft_failed_event.room_version, soft_failed_event
+                )
+            )
+
+        # Load the needed auth state from the current state
+        # (type, state key) -> event_id
+        current_auth_state_ids_map = dict(
+            await self.get_partial_filtered_current_state_ids(
+                room_id, StateFilter.from_types(needed_state_tuples_for_auth)
+            )
+        )
+        # `state_delta_for_room` hasn't yet been applied to the room's persisted current state,
+        # so we need to apply it here to the auth state we are using for the re-evaluation
+        for deleted_key in state_delta_for_room.to_delete:
+            current_auth_state_ids_map.pop(deleted_key, None)
+        for inserted_key, inserted_event_id in state_delta_for_room.to_insert.items():
+            if inserted_key in needed_state_tuples_for_auth:
+                current_auth_state_ids_map[inserted_key] = inserted_event_id
+
+        # Now load in the auth events
+        persisting_events_by_id = {ev.event_id: ev for ev, _ in events_and_contexts}
+        current_auth_events: list[EventBase] = []
+        current_auth_state_event_ids_to_fetch: list[str] = []
+        for event_id in current_auth_state_ids_map.values():
+            persisting_event = persisting_events_by_id.get(event_id)
+            if persisting_event is not None:
+                # This event is one we are about to persist, so just use it
+                current_auth_events.append(persisting_event)
+            else:
+                # This event needs to be loaded from the database
+                current_auth_state_event_ids_to_fetch.append(event_id)
+        current_auth_events.extend(
+            await self.get_events_as_list(current_auth_state_event_ids_to_fetch)
+        )
+
+        passing_event_ids: set[str] = set()
+        for soft_failed_event in events_to_check.values():
+            try:
+                # We don't need to check_state_independent_auth_rules as that doesn't depend on room state,
+                # so if it passed once it'll pass again.
+                event_auth.check_state_dependent_auth_rules(
+                    soft_failed_event, current_auth_events
+                )
+
+                # Ready to be un-soft-failed
+                passing_event_ids.add(soft_failed_event.event_id)
+            except AuthError:
+                # state-dependent auth rules still unsatisfied: remain soft-failed
+                pass
+
+        if passing_event_ids:
+            logger.info(
+                "%s soft-failed events now pass current state checks in room %s : %s",
+                len(passing_event_ids),
+                room_id,
+                shortstr(passing_event_ids),
+            )
+
+        return passing_event_ids
+
+    async def _get_soft_failed_sticky_events_to_recheck(
+        self,
+        room_id: str,
+        state_delta_for_room: DeltaState,
+    ) -> list[str]:
+        """
+        Fetch soft-failed sticky events which should be rechecked against the current state.
+
+        Returns:
+            A list of event IDs to recheck
+        """
+
+        if state_delta_for_room.no_longer_in_room:
+            # We're leaving the room, so the current state is about to be wiped and
+            # nothing can pass auth against it.
+            return []
+
+        # Only a change to critical auth state may change soft failure status.
+        # This means any changes to join rules, power levels or member events.
+        # If the state has changed but these types are unchanged, we don't need to recheck.
+        CRITICAL_AUTH_TYPES = (
+            EventTypes.JoinRules,
+            EventTypes.PowerLevels,
+            EventTypes.Member,
+        )
+
+        critical_auth_types_changed = {
+            typ
+            for typ, _ in chain(
+                state_delta_for_room.to_insert, state_delta_for_room.to_delete
+            )
+            if typ in CRITICAL_AUTH_TYPES
+        }
+        if len(critical_auth_types_changed) == 0:
+            # No change to critical auth events.
+            # No way soft failure status could be different.
+            return []
+
+        if critical_auth_types_changed == {EventTypes.Member}:
+            # If the only critical auth state that changed is user memberships,
+            # then we can restrict our re-evaluation to only reconsider soft-failed sticky events sent
+            # by the users who have their membership changed.
+            # Events sent by any other user can not be affected,
+            # with the pedantic yet possible exception of sticky invite/kick/ban `m.room.member`
+            # state events (where state key ≠ sender).
+            # That said: we don't expect to use those and it is not possible to create one with
+            # the Client-Server API.
+            changed_members = {
+                membership_user_id
+                for event_type, membership_user_id in chain(
+                    state_delta_for_room.to_insert, state_delta_for_room.to_delete
+                )
+                if event_type == EventTypes.Member
+            }
+
+            return await self.db_pool.runInteraction(
+                "_get_soft_failed_sticky_events_to_recheck_members",
+                self._get_soft_failed_sticky_events_txn,
+                room_id,
+                # Only reconsider events from changed members
+                senders=changed_members,
+            )
+
+        # If we reach here, then it must be the case that there have been changes in
+        # power level or join rules.
+        # In both of these cases we want to re-evaluate soft failure status of all the
+        # soft-failed events in the room.
+        #
+        # NB: event auth checks are NOT recursive. We don't need to specifically handle the case where
+        # an admin user's membership changes which causes a PL event to be allowed, as when the PL event
+        # gets allowed we will re-evaluate anyway. E.g:
+        #
+        #  PL(send_event=0, sender=Admin) #1
+        #            ^              ^_____________________
+        #            |                                   |
+        # . PL(send_event=50, sender=Mod) #2            sticky event (sender=User) #3
+        #
+        # In this scenario, the sticky event is soft-failed due to the Mod updating the PL event to
+        # set send_event=50, which User does not have. If we learn of an event which makes Mod's PL
+        # event invalid (say, Mod was banned by Admin concurrently to Mod setting the PL event), then
+        # the act of seeing the ban event will cause the old PL event to be in the state delta, meaning
+        # we will re-evaluate the sticky event due to the PL changing. We don't need to specially handle
+        # this case.
+        return await self.db_pool.runInteraction(
+            "_get_soft_failed_sticky_events_to_recheck",
+            self._get_soft_failed_sticky_events_txn,
+            room_id,
+            # Consider everyone
+            senders=None,
+        )
+
+    def _get_soft_failed_sticky_events_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        *,
+        senders: Collection[str] | None,
+    ) -> list[str]:
+        """
+        Fetch the event IDs of (unexpired) soft-failed sticky events in a room.
+
+        Args:
+            room_id: the room to look in.
+            senders:
+                If present, only return sticky events sent by one of these users.
+                If None, do not restrict by sender.
+        """
+        sender_clause = ""
+        sender_args: Collection[str] = ()
+        if senders is not None:
+            if not senders:
+                return []
+            sender_sql, sender_args = make_in_list_sql_clause(
+                txn.database_engine, "se.sender", senders
+            )
+            sender_clause = f"AND {sender_sql}"
+
+        if isinstance(self.database_engine, PostgresEngine):
+            expr_soft_failed = "COALESCE(((ej.internal_metadata::jsonb)->>'soft_failed')::boolean, FALSE)"
+        else:
+            expr_soft_failed = "COALESCE(ej.internal_metadata->>'soft_failed', FALSE)"
+
+        # Note that we are relying on the 1h stickiness limit to make this
+        # tractable, as we can't realistically apply any LIMIT here.
+        txn.execute(
+            f"""
+            SELECT se.event_id
+            FROM sticky_events se
+            INNER JOIN event_json ej USING (event_id)
+            WHERE
+                se.room_id = ?
+                AND ? < se.expires_at
+                AND {expr_soft_failed}
+                {sender_clause}
+            """,
+            (room_id, self.clock.time_msec(), *sender_args),
+        )
+        return [event_id for (event_id,) in txn]
+
+    def un_soft_fail_sticky_events_txn(
+        self, txn: LoggingTransaction, sticky_event_ids: Set[str]
+    ) -> None:
+        """
+        For the given soft-failed sticky events:
+
+        - removes their soft-failed status
+        - moves them to the end of the `sticky_events` stream so that clients get told about them
+        """
+        if not sticky_event_ids:
+            return
+
+        # Update the internal metadata on the event itself.
+        event_id_in_list_clause, event_id_in_list_args = make_in_list_sql_clause(
+            txn.database_engine,
+            "event_id",
+            sticky_event_ids,
+        )
+        if isinstance(txn.database_engine, PostgresEngine):
+            # It's a bit sad that internal_metadata is TEXT and not JSONB...
+            txn.execute(
+                f"""
+                UPDATE event_json
+                SET internal_metadata = (
+                    jsonb_set(internal_metadata::jsonb, '{{soft_failed}}', 'false'::jsonb)
+                )::text
+                WHERE {event_id_in_list_clause}
+                """,
+                event_id_in_list_args,
+            )
+        else:
+            assert isinstance(txn.database_engine, Sqlite3Engine)
+            txn.execute(
+                f"""
+                UPDATE event_json
+                SET internal_metadata = json_set(internal_metadata, '$.soft_failed', json('false'))
+                WHERE {event_id_in_list_clause}
+                """,
+                event_id_in_list_args,
+            )
+
+        # Invalidate caches as a result
+        for event_id in sticky_event_ids:
+            self.invalidate_get_event_cache_after_txn(txn, event_id)
+
+        # Move the events to the end of the sticky events stream
+        new_stream_ids = self._sticky_events_id_gen.get_next_mult_txn(
+            txn, len(sticky_event_ids)
+        )
+        self.db_pool.simple_update_many_txn(
+            txn,
+            table="sticky_events",
+            key_names=("event_id",),
+            key_values=[(event_id,) for event_id in sticky_event_ids],
+            value_names=(
+                "stream_id",
+                "instance_name",
+            ),
+            value_values=[
+                (stream_id, self._instance_name) for stream_id in new_stream_ids
             ],
         )
 

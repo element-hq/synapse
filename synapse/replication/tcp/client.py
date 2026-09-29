@@ -50,6 +50,8 @@ from synapse.replication.tcp.streams._base import (
 )
 from synapse.replication.tcp.streams.events import (
     EventsStream,
+    EventsStreamAllStateRow,
+    EventsStreamCurrentStateRow,
     EventsStreamEventRow,
     EventsStreamRow,
 )
@@ -191,6 +193,20 @@ class ReplicationDataHandler:
             # We shouldn't get multiple rows per token for events stream, so
             # we don't need to optimise this for multiple rows.
             for row in rows:
+                # If this is a server ACL event, clear the cache in the storage controller.
+                if row.type in (
+                    EventsStreamEventRow.TypeId,
+                    EventsStreamCurrentStateRow.TypeId,
+                ):
+                    if row.data.type == EventTypes.ServerACL:
+                        self._state_storage_controller.get_server_acl_for_room.invalidate(
+                            (row.data.room_id,)
+                        )
+                elif row.type == EventsStreamAllStateRow.TypeId:
+                    self._state_storage_controller.get_server_acl_for_room.invalidate(
+                        (row.data.room_id,)
+                    )
+
                 if row.type != EventsStreamEventRow.TypeId:
                     # The row's data is an `EventsStreamCurrentStateRow`.
                     # When we recompute the current state of a room based on forward
@@ -238,11 +254,6 @@ class ReplicationDataHandler:
                         row.data.event_id, row.data.room_id
                     )
 
-                # If this is a server ACL event, clear the cache in the storage controller.
-                if row.data.type == EventTypes.ServerACL:
-                    self._state_storage_controller.get_server_acl_for_room.invalidate(
-                        (row.data.room_id,)
-                    )
         elif stream_name == UnPartialStatedRoomStream.NAME:
             for row in rows:
                 assert isinstance(row, UnPartialStatedRoomStreamRow)

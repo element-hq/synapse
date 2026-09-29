@@ -58,6 +58,17 @@ class AuthenticationData(RequestBodyModel):
     type: StrictStr | None = None
 
 
+class UserInteractiveAuthBody(RequestBodyModel):
+    """
+    A request body that may carry user-interactive authentication data. Other keys
+    are endpoint-specific and are left for the endpoint to handle.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    auth: AuthenticationData | None = None
+
+
 # See also assert_valid_client_secret()
 ClientSecretStr = Annotated[
     str,
