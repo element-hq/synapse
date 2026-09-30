@@ -1,0 +1,25 @@
+# Example systemd socket unit for Synapse.
+#
+# This is optional: Synapse binds its own sockets by default. Pairing this
+# with a `listeners` entry using `path: "systemd:matrix-synapse"` in
+# homeserver.yaml lets systemd own the listening socket instead.
+#
+# Copy alongside matrix-synapse.service into /etc/systemd/system/, then:
+#
+#    systemctl enable --now matrix-synapse.socket
+#
+# **NOTE:** This is an example unit that may change in the future. If you
+# wish to use this please copy rather than symlink it.
+
+[Unit]
+Description=Synapse Matrix homeserver socket
+
+[Socket]
+FileDescriptorName=matrix-synapse
+
+ListenStream=8008
+# Or alternatively a unix socket:
+# ListenStream=/run/matrix-synapse/matrix-synapse.socket
+
+[Install]
+WantedBy=sockets.target

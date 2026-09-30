@@ -290,7 +290,8 @@ class GenericWorkerServer(HomeServer):
                     )
                 else:
                     raise ConfigError(
-                        "Can not using a unix socket for manhole at this time."
+                        "Can not use a unix socket or systemd socket activation "
+                        "for manhole at this time."
                     )
 
             elif listener.type == "metrics":
@@ -308,7 +309,8 @@ class GenericWorkerServer(HomeServer):
                         )
                     else:
                         raise ConfigError(
-                            "Can not use a unix socket for metrics at this time."
+                            "Can not use a unix socket or systemd socket activation "
+                            "for metrics at this time."
                         )
 
             else:
