@@ -439,6 +439,26 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             ],
         )
 
+    def delete_sticky_events_txn(
+        self, txn: LoggingTransaction, room_id: str, event_ids: Collection[str]
+    ) -> None:
+        """
+        Given a room ID and a list of event IDs, deletes `sticky_events` entries for those
+        events.
+        This prevents us from retrieving those events as if they are still sticky
+        in the future.
+
+        Ignores entries that are not present in the `sticky_events` table.
+
+        This is used when an event is redacted.
+        """
+        self.db_pool.simple_delete_many_batch_txn(
+            txn,
+            table="sticky_events",
+            keys=("room_id", "event_id"),
+            values=[(room_id, event_id) for event_id in event_ids],
+        )
+
     async def compute_sticky_events_to_un_soft_fail(
         self,
         room_id: str,
