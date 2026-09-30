@@ -49,6 +49,7 @@ from synapse.rest.admin._base import (
     assert_user_is_admin,
 )
 from synapse.rest.client._base import client_patterns
+from synapse.storage.databases.main import UserPaginateResponse
 from synapse.storage.databases.main.registration import ExternalIDReuseException
 from synapse.storage.databases.main.stats import UserSortOrder
 from synapse.types import JsonDict, JsonMapping, TaskStatus, UserID
@@ -181,13 +182,16 @@ class UsersRestServletV2(RestServlet):
         )
 
         # If support for MSC3866 is not enabled, don't show the approval flag.
-        filter = None
+        users_filter = None
         if not self._msc3866_enabled:
+            users_filter = attr.filters.exclude(
+                attr.fields(UserPaginateResponse).approved
+            )
 
-            def _filter(a: attr.Attribute) -> bool:
-                return a.name != "approved"
-
-        ret = {"users": [attr.asdict(u, filter=filter) for u in users], "total": total}
+        ret = {
+            "users": [attr.asdict(u, filter=users_filter) for u in users],
+            "total": total,
+        }
         if (start + limit) < total:
             ret["next_token"] = str(start + len(users))
 
@@ -233,6 +237,7 @@ class UserRestServletV2Get(RestServlet):
         self.pusher_pool = hs.get_pusherpool()
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
         self._all_user_types = hs.config.user_types.all_user_types
+        self._auth_delegation_enabled = hs.config.mas.enabled
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -475,6 +480,15 @@ class UserRestServletV2(UserRestServletV2Get):
             return HTTPStatus.OK, user
 
         else:  # create user
+            if self._auth_delegation_enabled:
+                raise SynapseError(
+                    HTTPStatus.FORBIDDEN,
+                    "User creation via the Admin API is not available when "
+                    "Synapse is delegating authentication to MAS. Create the "
+                    "user via MAS instead.",
+                    errcode=Codes.FORBIDDEN,
+                )
+
             displayname = body.get("displayname", None)
 
             password_hash = None

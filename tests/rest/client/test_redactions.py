@@ -24,6 +24,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, RelationTypes
+from synapse.api.errors import Codes
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
@@ -65,10 +66,6 @@ class RedactionsTestCase(HomeserverTestCase):
         self.room_id = self.helper.create_room_as(
             self.mod_user_id,
             tok=self.mod_access_token,
-            # FIXME: Using room version 10 here as using later version requires
-            # https://github.com/element-hq/synapse/pull/19782
-            # Remove the override when the above PR is merged.
-            room_version="10",
         )
 
         # Invite the other user
@@ -169,6 +166,80 @@ class RedactionsTestCase(HomeserverTestCase):
         self.assertEqual(timeline[-3]["event_id"], normal_msg_id)
         self.assertEqual(timeline[-3]["unsigned"]["redacted_by"], redaction_id)
         self.assertEqual(timeline[-3]["content"], {})
+
+    @override_config({"redaction_allowed_period": "1h"})
+    def test_can_redact_recent_event(self) -> None:
+        b = self.helper.send(room_id=self.room_id, tok=self.other_access_token)
+        self._redact_event(
+            self.other_access_token, self.room_id, b["event_id"], expect_code=200
+        )
+
+    @override_config({"redaction_allowed_period": "1h"})
+    def test_cannot_redact_old_event(self) -> None:
+        b = self.helper.send(room_id=self.room_id, tok=self.other_access_token)
+        msg_id = b["event_id"]
+
+        # go past allowed period
+        self.reactor.advance(60 * 60 + 1)
+
+        body = self._redact_event(
+            self.other_access_token, self.room_id, msg_id, expect_code=403
+        )
+        self.assertEqual(body["errcode"], Codes.FORBIDDEN)
+
+    @override_config({"redaction_allowed_period": "1h"})
+    def test_edit_redaction_uses_original_timestamp(self) -> None:
+        b = self.helper.send(room_id=self.room_id, tok=self.other_access_token)
+        original_id = b["event_id"]
+
+        self.reactor.advance(60 * 60 + 1)
+
+        edit = self.helper.send_event(
+            self.room_id,
+            EventTypes.Message,
+            content={
+                "msgtype": "m.text",
+                "body": "* edited",
+                "m.new_content": {"msgtype": "m.text", "body": "edited"},
+                "m.relates_to": {
+                    "rel_type": RelationTypes.REPLACE,
+                    "event_id": original_id,
+                },
+            },
+            tok=self.other_access_token,
+        )
+
+        body = self._redact_event(
+            self.other_access_token, self.room_id, edit["event_id"], expect_code=403
+        )
+        self.assertEqual(body["errcode"], Codes.FORBIDDEN)
+
+    @override_config({"redaction_allowed_period": "1h"})
+    def test_can_redact_old_non_message_event(self) -> None:
+        # the restriction only applies to m.room.message. other event types
+        # (a reaction in this test) can still be redacted after the period.
+        msg = self.helper.send(room_id=self.room_id, tok=self.other_access_token)
+        reaction = self.helper.send_event(
+            self.room_id,
+            "m.reaction",
+            content={
+                "m.relates_to": {
+                    "rel_type": RelationTypes.ANNOTATION,
+                    "event_id": msg["event_id"],
+                    "key": "👍",
+                }
+            },
+            tok=self.other_access_token,
+        )
+
+        self.reactor.advance(60 * 60 + 1)
+
+        self._redact_event(
+            self.other_access_token,
+            self.room_id,
+            reaction["event_id"],
+            expect_code=200,
+        )
 
     def test_redact_nonexistent_event(self) -> None:
         # control case: an existing event

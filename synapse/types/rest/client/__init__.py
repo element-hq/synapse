@@ -26,6 +26,7 @@ from pydantic import (
     ConfigDict,
     Field,
     GetCoreSchemaHandler,
+    GetPydanticSchema,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -33,7 +34,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import CoreSchema, PydanticCustomError
+from pydantic_core import CoreSchema
 from typing_extensions import Annotated, Self
 
 from synapse.types import Absent, AbsentType, NonNegativeStrictInt
@@ -57,11 +58,22 @@ class AuthenticationData(RequestBodyModel):
     type: StrictStr | None = None
 
 
+class UserInteractiveAuthBody(RequestBodyModel):
+    """
+    A request body that may carry user-interactive authentication data. Other keys
+    are endpoint-specific and are left for the endpoint to handle.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    auth: AuthenticationData | None = None
+
+
 # See also assert_valid_client_secret()
 ClientSecretStr = Annotated[
     str,
     StringConstraints(
-        pattern="[0-9a-zA-Z.=_-]",
+        pattern="^[0-9a-zA-Z.=_-]+$",
         min_length=1,
         max_length=255,
         strict=True,
@@ -91,25 +103,33 @@ class EmailRequestTokenBody(ThreepidRequestTokenBody):
     # know the exact spelling (eg. upper and lower case) of address in the database.
     # Without this, an email stored in the database as "foo@bar.com" would cause
     # user requests for "FOO@bar.com" to raise a Not Found error.
+    #
+    # A ValueError produces a Pydantic error of type "value_error", which
+    # validate_json_object translates to M_INVALID_PARAM, the errcode the spec
+    # lists for an invalid address on /account/3pid/email/requestToken:
+    # https://spec.matrix.org/v1.19/client-server-api/#post_matrixclientv3account3pidemailrequesttoken
     @field_validator("email")
     @classmethod
     def _email_validator(cls, email: StrictStr) -> StrictStr:
-        try:
-            return validate_email(email)
-        except ValueError as e:
-            # To ensure backward compatibility of HTTP error codes, we return a
-            # Pydantic error with the custom, unrecognized error type
-            # "email_custom_err_type" instead of the default error type
-            # "value_error". This results in the more generic BAD_JSON HTTP
-            # error instead of the more specific INVALID_PARAM one.
-            raise PydanticCustomError("email_custom_err_type", str(e), None) from e
+        return validate_email(email)
 
 
-ISO3116_1_Alpha_2 = Annotated[str, StringConstraints(pattern="[A-Z]{2}", strict=True)]
+ISO3166_1_Alpha_2 = Annotated[
+    str,
+    GetPydanticSchema(
+        lambda source, handler: pydantic_core.core_schema.custom_error_schema(
+            pydantic_core.core_schema.str_schema(pattern="[A-Z]{2}", strict=True),
+            custom_error_type="value_error",
+            custom_error_context={
+                "error": "Not a valid ISO 3166-1 alpha-2 country code"
+            },
+        )
+    ),
+]
 
 
 class MsisdnRequestTokenBody(ThreepidRequestTokenBody):
-    country: ISO3116_1_Alpha_2
+    country: ISO3166_1_Alpha_2
     phone_number: StrictStr
 
 
@@ -478,6 +498,18 @@ class SlidingSyncBody(RequestBodyModel):
             limit: NonNegativeStrictInt = 100
             since: SlidingSyncStickyEventsToken | AbsentType = Absent
 
+        class ProfilesExtension(RequestBodyModel):
+            """The Profile Updates extension (MSC4262)
+
+            Attributes:
+                enabled
+                fields: List of fields to filter upon (optional)
+            """
+
+            enabled: StrictBool = False
+            # Optionally filter on specific fields
+            fields: list[StrictStr] | AbsentType = Absent
+
         to_device: ToDeviceExtension | None = None
         e2ee: E2eeExtension | None = None
         account_data: AccountDataExtension | None = None
@@ -488,6 +520,9 @@ class SlidingSyncBody(RequestBodyModel):
         )
         sticky_events: StickyEventsExtension | AbsentType = Field(
             Absent, alias="org.matrix.msc4354.sticky_events"
+        )
+        profiles: ProfilesExtension | AbsentType = Field(
+            Absent, alias="org.matrix.msc4262.profiles"
         )
 
     conn_id: StrictStr | None = None

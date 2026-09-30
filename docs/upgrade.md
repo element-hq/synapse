@@ -118,6 +118,37 @@ stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
 
+# Upgrading to v1.163.0
+
+## `limit_profile_requests_to_users_who_share_rooms` now requires `require_auth_for_profile_requests`
+
+The shared-room check enabled by
+[`limit_profile_requests_to_users_who_share_rooms`](usage/configuration/config_documentation.md#limit_profile_requests_to_users_who_share_rooms)
+is only applied to authenticated requests, and profile requests are only
+authenticated when
+[`require_auth_for_profile_requests`](usage/configuration/config_documentation.md#require_auth_for_profile_requests)
+is enabled. Enabling the former without the latter therefore never restricted
+any profile lookup.
+
+Synapse will now refuse to start with that combination. If you have
+`limit_profile_requests_to_users_who_share_rooms: true` in your configuration,
+either also set `require_auth_for_profile_requests: true`, or remove the option to
+keep the behaviour you have today.
+
+# Upgrading to v1.161.0
+
+## Deprecation of `matrix_rtc.livekit_service_url`
+
+When configuring the MatrixRTC LiveKit transport, the `livekit_service_url` is now
+deprecated but should continue to be listed to ensure backwards compatibility with
+older clients. A new sibling `url` config property is added that should be set to
+your SFU's WebSocket URL. Clients that support `url` will use the Client-Server API
+to (indirectly) interact with the LiveKit authorization service. The service needs
+to be set up as an application service in order to support these endpoints. See
+https://github.com/element-hq/lk-jwt-service and
+https://element-hq.github.io/synapse/v1.161/usage/configuration/config_documentation.html#matrix_rtc
+for further details.
+
 # Upgrading to v1.159.0
 
 ## Change of signing key expiry date for the Debian/Ubuntu package repository (2026)

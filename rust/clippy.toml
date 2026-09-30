@@ -1,0 +1,10 @@
+# Blocking work spawned onto the tokio threadpool is leaked if it is still
+# running when the per-homeserver `RustRuntime` is shut down (see
+# `rust/src/runtime.rs`). We should avoid spawning blocking work until we figure
+# out how to cancel/stop such work on shutdown.
+disallowed-methods = [
+    { path = "tokio::task::spawn_blocking", reason = "leaks past RustRuntime shutdown; see rust/src/runtime.rs" },
+    { path = "tokio::runtime::Runtime::spawn_blocking", reason = "leaks past RustRuntime shutdown; see rust/src/runtime.rs" },
+    { path = "tokio::runtime::Handle::spawn_blocking", reason = "leaks past RustRuntime shutdown; see rust/src/runtime.rs" },
+    { path = "tokio::task::block_in_place", reason = "blocks a tokio worker thread; see rust/src/runtime.rs" },
+]

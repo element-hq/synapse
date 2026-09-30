@@ -68,6 +68,7 @@ def load_appservices(
     # Dicts of value -> filename
     seen_as_tokens: dict[str, str] = {}
     seen_ids: dict[str, str] = {}
+    seen_proxy_prefixes: dict[str, str] = {}
 
     appservices = []
 
@@ -93,6 +94,17 @@ def load_appservices(
                         )
                     )
                 seen_as_tokens[appservice.token] = config_file
+                if appservice.proxy_prefix is not None:
+                    for seen_prefix, seen_file in seen_proxy_prefixes.items():
+                        if _proxy_prefixes_overlap(
+                            appservice.proxy_prefix, seen_prefix
+                        ):
+                            raise ConfigError(
+                                "io.element.msc4512.proxy_prefix values must not overlap across "
+                                "application services: "
+                                f"{appservice.proxy_prefix} (files: {config_file}, {seen_file})"
+                            )
+                    seen_proxy_prefixes[appservice.proxy_prefix] = config_file
                 logger.info("Loaded application service: %s", appservice)
                 appservices.append(appservice)
         except Exception as e:
@@ -100,6 +112,15 @@ def load_appservices(
             logger.exception(e)
             raise
     return appservices
+
+
+def _proxy_prefixes_overlap(prefix_a: str, prefix_b: str) -> bool:
+    """Returns whether two proxy prefixes overlap by sharing a common path prefix."""
+    return (
+        prefix_a == prefix_b
+        or prefix_a.startswith(prefix_b + "/")
+        or prefix_b.startswith(prefix_a + "/")
+    )
 
 
 def _load_appservice(
@@ -199,6 +220,30 @@ def _load_appservice(
             "The `io.element.msc4190` option should be true or false if specified."
         )
 
+    # Opt-in list of scopes granted to this appservice for restricted C-S API
+    # functionality.
+    scopes = as_info.get("io.element.msc4502.scopes", [])
+    if not isinstance(scopes, list) or not all(isinstance(s, str) for s in scopes):
+        raise ValueError(
+            "The `io.element.msc4502.scopes` option should be a list of strings if specified."
+        )
+
+    # Opt-in setting to enable proxying C-S and S-S API endpoints.
+    # When set, Synapse will reverse-proxy requests under the prefix to the appservice:
+    proxy_prefix = as_info.get("io.element.msc4512.proxy_prefix")
+    if proxy_prefix is not None:
+        if not isinstance(proxy_prefix, str) or not proxy_prefix:
+            raise ValueError(
+                "The `io.element.msc4512.proxy_prefix` option should be a non-empty string."
+            )
+
+    proxy_url = as_info.get("io.element.msc4512.proxy_url")
+    if proxy_url is not None:
+        if not isinstance(proxy_url, str) or not proxy_url:
+            raise ValueError(
+                "The `io.element.msc4512.proxy_url` option should be a non-empty string."
+            )
+
     return ApplicationService(
         token=as_info["as_token"],
         url=as_info["url"],
@@ -213,4 +258,7 @@ def _load_appservice(
         supports_ephemeral=supports_ephemeral,
         msc3202_transaction_extensions=msc3202_transaction_extensions,
         msc4190_device_management=msc4190_enabled,
+        scopes=scopes,
+        proxy_prefix=proxy_prefix,
+        proxy_url=proxy_url,
     )

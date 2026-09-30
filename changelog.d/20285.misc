@@ -1,0 +1,1 @@
+Prune `user_ips` less frequently (less stress on the database).

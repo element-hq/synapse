@@ -1387,17 +1387,23 @@ class MediaRepository:
                         self.hs.get_reactor(), thumbnailer.transpose
                     )
 
+                # JPEG has no alpha channel, so it would flatten a transparent
+                # image onto a solid color background.
+                needs_alpha = await defer_to_thread(
+                    self.hs.get_reactor(), lambda: thumbnailer.has_transparency
+                )
+
                 # We deduplicate the thumbnail sizes by ignoring the cropped versions if
                 # they have the same dimensions of a scaled one.
                 thumbnails: dict[tuple[int, int, str], str] = {}
                 for requirement in requirements:
+                    t_type = requirement.media_type
+                    if needs_alpha and t_type == "image/jpeg":
+                        t_type = "image/png"
+
                     if requirement.method == "crop":
                         thumbnails.setdefault(
-                            (
-                                requirement.width,
-                                requirement.height,
-                                requirement.media_type,
-                            ),
+                            (requirement.width, requirement.height, t_type),
                             requirement.method,
                         )
                     elif requirement.method == "scale":
@@ -1406,9 +1412,7 @@ class MediaRepository:
                         )
                         t_width = min(m_width, t_width)
                         t_height = min(m_height, t_height)
-                        thumbnails[(t_width, t_height, requirement.media_type)] = (
-                            requirement.method
-                        )
+                        thumbnails[(t_width, t_height, t_type)] = requirement.method
 
                 # Now we generate the thumbnails for each dimension, store it
                 #

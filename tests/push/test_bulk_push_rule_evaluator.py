@@ -650,3 +650,31 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                 type="m.room.message",
             )
         )
+
+    def _get_rule_ids(self) -> set[str]:
+        """Returns the IDs of all push rules that apply to Alice."""
+        filtered_push_rules = self.get_success(
+            self.hs.get_datastores().main.get_push_rules_for_user(self.alice)
+        )
+        return {rule.rule_id for rule, _ in filtered_push_rules.rules()}
+
+    def test_msc4075_rules_omitted_when_disabled(self) -> None:
+        """The MSC4075 base rules should be filtered out unless the feature is enabled."""
+        rule_ids = self._get_rule_ids()
+        self.assertNotIn(
+            "global/override/.org.matrix.msc4075.rule.rtc.invite_for_me", rule_ids
+        )
+        self.assertNotIn(
+            "global/override/.org.matrix.msc4075.rule.rtc.invite_for_room", rule_ids
+        )
+
+    @override_config({"experimental_features": {"msc4075_enabled": True}})
+    def test_msc4075_rules_present_when_enabled(self) -> None:
+        """The MSC4075 base rules should be included when the feature is enabled."""
+        rule_ids = self._get_rule_ids()
+        self.assertIn(
+            "global/override/.org.matrix.msc4075.rule.rtc.invite_for_me", rule_ids
+        )
+        self.assertIn(
+            "global/override/.org.matrix.msc4075.rule.rtc.invite_for_room", rule_ids
+        )

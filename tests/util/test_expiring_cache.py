@@ -87,6 +87,49 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(cache.get("key3"), [4, 5])
         self.assertEqual(cache.get("key4"), [6, 7])
 
+    def test_size_callback_eviction(self) -> None:
+        reactor, clock = get_clock()
+        cache: ExpiringCache[str, list[int]] = ExpiringCache(
+            cache_name="test",
+            server_name="testserver",
+            hs=self.hs,
+            clock=clock,
+            max_len=5,
+            # Size each value by its sum, so that `len()` and the reported
+            # size disagree.
+            size_callback=sum,
+        )
+
+        cache["key"] = [1]
+        cache["key2"] = [2]
+        cache["key3"] = [2]
+
+        self.assertEqual(cache.get("key"), [1])
+        self.assertEqual(cache.get("key2"), [2])
+        self.assertEqual(cache.get("key3"), [2])
+        self.assertEqual(len(cache), 5)
+
+        # Three entries of `len()` 1 each, but a size of 6, so the oldest two
+        # go.
+        cache["key4"] = [3]
+        self.assertEqual(cache.get("key"), None)
+        self.assertEqual(cache.get("key2"), None)
+        self.assertEqual(cache.get("key3"), [2])
+        self.assertEqual(cache.get("key4"), [3])
+        self.assertEqual(len(cache), 5)
+
+    def test_iterable_and_size_callback_are_exclusive(self) -> None:
+        reactor, clock = get_clock()
+        with self.assertRaises(ValueError):
+            ExpiringCache(
+                cache_name="test",
+                server_name="testserver",
+                hs=self.hs,
+                clock=clock,
+                iterable=True,
+                size_callback=len,
+            )
+
     def test_time_eviction(self) -> None:
         reactor, clock = get_clock()
         cache: ExpiringCache[str, int] = ExpiringCache(
