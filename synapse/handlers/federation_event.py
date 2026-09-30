@@ -1832,6 +1832,31 @@ class FederationEventHandler:
             rejected_event_ids = await self._store.has_rejected_event_ids(seen_remotes)
             if len(rejected_event_ids) > 0:
                 has_rejected_events = True
+                if is_state_dag_room:
+                    # The copies in `event_map` came off the wire, so they claim to be
+                    # unrejected even for events we rejected when we first saw them, e.g
+                    # during an earlier join of this room. Swap in the persisted copies,
+                    # which carry `rejected_reason`, so that rejection cascades into the
+                    # events in this batch which reference them via `prev_state_events`.
+                    #
+                    # Events rejected during *this* batch are not covered by this: they
+                    # have not been persisted yet, so they are tracked separately and
+                    # passed to the auth rules as `batched_rejections`.
+                    persisted_rejected_events = await self._store.get_events(
+                        rejected_event_ids,
+                        allow_rejected=True,
+                        redact_behaviour=EventRedactBehaviour.as_is,
+                    )
+                    missing = rejected_event_ids - set(persisted_rejected_events)
+                    if missing:
+                        # We have seen these events and they have rejection rows, so we
+                        # should be able to load them. If we cannot, rejection would
+                        # silently stop cascading, so complain loudly instead.
+                        raise AssertionError(
+                            f"Could not load rejected events {missing} "
+                            + f"out of {rejected_event_ids}"
+                        )
+                    event_map.update(persisted_rejected_events)
 
         # XXX: it might be possible to kick this process off in parallel with fetching
         # the events.
@@ -1981,7 +2006,9 @@ class FederationEventHandler:
             event_map: every event we were given, by event ID. This includes events we
                have already persisted and so are not persisting again, because we may
                still need them to work out the auth events of an event we have not seen
-               before. On /send_join this is the complete state DAG.
+               before. Any of those which were rejected are the persisted copies,
+               so they carry `rejected_reason`. On /send_join this is the complete
+               state DAG.
             sorted_events: the events being persisted, sorted so that an event's
                `prev_state_events` come before it
             from_send_join: True if `event_map` is the complete state DAG from a
