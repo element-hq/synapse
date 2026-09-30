@@ -6,6 +6,7 @@ use pyo3_log::ResetHandle;
 
 pub mod acl;
 pub mod canonical_json;
+pub mod clock;
 pub mod config;
 pub mod deferred;
 pub mod duration;

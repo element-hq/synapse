@@ -32,6 +32,7 @@ use anyhow::Context;
 use pyo3::{exceptions::PyRuntimeError, prelude::*};
 use tokio::runtime::{Handle, Runtime};
 
+use crate::clock::Clock;
 use crate::homeserver::HomeServer;
 use crate::reactor::Reactor;
 use crate::twisted_dispatch::{self, TwistedDispatchReader, TwistedDispatcher};
@@ -60,6 +61,7 @@ pub struct RustRuntimeInner {
     reactor: Reactor,
     tokio: Mutex<TokioState>,
     worker_threads: usize,
+    clock: Clock,
 
     /// Runs closures on the Twisted reactor thread without taking the GIL on
     /// the calling thread. See [`crate::twisted_dispatch`].
@@ -70,6 +72,11 @@ pub struct RustRuntimeInner {
 }
 
 impl RustRuntimeInner {
+    /// This homeserver's clock. See [`crate::clock`].
+    pub fn clock(&self) -> &Clock {
+        &self.clock
+    }
+
     /// Queue `f` to run on the Twisted reactor thread with the GIL held, and
     /// wake the reactor. Never takes the GIL itself, so a tokio task can call
     /// it to hand a result back to Twisted. See [`crate::twisted_dispatch`].
@@ -202,6 +209,7 @@ impl RustRuntime {
             reactor,
             tokio: Mutex::new(TokioState::NotStarted),
             worker_threads,
+            clock: Clock::new(),
             dispatcher,
             dispatch_reader,
         });
@@ -219,6 +227,17 @@ impl RustRuntime {
         hs.register_sync_shutdown_handler(py, hook.bind(py).as_any())?;
 
         Ok(RustRuntime { inner })
+    }
+
+    /// The current time, in milliseconds since the Unix epoch.
+    fn time_msec(&self) -> u64 {
+        self.inner.clock.now_millis()
+    }
+
+    /// Pin the clock to the given time, in milliseconds since the Unix epoch.
+    /// Only tests call this. See [`crate::clock`].
+    fn set_virtual_time_msec(&self, millis: u64) {
+        self.inner.clock.set_virtual_time(millis);
     }
 }
 
