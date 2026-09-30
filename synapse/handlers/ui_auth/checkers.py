@@ -116,9 +116,7 @@ class RecaptchaAuthChecker(UserInteractiveAuthChecker):
                 400, "Captcha response is required", errcode=Codes.CAPTCHA_NEEDED
             )
 
-        logger.info(
-            "Submitting recaptcha response %s with remoteip %s", user_response, clientip
-        )
+        logger.debug("Submitting recaptcha response %s", user_response)
 
         # TODO: get this from the homeserver rather than creating a new one for
         # each request
