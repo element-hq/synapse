@@ -81,6 +81,7 @@ from synapse.types import (
     StrCollection,
     UserID,
     get_domain_from_id,
+    unwrap,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -1182,6 +1183,16 @@ class PersistEventsStore:
         events_and_contexts = self._apply_existing_redaction_txn(
             txn, room_id, room_version, events_and_contexts=events_and_contexts
         )
+
+        checked_redacted_event_ids = self._compute_newly_redacted_event_ids_txn(
+            txn, room_id, room_version, events_and_contexts=events_and_contexts
+        )
+        if checked_redacted_event_ids:
+            # If any of the events being redacted are sticky,
+            # we should remove the stickiness.
+            self.store.delete_sticky_events_txn(
+                txn, room_id, checked_redacted_event_ids
+            )
 
         self._store_event_txn(txn, events_and_contexts=events_and_contexts)
 
@@ -3010,6 +3021,93 @@ class PersistEventsStore:
                 out.append((event, context))
 
         return out
+
+    def _compute_newly_redacted_event_ids_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        room_version: RoomVersion,
+        events_and_contexts: list[EventPersistencePair],
+    ) -> set[str]:
+        """
+        If we are persisting any redactions, computes the set of event IDs
+        that we can confirm are now redacted.
+
+        Put another way: this function tells you about _known_ events that are getting
+        redacted by the persistence of this batch of events.
+        (It's useful for applying some effects to events as they become redacted, such as
+        removing their stickiness.)
+
+        For redactions not requiring re-check, this function DOES NOT protect against cross-room confusion;
+        the caller is responsible for scoping its usage of these results to the room.
+
+        For redactions requiring re-check, applies the re-check and only returns events satisfying
+        the re-check.
+        For redactions requiring re-check, if we don't have the target event that is being redacted,
+        the event ID is NOT returned as we can't confirm it.
+        """
+
+        redaction_events = [
+            event
+            for event, _context in events_and_contexts
+            if event.redacts is not None and event.rejected_reason is None
+        ]
+        if not redaction_events:
+            return set()
+
+        raw_rows = self.db_pool.simple_select_many_txn(
+            txn,
+            table="events",
+            column="event_id",
+            iterable=[
+                # seen to be non-None above
+                unwrap(e.redacts)
+                for e in redaction_events
+            ],
+            keyvalues={"room_id": room_id},
+            retcols=("event_id", "sender", "type"),
+        )
+        redacted_events_sender_domains: dict[str, str] = {}
+        redacted_event_types: dict[str, str] = {}
+        for event_id, sender, event_type in raw_rows:
+            redacted_events_sender_domains[event_id] = get_domain_from_id(sender)
+            redacted_event_types[event_id] = event_type
+
+        confirmed_redaction_events: list[EventBase] = []
+        for redaction_event in redaction_events:
+            if (
+                redacted_event_types.get(unwrap(redaction_event.redacts))
+                == EventTypes.Create
+            ):
+                # we choose to ignore redactions of m.room.create events,
+                # as in `_maybe_redact_event_row`
+                continue
+
+            # Some redactions in v3+ rooms need a recheck based on the event
+            # they are redacting.
+            if redaction_event.internal_metadata.need_to_check_redaction():
+                expected_domain = redacted_events_sender_domains.get(
+                    unwrap(redaction_event.redacts)
+                )
+                if expected_domain is None:
+                    # We don't have the event being redacted locally,
+                    # so can't check the redaction.
+                    continue
+
+                # This is the same logic as in `_maybe_redact_event_row`.
+                if get_domain_from_id(redaction_event.sender) != expected_domain:
+                    # Sender servers don't match, so the event isn't actually redacted
+                    continue
+
+                # This redaction event is allowed. Mark as not needing a recheck.
+                redaction_event.internal_metadata.recheck_redaction = False
+
+            confirmed_redaction_events.append(redaction_event)
+
+        return {
+            unwrap(redaction_event.redacts)
+            for redaction_event in confirmed_redaction_events
+        }
 
     def _store_event_txn(
         self,

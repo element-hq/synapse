@@ -1810,7 +1810,11 @@ class EventsWorkerStore(SQLBaseStore):
             # Starting in room version v3, some redactions need to be
             # rechecked if we didn't have the redacted event at the
             # time, so we recheck on read instead.
-            # NOTE: If this logic changes, need to update `_apply_existing_redaction_txn`
+            # NOTE: If this logic changes, need to update:
+            # - `_apply_existing_redaction_txn` (persistence of an event that is already redacted)
+            # - `_compute_newly_redacted_event_ids_txn` (persistence of a new redaction)
+            # - `persist_and_notify_client_events` (sort of; applies quality-of-life errors to clients sending
+            #   redactions that wouldn't be valid if they were sent.)
             if redaction_event.internal_metadata.need_to_check_redaction():
                 expected_domain = get_domain_from_id(original_ev.sender)
                 if get_domain_from_id(redaction_event.sender) == expected_domain:
