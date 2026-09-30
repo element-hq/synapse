@@ -31,8 +31,10 @@ import synapse.rest.admin
 from synapse.api.constants import UserTypes
 from synapse.api.errors import HttpResponseException, RequestSendFailed, SynapseError
 from synapse.api.room_versions import RoomVersion, RoomVersions
+from synapse.app.generic_worker import GenericWorkerServer
 from synapse.appservice import ApplicationService
 from synapse.federation.user_directory import UserDirectoryEntryModel
+from synapse.handlers.user_directory import UserDirectoryHandler
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
     LoggingContext,
@@ -2249,7 +2251,7 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         )
 
     @override_config({"federation_domain_whitelist": ["remote.example.com"]})
-    def test_sync_is_scheduled_on_background_worker(self) -> None:
+    def test_scheduled_sync_waits_for_page_updates(self) -> None:
         """The periodic sync waits for page updates before starting another run."""
         updates: list[Deferred[None]] = []
         first_started: Deferred[None] = Deferred()
@@ -2548,27 +2550,166 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         )
 
 
-class FederatedUserDirectoryNoBackgroundTasksTestCase(unittest.HomeserverTestCase):
-    """Tests that federated directory sync only runs on the background worker."""
+class FederatedUserDirectoryWorkerTestCase(unittest.HomeserverTestCase):
+    """Schedule federation sync on the process responsible for the directory."""
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
-        config["run_background_tasks_on"] = "other"
-        config["experimental_features"] = {
-            "bwi_federated_user_dir_enabled": True,
-            "bwi_federated_user_dir_sync_interval": "1s",
-        }
+        config.setdefault("run_background_tasks_on", "background_worker")
+        config["federation_domain_whitelist"] = ["remote.example.com"]
+        experimental = config.setdefault("experimental_features", {})
+        experimental.setdefault("bwi_federated_user_dir_enabled", True)
+        experimental["bwi_federated_user_dir_sync_interval"] = "1s"
+
+        self.sync_runs: list[Deferred[None]] = []
+        original_sync = UserDirectoryHandler._sync_federated_user_directory
+
+        def sync(handler: UserDirectoryHandler) -> Deferred[None]:
+            result = ensureDeferred(original_sync(handler))
+            self.sync_runs.append(result)
+            return result
+
+        self.patch(UserDirectoryHandler, "_sync_federated_user_directory", sync)
+
+        # The standard startup initializes the handler through ModuleApi. Do not
+        # instantiate it here or register client servlets to start the timer.
+        if config.get("worker_app"):
+            config["instance_map"] = {"main": {"host": "testserv", "port": 8765}}
+            return self.setup_test_homeserver(
+                config=config, homeserver_to_use=GenericWorkerServer
+            )
         return self.setup_test_homeserver(config=config)
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
-        self.handler = hs.get_user_directory_handler()
-        self.transport_layer = hs.get_federation_client().transport_layer
+        self.fetch = AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "user_id": "@bob:remote.example.com",
+                        "display_name": "Bob Remote",
+                        "avatar_url": "mxc://remote.example.com/avatar",
+                    }
+                ]
+            }
+        )
+        self.patch(
+            hs.get_federation_client().transport_layer,
+            "user_directory_fetch",
+            self.fetch,
+        )
 
-    @override_config({"federation_domain_whitelist": ["remote.example.com"]})
-    def test_sync_is_not_scheduled(self) -> None:
-        self.transport_layer.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+    def _assert_sync_runs_and_writes(self) -> None:
+        self.assertTrue(self.hs.config.worker.should_update_user_directory)
+        self.assertFalse(self.hs.config.worker.run_background_tasks)
+        self.assertEqual(self.sync_runs, [])
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "removed.example.com",
+                [("@old:removed.example.com", "Old", None)],
+                None,
+                None,
+            )
+        )
 
         self.reactor.advance(1.0)
+        self.assertEqual(len(self.sync_runs), 1)
+        self.get_success(self.sync_runs[0])
+        self.fetch.assert_awaited_once()
 
-        self.transport_layer.user_directory_fetch.assert_not_called()
+        helper = GetUserDirectoryTables(self.store)
+        self.assertEqual(
+            self.get_success(helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )
+        self.assertEqual(
+            self.get_success(helper.get_profiles_in_user_directory()),
+            {
+                "@bob:remote.example.com": ProfileInfo(
+                    display_name="Bob Remote",
+                    avatar_url="mxc://remote.example.com/avatar",
+                )
+            },
+        )
+        self.assertEqual(
+            self.get_success(
+                self.store.db_pool.simple_select_list(
+                    "user_directory_search", None, ("user_id",)
+                )
+            ),
+            [("@bob:remote.example.com",)],
+        )
+
+    @override_config({"update_user_directory_from_worker": None})
+    def test_main_syncs_when_background_tasks_are_elsewhere(self) -> None:
+        self._assert_sync_runs_and_writes()
+
+    @override_config(
+        {
+            "worker_app": "synapse.app.generic_worker",
+            "worker_name": "directory_worker",
+            "update_user_directory_from_worker": "directory_worker",
+        }
+    )
+    def test_directory_worker_syncs_without_client_requests(self) -> None:
+        self.assertIsInstance(self.hs, GenericWorkerServer)
+        self._assert_sync_runs_and_writes()
+
+    def _assert_sync_not_scheduled(self) -> None:
+        self.reactor.advance(2.0)
+        self.assertEqual(self.sync_runs, [])
+        self.fetch.assert_not_called()
+
+    @override_config(
+        {
+            "run_background_tasks_on": None,
+            "update_user_directory_from_worker": "directory_worker",
+        }
+    )
+    def test_main_does_not_sync_when_directory_is_elsewhere(self) -> None:
+        self.assertTrue(self.hs.config.worker.run_background_tasks)
+        self._assert_sync_not_scheduled()
+
+    @override_config(
+        {
+            "worker_app": "synapse.app.generic_worker",
+            "worker_name": "background_worker",
+            "update_user_directory_from_worker": "directory_worker",
+        }
+    )
+    def test_background_worker_does_not_sync(self) -> None:
+        self.assertTrue(self.hs.config.worker.run_background_tasks)
+        self._assert_sync_not_scheduled()
+
+    @override_config(
+        {
+            "worker_app": "synapse.app.generic_worker",
+            "worker_name": "other_worker",
+            "update_user_directory_from_worker": "directory_worker",
+        }
+    )
+    def test_other_worker_does_not_sync(self) -> None:
+        self.assertFalse(self.hs.config.worker.run_background_tasks)
+        self._assert_sync_not_scheduled()
+
+    @override_config(
+        {
+            "update_user_directory_from_worker": None,
+            "experimental_features": {"bwi_federated_user_dir_enabled": False},
+        }
+    )
+    def test_disabled_feature_is_not_scheduled(self) -> None:
+        self.assertTrue(self.hs.config.worker.should_update_user_directory)
+        self._assert_sync_not_scheduled()
+
+    def test_direct_sync_on_non_directory_process_does_nothing(self) -> None:
+        self.assertFalse(self.hs.config.worker.should_update_user_directory)
+        prune = AsyncMock()
+        self.patch(self.store, "prune_federated_remote_users", prune)
+
+        self.get_success(
+            self.hs.get_user_directory_handler()._sync_federated_user_directory()
+        )
+
+        prune.assert_not_called()
+        self.fetch.assert_not_called()

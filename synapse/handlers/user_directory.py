@@ -174,10 +174,10 @@ class UserDirectoryHandler(StateDeltasHandler):
             )
 
         # Periodically sync remote homeservers' user directories into our own,
-        # but only on the worker that runs background tasks.
+        # on the worker responsible for updating the user directory.
         if (
             hs.config.experimental.bwi_federated_user_dir_enabled
-            and hs.config.worker.run_background_tasks
+            and self.update_user_directory
         ):
             self.clock.looping_call(
                 self._sync_federated_user_directory,
@@ -835,15 +835,18 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         Remove imports from homeservers no longer in the whitelist before fetching.
         """
+        if not self.update_user_directory:
+            # Only the worker that owns the user directory should write to it.
+            return
+
         whitelist = self.hs.config.federation.federation_domain_whitelist or {}
         destinations: list[str] = [
             destination for destination in whitelist if destination != self.server_name
         ]
 
-        if self.update_user_directory:
-            # Clean up removed sources even when no destinations remain.
-            # An empty or unset whitelist clears all federation imports.
-            await self.store.prune_federated_remote_users(destinations)
+        # Clean up removed sources even when no destinations remain.
+        # An empty or unset whitelist clears all federation imports.
+        await self.store.prune_federated_remote_users(destinations)
 
         if not destinations:
             logger.debug(
