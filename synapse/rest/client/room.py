@@ -632,7 +632,7 @@ def _parse_request_for_delayed_event_delay(
 def _raise_delayed_events_unsupported() -> NoReturn:
     raise SynapseError(
         HTTPStatus.FORBIDDEN,
-        "Sending delayed events has been disallowed",
+        "Sending delayed events is disabled on this homeserver",
         Codes.FORBIDDEN,
     )
 
