@@ -1877,8 +1877,12 @@ class FederationEventHandler:
             ]
             for ev in unseen_event_map.values()
         }
-        unseen_sorted_event_ids = sorted_topologically(unseen_event_map.keys(), auth_graph)
-        unseen_sorted_events = [unseen_event_map[e_id] for e_id in unseen_sorted_event_ids]
+        unseen_sorted_event_ids = sorted_topologically(
+            unseen_event_map.keys(), auth_graph
+        )
+        unseen_sorted_events = [
+            unseen_event_map[e_id] for e_id in unseen_sorted_event_ids
+        ]
         logger.info(
             "Persisting %i remaining outliers: %s",
             len(unseen_sorted_events),
@@ -1899,7 +1903,9 @@ class FederationEventHandler:
             aid for event in unseen_sorted_events for aid in event.auth_event_ids()
         }
         auth_map = {
-            ev.event_id: ev for ev in unseen_sorted_events if ev.event_id in auth_event_ids
+            ev.event_id: ev
+            for ev in unseen_sorted_events
+            if ev.event_id in auth_event_ids
         }
 
         missing_events = auth_event_ids.difference(auth_map)
