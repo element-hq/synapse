@@ -2039,25 +2039,70 @@ class FederationEventHandler:
         # our own decisions and tell the auth rules about them.
         rejected_event_id_to_reason_map: dict[str, str] = {}
 
+        async def prev_state_maps(event: EventBase) -> dict[int, StateMap[str]]:
+            """The state at each of an event's `prev_state_events`, by state group.
+
+            A `prev_state_event` processed earlier in this batch has not been persisted
+            yet, so the state at it is only in memory. A `prev_state_event` persisted in the past
+            e.g. from a previous room join are stored in the database. A single event can reference
+            both, so fill in from the database on a miss and remember it for the rest of
+            the batch.
+            """
+            missing = [
+                prev_state_event_id
+                for prev_state_event_id in event.prev_state_events
+                if prev_state_event_id not in event_id_to_state_group
+            ]
+            if missing:
+                # Anything we have not remembered was persisted before this batch, so
+                # the database knows the state at it.
+                groups = (
+                    await self._state_storage_controller.get_state_group_for_events(
+                        missing, await_full_state=False,
+                    )
+                )
+                unknown = [
+                    prev_state_event_id
+                    for prev_state_event_id in missing
+                    if groups.get(prev_state_event_id) is None
+                ]
+                if unknown:
+                    # `get_state_group_for_events` claims to raise when it can't
+                    # find a state group, but that only covers lookups which reached the
+                    # database :/ cached entries come back as None.
+                    # We can't calculate the state at `event` without knowing the state groups
+                    # for ALL prev_state_events so bail out if we're missing them.
+                    raise RuntimeError(
+                        f"No state group for prev_state_events {unknown} of "
+                        f"{event.event_id}, so the state before it cannot be calculated"
+                    )
+
+                group_to_state = (
+                    await self._state_storage_controller.get_state_for_groups(
+                        set(groups.values())
+                    )
+                )
+                # Now populate the in-memory map
+                for prev_state_event_id, state_group in groups.items():
+                    event_id_to_state_group[prev_state_event_id] = state_group
+                    state_group_to_state_map[state_group] = group_to_state[state_group]
+
+            return {
+                event_id_to_state_group[prev_state_event_id]: state_group_to_state_map[
+                    event_id_to_state_group[prev_state_event_id]
+                ]
+                for prev_state_event_id in event.prev_state_events
+            }
+
         async def process(event: EventBase) -> EventPersistencePair:
             assert supports_msc4242_state_dag(event)
             with nested_logging_context(suffix=event.event_id):
-                # We can only use the state we have remembered if we have remembered it
-                # for every one of the event's `prev_state_events`. If we haven't, the
-                # missing ones were already persisted, so use the database instead.
+                # On a /send_join the events in this batch are not persisted until we
+                # have processed all of them, so the state at an event's
+                # `prev_state_events` can be spread across memory and the database.
                 known_prev_state_maps = None
-                if from_send_join and all(
-                    prev_state_event_id in event_id_to_state_group
-                    for prev_state_event_id in event.prev_state_events
-                ):
-                    known_prev_state_maps = {
-                        event_id_to_state_group[prev_state_event_id]: (
-                            state_group_to_state_map[
-                                event_id_to_state_group[prev_state_event_id]
-                            ]
-                        )
-                        for prev_state_event_id in event.prev_state_events
-                    }
+                if from_send_join:
+                    known_prev_state_maps = await prev_state_maps(event)
 
                 (
                     context,
