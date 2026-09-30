@@ -1,0 +1,1 @@
+Fix an issue which could cause room state to diverge from other servers under bad federation connectivity.
