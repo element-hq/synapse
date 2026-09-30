@@ -2085,7 +2085,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             batch_device_ids: StrCollection,
         ) -> int:
             stream_ids = self._device_list_id_gen.get_next_mult_txn(
-                txn, len(device_ids)
+                txn, len(batch_device_ids)
             )
 
             self._add_device_change_to_stream_txn(
