@@ -132,15 +132,12 @@ jobs:
           ln -s -T /venv /src/.venv
           poetry remove twisted
           poetry add --extras tls git+https://github.com/twisted/twisted.git#trunk
-          poetry install --no-interaction --extras "all test"
         working-directory: /src
       - name: Run SyTest
+        # Bootstrap copies the patched pyproject.toml and poetry.lock, then installs
+        # with Poetry, layering Twisted trunk on top of the usual SyTest setup.
         run: /bootstrap.sh synapse
         working-directory: /src
-        env:
-          # Use offline mode to avoid reinstalling the pinned version of
-          # twisted.
-          OFFLINE: 1
       - name: Summarise results.tap
         if: ${{ always() }}
         run: /sytest/scripts/tap_to_gha.pl /logs/results.tap
