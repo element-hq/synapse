@@ -344,6 +344,16 @@ class UIAuthTests(unittest.HomeserverTestCase):
             },
         )
 
+    def test_ui_auth_null_auth(self) -> None:
+        """
+        A null `auth` value is treated as if it was omitted.
+        """
+        channel = self.delete_device(
+            self.user_tok, self.device_id, HTTPStatus.UNAUTHORIZED, {"auth": None}
+        )
+        self.assertIn("session", channel.json_body)
+        self.assertIn({"stages": ["m.login.password"]}, channel.json_body["flows"])
+
     @override_config({"password_config": {"enabled": "only_for_reauth"}})
     def test_ui_auth_with_passwords_for_reauth_only(self) -> None:
         """
