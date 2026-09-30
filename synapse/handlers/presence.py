@@ -2686,8 +2686,15 @@ class PresenceFederationQueue:
         self._repl_client = ReplicationGetStreamUpdates.make_client(hs)
 
         # Should we keep a queue of recent presence updates? We only bother if
-        # another process may be handling federation sending.
-        self._queue_presence_updates = True
+        # another process may be handling federation sending, i.e. outbound
+        # federation is enabled somewhere and it isn't this instance alone. If
+        # federation is disabled entirely (no sender instances) or this instance
+        # is the sole sender, nothing consumes the queue over replication, and
+        # queuing would only advance the presence_federation stream for nothing.
+        federation_instances = hs.config.worker.federation_shard_config.instances
+        self._queue_presence_updates = bool(federation_instances) and (
+            federation_instances != [self._instance_name]
+        )
 
         # Whether this instance is a presence writer.
         self._presence_writer = self._instance_name in hs.config.worker.writers.presence
@@ -2697,13 +2704,6 @@ class PresenceFederationQueue:
 
         if hs.should_send_federation():
             self._federation = hs.get_federation_sender()
-
-            # We don't bother queuing up presence states if only this instance
-            # is sending federation.
-            if hs.config.worker.federation_shard_config.instances == [
-                self._instance_name
-            ]:
-                self._queue_presence_updates = False
 
         # The queue of recently queued updates as tuples of: `(timestamp,
         # stream_id, destinations, user_ids)`. We don't store the full states

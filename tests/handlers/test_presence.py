@@ -1995,6 +1995,16 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
 
 
 class PresenceFederationQueueTestCase(unittest.HomeserverTestCase):
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # These tests exercise the queue's storage/replication mechanics, which
+        # only run when another instance handles federation sending (so the
+        # writer queues updates for that instance to consume over replication).
+        # Point federation sending at a separate instance to enable queuing
+        # without turning this process into a federation sender itself.
+        config["federation_sender_instances"] = ["federation_sender"]
+        return config
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.presence_handler = hs.get_presence_handler()
         self.clock = hs.get_clock()
@@ -2209,6 +2219,43 @@ class PresenceFederationQueueTestCase(unittest.HomeserverTestCase):
         ]
 
         self.assertCountEqual(rows, expected_rows)
+
+
+class PresenceFederationQueueDisabledTestCase(unittest.HomeserverTestCase):
+    """When outbound federation is disabled deployment-wide there is no
+    federation sender to consume the presence federation queue, so it must not
+    queue updates or advance the `presence_federation` stream. Otherwise the
+    stream position climbs forever with no consumer, causing replication
+    `wait_for_stream_position` timeouts on instances that never receive it.
+    """
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # No federation sender instances => outbound federation disabled.
+        config["federation_sender_instances"] = []
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.instance_name = hs.get_instance_name()
+        self.queue = hs.get_presence_handler().get_federation_queue()
+
+    def test_updates_not_queued_when_federation_disabled(self) -> None:
+        self.assertFalse(self.queue._queue_presence_updates)
+
+        state = UserPresenceState.default("@user1:test")
+        prev_token = self.queue.get_current_token(self.instance_name)
+
+        self.get_success(self.queue.send_presence_to_destinations((state,), ("dest1",)))
+
+        # Nothing should have been queued, so the stream position must not move.
+        self.assertEqual(self.queue.get_current_token(self.instance_name), prev_token)
+
+        rows, _, _ = self.get_success(
+            self.queue.get_replication_rows(
+                self.instance_name, prev_token, prev_token + 10, 10
+            )
+        )
+        self.assertEqual(rows, [])
 
 
 class PresenceJoinTestCase(unittest.HomeserverTestCase):
