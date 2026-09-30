@@ -84,13 +84,13 @@ class MSC4388CreateRendezvousServlet(RestServlet):
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, Any]:
         if self.require_authentication:
-            # This will raise if the user is not authenticated
+            # This will raise if the user is not authenticated or the token needs a refresh
             await self.auth.get_user_by_req(request)
         return HTTPStatus.OK, {"create_available": True}
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, Any]:
         if self.require_authentication:
-            # This will raise if the user is not authenticated
+            # This will raise if the user is not authenticated or the token needs a refresh
             await self.auth.get_user_by_req(request)
         return self._handler.handle_post(request)
 
@@ -110,13 +110,35 @@ class MSC4388UpdateRendezvousServlet(RestServlet):
     def on_GET(self, request: SynapseRequest, rendezvous_id: str) -> tuple[int, Any]:
         return self._handler.handle_get(rendezvous_id, request)
 
-    def on_PUT(self, request: SynapseRequest, rendezvous_id: str) -> tuple[int, Any]:
-        return self._handler.handle_put(rendezvous_id, request)
-
     def on_DELETE(
         self, _request: SynapseRequest, rendezvous_id: str
     ) -> tuple[int, Any]:
         return self._handler.handle_delete(rendezvous_id)
+
+
+class MSC4388SendRendezvousServlet(RestServlet):
+    """Send a payload to a rendezvous session.
+
+    The transaction ID in the path is used by the server to make retries of a
+    send idempotent: repeating a request with the same transaction ID returns
+    the response recorded for the original request.
+    """
+
+    PATTERNS = client_patterns(
+        "/io.element.msc4388/rendezvous/(?P<rendezvous_id>[^/]+)/(?P<txn_id>[^/]+)$",
+        releases=[],
+        v1=False,
+        unstable=True,
+    )
+
+    def __init__(self, hs: "HomeServer") -> None:
+        super().__init__()
+        self._handler = hs.get_msc4388_rendezvous_handler()
+
+    def on_PUT(
+        self, request: SynapseRequest, rendezvous_id: str, txn_id: str
+    ) -> tuple[int, Any]:
+        return self._handler.handle_put(rendezvous_id, txn_id, request)
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
@@ -129,3 +151,4 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if hs.config.experimental.msc4388_enabled:
         MSC4388CreateRendezvousServlet(hs).register(http_server)
         MSC4388UpdateRendezvousServlet(hs).register(http_server)
+        MSC4388SendRendezvousServlet(hs).register(http_server)
