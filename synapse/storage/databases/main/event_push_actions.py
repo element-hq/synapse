@@ -701,11 +701,8 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             if thread_id not in summarised_threads:
                 continue
 
-            # Note that previous thread summaries of 0 are discarded above, so this
-            # may create a new entry.
-            #
-            # TODO If empty summaries are deleted this can use `thread_counts`
-            # directly.
+            # Every thread in `summarised_threads` was given an entry by the loop
+            # over the summary rows above, so this only tops up an existing count.
             counts = _get_thread(thread_id)
             counts.notify_count += notif_count
             counts.unread_count += unread_count
