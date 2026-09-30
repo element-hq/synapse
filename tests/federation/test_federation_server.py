@@ -22,6 +22,7 @@ import logging
 from http import HTTPStatus
 from unittest import skip as skip_test
 from unittest.mock import AsyncMock, Mock, patch
+from urllib.parse import urlencode
 
 from parameterized import parameterized
 
@@ -170,7 +171,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         """A server failure is returned as an error, not an empty directory."""
         with patch.object(
             self.hs.get_datastores().main,
-            "get_local_users_in_user_dir",
+            "get_local_users_in_user_dir_paginated",
             new=AsyncMock(side_effect=RuntimeError("database unavailable")),
         ):
             channel = self.make_signed_federation_request(
@@ -181,6 +182,79 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.INTERNAL_SERVER_ERROR)
         self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN")
+
+    @parameterized.expand(
+        [
+            ("empty", 0, [0]),
+            ("partial", 9, [9]),
+            ("full", 10, [10, 0]),
+            ("full_and_partial", 11, [10, 1]),
+            ("two_full", 20, [10, 10, 0]),
+        ]
+    )
+    def test_federation_user_directory_fetch_pagination(
+        self, name: str, user_count: int, expected_page_sizes: list[int]
+    ) -> None:
+        """Signed requests traverse the real responder, including an empty tail."""
+        store = self.hs.get_datastores().main
+        user_ids = []
+        for i in reversed(range(user_count)):
+            user_id = self.register_user(f"page{i:02}", "password")
+            self.get_success(store.update_profile_in_user_dir(user_id, None, None))
+            user_ids.append(user_id)
+        user_ids.sort()
+
+        self.get_success(
+            store.update_profile_in_user_dir("@remote:elsewhere", "Remote user", None)
+        )
+        endpoint = (
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/"
+            "user_directory/fetch"
+        )
+        start_token = None
+        received_ids: list[str] = []
+        for page_number, expected_size in enumerate(expected_page_sizes):
+            path = endpoint
+            if start_token is not None:
+                path += "?" + urlencode({"start_token": start_token})
+            channel = self.make_signed_federation_request("GET", path)
+            self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+            results = channel.json_body["results"]
+            self.assertEqual(len(results), expected_size)
+            self.assertEqual(
+                results,
+                [
+                    {"user_id": user_id}
+                    for user_id in user_ids[
+                        len(received_ids) : len(received_ids) + expected_size
+                    ]
+                ],
+            )
+            received_ids.extend(entry["user_id"] for entry in results)
+            if page_number < len(expected_page_sizes) - 1:
+                self.assertEqual(channel.json_body["next_token"], received_ids[-1])
+                start_token = channel.json_body["next_token"]
+            else:
+                self.assertNotIn("next_token", channel.json_body)
+
+        self.assertEqual(received_ids, user_ids)
+
+    @parameterized.expand(
+        [("empty", ""), ("malformed", "not-a-user-id"), ("foreign", "@user:elsewhere")]
+    )
+    def test_federation_user_directory_fetch_rejects_invalid_start_token(
+        self, name: str, start_token: str
+    ) -> None:
+        """Invalid request cursors return an error instead of an empty directory."""
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/"
+            "user_directory/fetch?" + urlencode({"start_token": start_token}),
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
 
 
 class FederationUserDirectoryDisabledTests(unittest.FederatingHomeserverTestCase):

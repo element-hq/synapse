@@ -530,7 +530,7 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
                 )
 
     def test_get_local_users_in_user_dir_paginated(self) -> None:
-        """Only registered local directory entries and their profiles are returned."""
+        """Pages return registered local profiles in order, after the start token."""
         local_user = "@local:test"
         no_profile_user = "@no_profile:test"
         self.get_success(
@@ -554,18 +554,29 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
 
         result = self.get_success(
             self.store.get_local_users_in_user_dir_paginated(
-                start_token=None, page_size=1000
+                start_token=None, page_size=1
             )
         )
 
-        self.assertCountEqual(
+        self.assertEqual(
             result,
             [
                 {
                     "user_id": local_user,
                     "display_name": "Directory profile",
                     "avatar_url": "mxc://test/avatar",
-                },
+                }
+            ],
+        )
+
+        next_page = self.get_success(
+            self.store.get_local_users_in_user_dir_paginated(
+                start_token=result[-1]["user_id"], page_size=1
+            )
+        )
+        self.assertEqual(
+            next_page,
+            [
                 {
                     "user_id": no_profile_user,
                     "display_name": None,
@@ -573,10 +584,18 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
                 },
             ],
         )
+        self.assertEqual(
+            self.get_success(
+                self.store.get_local_users_in_user_dir_paginated(
+                    start_token=next_page[-1]["user_id"], page_size=1
+                )
+            ),
+            [],
+        )
 
     def test_get_local_users_in_user_dir_remote_only(self) -> None:
         """A directory containing only remote users has no local results."""
-        # FIXME: Test does not what it says
+        # prepare() populates the directory exclusively with remote profiles.
         self.assertEqual(
             self.get_success(
                 self.store.get_local_users_in_user_dir_paginated(
@@ -788,6 +807,200 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         # "e"-lookalikes to be the same.
 
     test_search_user_dir_accent_insensitivity.skip = "not supported yet"  # type: ignore
+
+
+class FederatedUserDirectoryStoreTestCase(HomeserverTestCase):
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config["experimental_features"] = {"bwi_federated_user_dir_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.user_dir_helper = GetUserDirectoryTables(self.store)
+
+    def _assert_directory_state(
+        self,
+        profiles: dict[str, ProfileInfo],
+        imports: set[tuple[str, str]],
+    ) -> None:
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
+            profiles,
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            imports,
+        )
+        indexed_users = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                table="user_directory_search", keyvalues=None, retcol="user_id"
+            )
+        )
+        self.assertCountEqual(indexed_users, profiles)
+
+    def _assert_search_results(self, term: str, expected: set[str]) -> None:
+        results = self.get_success(
+            self.store.search_user_dir("@searcher:test", term, 20)
+        )
+        self.assertFalse(results["limited"])
+        self.assertEqual({user["user_id"] for user in results["results"]}, expected)
+
+    def test_reconcile_range_only_removes_imports_in_range(self) -> None:
+        """Removal includes the upper boundary, but excludes unrelated profiles."""
+        users = [f"@{letter}:remote" for letter in "abcde"]
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote",
+                [(user, "Rangeentry", None) for user in users],
+                start_token=None,
+                end_token=None,
+            )
+        )
+        other_server_user = "@c:other"
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "other",
+                [(other_server_user, "Rangeentry", None)],
+                start_token=None,
+                end_token=None,
+            )
+        )
+        local_user = "@c:test"
+        self.get_success(self.store.register_user(local_user))
+        unimported_user = "@c0:remote"
+        for user in (local_user, unimported_user):
+            self.get_success(
+                self.store.update_profile_in_user_dir(user, "Unrelatedprofile", None)
+            )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        imports = {(user, "remote") for user in users} | {(other_server_user, "other")}
+        self._assert_directory_state(profiles, imports)
+        self._assert_search_results("Rangeentry", set(users) | {other_server_user})
+
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote", [], start_token=users[1], end_token=users[3]
+            )
+        )
+
+        for user in users[2:4]:
+            del profiles[user]
+            imports.remove((user, "remote"))
+        self._assert_directory_state(profiles, imports)
+        self._assert_search_results(
+            "Rangeentry", {users[0], users[1], users[4], other_server_user}
+        )
+
+    def test_reconcile_pages_out_of_order_and_repeated(self) -> None:
+        """Disjoint pages may commit out of order and be replayed after a restart."""
+        users = [f"@user{number:02}:remote" for number in range(1, 7)]
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote",
+                [(user, "Beforepage", "mxc://remote/before") for user in users],
+                start_token=None,
+                end_token=None,
+            )
+        )
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        imports = {(user, "remote") for user in users}
+        pages: list[
+            tuple[str | None, str | None, list[tuple[str, str | None, str | None]]]
+        ] = [
+            (
+                None,
+                users[1],
+                [
+                    (users[0], "Freshpage", "mxc://remote/after"),
+                    (users[1], None, None),
+                ],
+            ),
+            (users[1], users[3], [(users[3], "Freshpage", None)]),
+            (users[3], None, [(users[5], "Freshpage", None)]),
+        ]
+        removed_by_page = [set(), {users[2]}, {users[4]}]
+        old_search_results = set(users)
+        new_search_results: set[str] = set()
+
+        for page_number in (2, 0, 1, 0, 1, 2):
+            with self.subTest(page=page_number + 1):
+                start_token, end_token, entries = pages[page_number]
+                self.get_success(
+                    self.store.reconcile_federated_remote_users(
+                        "remote", entries, start_token=start_token, end_token=end_token
+                    )
+                )
+
+                for user in removed_by_page[page_number]:
+                    profiles.pop(user, None)
+                    imports.discard((user, "remote"))
+                    old_search_results.discard(user)
+                for user, display_name, avatar_url in entries:
+                    profiles[user] = ProfileInfo(
+                        display_name=display_name, avatar_url=avatar_url
+                    )
+                    old_search_results.discard(user)
+                    if display_name is not None:
+                        new_search_results.add(user)
+
+                self._assert_directory_state(profiles, imports)
+                self._assert_search_results("Beforepage", old_search_results)
+                self._assert_search_results("Freshpage", new_search_results)
+
+    def test_reconcile_empty_tail_then_user_returns(self) -> None:
+        """An empty final page removes stale users, which can be imported again."""
+        entries = [
+            ("@a:remote", "Keptprofile", None),
+            ("@b:remote", "Keptprofile", None),
+            ("@c:remote", "Tailprofile", "mxc://remote/old"),
+        ]
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote", entries, start_token=None, end_token=None
+            )
+        )
+        self._assert_search_results("Tailprofile", {"@c:remote"})
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote", entries[:2], start_token=None, end_token="@b:remote"
+            )
+        )
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote", [], start_token="@b:remote", end_token=None
+            )
+        )
+
+        profiles = {
+            user: ProfileInfo(display_name=display_name, avatar_url=avatar_url)
+            for user, display_name, avatar_url in entries[:2]
+        }
+        imports = {(user, "remote") for user in profiles}
+        self._assert_directory_state(profiles, imports)
+        self._assert_search_results("Keptprofile", {"@a:remote", "@b:remote"})
+        self._assert_search_results("Tailprofile", set())
+
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote",
+                [("@c:remote", "Returnedprofile", "mxc://remote/new")],
+                start_token="@b:remote",
+                end_token=None,
+            )
+        )
+        profiles["@c:remote"] = ProfileInfo(
+            display_name="Returnedprofile", avatar_url="mxc://remote/new"
+        )
+        imports.add(("@c:remote", "remote"))
+        self._assert_directory_state(profiles, imports)
+        self._assert_search_results("Tailprofile", set())
+        self._assert_search_results("Returnedprofile", {"@c:remote"})
 
 
 class UserDirectoryICUTestCase(HomeserverTestCase):

@@ -22,6 +22,9 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock, call, patch
 from urllib.parse import quote
 
+from pydantic import ValidationError
+
+from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
@@ -29,12 +32,19 @@ from synapse.api.constants import UserTypes
 from synapse.api.errors import HttpResponseException, RequestSendFailed, SynapseError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.appservice import ApplicationService
+from synapse.federation.user_directory import UserDirectoryEntryModel
+from synapse.logging.context import (
+    SENTINEL_CONTEXT,
+    LoggingContext,
+    current_context,
+    make_deferred_yieldable,
+    run_in_background,
+)
 from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import (
     JsonDict,
-    RemoteUserDirectoryEntry,
     UserID,
     UserProfile,
     create_requester,
@@ -1473,7 +1483,7 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.handler = hs.get_user_directory_handler()
-        self.federation_client = hs.get_federation_client()
+        self.transport_layer = hs.get_federation_client().transport_layer
         self.user_dir_helper = GetUserDirectoryTables(self.store)
 
     @override_config(
@@ -1493,7 +1503,9 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        async def fetch(destination: str, _timeout: int) -> JsonDict:
+        async def fetch(
+            destination: str, _start_token: str | None, _timeout: int
+        ) -> JsonDict:
             return {
                 "results": [
                     {
@@ -1504,7 +1516,7 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
                 ],
             }
 
-        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
             side_effect=fetch
         )
 
@@ -1513,11 +1525,14 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         timeout = (
             self.hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout
         )
-        self.federation_client.user_directory_fetch.assert_has_awaits(
-            [call("remote.example.com", timeout), call("second.example.com", timeout)],
+        self.transport_layer.user_directory_fetch.assert_has_awaits(
+            [
+                call("remote.example.com", None, timeout),
+                call("second.example.com", None, timeout),
+            ],
             any_order=True,
         )
-        self.assertEqual(self.federation_client.user_directory_fetch.await_count, 2)
+        self.assertEqual(self.transport_layer.user_directory_fetch.await_count, 2)
 
         profiles = self.get_success(
             self.user_dir_helper.get_profiles_in_user_directory()
@@ -1541,11 +1556,11 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
 
     @override_config({"federation_domain_whitelist": ["test"]})
     def test_sync_skips_own_server(self) -> None:
-        self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+        self.transport_layer.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
 
         self.get_success(self.handler._sync_federated_user_directory())
 
-        self.federation_client.user_directory_fetch.assert_not_called()
+        self.transport_layer.user_directory_fetch.assert_not_called()
 
     def test_sync_empty_or_unset_whitelist_clears_imports(self) -> None:
         whitelists: list[dict[str, bool] | None] = [None, {}]
@@ -1554,14 +1569,17 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
                 self.hs.config.federation.federation_domain_whitelist = whitelist
                 self.get_success(
                     self.store.reconcile_federated_remote_users(
-                        "remote.example.com", [("@bob:remote.example.com", "Bob", None)]
+                        "remote.example.com",
+                        [("@bob:remote.example.com", "Bob", None)],
+                        start_token=None,
+                        end_token=None,
                     )
                 )
 
-                self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+                self.transport_layer.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
                 self.get_success(self.handler._sync_federated_user_directory())
 
-                self.federation_client.user_directory_fetch.assert_not_called()
+                self.transport_layer.user_directory_fetch.assert_not_called()
                 self.assertEqual(
                     self.get_success(
                         self.user_dir_helper.get_users_in_federated_search()
@@ -1579,12 +1597,15 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         user_id = "@bob:remote.example.com"
         self.get_success(
             self.store.reconcile_federated_remote_users(
-                "remote.example.com", [(user_id, "Bob", None)]
+                "remote.example.com",
+                [(user_id, "Bob", None)],
+                start_token=None,
+                end_token=None,
             )
         )
         self.handler.update_user_directory = False
 
-        self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+        self.transport_layer.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
         self.get_success(self.handler._sync_federated_user_directory())
 
         self.assertEqual(
@@ -1595,22 +1616,282 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
             {user_id: ProfileInfo(display_name="Bob", avatar_url=None)},
         )
-        self.federation_client.user_directory_fetch.assert_not_called()
+        self.transport_layer.user_directory_fetch.assert_not_called()
 
     def _run_sync_returning(self, results: list[dict]) -> None:
         """Run a sync with the supplied remote results."""
         self._run_sync_response({"results": results})
 
     def _run_sync_response(self, response: JsonDict) -> None:
-        """Run a sync with the supplied remote response."""
-        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+        """Mock the transport so the real client validates the supplied page."""
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
             return_value=response
         )
         self.get_success(self.handler._sync_federated_user_directory())
 
+    def _block_directory_page_updates(
+        self,
+    ) -> tuple[AsyncMock, list[Deferred[None]]]:
+        updates: list[Deferred[None]] = []
+        context = current_context()
+
+        async def reconcile(*_args: object) -> None:
+            self.assertIs(current_context(), context)
+            update: Deferred[None] = Deferred()
+            updates.append(update)
+            try:
+                await make_deferred_yieldable(update)
+            finally:
+                self.assertIs(current_context(), context)
+
+        reconcile_mock = AsyncMock(side_effect=reconcile)
+        self.patch(self.handler, "reconcile_remote_users", reconcile_mock)
+        return reconcile_mock, updates
+
+    def test_sync_overlaps_bounded_page_updates_and_waits_for_all(self) -> None:
+        destination = "remote.example.com"
+        user_ids = [f"@user{i}:{destination}" for i in range(5)]
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                *(
+                    {"results": [{"user_id": user_id}], "next_token": user_id}
+                    for user_id in user_ids
+                ),
+                {"results": []},
+            ]
+        )
+        with LoggingContext(name="page-sync", server_name="test") as context:
+            reconcile, updates = self._block_directory_page_updates()
+            sync = ensureDeferred(
+                self.handler._sync_federated_user_directory_for_destination(destination)
+            )
+
+            self.assertEqual(len(updates), 4)
+            self.assertEqual(self.transport_layer.user_directory_fetch.await_count, 4)
+            self.assertNoResult(sync)
+            self.assertIs(current_context(), SENTINEL_CONTEXT)
+
+            # A later page can free capacity while page one is still blocked.
+            updates[2].callback(None)
+            self.assertEqual(len(updates), 5)
+            self.assertEqual(self.transport_layer.user_directory_fetch.await_count, 5)
+            self.assertNoResult(updates[0])
+            self.assertIs(current_context(), SENTINEL_CONTEXT)
+
+            updates[4].callback(None)
+            self.assertEqual(len(updates), 6)
+            self.assertEqual(self.transport_layer.user_directory_fetch.await_count, 6)
+            reconcile.assert_awaited_with(destination, [], user_ids[-1], None)
+
+            # The empty final page may finish first; the traversal must still wait.
+            for index in (5, 1, 3):
+                updates[index].callback(None)
+            self.assertNoResult(sync)
+            updates[0].callback(None)
+            self.assertEqual(self.successResultOf(sync), 5)
+            self.assertIs(current_context(), context)
+
+    def test_sync_update_failure_during_fetch_discards_response_and_drains(
+        self,
+    ) -> None:
+        destination = "remote.example.com"
+        response: Deferred[JsonDict] = Deferred()
+        pages = iter(
+            {
+                "results": [{"user_id": f"@user{i}:{destination}"}],
+                "next_token": f"@user{i}:{destination}",
+            }
+            for i in range(2)
+        )
+
+        async def fetch(*_args: object) -> JsonDict:
+            page = next(pages, None)
+            if page is not None:
+                return page
+            return await make_deferred_yieldable(response)
+
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=fetch
+        )
+        reconcile, updates = self._block_directory_page_updates()
+        sync = run_in_background(
+            self.handler._sync_federated_user_directory_for_destination, destination
+        )
+        self.assertEqual(len(updates), 2)
+        self.assertEqual(self.transport_layer.user_directory_fetch.await_count, 3)
+
+        error = RuntimeError("first page update failed")
+        updates[0].errback(error)
+        response.callback({"results": [{"user_id": f"@user2:{destination}"}]})
+        self.assertEqual(reconcile.await_count, 2)
+        self.assertNoResult(sync)
+
+        updates[1].errback(RuntimeError("second page update failed"))
+        self.assertIs(self.failureResultOf(sync, RuntimeError).value, error)
+
+    def test_sync_stops_after_immediate_page_update_failure(self) -> None:
+        destination = "remote.example.com"
+        user_id = f"@user0:{destination}"
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value={"results": [{"user_id": user_id}], "next_token": user_id}
+        )
+        error = RuntimeError("page update failed immediately")
+        reconcile = AsyncMock(side_effect=error)
+        self.patch(self.handler, "reconcile_remote_users", reconcile)
+
+        sync = run_in_background(
+            self.handler._sync_federated_user_directory_for_destination, destination
+        )
+
+        self.assertIs(self.failureResultOf(sync, RuntimeError).value, error)
+        self.assertEqual(self.transport_layer.user_directory_fetch.await_count, 1)
+        self.assertEqual(reconcile.await_count, 1)
+
+    def test_sync_update_failure_at_capacity_stops_fetching_and_drains(self) -> None:
+        destination = "remote.example.com"
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                {
+                    "results": [{"user_id": f"@user{i}:{destination}"}],
+                    "next_token": f"@user{i}:{destination}",
+                }
+                for i in range(5)
+            ]
+        )
+        with LoggingContext(name="page-update-failure", server_name="test") as context:
+            reconcile, updates = self._block_directory_page_updates()
+            sync = ensureDeferred(
+                self.handler._sync_federated_user_directory_for_destination(destination)
+            )
+            self.assertEqual(len(updates), 4)
+            self.assertNoResult(sync)
+            self.assertIs(current_context(), SENTINEL_CONTEXT)
+
+            error = RuntimeError("page update failed at capacity")
+            updates[2].errback(error)
+            self.assertEqual(self.transport_layer.user_directory_fetch.await_count, 4)
+            self.assertEqual(reconcile.await_count, 4)
+            self.assertNoResult(sync)
+            self.assertIs(current_context(), SENTINEL_CONTEXT)
+
+            for index in (0, 3):
+                updates[index].callback(None)
+                self.assertNoResult(sync)
+            updates[1].callback(None)
+            self.assertIs(self.failureResultOf(sync, RuntimeError).value, error)
+            self.assertIs(current_context(), context)
+
+    def test_sync_fetch_or_validation_failure_drains_page_updates(self) -> None:
+        destination = "remote.example.com"
+        for response, error_type in (
+            (HttpResponseException(500, "fetch failed", b""), HttpResponseException),
+            ({"results": [{"user_id": "invalid"}]}, ValidationError),
+        ):
+            with (
+                self.subTest(error_type=error_type),
+                LoggingContext(
+                    name="page-fetch-failure", server_name="test"
+                ) as context,
+            ):
+                self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+                    side_effect=[
+                        *(
+                            {
+                                "results": [{"user_id": f"@user{i}:{destination}"}],
+                                "next_token": f"@user{i}:{destination}",
+                            }
+                            for i in range(2)
+                        ),
+                        response,
+                    ]
+                )
+                reconcile, updates = self._block_directory_page_updates()
+                sync = ensureDeferred(
+                    self.handler._sync_federated_user_directory_for_destination(
+                        destination
+                    )
+                )
+
+                self.assertEqual(reconcile.await_count, 2)
+                self.assertEqual(
+                    self.transport_layer.user_directory_fetch.await_count, 3
+                )
+                self.assertNoResult(sync)
+                self.assertIs(current_context(), SENTINEL_CONTEXT)
+                self.assertTrue(all(not update.called for update in updates))
+                updates[0].callback(None)
+                self.assertNoResult(sync)
+                updates[1].callback(None)
+                self.failureResultOf(sync, error_type)
+                self.assertIs(current_context(), context)
+
+    def test_sync_cancellation_waits_for_started_page_updates(self) -> None:
+        destination = "remote.example.com"
+        for phase, page_count in (
+            ("capacity limit", 4),
+            ("final drain", 2),
+            ("fetch", 2),
+        ):
+            with (
+                self.subTest(phase=phase),
+                LoggingContext(name="page-cancellation", server_name="test") as context,
+            ):
+                fetch_cancelled = Mock()
+                response: Deferred[JsonDict] = Deferred(fetch_cancelled)
+                pages = iter(
+                    [
+                        {
+                            "results": [{"user_id": f"@user{i}:{destination}"}],
+                            "next_token": (
+                                None
+                                if phase == "final drain" and i == page_count - 1
+                                else f"@user{i}:{destination}"
+                            ),
+                        }
+                        for i in range(page_count)
+                    ]
+                )
+
+                async def fetch(*_args: object) -> JsonDict:
+                    page = next(pages, None)
+                    if page is not None:
+                        return page
+                    return await make_deferred_yieldable(response)
+
+                self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+                    side_effect=fetch
+                )
+                _, updates = self._block_directory_page_updates()
+                sync = ensureDeferred(
+                    self.handler._sync_federated_user_directory_for_destination(
+                        destination
+                    )
+                )
+
+                self.assertEqual(len(updates), page_count)
+                sync.cancel()
+                self.assertNoResult(sync)
+                self.assertIs(current_context(), SENTINEL_CONTEXT)
+                self.assertTrue(all(not update.called for update in updates))
+                if phase == "fetch":
+                    fetch_cancelled.assert_called_once_with(response)
+                else:
+                    fetch_cancelled.assert_not_called()
+
+                for update in updates[:-1]:
+                    update.callback(None)
+                self.assertNoResult(sync)
+                updates[-1].callback(None)
+                self.failureResultOf(sync, CancelledError)
+                self.assertIs(current_context(), context)
+                self.assertEqual(
+                    self.transport_layer.user_directory_fetch.await_count,
+                    page_count + (phase == "fetch"),
+                )
+
     @override_config({"federation_domain_whitelist": ["remote.example.com"]})
     def test_sync_clears_unset_profile_fields(self) -> None:
-        """Missing or null fields in a full snapshot clear cached profile values."""
+        """Missing or null fields in a directory page clear cached profile values."""
         destination = "remote.example.com"
         user_id = "@bob:remote.example.com"
         for description, profile in (
@@ -1708,7 +1989,7 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
 
     @override_config({"federation_domain_whitelist": ["remote.example.com"]})
     def test_sync_invalid_response_does_not_reconcile(self) -> None:
-        """Any malformed entry invalidates the destination's whole response."""
+        """Any malformed entry invalidates the whole page before reconciliation."""
         self._run_sync_returning(
             [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
         )
@@ -1756,7 +2037,11 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
 
         for description, response in malformed_responses:
             with self.subTest(description):
-                self._run_sync_response(response)
+                with patch.object(
+                    self.handler, "reconcile_remote_users", new_callable=AsyncMock
+                ) as reconcile:
+                    self._run_sync_response(response)
+                    reconcile.assert_not_awaited()
 
                 self.assertEqual(
                     self.get_success(
@@ -1794,7 +2079,10 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         removed_user = "@old:removed.example.com"
         self.get_success(
             self.store.reconcile_federated_remote_users(
-                "removed.example.com", [(removed_user, "Old", None)]
+                "removed.example.com",
+                [(removed_user, "Old", None)],
+                start_token=None,
+                end_token=None,
             )
         )
 
@@ -1803,23 +2091,27 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
                 self.handler.reconcile_remote_users(
                     destination,
                     [
-                        RemoteUserDirectoryEntry(
+                        UserDirectoryEntryModel(
                             user_id=f"@existing:{destination}",
                             display_name="Existing",
                             avatar_url=None,
                         )
                     ],
+                    start_token=None,
+                    end_token=None,
                 )
             )
 
-        async def fetch(destination: str, _timeout: int) -> JsonDict:
+        async def fetch(
+            destination: str, _start_token: str | None, _timeout: int
+        ) -> JsonDict:
             error = failures.get(destination)
             if error is not None:
                 raise error
 
             return {"results": [{"user_id": f"@new:{destination}"}]}
 
-        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
             side_effect=fetch
         )
 
@@ -1838,13 +2130,30 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
         )
         self.assertEqual(
-            self.federation_client.user_directory_fetch.call_count,
+            self.transport_layer.user_directory_fetch.await_count,
             len(failures) + 1,
         )
 
     @override_config({"federation_domain_whitelist": ["remote.example.com"]})
     def test_sync_is_scheduled_on_background_worker(self) -> None:
-        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+        """The periodic sync waits for page updates before starting another run."""
+        updates: list[Deferred[None]] = []
+        first_started: Deferred[None] = Deferred()
+        second_started: Deferred[None] = Deferred()
+
+        async def reconcile(*_args: object) -> None:
+            update: Deferred[None] = Deferred()
+            updates.append(update)
+            if len(updates) == 1:
+                first_started.callback(None)
+            elif len(updates) == 2:
+                second_started.callback(None)
+            await make_deferred_yieldable(update)
+
+        self.patch(
+            self.handler, "reconcile_remote_users", AsyncMock(side_effect=reconcile)
+        )
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
             return_value={
                 "results": [
                     {"user_id": "@scheduled:remote.example.com"},
@@ -1852,24 +2161,139 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             }
         )
 
+        # Trigger the configured one-second sync interval.
         self.reactor.advance(1.0)
+        self.get_success(first_started)
 
-        self.federation_client.user_directory_fetch.assert_called_once_with(
+        self.transport_layer.user_directory_fetch.assert_awaited_once_with(
             "remote.example.com",
+            None,
             self.hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout,
         )
+
+        # Passing several intervals must not start a second sync while an update waits.
+        self.reactor.advance(5.0)
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(self.transport_layer.user_directory_fetch.await_count, 1)
+
+        updates[0].callback(None)
+        self.reactor.advance(1.0)
+        self.get_success(second_started)
+        self.assertEqual(len(updates), 2)
+        self.assertEqual(self.transport_layer.user_directory_fetch.await_count, 2)
+        updates[1].callback(None)
+
+    @override_config({"federation_domain_whitelist": ["remote.example.com"]})
+    def test_scheduled_sync_restarts_from_first_page_after_partial_failure(
+        self,
+    ) -> None:
+        """Committed pages survive a failure and the next timer run repairs the tail."""
+        destination = "remote.example.com"
+        alice = f"@alice:{destination}"
+        bob = f"@bob:{destination}"
+        stale = f"@stale:{destination}"
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                destination,
+                [(alice, "Original", None), (stale, "Stale", None)],
+                start_token=None,
+                end_token=None,
+            )
+        )
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                {
+                    "results": [{"user_id": alice, "display_name": "First update"}],
+                    "next_token": alice,
+                },
+                HttpResponseException(500, "second page unavailable", b""),
+                {
+                    "results": [{"user_id": alice, "display_name": "Retried update"}],
+                    "next_token": alice,
+                },
+                {"results": [{"user_id": bob, "display_name": "Recovered"}]},
+            ]
+        )
+
+        original_sync = self.handler._sync_federated_user_directory_for_destination
+        completed: list[Deferred[None]] = [Deferred(), Deferred()]
+        runs = 0
+
+        async def observe_sync(destination: str) -> int:
+            nonlocal runs
+            finished = completed[runs]
+            runs += 1
+            try:
+                return await original_sync(destination)
+            finally:
+                finished.callback(None)
+
+        self.patch(
+            self.handler, "_sync_federated_user_directory_for_destination", observe_sync
+        )
+
+        # First timer run commits page one, but cannot fetch the remaining range.
+        self.reactor.advance(1.0)
+        self.get_success(completed[0])
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
+            {
+                alice: ProfileInfo(display_name="First update", avatar_url=None),
+                stale: ProfileInfo(display_name="Stale", avatar_url=None),
+            },
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {(alice, destination), (stale, destination)},
+        )
+
+        # The next timer run must fetch page one again, then reconcile the tail.
+        self.reactor.advance(1.0)
+        self.get_success(completed[1])
+        timeout = (
+            self.hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout
+        )
+        self.assertEqual(
+            self.transport_layer.user_directory_fetch.await_args_list,
+            [
+                call(destination, None, timeout),
+                call(destination, alice, timeout),
+                call(destination, None, timeout),
+                call(destination, alice, timeout),
+            ],
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
+            {
+                alice: ProfileInfo(display_name="Retried update", avatar_url=None),
+                bob: ProfileInfo(display_name="Recovered", avatar_url=None),
+            },
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {(alice, destination), (bob, destination)},
+        )
+        indexed_users = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                table="user_directory_search", keyvalues=None, retcol="user_id"
+            )
+        )
+        self.assertEqual(set(indexed_users), {alice, bob})
+        self.assertEqual(runs, 2)
 
     def test_reconcile_remote_users_persists_profiles_and_visibility(self) -> None:
         self.get_success(
             self.handler.reconcile_remote_users(
                 "remote.example.com",
                 [
-                    RemoteUserDirectoryEntry(
+                    UserDirectoryEntryModel(
                         user_id="@alice:remote.example.com",
                         display_name="Alice Remote",
                         avatar_url="mxc://remote.example.com/abc",
                     )
                 ],
+                start_token=None,
+                end_token=None,
             )
         )
 
@@ -1898,71 +2322,19 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             self.get_success(self.user_dir_helper.get_users_in_public_rooms()), set()
         )
 
-    def test_reconcile_remote_users_ignores_local_users(self) -> None:
-        self.get_success(
-            self.handler.reconcile_remote_users(
-                "remote.example.com",
-                [
-                    RemoteUserDirectoryEntry(
-                        user_id="@localuser:test",
-                        display_name="Local User",
-                        avatar_url=None,
-                    )
-                ],
-            )
-        )
-
-        profiles = self.get_success(
-            self.user_dir_helper.get_profiles_in_user_directory()
-        )
-        self.assertNotIn("@localuser:test", profiles)
-
-    def test_reconcile_remote_users_ignores_users_from_other_servers(self) -> None:
-        self.get_success(
-            self.handler.reconcile_remote_users(
-                "remote.example.com",
-                [
-                    RemoteUserDirectoryEntry(
-                        user_id="@alice:remote.example.com",
-                        display_name="Alice Remote",
-                        avatar_url=None,
-                    ),
-                    RemoteUserDirectoryEntry(
-                        user_id="@mallory:third-party.example.com",
-                        display_name="Mallory",
-                        avatar_url=None,
-                    ),
-                    RemoteUserDirectoryEntry(
-                        user_id="not-a-valid-user-id",
-                        display_name="Malformed",
-                        avatar_url=None,
-                    ),
-                ],
-            )
-        )
-
-        profiles = self.get_success(
-            self.user_dir_helper.get_profiles_in_user_directory()
-        )
-        self.assertIn("@alice:remote.example.com", profiles)
-        self.assertNotIn("@mallory:third-party.example.com", profiles)
-        self.assertNotIn("not-a-valid-user-id", profiles)
-        self.assertEqual(
-            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
-            {("@alice:remote.example.com", "remote.example.com")},
-        )
-
     def test_search_users_returns_cached_remote_users(self) -> None:
         self.get_success(
             self.handler.reconcile_remote_users(
                 "remote.example.com",
                 [
-                    RemoteUserDirectoryEntry(
+                    UserDirectoryEntryModel(
                         user_id="@carol:remote.example.com",
                         display_name="Carol Remote",
                         avatar_url=None,
                     )
                 ],
+                start_token=None,
+                end_token=None,
             )
         )
 
@@ -1983,12 +2355,14 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             self.handler.reconcile_remote_users(
                 "remote.example.com",
                 [
-                    RemoteUserDirectoryEntry(
+                    UserDirectoryEntryModel(
                         user_id=user_id,
                         display_name="Dave Remote",
                         avatar_url=None,
                     )
                 ],
+                start_token=None,
+                end_token=None,
             )
         )
         self.get_success(self.store.add_users_in_public_rooms(room_id, [user_id]))
@@ -2014,12 +2388,14 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             self.handler.reconcile_remote_users(
                 "remote.example.com",
                 [
-                    RemoteUserDirectoryEntry(
+                    UserDirectoryEntryModel(
                         user_id=user_id,
                         display_name="Erin Remote",
                         avatar_url=None,
                     )
                 ],
+                start_token=None,
+                end_token=None,
             )
         )
 
@@ -2039,12 +2415,14 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             self.handler.reconcile_remote_users(
                 "remote.example.com",
                 [
-                    RemoteUserDirectoryEntry(
+                    UserDirectoryEntryModel(
                         user_id="@frank:remote.example.com",
                         display_name="Frank Remote",
                         avatar_url=None,
                     )
                 ],
+                start_token=None,
+                end_token=None,
             )
         )
 
@@ -2071,12 +2449,12 @@ class FederatedUserDirectoryNoBackgroundTasksTestCase(unittest.HomeserverTestCas
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.handler = hs.get_user_directory_handler()
-        self.federation_client = hs.get_federation_client()
+        self.transport_layer = hs.get_federation_client().transport_layer
 
     @override_config({"federation_domain_whitelist": ["remote.example.com"]})
     def test_sync_is_not_scheduled(self) -> None:
-        self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+        self.transport_layer.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
 
         self.reactor.advance(1.0)
 
-        self.federation_client.user_directory_fetch.assert_not_called()
+        self.transport_layer.user_directory_fetch.assert_not_called()
