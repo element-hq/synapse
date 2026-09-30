@@ -1554,6 +1554,120 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             },
         )
 
+    def test_sync_bounds_destinations_and_their_page_updates(self) -> None:
+        """A destination holds its slot until every started page update finishes."""
+        destinations = ["first.example", "second.example", "third.example"]
+        first, second, third = destinations
+        self.hs.config.federation.federation_domain_whitelist = dict.fromkeys(
+            destinations, True
+        )
+        for fail_second in (False, True):
+            with self.subTest(fail_second=fail_second):
+                updates: dict[str, list[Deferred[None]]] = {
+                    destination: [] for destination in destinations
+                }
+                fetch_counts = dict.fromkeys(destinations, 0)
+                full: Deferred[None] = Deferred()
+
+                async def fetch(
+                    destination: str, start_token: str | None, _timeout: int
+                ) -> JsonDict:
+                    page = fetch_counts[destination]
+                    expected_start = f"@user{page - 1}:{destination}" if page else None
+                    self.assertEqual(start_token, expected_start)
+                    fetch_counts[destination] += 1
+                    if page == 4:
+                        return {"results": []}
+                    user_id = f"@user{page}:{destination}"
+                    return {"results": [{"user_id": user_id}], "next_token": user_id}
+
+                async def reconcile(
+                    destination: str, _users: object, _start: object, _end: object
+                ) -> None:
+                    update: Deferred[None] = Deferred()
+                    updates[destination].append(update)
+                    if (
+                        len(updates[first]) == len(updates[second]) == 4
+                        and not full.called
+                    ):
+                        full.callback(None)
+                    await make_deferred_yieldable(update)
+
+                self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+                    side_effect=fetch
+                )
+                self.patch(
+                    self.handler,
+                    "reconcile_remote_users",
+                    AsyncMock(side_effect=reconcile),
+                )
+                sync = ensureDeferred(self.handler._sync_federated_user_directory())
+                self.get_success(full)
+                self.assertEqual(fetch_counts, {first: 4, second: 4, third: 0})
+                self.assertNoResult(sync)
+
+                # Free a page slot, but keep the destination's first update blocked.
+                updates[second][2].callback(None)
+                self.assertEqual(fetch_counts, {first: 4, second: 5, third: 0})
+                for index in (4, 0, 1):
+                    updates[second][index].callback(None)
+                self.assertEqual(fetch_counts[third], 0)
+                self.assertNoResult(sync)
+
+                if fail_second:
+                    updates[second][3].errback(
+                        RuntimeError("second destination failed")
+                    )
+                else:
+                    updates[second][3].callback(None)
+                self.assertEqual(fetch_counts, {first: 4, second: 5, third: 4})
+                self.assertTrue(all(not update.called for update in updates[first]))
+                self.assertNoResult(sync)
+
+                for destination in (third, first):
+                    # Completing one page permits fetching the empty final page.
+                    for index in range(5):
+                        updates[destination][index].callback(None)
+                    if destination == third:
+                        self.assertNoResult(sync)
+                self.get_success(sync)
+                self.assertEqual(fetch_counts, dict.fromkeys(destinations, 5))
+
+    def test_sync_cancellation_waits_for_all_destinations(self) -> None:
+        """Outer cancellation lets active and queued destinations finish."""
+        destinations = ["first.example", "second.example", "third.example"]
+        self.hs.config.federation.federation_domain_whitelist = dict.fromkeys(
+            destinations, True
+        )
+        gates: dict[str, Deferred[int]] = {}
+        started: Deferred[None] = Deferred()
+
+        async def sync_destination(destination: str) -> int:
+            gate: Deferred[int] = Deferred()
+            gates[destination] = gate
+            if len(gates) == 2:
+                started.callback(None)
+            return await make_deferred_yieldable(gate)
+
+        self.patch(
+            self.handler,
+            "_sync_federated_user_directory_for_destination",
+            sync_destination,
+        )
+        sync = ensureDeferred(self.handler._sync_federated_user_directory())
+        self.get_success(started)
+        sync.cancel()
+        self.assertNoResult(sync)
+        self.assertTrue(all(not gate.called for gate in gates.values()))
+
+        gates[destinations[1]].callback(0)
+        self.assertEqual(set(gates), set(destinations))
+        gates[destinations[2]].callback(0)
+        self.assertNoResult(sync)
+        gates[destinations[0]].callback(0)
+        # The outer background-process wrapper logs and consumes CancelledError.
+        self.get_success(sync)
+
     @override_config({"federation_domain_whitelist": ["test"]})
     def test_sync_skips_own_server(self) -> None:
         self.transport_layer.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]

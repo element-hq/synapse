@@ -53,7 +53,7 @@ from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import UserID
-from synapse.util.async_helpers import delay_cancellation
+from synapse.util.async_helpers import concurrently_execute, delay_cancellation
 from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
@@ -77,7 +77,10 @@ MAX_SERVERS_TO_REFRESH_PROFILES_FOR_IN_ONE_GO = 5
 # every 15 seconds.
 INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES = Duration(seconds=15)
 
-# Bound the pages retained while their database updates are still running.
+# Bound the number of remote directories synchronized at once.
+MAX_CONCURRENT_USER_DIRECTORY_DESTINATIONS = 2
+
+# Bound the pages retained per destination while database updates are running.
 MAX_CONCURRENT_USER_DIRECTORY_PAGE_UPDATES = 4
 
 
@@ -827,8 +830,8 @@ class UserDirectoryHandler(StateDeltasHandler):
     async def _sync_federated_user_directory(self) -> None:
         """Sync federated user directories from whitelisted homeservers.
 
-        Fetch each remote directory and reconcile its validated pages concurrently.
-        A failed destination does not prevent subsequent destinations from syncing.
+        Bound both concurrent destinations and their page updates.
+        A failed destination does not prevent other destinations from syncing.
 
         Remove imports from homeservers no longer in the whitelist before fetching.
         """
@@ -849,7 +852,7 @@ class UserDirectoryHandler(StateDeltasHandler):
             )
             return
 
-        for destination in destinations:
+        async def sync_destination(destination: str) -> None:
             try:
                 total_reconciled = (
                     await self._sync_federated_user_directory_for_destination(
@@ -896,6 +899,14 @@ class UserDirectoryHandler(StateDeltasHandler):
                     total_reconciled,
                     destination,
                 )
+
+        # Keep the background context alive until all destination syncs finish.
+        await concurrently_execute(
+            sync_destination,
+            destinations,
+            MAX_CONCURRENT_USER_DIRECTORY_DESTINATIONS,
+            delay_cancellation=True,
+        )
 
     async def _sync_federated_user_directory_for_destination(
         self, destination: str
