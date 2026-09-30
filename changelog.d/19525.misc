@@ -1,0 +1,1 @@
+Batch `get_e2e_unused_fallback_key_types` cache invalidations by user when many devices are affected, reducing RDATA replication traffic.
