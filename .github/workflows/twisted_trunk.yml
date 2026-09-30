@@ -137,10 +137,6 @@ jobs:
       - name: Run SyTest
         run: /bootstrap.sh synapse
         working-directory: /src
-        env:
-          # Use offline mode to avoid reinstalling the pinned version of
-          # twisted.
-          OFFLINE: 1
       - name: Summarise results.tap
         if: ${{ always() }}
         run: /sytest/scripts/tap_to_gha.pl /logs/results.tap
