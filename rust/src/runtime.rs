@@ -177,7 +177,7 @@ impl Drop for RustRuntimeInner {
 /// `HomeServer.get_rust_runtime()`. Rust classes that need it take it as a
 /// constructor argument and store their own clone, which is just an `Arc`
 /// refcount bump. Derefs to [`RustRuntimeInner`].
-#[pyclass(frozen, skip_from_py_object)]
+#[pyclass(frozen, weakref, skip_from_py_object)]
 #[derive(Clone)]
 pub struct RustRuntime {
     inner: Arc<RustRuntimeInner>,
