@@ -928,7 +928,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         pending: set[defer.Deferred[None]] = set()
         failures: list[Failure] = []
 
-        def page_finished(result: None | Failure, task: defer.Deferred[None]) -> None:
+        def page_finished(result: None | Failure, task: "defer.Deferred[None]") -> None:
             pending.remove(task)
             if isinstance(result, Failure):
                 if failures:

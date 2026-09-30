@@ -186,22 +186,36 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
     @parameterized.expand(
         [
             ("empty", 0, [0]),
-            ("partial", 9, [9]),
-            ("full", 10, [10, 0]),
-            ("full_and_partial", 11, [10, 1]),
-            ("two_full", 20, [10, 10, 0]),
+            ("partial", 999, [999]),
+            ("full", 1_000, [1_000, 0]),
+            ("full_and_partial", 1_001, [1_000, 1]),
+            ("two_full", 2_000, [1_000, 1_000, 0]),
         ]
     )
     def test_federation_user_directory_fetch_pagination(
         self, name: str, user_count: int, expected_page_sizes: list[int]
     ) -> None:
-        """Signed requests traverse the real responder, including an empty tail."""
+        """Signed requests use 1,000-entry pages, including an empty final page."""
         store = self.hs.get_datastores().main
-        user_ids = []
-        for i in reversed(range(user_count)):
-            user_id = self.register_user(f"page{i:02}", "password")
-            self.get_success(store.update_profile_in_user_dir(user_id, None, None))
-            user_ids.append(user_id)
+        user_ids = [
+            f"@page{i:04}:{self.hs.hostname}" for i in reversed(range(user_count))
+        ]
+        self.get_success(
+            store.db_pool.simple_insert_many(
+                table="users",
+                keys=("name", "creation_ts"),
+                values=[(user_id, 0) for user_id in user_ids],
+                desc="populate_pagination_users",
+            )
+        )
+        self.get_success(
+            store.db_pool.simple_insert_many(
+                table="user_directory",
+                keys=("user_id", "display_name", "avatar_url"),
+                values=[(user_id, None, None) for user_id in user_ids],
+                desc="populate_pagination_directory",
+            )
+        )
         user_ids.sort()
 
         self.get_success(

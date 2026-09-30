@@ -1747,7 +1747,7 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
 
     def _block_directory_page_updates(
         self,
-    ) -> tuple[AsyncMock, list[Deferred[None]]]:
+    ) -> "tuple[AsyncMock, list[Deferred[None]]]":
         updates: list[Deferred[None]] = []
         context = current_context()
 
@@ -2564,7 +2564,7 @@ class FederatedUserDirectoryWorkerTestCase(unittest.HomeserverTestCase):
         self.sync_runs: list[Deferred[None]] = []
         original_sync = UserDirectoryHandler._sync_federated_user_directory
 
-        def sync(handler: UserDirectoryHandler) -> Deferred[None]:
+        def sync(handler: UserDirectoryHandler) -> "Deferred[None]":
             result = ensureDeferred(original_sync(handler))
             self.sync_runs.append(result)
             return result
