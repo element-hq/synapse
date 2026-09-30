@@ -1,0 +1,1 @@
+Fix bug where membership events would not be returned in `/sync` when using lazy-loaded members and using an old token for `since`.
