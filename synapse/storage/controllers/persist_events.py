@@ -660,7 +660,7 @@ class EventsPersistenceStorageController:
                 #
                 # In practice the only thing which gets here are state events from /send_join.
                 # Those events are persisted as backfilled so that they do not appear down
-                # /sync, but the state DAG forwards extremities must be updated otherwise when
+                # /sync, but the state DAG forward extremities must be updated otherwise when
                 # we hit the join event we won't calculate the current state correctly due to having
                 # stale extremities.
                 #

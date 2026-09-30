@@ -1295,7 +1295,7 @@ class BackfilledStateDagEventTests(unittest.FederatingHomeserverTestCase):
             event_injection.inject_member_event(self.hs, room_id, OTHER_USER, "join")
         )
 
-        # Move the state DAG on locally, so that what we backfill below is a genuine fork
+        # Move the state DAG locally, so that the backfill below is a genuine fork
         # rather than an extension of the only branch we have.
         topic_event_id = self.helper.send_state(
             room_id, "m.room.topic", {"topic": "local"}, tok=tok

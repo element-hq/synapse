@@ -912,7 +912,9 @@ class FederationEventHandler:
             return
 
         # Our callers only ever pass events for a single room.
-        room_id = next(iter(events)).room_id
+        first_event = next(iter(events))
+        room_id = first_event.room_id
+        is_state_dag_room = first_event.room_version.msc4242_state_dags
 
         set_tag(
             SynapseTags.FUNC_ARG_PREFIX + "event_ids",
@@ -948,6 +950,7 @@ class FederationEventHandler:
 
         new_events: list[EventBase] = []
         for event in events:
+            assert event.room_id == room_id
             event_id = event.event_id
 
             # If we've already seen this event ID...
@@ -1000,7 +1003,7 @@ class FederationEventHandler:
             if (
                 backfilled  # Non-backfilled pulled events will automatically update the current state, this check is only for /backfill
                 and sorted_events
-                and supports_msc4242_state_dag(sorted_events[0])
+                and is_state_dag_room
             ):
                 state_dag_extremities_before = (
                     await self._store.get_state_dag_extremities(room_id)
@@ -1874,28 +1877,29 @@ class FederationEventHandler:
             ]
             for ev in unseen_event_map.values()
         }
-        sorted_event_ids = sorted_topologically(unseen_event_map.keys(), auth_graph)
-        sorted_events = [unseen_event_map[e_id] for e_id in sorted_event_ids]
+        unseen_sorted_event_ids = sorted_topologically(unseen_event_map.keys(), auth_graph)
+        unseen_sorted_events = [unseen_event_map[e_id] for e_id in unseen_sorted_event_ids]
         logger.info(
             "Persisting %i remaining outliers: %s",
-            len(sorted_events),
-            shortstr(e.event_id for e in sorted_events),
+            len(unseen_sorted_events),
+            shortstr(e.event_id for e in unseen_sorted_events),
         )
 
         if is_state_dag_room:
-            return await self._auth_and_persist_state_dag_outliers(
-                room_id, event_map, sorted_events, from_send_join
+            has_new_rejected_events = await self._auth_and_persist_state_dag_outliers(
+                room_id, event_map, unseen_sorted_events, from_send_join
             )
+            return has_rejected_events or has_new_rejected_events
 
         events_and_contexts_to_persist: list[EventPersistencePair] = []
 
         # get all the auth events for all the events in this batch. By now, they should
         # have been persisted.
         auth_event_ids = {
-            aid for event in sorted_events for aid in event.auth_event_ids()
+            aid for event in unseen_sorted_events for aid in event.auth_event_ids()
         }
         auth_map = {
-            ev.event_id: ev for ev in sorted_events if ev.event_id in auth_event_ids
+            ev.event_id: ev for ev in unseen_sorted_events if ev.event_id in auth_event_ids
         }
 
         missing_events = auth_event_ids.difference(auth_map)
@@ -1952,7 +1956,7 @@ class FederationEventHandler:
 
             events_and_contexts_to_persist.append((event, context))
 
-        for i, event in enumerate(sorted_events):
+        for i, event in enumerate(unseen_sorted_events):
             await prep(event)
 
             # The above function is typically not async, and so won't yield to
@@ -2027,7 +2031,7 @@ class FederationEventHandler:
         # processed all of it, so an event we rejected a moment ago still looks accepted
         # both in the database and on the in-memory event. We therefore have to remember
         # our own decisions and tell the auth rules about them.
-        rejections: dict[str, str] = {}
+        rejected_event_id_to_reason_map: dict[str, str] = {}
 
         async def process(event: EventBase) -> EventPersistencePair:
             assert supports_msc4242_state_dag(event)
@@ -2123,7 +2127,7 @@ class FederationEventHandler:
                         self._store,
                         event,
                         batched_auth_events,
-                        batched_rejections=rejections,
+                        batched_rejections=rejected_event_id_to_reason_map,
                     )
                     check_state_dependent_auth_rules(
                         event, calculated_auth_events.values()
@@ -2144,7 +2148,7 @@ class FederationEventHandler:
                     context.rejected = RejectedReason.OVERSIZED_EVENT
 
             if context.rejected is not None:
-                rejections[event.event_id] = context.rejected
+                rejected_event_id_to_reason_map[event.event_id] = context.rejected
             processed_event_map[event.event_id] = event
             return event, context
 
