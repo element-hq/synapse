@@ -132,6 +132,7 @@ jobs:
           ln -s -T /venv /src/.venv
           poetry remove twisted
           poetry add --extras tls git+https://github.com/twisted/twisted.git#trunk
+          poetry install --no-interaction --extras "all test"
         working-directory: /src
       - name: Run SyTest
         # Bootstrap copies the patched pyproject.toml and poetry.lock, then installs
