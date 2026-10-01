@@ -2904,19 +2904,24 @@ class RoomDelayedEventTestCase(RoomBase):
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_send_delayed_message_event(self) -> None:
-        """Test sending a valid delayed message event."""
+        """Test sending a valid delayed message event, and that repeating the request is a no-op."""
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=2000),
             event_type="m.room.message",
             content={"body": "test", "msgtype": "m.text"},
+            method="PUT",
+            txn_id="txn_id_0",
         )
-        channel = self.make_request(
-            method,
-            path,
-            body,
-        )
+        channel = self.make_request(method, path, body)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        delay_id = channel.json_body["delay_id"]
+
+        # Repeat the request, which reuses its txn_id
+        channel = self.make_request(method, path, body)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(delay_id, channel.json_body.get("delay_id"))
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_send_delayed_state_event(self) -> None:
@@ -3098,6 +3103,32 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
             channel.json_body["errcode"],
             channel.json_body,
         )
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_send_delayed_state_event(self) -> None:
+        """
+        Test sending a valid delayed state event, and that repeating the request is a no-op.
+        Note that only the dedicated endpoint can test this, as the one based on /state
+        does not support idempotent requests by using a transaction ID.
+        """
+        method, path, body = self.build_delayed_event_request(
+            room_id=self.room_id,
+            delay=Duration(milliseconds=2000),
+            event_type="m.room.topic",
+            state_key="",
+            content={"topic": "This is a topic"},
+            method="PUT",
+            txn_id="txn_id_0",
+        )
+        channel = self.make_request(method, path, body)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        delay_id = channel.json_body["delay_id"]
+
+        # Repeat the request, which reuses its txn_id
+        channel = self.make_request(method, path, body)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(delay_id, channel.json_body.get("delay_id"))
 
 
 class RoomSearchTestCase(unittest.HomeserverTestCase):
