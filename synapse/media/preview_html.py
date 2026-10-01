@@ -214,7 +214,7 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
         #
         # mypy doesn't like passing both name and string, but it is used to ignore
         # empty elements.
-        title = soup.find(("title", "h1", "h2", "h3"), string=True)  # type: ignore[call-overload]
+        title = soup.find(("title", "h1", "h2", "h3"), string=True)
         if title and title.string:
             og["og:title"] = title.string.strip()
         else:
