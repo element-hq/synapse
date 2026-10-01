@@ -105,7 +105,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         # To fix isinstance(...) checks.
         fake_engine.__class__ = engine.__class__  # type: ignore[assignment]
 
-        db = DatabasePool(Mock(), Mock(config=db_config), fake_engine)
+        db = DatabasePool(Mock(hostname="test"), Mock(config=db_config), fake_engine)
         db._db_pool = conn_pool
 
         self.datastore = SQLBaseStore(db, None, hs)  # type: ignore[arg-type]

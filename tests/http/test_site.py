@@ -50,6 +50,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # complete the connection and wire it up to a fake transport
         client_address = IPv6Address("TCP", "::1", 2345)
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -70,6 +71,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
 
         # now send an oversized request
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -117,6 +119,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # complete the connection and wire it up to a fake transport
         client_address = IPv6Address("TCP", "::1", 2345)
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -137,6 +140,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
 
         # now send request with content-type header
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -168,6 +172,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # complete the connection and wire it up to a fake transport
         client_address = IPv6Address("TCP", "::1", 2345)
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -204,6 +209,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # complete the connection and wire it up to a fake transport
         client_address = IPv6Address("TCP", "::1", 2345)
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -237,6 +243,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # complete the connection and wire it up to a fake transport
         client_address = IPv6Address("TCP", "::1", 2345)
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
