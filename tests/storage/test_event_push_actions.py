@@ -506,8 +506,14 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         self._send_message(room_id, other_token)
         self.get_success(self.store._rotate_notifs())
 
-        # A summary row for a thread whose ID sorts after "main", so that it, rather
-        # than the main timeline, is the last row the summary query returns.
+        # A summary row for a thread whose ID sorts after "main" and which is
+        # inserted after the main timeline's row. Whether the summary query returns
+        # rows in index order or in table order, this one comes back last.
+        #
+        # `notif_count` has to be non-zero or the summary query discards the row.
+        # A NULL `last_receipt_stream_ordering` is what rows written by older
+        # versions of Synapse have; such a row counts as up to date as long as its
+        # `stream_ordering` is past the user's join. 100000 is arbitrary.
         self.get_success(
             self.store.db_pool.simple_insert(
                 table="event_push_summary",
