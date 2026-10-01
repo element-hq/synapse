@@ -187,9 +187,9 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
     ogRoot = _get_meta_tags(soup, "property", "og")
 
     # https://ogp.me/#type_article
-    ogArticle = _get_meta_tags(tree, "property", "article")
+    ogArticle = _get_meta_tags(soup, "property", "article")
     # https://ogp.me/#type_profile
-    ogProfile = _get_meta_tags(tree, "property", "profile")
+    ogProfile = _get_meta_tags(soup, "property", "profile")
 
     # Merge as-is
     og = ogRoot | ogArticle | ogProfile
