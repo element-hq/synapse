@@ -200,8 +200,8 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             )
         else:
             # We didn't hit the limit, therefore we have read the whole range.
-            # We can skip ahead to `to_token` (just be careful that we don't
-            # rewind `from_token` in the case this worker is behind.)
+            # We can skip ahead to `to_token`, using `copy_and_advance` to ensure
+            # we don't rewind `from_token` in the case this worker is behind.
             new_to_token = from_token.copy_and_advance(to_token)
 
         # room ID -> event IDs

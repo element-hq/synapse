@@ -1035,7 +1035,9 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
 
     See:
         - `is_stream_position_in_range` for a single row
+        - `is_before_or_eq` for comparing two tokens
         - `make_multiwriter_sharded_token_bounds_sql` for SQL
+            - and its companion `advance_multiwriter_sharded_token_after_partial_read`
     """
 
     @classmethod
