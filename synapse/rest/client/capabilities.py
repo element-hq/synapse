@@ -77,6 +77,11 @@ class CapabilitiesRestServlet(RestServlet):
             }
         }
 
+        response["capabilities"]["m.preview_url"] = (
+            self.config.media.url_preview_enabled
+        )
+
+        # Keep around while clients migrate away from MSC4452
         if self.config.experimental.msc4452_enabled:
             response["capabilities"]["io.element.msc4452.preview_url"] = {
                 "enabled": self.config.media.url_preview_enabled,
