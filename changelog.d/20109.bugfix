@@ -1,1 +1,1 @@
-Fix notification counts for the main timeline sometimes being attributed to a thread.
+Fix a bug where notification counts for the main timeline could be attributed to a thread.
