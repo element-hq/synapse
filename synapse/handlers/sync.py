@@ -690,7 +690,7 @@ class SyncHandler:
             from_token = (
                 since_token.sticky_events_key
                 if since_token
-                else MultiWriterStreamToken(stream=0)
+                else StreamToken.START.sticky_events_key
             )
 
             room_ids = sync_result_builder.joined_room_ids
@@ -729,7 +729,7 @@ class SyncHandler:
             _, sticky_by_room = await self.store.get_sticky_events_in_rooms(
                 newly_joined_rooms,
                 # Since the start of time
-                from_token=MultiWriterStreamToken(stream=0),
+                from_token=StreamToken.START.sticky_events_key,
                 to_token=now_token.sticky_events_key,
                 now=now,
                 # Unfortunately, we're meant to return all sticky events in one go
