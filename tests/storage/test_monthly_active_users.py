@@ -41,7 +41,7 @@ def gen_3pids(count: int) -> list[dict[str, Any]]:
 
 class MonthlyActiveUsersTestCase(unittest.HomeserverTestCase):
     def default_config(self) -> dict[str, Any]:
-        config = default_config("test")
+        config = default_config(server_name="test")
 
         config.update({"limit_usage_by_mau": True, "max_mau_value": 50})
 

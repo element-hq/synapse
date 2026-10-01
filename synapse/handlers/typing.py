@@ -102,7 +102,7 @@ class FollowerTypingHandler:
         self._room_typing: dict[str, set[str]] = {}
 
         self._member_last_federation_poke: dict[RoomMember, int] = {}
-        self.wheel_timer: WheelTimer[RoomMember] = WheelTimer(bucket_size=5000)
+        self.wheel_timer: WheelTimer[RoomMember] = WheelTimer()
         self._latest_room_serial = 0
 
         self._rooms_updated: set[str] = set()
@@ -120,7 +120,7 @@ class FollowerTypingHandler:
         self._rooms_updated = set()
 
         self._member_last_federation_poke = {}
-        self.wheel_timer = WheelTimer(bucket_size=5000)
+        self.wheel_timer = WheelTimer()
 
     @wrap_as_background_process("typing._handle_timeouts")
     async def _handle_timeouts(self) -> None:

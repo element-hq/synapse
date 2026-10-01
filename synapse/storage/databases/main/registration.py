@@ -1133,6 +1133,33 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction("count_real_users", _count_users)
 
+    async def get_user_count_by_service(self) -> list[tuple[str, int]]:
+        """Counts users grouped by their appservice.
+
+        Returns:
+            A list of tuples (appservice_id, count). "native" is emitted as the
+            appservice for users that don't come from appservices (i.e. native Matrix
+            users).
+
+        """
+
+        def _get_user_count_by_service(
+            txn: LoggingTransaction,
+        ) -> list[tuple[str, int]]:
+            sql = """
+                SELECT COALESCE(NULLIF(appservice_id, ''), 'native') AS app_service, COUNT(*) AS count
+                FROM users
+                WHERE deactivated = 0
+                GROUP BY COALESCE(NULLIF(appservice_id, ''), 'native')
+            """
+
+            txn.execute(sql)
+            return cast(list[tuple[str, int]], txn.fetchall())
+
+        return await self.db_pool.runInteraction(
+            "get_user_count_by_service", _get_user_count_by_service
+        )
+
     async def generate_user_id(self) -> str:
         """Generate a suitable localpart for a guest user
 
@@ -2474,14 +2501,6 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         def user_delete_access_tokens_for_devices_txn(
             txn: LoggingTransaction, batch_device_ids: StrCollection
         ) -> list[tuple[str, int, str | None]]:
-            self.db_pool.simple_delete_many_txn(
-                txn,
-                table="refresh_tokens",
-                keyvalues={"user_id": user_id},
-                column="device_id",
-                values=batch_device_ids,
-            )
-
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "device_id", batch_device_ids
             )
@@ -2500,6 +2519,17 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 self.get_user_by_access_token,
                 [(t[0],) for t in tokens_and_devices],
             )
+            # Delete access tokens first, before refresh tokens.
+            # This ensures we can capture the deleted access tokens for cache invalidation
+            # before any CASCADE deletes occur.
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="refresh_tokens",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=batch_device_ids,
+            )
+
             return tokens_and_devices
 
         results = []

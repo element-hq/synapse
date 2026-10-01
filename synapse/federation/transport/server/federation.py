@@ -1,8 +1,9 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-#  Copyright 2021 The Matrix.org Foundation C.I.C.
+# Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -27,7 +28,7 @@ from typing import (
     Sequence,
 )
 
-from synapse.api.constants import Direction, EduTypes
+from synapse.api.constants import Direction, EduTypes, StateDag
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.api.urls import FEDERATION_UNSTABLE_PREFIX, FEDERATION_V2_PREFIX
@@ -36,6 +37,7 @@ from synapse.federation.transport.server._base import (
     BaseFederationServlet,
 )
 from synapse.http.servlet import (
+    parse_boolean,
     parse_boolean_from_args,
     parse_integer,
     parse_integer_from_args,
@@ -45,7 +47,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
-from synapse.media.thumbnailer import ThumbnailProvider
+from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
 from synapse.types import JsonDict
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -273,6 +275,22 @@ class FederationQueryServlet(BaseFederationServerServlet):
         return await self.handler.on_query_request(query_type, args)
 
 
+class FederationUnstableGetExtremitiesServlet(BaseFederationServerServlet):
+    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc4370"
+    PATH = "/extremities/(?P<room_id>[^/]*)"
+    CATEGORY = "Federation requests"
+
+    async def on_GET(
+        self,
+        origin: str,
+        content: Literal[None],
+        query: dict[bytes, list[bytes]],
+        room_id: str,
+    ) -> tuple[int, JsonDict]:
+        result = await self.handler.on_get_extremities_request(origin, room_id)
+        return 200, result
+
+
 class FederationMakeJoinServlet(BaseFederationServerServlet):
     PATH = "/make_join/(?P<room_id>[^/]*)/(?P<user_id>[^/]*)"
     CATEGORY = "Federation requests"
@@ -473,7 +491,11 @@ class FederationV1InviteServlet(BaseFederationServerServlet):
         # state resolution algorithm, and we don't use that for processing
         # invites
         result = await self.handler.on_invite_request(
-            origin, content, room_version_id=RoomVersions.V1.identifier
+            origin=origin,
+            expected_room_id=room_id,
+            expected_event_id=event_id,
+            event_json=content,
+            room_version_id=RoomVersions.V1.identifier,
         )
 
         # V1 federation API is defined to return a content of `[200, {...}]`
@@ -495,9 +517,6 @@ class FederationV2InviteServlet(BaseFederationServerServlet):
         room_id: str,
         event_id: str,
     ) -> tuple[int, JsonDict]:
-        # TODO(paul): assert that room_id/event_id parsed from path actually
-        #   match those given in content
-
         room_version = content["room_version"]
         event = content["event"]
         invite_room_state = content.get("invite_room_state", [])
@@ -506,12 +525,15 @@ class FederationV2InviteServlet(BaseFederationServerServlet):
             invite_room_state = []
 
         # Synapse expects invite_room_state to be in unsigned, as it is in v1
-        # API
-
+        # API. We will sanitize this inside `on_invite_request(...)`
         event.setdefault("unsigned", {})["invite_room_state"] = invite_room_state
 
         result = await self.handler.on_invite_request(
-            origin, event, room_version_id=room_version
+            origin=origin,
+            expected_room_id=room_id,
+            expected_event_id=event_id,
+            event_json=event,
+            room_version_id=room_version,
         )
 
         # We only store invite_room_state for internal use, so remove it before
@@ -621,6 +643,7 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
         limit = int(content.get("limit", 10))
         earliest_events = content.get("earliest_events", [])
         latest_events = content.get("latest_events", [])
+        walk_state_dag = bool(content.get(StateDag.GET_MISSING_EVENTS_FIELD, False))
 
         result = await self.handler.on_get_missing_events(
             origin,
@@ -628,6 +651,7 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
             earliest_events=earliest_events,
             latest_events=latest_events,
             limit=limit,
+            walk_state_dag=walk_state_dag,
         )
 
         return 200, result
@@ -858,8 +882,9 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         width = parse_integer(request, "width", required=True)
         height = parse_integer(request, "height", required=True)
         method = parse_string(request, "method", "scale")
+        animated = parse_boolean(request, "animated", default=False)
         # TODO Parse the Accept header to get an prioritised list of thumbnail types.
-        m_type = "image/png"
+        m_type = ANIMATED_THUMBNAIL_TYPE if animated else "image/png"
         max_timeout_ms = parse_integer(
             request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
         )
@@ -867,7 +892,15 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
 
         if self.dynamic_thumbnails:
             await self.thumbnail_provider.select_or_generate_local_thumbnail(
-                request, media_id, width, height, method, m_type, max_timeout_ms, True
+                request,
+                media_id,
+                width,
+                height,
+                method,
+                m_type,
+                max_timeout_ms,
+                True,
+                animated=animated,
             )
         else:
             await self.thumbnail_provider.respond_local_thumbnail(
@@ -884,6 +917,7 @@ FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationBackfillServlet,
     FederationTimestampLookupServlet,
     FederationQueryServlet,
+    FederationUnstableGetExtremitiesServlet,
     FederationMakeJoinServlet,
     FederationMakeLeaveServlet,
     FederationEventServlet,

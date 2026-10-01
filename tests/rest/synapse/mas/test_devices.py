@@ -546,6 +546,48 @@ class MasSyncDevicesResource(BaseTestCase):
         devices = self.get_success(store.get_devices_by_user(str(self.alice_user_id)))
         self.assertEqual(set(devices.keys()), {"DEVICE1"})
 
+    def test_sync_devices_preserves_dehydrated_device(self) -> None:
+        # Store a dehydrated device (MSC3814). It has no MAS session, so it is
+        # never part of the target device list, but it must survive a sync.
+        device_handler = self.hs.get_device_handler()
+        dehydrated_device_id = self.get_success(
+            device_handler.store_dehydrated_device(
+                user_id=str(self.alice_user_id),
+                device_id=None,
+                device_data={"device_data": {"foo": "bar"}},
+                initial_device_display_name="dehydrated device",
+                keys_for_device={},
+            )
+        )
+
+        # Sync down to a single real device. The dehydrated device is not in the
+        # target list, but must not be deleted.
+        channel = self.make_request(
+            "POST",
+            "/_synapse/mas/sync_devices",
+            shorthand=False,
+            access_token=self.SHARED_SECRET,
+            content={
+                "localpart": "alice",
+                "devices": ["DEVICE1"],
+            },
+        )
+
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {})
+
+        # The real devices are reconciled, but the dehydrated device survives.
+        store = self.hs.get_datastores().main
+        devices = self.get_success(store.get_devices_by_user(str(self.alice_user_id)))
+        self.assertEqual(set(devices.keys()), {"DEVICE1", dehydrated_device_id})
+
+        # And it is still registered as the dehydrated device.
+        dehydrated = self.get_success(
+            device_handler.get_dehydrated_device(str(self.alice_user_id))
+        )
+        assert dehydrated is not None
+        self.assertEqual(dehydrated[0], dehydrated_device_id)
+
     def test_sync_devices_add_and_delete(self) -> None:
         # Sync with a mix of additions and deletions
         channel = self.make_request(

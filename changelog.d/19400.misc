@@ -1,1 +1,0 @@
-Update and align Grafana dashboard to use regex matching for `job` selectors (`job=~"$job"`) so the "all" value works correctly across all panels.

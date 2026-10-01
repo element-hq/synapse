@@ -21,7 +21,7 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, MSC3244_CAPABILITIES
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
@@ -77,10 +77,10 @@ class CapabilitiesRestServlet(RestServlet):
             }
         }
 
-        if self.config.experimental.msc3244_enabled:
-            response["capabilities"]["m.room_versions"][
-                "org.matrix.msc3244.room_capabilities"
-            ] = MSC3244_CAPABILITIES
+        if self.config.experimental.msc4452_enabled:
+            response["capabilities"]["io.element.msc4452.preview_url"] = {
+                "enabled": self.config.media.url_preview_enabled,
+            }
 
         if self.config.experimental.msc3720_enabled:
             response["capabilities"]["org.matrix.msc3720.account_status"] = {
@@ -108,6 +108,11 @@ class CapabilitiesRestServlet(RestServlet):
             response["capabilities"]["uk.tcpip.msc4133.profile_fields"] = response[
                 "capabilities"
             ]["m.profile_fields"]
+
+        response["capabilities"]["org.matrix.msc4140.delayed_events"] = {
+            "max_delay_ms": self.config.server.max_event_delay_duration.as_millis(),
+            "max_scheduled": self.config.server.max_delayed_events_per_user,
+        }
 
         if self.config.experimental.msc4267_enabled:
             response["capabilities"]["org.matrix.msc4267.forget_forced_upon_leave"] = {

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 class ThirdPartyProtocolsServlet(RestServlet):
-    PATTERNS = client_patterns("/thirdparty/protocols")
+    PATTERNS = client_patterns("/thirdparty/protocols$")
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()

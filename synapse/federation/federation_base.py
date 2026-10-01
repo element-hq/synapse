@@ -177,7 +177,9 @@ class FederationBase:
             # Note: we don't redact the event so admins can inspect the event after the
             # fact. Other processes may redact the event, but that won't be applied to
             # the database copy of the event until the server's config requires it.
-            return pdu
+            #
+            # We also *don't* return early here as we would still like to evaluate
+            # `spam_checker_spammy`, for completeness.
 
         spam_check = await self._spam_checker_module_callbacks.check_event_for_spam(pdu)
 
@@ -194,6 +196,8 @@ class FederationBase:
             # using the event in prev_events).
             redacted_event = prune_event(pdu)
             redacted_event.internal_metadata.soft_failed = True
+            # Mark this as spam so we don't re-evaluate soft-failure status.
+            redacted_event.internal_metadata.spam_checker_spammy = True
             return redacted_event
 
         return pdu
@@ -303,20 +307,27 @@ def _is_invite_via_3pid(event: EventBase) -> bool:
 
 
 def parse_events_from_pdu_json(
-    pdus_json: Sequence[JsonDict], room_version: RoomVersion
+    pdus_json: Sequence[JsonDict],
+    room_version: RoomVersion,
+    received_time: int | None = None,
 ) -> list[EventBase]:
     return [
-        event_from_pdu_json(pdu_json, room_version)
+        event_from_pdu_json(pdu_json, room_version, received_time=received_time)
         for pdu_json in filter_pdus_for_valid_depth(pdus_json)
     ]
 
 
-def event_from_pdu_json(pdu_json: JsonDict, room_version: RoomVersion) -> EventBase:
+def event_from_pdu_json(
+    pdu_json: JsonDict, room_version: RoomVersion, received_time: int | None = None
+) -> EventBase:
     """Construct an EventBase from an event json received over federation
 
     Args:
         pdu_json: pdu as received over federation
         room_version: The version of the room this event belongs to
+        received_time: timestamp in ms that the event was received at. If
+            `None` then any `age` field in the `unsigned` block will be
+            dropped.
 
     Raises:
         SynapseError: if the pdu is missing required fields or is otherwise
@@ -328,6 +339,25 @@ def event_from_pdu_json(pdu_json: JsonDict, room_version: RoomVersion) -> EventB
     # Strip any unauthorized values from "unsigned" if they exist
     if "unsigned" in pdu_json:
         _strip_unsigned_values(pdu_json)
+
+        # Handle the `age` field, which is sent by some servers as part of the
+        # `unsigned` block. We convert this into an `age_ts` field, which is
+        # what Synapse uses internally. We also remove the `age` field to avoid
+        # confusion.
+        #
+        # c.f. https://github.com/matrix-org/synapse/issues/8429
+        unsigned = pdu_json["unsigned"]
+        age = unsigned.pop("age", None)
+
+        # We check that the `age` is actually an int before using it below. We
+        # don't error here as the `age` a) doesn't affect the validity of the
+        # event, and b) is best effort anyway.
+        if not isinstance(age, int):
+            age = None
+
+        unsigned.pop("age_ts", None)
+        if received_time is not None and age is not None:
+            unsigned["age_ts"] = received_time - int(age)
 
     depth = pdu_json["depth"]
     if type(depth) is not int:  # noqa: E721

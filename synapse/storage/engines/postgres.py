@@ -31,6 +31,7 @@ from synapse.storage.engines._base import (
     IsolationLevel,
 )
 from synapse.storage.types import Cursor
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.storage.database import LoggingDatabaseConnection
@@ -54,14 +55,33 @@ class PostgresEngine(
 
         psycopg2.extensions.register_adapter(bytes, _disable_bytes_adapter)
         self.synchronous_commit: bool = database_config.get("synchronous_commit", True)
-        # Set the statement timeout to 1 hour by default.
-        # Any query taking more than 1 hour should probably be considered a bug;
+        # Set the statement timeout to 10 minutes by default.
+        #
+        # Any query taking more than 10 minutes should probably be considered a bug;
         # most of the time this is a sign that work needs to be split up or that
         # some degenerate query plan has been created and the client has probably
         # timed out/walked off anyway.
         # This is in milliseconds.
         self.statement_timeout: int | None = database_config.get(
-            "statement_timeout", 60 * 60 * 1000
+            "statement_timeout", Duration(minutes=10).as_millis()
+        )
+
+        # Abort transactions that sit idle for too long.
+        #
+        # Idle transactions can block maintenance tasks server-side like
+        # vacuums, which can lead to bloat and performance issues.
+        #
+        # We should never hit this timeout in normal operation, as Synapse
+        # should always be actively using the connection when in a transaction
+        # and so it should only ever be briefly idle. If we do hit this timeout,
+        # it's likely that no progress is being made and so aborting the session
+        # is safe.
+        #
+        # In certain cases we have seen connections leak, particularly when
+        # using a connection pooler like pgcat, and this timeout will help with
+        # that.
+        self.idle_in_transaction_session_timeout: int | None = database_config.get(
+            "idle_in_transaction_session_timeout", Duration(minutes=30).as_millis()
         )
         self._version: int | None = None  # unknown as yet
 
@@ -184,6 +204,14 @@ class PostgresEngine(
         # Abort really long-running statements and turn them into errors.
         if self.statement_timeout is not None:
             cursor.execute("SET statement_timeout TO ?", (self.statement_timeout,))
+
+        # Abort transactions that sit idle for too long, as they hold locks
+        # and block vacuum.
+        if self.idle_in_transaction_session_timeout is not None:
+            cursor.execute(
+                "SET idle_in_transaction_session_timeout TO ?",
+                (self.idle_in_transaction_session_timeout,),
+            )
 
         cursor.close()
         db_conn.commit()

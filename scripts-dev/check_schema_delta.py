@@ -14,6 +14,11 @@ import sqlglot.expressions
 
 SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
 
+# Keep this in sync with synapse.storage.engines._base. The CI job for this
+# script deliberately installs only its lightweight parsing dependencies, so we
+# avoid importing Synapse here.
+AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER = "$%AUTO_INCREMENT_PRIMARY_KEY%$"
+
 # The base branch we want to check against. We use the main development branch
 # on the assumption that is what we are developing against.
 DEVELOP_BRANCH = "develop"
@@ -81,7 +86,7 @@ def main(force_colors: bool) -> None:
     bad_delta_files = []
     changed_delta_files = []
     for diff in diffs:
-        if diff.b_path is None:
+        if diff.deleted_file or diff.b_path is None:
             # We don't lint deleted files.
             continue
 
@@ -196,6 +201,10 @@ def check_schema_delta(delta_files: list[str], force_colors: bool) -> bool:
             )
             return True
 
+        delta_contents = _replace_auto_increment_primary_key_placeholder(
+            delta_contents, sql_lang
+        )
+
         statements = sqlglot.parse(delta_contents, read=sql_lang)
 
         for statement in statements:
@@ -242,6 +251,19 @@ def check_schema_delta(delta_files: list[str], force_colors: bool) -> bool:
         success = False
 
     return success
+
+
+def _replace_auto_increment_primary_key_placeholder(
+    delta_contents: str, sql_lang: str
+) -> str:
+    """Replace Synapse's auto-increment PK placeholder with parseable SQL."""
+
+    if sql_lang == "sqlite":
+        replacement = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    else:
+        replacement = "BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY"
+
+    return delta_contents.replace(AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER, replacement)
 
 
 if __name__ == "__main__":

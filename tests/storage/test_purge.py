@@ -18,15 +18,25 @@
 #
 #
 
+from parameterized import parameterized
+
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import EventTypes
 from synapse.api.errors import NotFoundError, SynapseError
+from synapse.api.room_versions import (
+    EventFormatVersions,
+    RoomVersion,
+    RoomVersions,
+)
+from synapse.events import EventBase
 from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
 from synapse.util.clock import Clock
 
+from tests.test_utils.event_builders import make_test_pdu_event
 from tests.unittest import HomeserverTestCase
 
 
@@ -457,3 +467,88 @@ class PurgeTests(HomeserverTestCase):
             )
         )
         self.assertEqual(len(state_groups), 210)
+
+
+class PurgeLocalEventsTests(HomeserverTestCase):
+    """Tests that purging history with ``delete_local_events=False`` preserves
+    locally-originated events while still deleting remote ones.
+    """
+
+    user_id = "@red:server"
+    servlets = [room.register_servlets]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        hs = self.setup_test_homeserver("server")
+        return hs
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.state = hs.get_state_handler()
+        self._storage_controllers = hs.get_storage_controllers()
+
+    @parameterized.expand([(RoomVersions.V2,), (RoomVersions.V12,)])
+    def test_purge_history_keeps_local_events(self, room_version: RoomVersion) -> None:
+        """
+        Purging with `delete_local_events=False` should keep local events.
+        """
+        room_id = self.helper.create_room_as(
+            self.user_id, room_version=room_version.identifier
+        )
+
+        def inject_remote_event(*, depth: int, prev_event_id: str) -> EventBase:
+            pdu = {
+                "type": EventTypes.Message,
+                "sender": "@bob:other.example.com",
+                "room_id": room_id,
+                "content": {"msgtype": "m.text", "body": "this is a message"},
+                "prev_events": [prev_event_id],
+                "auth_events": [],
+                "depth": depth,
+                "origin_server_ts": 42,
+            }
+            if room_version.event_format == EventFormatVersions.ROOM_V1_V2:
+                # For v1/v2 rooms we need to assign our own arbitrary event ID at creation time
+                # For later versions, the event ID is computed (it's a hash)
+                pdu["event_id"] = "$remote_abc:other.example.com"
+                # The format of prev_events was also different
+                pdu["prev_events"] = [[prev_event_id, {}]]
+
+            remote_event = make_test_pdu_event(pdu, room_version)
+            context = self.get_success(self.state.compute_event_context(remote_event))
+            persistence = self._storage_controllers.persistence
+            assert persistence is not None
+            self.get_success(persistence.persist_event(remote_event, context))
+            return remote_event
+
+        # A local event before the purge threshold
+        local_event_id = self.helper.send(room_id, body="local event")["event_id"]
+        local_event = self.get_success(self.store.get_event(local_event_id))
+
+        # A remote event before the purge threshold
+        remote_event = inject_remote_event(
+            prev_event_id=local_event_id,
+            depth=local_event.depth + 1,
+        )
+
+        # A final local event, after the cutoff, to serve as the new forward
+        # extremity (so the purge doesn't refuse to delete the extremities).
+        last_event_id = self.helper.send(room_id, body="new fwd extrem")["event_id"]
+
+        token = self.get_success(
+            self.store.get_topological_token_for_event(last_event_id)
+        )
+        token_str = self.get_success(token.to_string(self.store))
+
+        # Purge everything before the last event, keeping local events.
+        self.get_success(
+            self._storage_controllers.purge_events.purge_history(
+                room_id, token_str, delete_local_events=False
+            )
+        )
+
+        # The remote event below the cutoff should have been deleted.
+        self.get_failure(self.store.get_event(remote_event.event_id), NotFoundError)
+
+        # Both local event must be preserved
+        self.get_success(self.store.get_event(local_event_id))
+        self.get_success(self.store.get_event(last_event_id))

@@ -66,6 +66,19 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         self.store = self.hs.get_datastores().main
         self.clock = self.hs.get_clock()
 
+    def _get_fully_read_marker(self, room_id: str) -> str | None:
+        content = self.get_success(
+            self.store.get_account_data_for_room_and_type(
+                self.owner,
+                room_id,
+                "m.fully_read",
+            )
+        )
+        if content is None:
+            return None
+
+        return content.get("event_id")
+
     def test_send_read_marker(self) -> None:
         room_id = self.helper.create_room_as(self.owner, tok=self.owner_tok)
 
@@ -97,6 +110,123 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
+
+    def test_send_read_marker_does_not_move_backwards_by_default(self) -> None:
+        room_id = self.helper.create_room_as(self.owner, tok=self.owner_tok)
+
+        older_event_id = self.helper.send(
+            room_id=room_id, body="1", tok=self.owner_tok
+        )["event_id"]
+        newer_event_id = self.helper.send(
+            room_id=room_id, body="2", tok=self.owner_tok
+        )["event_id"]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={"m.fully_read": newer_event_id},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(room_id), newer_event_id)
+
+        # Expected to be a no-op.
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={"m.fully_read": older_event_id},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(room_id), newer_event_id)
+
+    @unittest.override_config({"experimental_features": {"msc4446_enabled": True}})
+    def test_send_read_marker_can_move_backwards_with_opt_in(self) -> None:
+        room_id = self.helper.create_room_as(self.owner, tok=self.owner_tok)
+
+        older_event_id = self.helper.send(
+            room_id=room_id, body="1", tok=self.owner_tok
+        )["event_id"]
+        newer_event_id = self.helper.send(
+            room_id=room_id, body="2", tok=self.owner_tok
+        )["event_id"]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={"m.fully_read": newer_event_id},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={"m.fully_read": older_event_id, "com.beeper.allow_backward": True},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(room_id), older_event_id)
+
+    @unittest.override_config({"experimental_features": {"msc4446_enabled": True}})
+    def test_send_read_marker_does_not_move_backwards_with_explicit_opt_out(
+        self,
+    ) -> None:
+        room_id = self.helper.create_room_as(self.owner, tok=self.owner_tok)
+
+        older_event_id = self.helper.send(
+            room_id=room_id, body="1", tok=self.owner_tok
+        )["event_id"]
+        newer_event_id = self.helper.send(
+            room_id=room_id, body="2", tok=self.owner_tok
+        )["event_id"]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={"m.fully_read": newer_event_id},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Expected to be a no-op.
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={
+                "m.fully_read": older_event_id,
+                "com.beeper.allow_backward": False,
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(room_id), newer_event_id)
+
+    def test_send_read_marker_ignores_opt_in_when_feature_disabled(self) -> None:
+        room_id = self.helper.create_room_as(self.owner, tok=self.owner_tok)
+        older_event_id = self.helper.send(
+            room_id=room_id, body="1", tok=self.owner_tok
+        )["event_id"]
+        newer_event_id = self.helper.send(
+            room_id=room_id, body="2", tok=self.owner_tok
+        )["event_id"]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={"m.fully_read": newer_event_id},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={"m.fully_read": older_event_id, "com.beeper.allow_backward": True},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(room_id), newer_event_id)
 
     def test_send_read_marker_missing_previous_event(self) -> None:
         """

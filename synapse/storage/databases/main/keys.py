@@ -113,10 +113,20 @@ class KeyStore(CacheInvalidationWorkerStore):
             # invalidate takes a tuple corresponding to the params of
             # _get_server_keys_json. _get_server_keys_json only takes one
             # param, which is itself the 2-tuple (server_name, key_id).
-            self._invalidate_cache_and_stream_bulk(
+            #
+            # Invalidate the local cache directly, but we can only send
+            # primitive types per argument over replication, so JSON-encode the
+            # nested key and unpack it on the receiving side (see
+            # `CacheInvalidationWorkerStore.process_replication_rows`).
+            for key_id in verify_keys:
+                txn.call_after(
+                    self._get_server_keys_json.invalidate,
+                    ((server_name, key_id),),
+                )
+            self._send_invalidation_to_replication_bulk(
                 txn,
-                self._get_server_keys_json,
-                [((server_name, key_id),) for key_id in verify_keys],
+                self._get_server_keys_json.__name__,
+                [(json.dumps([server_name, key_id]),) for key_id in verify_keys],
             )
             self._invalidate_cache_and_stream_bulk(
                 txn,

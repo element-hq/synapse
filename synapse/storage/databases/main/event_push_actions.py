@@ -435,12 +435,13 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         """
         txn.execute(sql, args)
 
-        seen_thread_ids = set()
+        # The (room ID, thread ID) pairs we found an up-to-date summary for.
+        seen_room_thread_ids = set()
         room_to_count: dict[str, int] = defaultdict(int)
 
         for room_id, thread_id, notif_count in txn:
             room_to_count[room_id] += notif_count
-            seen_thread_ids.add(thread_id)
+            seen_room_thread_ids.add((room_id, thread_id))
 
         # Now get any event push actions that haven't been rotated using the same OR
         # join and filter by receipt and event push summary rotated up to stream ordering.
@@ -460,35 +461,31 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
 
         for room_id, thread_id, notif_count in txn:
             # Note: only count push actions we have valid summaries for with up to date receipt.
-            if thread_id not in seen_thread_ids:
+            if (room_id, thread_id) not in seen_room_thread_ids:
                 continue
             room_to_count[room_id] += notif_count
 
-        thread_id_clause, thread_ids_args = make_in_list_sql_clause(
-            self.database_engine, "epa.thread_id", seen_thread_ids
-        )
-
-        # Finally re-check event_push_actions for any rooms not in the summary, ignoring
-        # the rotated up-to position. This handles the case where a read receipt has arrived
-        # but not been rotated meaning the summary table is out of date, so we go back to
-        # the push actions table.
+        # Finally re-check event_push_actions for any room/threads not in the summary,
+        # ignoring the rotated up-to position. This handles the case where a read receipt
+        # has arrived but not been rotated meaning the summary table is out of date, so we
+        # go back to the push actions table.
         sql = f"""
             {receipts_cte}
-            SELECT epa.room_id, COUNT(CASE WHEN epa.notif = 1 THEN 1 END) AS notif_count
+            SELECT epa.room_id, epa.thread_id, COUNT(CASE WHEN epa.notif = 1 THEN 1 END) AS notif_count
             FROM event_push_actions AS epa
             {receipts_joins}
             WHERE user_id = ?
-            AND NOT {thread_id_clause}
             AND epa.notif = 1
             AND (threaded_receipt_stream_ordering IS NULL OR stream_ordering > threaded_receipt_stream_ordering)
             AND (unthreaded_receipt_stream_ordering IS NULL OR stream_ordering > unthreaded_receipt_stream_ordering)
-            GROUP BY epa.room_id
+            GROUP BY epa.room_id, epa.thread_id
         """
 
-        args.extend(thread_ids_args)
         txn.execute(sql, args)
 
-        for room_id, notif_count in txn:
+        for room_id, thread_id, notif_count in txn:
+            if (room_id, thread_id) in seen_room_thread_ids:
+                continue
             room_to_count[room_id] += notif_count
 
         return room_to_count
@@ -1509,6 +1506,43 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                         "last_receipt_stream_ordering": stream_ordering,
                     },
                 )
+                # If no summary row exists yet for a thread that has pending push
+                # actions (room active but not yet through a rotation cycle), the
+                # UPDATE above is a silent no-op for that thread and
+                # last_receipt_stream_ordering is never persisted.
+                # _rotate_notifs_before_txn would then INSERT the row with
+                # last_receipt_stream_ordering=NULL, causing the badge query to
+                # include every event before the receipt as unread.  Pre-populate
+                # rows for every thread with pending push actions so rotation
+                # only counts events that arrive after this receipt.
+                txn.execute(
+                    """
+                    SELECT DISTINCT thread_id
+                    FROM event_push_actions
+                    WHERE user_id = ? AND room_id = ?
+                    """,
+                    (user_id, room_id),
+                )
+                pending_thread_ids = [row[0] for row in txn]
+                self.db_pool.simple_upsert_many_txn(
+                    txn,
+                    table="event_push_summary",
+                    key_names=("user_id", "room_id", "thread_id"),
+                    key_values=[
+                        (user_id, room_id, pending_thread_id)
+                        for pending_thread_id in pending_thread_ids
+                    ],
+                    value_names=(
+                        "notif_count",
+                        "unread_count",
+                        "stream_ordering",
+                        "last_receipt_stream_ordering",
+                    ),
+                    value_values=[
+                        (0, 0, old_rotate_stream_ordering, stream_ordering)
+                        for _ in pending_thread_ids
+                    ],
+                )
 
             # For a threaded receipt, we *always* want to update that receipt,
             # event if there are no new notifications in that thread. This ensures
@@ -1517,8 +1551,10 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 unread_counts = [(0, 0, thread_id)]
 
             # Then any updated threads get their notification count and unread
-            # count updated.
-            self.db_pool.simple_update_many_txn(
+            # count updated.  Use upsert so that a row is created if none exists
+            # yet (same race as the unthreaded case above: without this, rotation
+            # would INSERT with last_receipt_stream_ordering=NULL).
+            self.db_pool.simple_upsert_many_txn(
                 txn,
                 table="event_push_summary",
                 key_names=("room_id", "user_id", "thread_id"),

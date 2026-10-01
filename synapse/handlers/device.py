@@ -30,6 +30,8 @@ from typing import (
     cast,
 )
 
+from prometheus_client import Gauge
+
 from synapse.api import errors
 from synapse.api.constants import EduTypes, EventTypes, Membership
 from synapse.api.errors import (
@@ -41,6 +43,7 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.logging.opentracing import log_kv, set_tag, trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
@@ -58,6 +61,7 @@ from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    MultiWriterStreamToken,
     ScheduledTask,
     StrCollection,
     StreamKeyType,
@@ -66,6 +70,7 @@ from synapse.types import (
     UserID,
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
+    is_compliant_user_id_localpart,
 )
 from synapse.util import stringutils
 from synapse.util.async_helpers import Linearizer
@@ -87,6 +92,21 @@ logger = logging.getLogger(__name__)
 DELETE_DEVICE_MSGS_TASK_NAME = "delete_device_messages"
 MAX_DEVICE_DISPLAY_NAME_LEN = 100
 DELETE_STALE_DEVICES_INTERVAL = Duration(days=1)
+
+device_list_conversion_lag_gauge = Gauge(
+    "synapse_device_lists_changes_conversion_lag_seconds",
+    "Age of the oldest device list change that has yet to be converted to outbound federation pokes",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+device_list_conversion_stream_lag_gauge = Gauge(
+    "synapse_device_lists_changes_conversion_stream_lag",
+    "Number of stream IDs between the current device lists stream position and the position converted to outbound federation pokes",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+# How often to update the device list conversion lag gauges.
+DEVICE_LIST_CONVERSION_LAG_GAUGE_METRIC_UPDATE_INTERVAL = Duration(seconds=30)
 
 
 def _check_device_name_length(name: str | None) -> None:
@@ -129,7 +149,6 @@ class DeviceHandler:
         self._auth_handler = hs.get_auth_handler()
         self._account_data_handler = hs.get_account_data_handler()
         self._event_sources = hs.get_event_sources()
-        self._msc3852_enabled = hs.config.experimental.msc3852_enabled
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
         )
@@ -290,6 +309,8 @@ class DeviceHandler:
             user_id: The user to delete devices from.
             device_ids: The list of device IDs to delete
         """
+        logger.info("Deleting devices %r for %r", list(device_ids), user_id)
+
         to_device_stream_id = self._event_sources.get_current_token().to_device_key
 
         try:
@@ -958,6 +979,13 @@ class DeviceWriterHandler(DeviceHandler):
                 self.device_list_updater.incoming_device_list_update,
             )
 
+            # Report how far behind we are at converting device list changes
+            # into outbound pokes.
+            self.clock.looping_call(
+                self._report_device_list_conversion_lag,
+                DEVICE_LIST_CONVERSION_LAG_GAUGE_METRIC_UPDATE_INTERVAL,
+            )
+
     @trace
     @measure_func("notify_device_update")
     async def notify_device_update(
@@ -1030,6 +1058,35 @@ class DeviceWriterHandler(DeviceHandler):
 
         self._handle_new_device_update_async()
         return
+
+    @wrap_as_background_process("_report_device_list_conversion_lag")
+    async def _report_device_list_conversion_lag(self) -> None:
+        """Report how far behind we are at converting rows in
+        `device_lists_changes_in_room` to `device_lists_outbound_pokes`.
+        """
+        (
+            oldest_ts,
+            last_converted_pos,
+        ) = await self.store.get_device_list_conversion_lag()
+
+        if oldest_ts is None:
+            device_list_conversion_lag_ms = 0
+        else:
+            device_list_conversion_lag_ms = max(0, self.clock.time_msec() - oldest_ts)
+
+        device_list_conversion_lag_gauge.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(device_list_conversion_lag_ms / 1000.0)  # convert to seconds
+
+        # The stream ID lag is only an approximation of the conversion
+        # backlog: the converted position only advances when the conversion
+        # loop runs, and stream IDs in the gap may not have rows needing
+        # conversion at all.
+        current_pos = self.store.get_device_stream_token().stream
+
+        device_list_conversion_stream_lag_gauge.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(max(0, current_pos - last_converted_pos))
 
     @wrap_as_background_process("_handle_new_device_update_async")
     async def _handle_new_device_update_async(self) -> None:
@@ -1192,7 +1249,16 @@ class DeviceWriterHandler(DeviceHandler):
         changes = await self.store.get_device_list_changes_in_room(
             room_id, device_lists_stream_id
         )
-        local_changes = {(u, d) for u, d in changes if self.hs.is_mine_id(u)}
+        if changes is not None:
+            local_changes = {(u, d) for u, d in changes if self.hs.is_mine_id(u)}
+        else:
+            # The `device_lists_stream_id` is too old, so we need to fall back
+            # to looking for changes for all local users.
+            local_users = await self.store.get_local_users_in_room(room_id)
+            local_changes = await self.store.get_device_changes_for_users(
+                MultiWriterStreamToken(stream=device_lists_stream_id), local_users
+            )
+
         if not local_changes:
             return
 
@@ -1467,6 +1533,28 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                 {
                     "message": "Got a device list update edu from a user and "
                     "device which does not match the origin of the request.",
+                    "user_id": user_id,
+                    "device_id": device_id,
+                }
+            )
+            return
+
+        if not is_compliant_user_id_localpart(UserID.from_string(user_id).localpart):
+            # We SHOULD NOT forward non-compliant (grandfathered historical)
+            # user IDs to clients outside the context of an event, and the spec
+            # gives dropping their device list updates as the example. See
+            # https://spec.matrix.org/v1.14/appendices/#historical-user-ids
+            logger.warning(
+                "Dropping device list update edu for non-compliant user ID %r from %r",
+                user_id,
+                origin,
+            )
+
+            set_tag("error", True)
+            log_kv(
+                {
+                    "message": "Got a device list update edu from a "
+                    "non-compliant user ID, dropping it.",
                     "user_id": user_id,
                     "device_id": device_id,
                 }

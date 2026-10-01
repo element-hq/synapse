@@ -18,10 +18,3 @@
 -- may want to either backfill this or delete all rows with a NULL value (and
 -- then make it NOT NULL).
 ALTER TABLE sliding_sync_connections ADD COLUMN last_used_ts BIGINT;
-
--- Note: We don't add an index on this column to allow HOT updates on PostgreSQL
--- to reduce the cost of the updates to the column. c.f.
--- https://www.postgresql.org/docs/current/storage-hot.html
---
--- We do query this column directly to find expired connections, but we expect
--- that to be an infrequent operation and a sequential scan should be fine.

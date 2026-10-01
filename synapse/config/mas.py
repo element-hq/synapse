@@ -36,6 +36,7 @@ from ._base import Config, ConfigError, RootConfig
 class MasConfigModel(ParseModel):
     enabled: StrictBool = False
     endpoint: AnyHttpUrl = AnyHttpUrl("http://localhost:8080")
+    force_http2: StrictBool = False
     secret: StrictStr | None = Field(default=None)
     # We set `strict=False` to allow `str` instances.
     secret_path: FilePath | None = Field(default=None, strict=False)
@@ -82,6 +83,7 @@ class MasConfig(Config):
 
         self.enabled = parsed.enabled
         self.endpoint = parsed.endpoint
+        self.force_http2 = parsed.force_http2
         self._secret = parsed.secret
         self._secret_path = parsed.secret_path
 
@@ -99,13 +101,6 @@ class MasConfig(Config):
 
         if not self.enabled:
             return
-
-        if root.experimental.msc3861.enabled:
-            raise ConfigError(
-                "Experimental MSC3861 was replaced by Matrix Authentication Service."
-                "Please disable MSC3861 or disable Matrix Authentication Service.",
-                ("experimental", "msc3861"),
-            )
 
         if (
             root.auth.password_enabled_for_reauth

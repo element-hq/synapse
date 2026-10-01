@@ -1,0 +1,2 @@
+Add type annotations for `RestServlet.PATTERNS` to prevent misuse.
+

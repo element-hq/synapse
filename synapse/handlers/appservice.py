@@ -255,9 +255,8 @@ class ApplicationServicesHandler:
                 will cause this function to return early.
 
                 Ephemeral events will only be pushed to appservices that have opted into
-                receiving them by setting `push_ephemeral` to true in their registration
-                file. Note that while MSC2409 is experimental, this option is called
-                `de.sorunome.msc2409.push_ephemeral`.
+                receiving them by setting `receive_ephemeral` to true in their
+                registration file(previously this was `push_ephemeral`).
 
                 Appservices will only receive ephemeral events that fall within their
                 registered user and room namespaces.
@@ -270,7 +269,6 @@ class ApplicationServicesHandler:
 
         # Notify appservices of updates in ephemeral event streams.
         # Only the following streams are currently supported.
-        # FIXME: We should use constants for these values.
         if stream_key not in (
             StreamKeyType.TYPING,
             StreamKeyType.RECEIPT,
@@ -315,7 +313,10 @@ class ApplicationServicesHandler:
                     StreamKeyType.PRESENCE,
                     StreamKeyType.TO_DEVICE,
                 )
-                and service.supports_ephemeral
+                # Honour both the stable `receive_ephemeral` registration flag and the
+                # legacy `de.sorunome.msc2409.push_ephemeral` one, matching the
+                # transaction body built in `ApplicationServiceApi.push_bulk`.
+                and (service.supports_ephemeral or service.supports_unstable_ephemeral)
             )
             or (
                 stream_key == StreamKeyType.DEVICE_LIST
@@ -373,13 +374,21 @@ class ApplicationServicesHandler:
                         # follow the base stream position.
                         new_token = MultiWriterStreamToken(stream=new_token.stream)
 
-                        events = await self._handle_receipts(service, new_token)
-                        self.scheduler.enqueue_for_appservice(service, ephemeral=events)
+                        while True:
+                            events, reached_token = await self._handle_receipts(
+                                service, new_token
+                            )
+                            self.scheduler.enqueue_for_appservice(
+                                service, ephemeral=events
+                            )
 
-                        # Persist the latest handled stream token for this appservice
-                        await self.store.set_appservice_stream_type_pos(
-                            service, "read_receipt", new_token.stream
-                        )
+                            # Persist the latest handled stream token for this appservice
+                            await self.store.set_appservice_stream_type_pos(
+                                service, "read_receipt", reached_token.stream
+                            )
+
+                            if reached_token.stream >= new_token.stream:
+                                break
 
                     elif stream_key == StreamKeyType.PRESENCE:
                         assert isinstance(new_token, int)
@@ -459,14 +468,16 @@ class ApplicationServicesHandler:
 
     async def _handle_receipts(
         self, service: ApplicationService, new_token: MultiWriterStreamToken
-    ) -> list[JsonMapping]:
+    ) -> tuple[list[JsonMapping], MultiWriterStreamToken]:
         """
-        Return the latest read receipts that the given application service should receive.
+        Return the next batch of read receipts that the given application service
+        should receive.
 
-        First fetch all read receipts between the last receipt stream token that this
-        application service should have previously received (non-inclusive) and the
-        latest read receipt stream token (inclusive). Then from that set, return only
-        those read receipts that the given application service may be interested in.
+        First fetch the oldest read receipts between the last receipt stream token that
+        this application service should have previously received (non-inclusive) and
+        the latest read receipt stream token (inclusive), up to a cap. Then from that
+        set, return only those read receipts that the given application service may be
+        interested in.
 
         Args:
             service: The application service to check for which events it should receive.
@@ -475,23 +486,40 @@ class ApplicationServicesHandler:
                 token. Prevents accidentally duplicating work.
 
         Returns:
-            A list of JSON dictionaries containing data derived from the read receipts that
-            should be sent to the given application service.
+            A two-tuple containing the following:
+                * A list of JSON dictionaries containing data derived from the read
+                  receipts that should be sent to the given application service.
+                * The receipt stream token up to which receipts were actually handled.
+                  This is earlier than `new_token` if the fetch was truncated; callers
+                  must call this method again to fetch the remaining receipts.
         """
         from_key = await self.store.get_type_stream_id_for_appservice(
             service, "read_receipt"
         )
-        if new_token is not None and new_token.stream <= from_key:
-            logger.debug("Rejecting token lower than or equal to stored: %s", new_token)
-            return []
+        if new_token.stream <= from_key:
+            if new_token.stream == from_key:
+                logger.debug(
+                    "Receipt token %s already handled for appservice %s",
+                    new_token,
+                    service.id,
+                )
+            else:
+                logger.warning(
+                    "Receipt token %s is behind stored position %s for appservice %s",
+                    new_token,
+                    from_key,
+                    service.id,
+                )
+
+            return [], MultiWriterStreamToken(stream=from_key)
 
         from_token = MultiWriterStreamToken(stream=from_key)
 
         receipts_source = self.event_sources.sources.receipt
-        receipts, _ = await receipts_source.get_new_events_as(
+        receipts, reached_token = await receipts_source.get_new_events_as(
             service=service, from_key=from_token, to_key=new_token
         )
-        return receipts
+        return receipts, reached_token
 
     async def _handle_presence(
         self,

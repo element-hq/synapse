@@ -38,6 +38,7 @@ from synapse.config import (  # noqa: F401
     oidc,
     password_auth_providers,
     push,
+    push_rules,
     ratelimiting,
     redis,
     registration,
@@ -51,6 +52,7 @@ from synapse.config import (  # noqa: F401
     spam_checker,
     sso,
     stats,
+    task_scheduler,
     third_party_event_rules,
     tls,
     tracer,
@@ -103,6 +105,7 @@ class RootConfig:
     worker: workers.WorkerConfig
     authproviders: password_auth_providers.PasswordAuthProviderConfig
     push: push.PushConfig
+    push_rules: push_rules.PushRulesConfig
     spamchecker: spam_checker.SpamCheckerConfig
     room: room.RoomConfig
     userdirectory: user_directory.UserDirectoryConfig
@@ -120,6 +123,7 @@ class RootConfig:
     background_updates: background_updates.BackgroundUpdateConfig
     auto_accept_invites: auto_accept_invites.AutoAcceptInvitesConfig
     user_types: user_types.UserTypesConfig
+    task_scheduler: task_scheduler.TaskSchedulerConfig
     mas: mas.MasConfig
     matrix_rtc: matrixrtc.MatrixRtcConfig
 

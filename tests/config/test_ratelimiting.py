@@ -57,7 +57,7 @@ class ParseRatelimitSettingsTestcase(TestCase):
 
 class RatelimitConfigTestCase(TestCase):
     def test_parse_rc_federation(self) -> None:
-        config_dict = default_config("test")
+        config_dict = default_config(server_name="test")
         config_dict["rc_federation"] = {
             "window_size": 20000,
             "sleep_limit": 693,

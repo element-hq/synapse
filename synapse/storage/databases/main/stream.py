@@ -608,7 +608,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             stream_column="stream_ordering",
             max_value=events_max,
         )
-        self._events_stream_cache = StreamChangeCache(
+        self._events_stream_cache: StreamChangeCache = StreamChangeCache(
             name="EventsRoomStreamChangeCache",
             server_name=self.server_name,
             current_stream_pos=min_event_val,
@@ -2425,11 +2425,18 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             event_filter: If provided filters the events to those that match the filter.
 
         Returns:
-            The results as a list of events, a token that points to the end of
-            the result set, and a boolean to indicate if there were more events
-            but we hit the limit. If no events are returned then the end of the
+            - The results as a list of events;
+            - a token that points to the end of the result set; and
+            - a boolean to indicate if there were more events
+              but we hit the limit (`limited`)
+
+            If no events are returned and `limited` is false, then the end of the
             stream has been reached (i.e. there are no events between `from_key`
             and `to_key`).
+
+            When `limited` is true, that means that more pagination can be attempted.
+            Note that `limited` can be true even if no events are returned,
+            because rejected events are filtered out after the limit check.
 
             When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
             When Direction.BACKWARDS: from_key >= x > to_key, (descending order)

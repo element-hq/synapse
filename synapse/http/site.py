@@ -23,7 +23,7 @@ import json
 import logging
 import time
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Generator
+from typing import TYPE_CHECKING, Any, Generator, Optional
 
 import attr
 from zope.interface import implementer
@@ -278,7 +278,7 @@ class SynapseRequest(Request):
         # See: https://github.com/element-hq/synapse/security/advisories/GHSA-rfq8-j7rh-8hf2
         if command == b"POST":
             ctype = self.requestHeaders.getRawHeaders(b"content-type")
-            if ctype and b"multipart/form-data" in ctype[0]:
+            if ctype and b"multipart/form-data" in ctype[0].lower():
                 logger.warning(
                     "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
                     self.client,
@@ -638,10 +638,12 @@ class SynapseRequest(Request):
         if authenticated_entity:
             requester = f"{authenticated_entity}|{requester}"
 
+        # Updates to this log line should also be reflected in our docs,
+        # `docs/usage/administration/request_log.md`
         self.synapse_site.access_logger.log(
             log_level,
             "%s - %s - {%s}"
-            " Processed request: %.3fsec/%.3fsec (%.3fsec, %.3fsec) (%.3fsec/%.3fsec/%d)"
+            " Processed request: %.3fsec/%.3fsec ru=(%.3fsec, %.3fsec) db=(%.3fsec/%.3fsec/%d)"
             ' %sB %s "%s %s %s" "%s" [%d dbevts]',
             self.get_client_ip_if_available(),
             self.synapse_site.site_tag,
@@ -905,7 +907,10 @@ class SynapseSite(ProxySite):
         self.server_version_string = server_version_string.encode("ascii")
         self.connections: list[Protocol] = []
 
-    def buildProtocol(self, addr: IAddress) -> SynapseProtocol:
+    # Twisted 26.4.0 types HTTPFactory.buildProtocol as returning its concrete
+    # `_GenericHTTPChannelProtocol` wrapper. We intentionally return our own HTTPChannel
+    # subclass instead. Thus we add a type-ignore.
+    def buildProtocol(self, addr: Optional[IAddress]) -> SynapseProtocol:  # type: ignore[override]
         protocol = SynapseProtocol(
             self,
             self.server_name,

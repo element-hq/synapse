@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from pydantic import StrictBool, StrictStr, model_validator
 
+from synapse.api.constants import ProfileFields
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.http.servlet import (
     parse_and_validate_json_object_from_request,
@@ -112,6 +113,18 @@ class MasProvisionUserResource(MasBaseResource):
         unset_emails: StrictBool = False
         set_emails: list[StrictStr] | None = None
 
+        locked: StrictBool | None = None
+        """
+        True to lock user. False to unlock. None to leave the same.
+
+        This is mostly for informational purposes; if the user's account is locked in MAS
+        but not in Synapse, the token introspection response will prevent them from using
+        their account.
+
+        However, having a local copy of the locked state in Synapse is useful for excluding
+        the user from the user directory.
+        """
+
         @model_validator(mode="before")
         @classmethod
         def validate_exclusive(cls, values: Any) -> Any:
@@ -150,18 +163,18 @@ class MasProvisionUserResource(MasBaseResource):
             )
         else:
             created = False
+            new_displayname = None
             if body.unset_displayname:
-                await self.profile_handler.set_displayname(
-                    target_user=user_id,
-                    requester=requester,
-                    new_displayname="",
-                    by_admin=True,
-                )
+                new_displayname = ""
             elif body.set_displayname is not None:
-                await self.profile_handler.set_displayname(
+                new_displayname = body.set_displayname
+
+            if new_displayname is not None:
+                await self.profile_handler.dispatch_set_profile_field(
                     target_user=user_id,
                     requester=requester,
-                    new_displayname=body.set_displayname,
+                    field_name=ProfileFields.DISPLAYNAME,
+                    new_value=new_displayname,
                     by_admin=True,
                 )
 
@@ -206,18 +219,21 @@ class MasProvisionUserResource(MasBaseResource):
                         validated_at=current_time,
                     )
 
+        if body.locked is not None:
+            await self.store.set_user_locked_status(user_id.to_string(), body.locked)
+
+        new_avatar_url_value = None
         if body.unset_avatar_url:
-            await self.profile_handler.set_avatar_url(
-                target_user=user_id,
-                requester=requester,
-                new_avatar_url="",
-                by_admin=True,
-            )
+            new_avatar_url_value = ""
         elif body.set_avatar_url is not None:
-            await self.profile_handler.set_avatar_url(
+            new_avatar_url_value = body.set_avatar_url
+
+        if new_avatar_url_value is not None:
+            await self.profile_handler.dispatch_set_profile_field(
                 target_user=user_id,
                 requester=requester,
-                new_avatar_url=body.set_avatar_url,
+                field_name=ProfileFields.AVATAR_URL,
+                new_value=new_avatar_url_value,
                 by_admin=True,
             )
 
@@ -365,10 +381,11 @@ class MasSetDisplayNameResource(MasBaseResource):
 
         requester = create_requester(user_id=user_id)
 
-        await self.profile_handler.set_displayname(
+        await self.profile_handler.dispatch_set_profile_field(
             target_user=requester.user,
             requester=requester,
-            new_displayname=body.displayname,
+            field_name=ProfileFields.DISPLAYNAME,
+            new_value=body.displayname,
             by_admin=True,
         )
 
@@ -409,10 +426,11 @@ class MasUnsetDisplayNameResource(MasBaseResource):
 
         requester = create_requester(user_id=user_id)
 
-        await self.profile_handler.set_displayname(
+        await self.profile_handler.dispatch_set_profile_field(
             target_user=requester.user,
             requester=requester,
-            new_displayname="",
+            field_name=ProfileFields.DISPLAYNAME,
+            new_value="",
             by_admin=True,
         )
 

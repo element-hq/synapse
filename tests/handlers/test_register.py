@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, Mock
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.auth.internal import InternalAuth
-from synapse.api.constants import UserTypes
+from synapse.api.constants import ProfileFields, UserTypes
 from synapse.api.errors import (
     CodeMessageException,
     Codes,
@@ -477,6 +477,7 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
             "auto_join_rooms": ["#room:test"],
             "autocreate_auto_join_room_preset": "private_chat",
             "auto_join_mxid_localpart": "support",
+            "default_room_version": "11",
         }
     )
     def test_auto_create_auto_join_room_preset_invalid_permissions(self) -> None:
@@ -485,6 +486,8 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
         registration doesn't completely break if the inviter doesn't have proper
         permissions.
         """
+        # This test is limited to room version 11, as after that the room creator will
+        # always have permission to invite users and make any other changes they wish.
         inviter = "@support:test"
 
         # Register an initial user to create the room and such (essentially this
@@ -528,7 +531,7 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        # Register a second user, which won't be be in the room (or even have an invite)
+        # Register a second user, which won't be in the room (or even have an invite)
         # since the inviter no longer has the proper permissions.
         user_id = self.get_success(self.handler.register_user(localpart="bob"))
 
@@ -824,8 +827,12 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
 
         if displayname is not None:
             # logger.info("setting user display name: %s -> %s", user_id, displayname)
-            await self.hs.get_profile_handler().set_displayname(
-                user, requester, displayname, by_admin=True
+            await self.hs.get_profile_handler().set_field(
+                target_user=user,
+                requester=requester,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value=displayname,
+                by_admin=True,
             )
 
         return user_id, token

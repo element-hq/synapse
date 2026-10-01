@@ -6,7 +6,7 @@ This is a quick cheat sheet for developers on how to use [`poetry`](https://pyth
 
 See the [contributing guide](contributing_guide.md#4-install-the-dependencies).
 
-Developers should use Poetry 1.3.2 or higher. If you encounter problems related
+Developers should use Poetry 2.2.0 or higher. If you encounter problems related
 to poetry, please [double-check your poetry version](#check-the-version-of-poetry-with-poetry---version).
 
 # Background

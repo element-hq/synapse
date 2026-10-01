@@ -49,7 +49,9 @@ if strtobool(os.environ.get("SYNAPSE_ASYNC_IO_REACTOR", "0")):
 
     from twisted.internet import asyncioreactor
 
-    asyncioreactor.install(asyncio.get_event_loop())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    asyncioreactor.install(loop)
 
 # Twisted and canonicaljson will fail to import when this file is executed to
 # get the __version__ during a fresh install. That's OK and subsequent calls to
@@ -65,7 +67,8 @@ try:
 except ImportError:
     pass
 
-# Teach canonicaljson how to serialise immutabledicts.
+
+# Teach canonicaljson how to serialise immutabledicts and JsonObjects.
 try:
     from canonicaljson import register_preserialisation_callback
     from immutabledict import immutabledict
@@ -79,6 +82,12 @@ try:
             return dict(d)
 
     register_preserialisation_callback(immutabledict, _immutabledict_cb)
+
+    #  Teach canonicaljson how to serialise JsonObjects, which is just to
+    #  convert them to dicts.
+    from synapse.synapse_rust.events import JsonObject  # noqa: E402
+
+    register_preserialisation_callback(JsonObject, lambda obj: dict(obj))
 except ImportError:
     pass
 

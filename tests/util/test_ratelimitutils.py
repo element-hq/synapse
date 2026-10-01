@@ -139,7 +139,7 @@ def _await_resolution(reactor: ThreadedMemoryReactorClock, d: Deferred) -> float
 
 
 def build_rc_config(settings: dict | None = None) -> FederationRatelimitSettings:
-    config_dict = default_config("test")
+    config_dict = default_config(server_name="test")
     config_dict.update(settings or {})
     config = HomeServerConfig()
     config.parse_config_dict(config_dict, "", "")

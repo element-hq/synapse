@@ -22,6 +22,7 @@ import synapse.rest.admin
 from synapse.api.constants import EventTypes, HistoryVisibility
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
+from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -124,6 +125,124 @@ class SlidingSyncRoomSubscriptionsTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1]["limited"],
             True,
             response_body["rooms"][room_id1],
+        )
+
+    def test_room_subscription_required_state_expansion_returns_immediately(
+        self,
+    ) -> None:
+        """
+        Test that adding a room subscription with stronger params than the list causes an
+        incremental long-poll to return immediately, even without new stream activity.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body: JsonDict = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "conn_id": "conn_id",
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        sync_body["room_subscriptions"] = {
+            room_id1: {
+                "required_state": [
+                    [EventTypes.Create, ""],
+                ],
+                "timeline_limit": 0,
+            }
+        }
+
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        channel.await_result(timeout_ms=3000)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        room_response = channel.json_body["rooms"][room_id1]
+        self.assertNotIn("initial", room_response)
+        self._assertRequiredStateIncludes(
+            room_response["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+            },
+            exact=True,
+        )
+
+    def test_room_subscription_required_state_change_returns_immediately(self) -> None:
+        """
+        Test that expanding an existing room subscription's required state causes an
+        incremental long-poll to return immediately, even without new stream activity.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id, tok=user1_tok, extra_content={"name": "Foo"}
+        )
+
+        sync_body: JsonDict = {
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                    ],
+                    "timeline_limit": 0,
+                }
+            },
+            "conn_id": "conn_id",
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+            },
+            exact=True,
+        )
+
+        sync_body["room_subscriptions"][room_id1]["required_state"] = [
+            [EventTypes.Create, ""],
+            [EventTypes.Name, ""],
+        ]
+
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        channel.await_result(timeout_ms=3000)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room_response = channel.json_body["rooms"][room_id1]
+        self.assertNotIn("initial", room_response)
+        self._assertRequiredStateIncludes(
+            room_response["required_state"],
+            {
+                state_map[(EventTypes.Name, "")],
+            },
+            exact=True,
         )
 
     def test_room_subscriptions_with_leave_membership(self) -> None:

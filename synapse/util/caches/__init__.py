@@ -21,7 +21,7 @@
 #
 import collections
 import logging
-import typing
+from collections import Counter
 from enum import Enum, auto
 from sys import intern
 from typing import Any, Callable, Sized, TypeVar
@@ -134,7 +134,7 @@ class CacheMetric:
 
     hits: int = 0
     misses: int = 0
-    eviction_size_by_reason: typing.Counter[EvictionReason] = attr.ib(
+    eviction_size_by_reason: Counter[EvictionReason] = attr.ib(
         factory=collections.Counter
     )
     memory_usage: int | None = None

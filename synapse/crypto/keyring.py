@@ -22,6 +22,7 @@
 import abc
 import logging
 from contextlib import ExitStack
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Callable, Iterable
 
 import attr
@@ -45,9 +46,9 @@ from synapse.api.errors import (
 )
 from synapse.config.key import TrustedKeyServer
 from synapse.events import EventBase
-from synapse.events.utils import prune_event_dict
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.storage.keys import FetchKeyResult
+from synapse.synapse_rust.events import redact_event
 from synapse.types import JsonDict
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import yieldable_gather_results
@@ -58,6 +59,15 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+# List of Unpadded Base64 server signing keys that are known to be vulnerable to attack.
+# Incoming requests from homeservers using any of these keys should be refused.
+# Events containing signatures using any of these keys should be refused.
+BANNED_SERVER_SIGNING_KEYS = (
+    # ELEMENTSEC-2025-1670
+    "l/O9hxMVKB6Lg+3Hqf0FQQZhVESQcMzbPN1Cz2nM3og=",
+)
 
 
 @attr.s(slots=True, frozen=True, cmp=False, auto_attribs=True)
@@ -110,13 +120,23 @@ class VerifyJsonRequest:
     ) -> "VerifyJsonRequest":
         """Create a VerifyJsonRequest to verify all signatures on an event
         object for the given server.
+
+        Raises immediately if the event doesn't have any signatures from the
+        given server.
         """
-        key_ids = list(event.signatures.get(server_name, []))
+        if server_name not in event.signatures:
+            raise SynapseError(
+                400,
+                f"Not signed by {server_name}",
+                Codes.UNAUTHORIZED,
+            )
+
+        key_ids = list(event.signatures[server_name])
         return VerifyJsonRequest(
             server_name,
             # We defer creating the redacted json object, as it uses a lot more
             # memory than the Event object itself.
-            lambda: prune_event_dict(event.room_version, event.get_pdu_json()),
+            lambda: redact_event(event).get_pdu_json(),
             minimum_valid_until_ms,
             key_ids=key_ids,
         )
@@ -348,6 +368,19 @@ class Keyring:
 
             if key_result.valid_until_ts < verify_request.minimum_valid_until_ts:
                 continue
+
+            key = encode_verify_key_base64(key_result.verify_key)
+            if key in BANNED_SERVER_SIGNING_KEYS:
+                raise SynapseError(
+                    HTTPStatus.UNAUTHORIZED,
+                    "Server signing key %s:%s for server %s has been banned by this server"
+                    % (
+                        key_result.verify_key.alg,
+                        key_result.verify_key.version,
+                        verify_request.server_name,
+                    ),
+                    Codes.UNAUTHORIZED,
+                )
 
             await self.process_json(key_result.verify_key, verify_request)
             verified = True

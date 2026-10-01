@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-def test_disconnect(
+def disconnect_and_assert(
     reactor: MemoryReactorClock,
     channel: FakeChannel,
     expect_cancellation: bool,

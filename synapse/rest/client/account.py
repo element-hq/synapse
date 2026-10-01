@@ -305,7 +305,7 @@ class DeactivateAccountRestServlet(RestServlet):
 
         # allow ASes to deactivate their own users:
         # ASes don't need user-interactive auth
-        if not requester.app_service:
+        if not requester.app_service_id:
             await self.auth_handler.validate_user_via_ui_auth(
                 requester,
                 request,
@@ -423,6 +423,17 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
         self.identity_handler = hs.get_identity_handler()
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        if not self.hs.config.registration.account_threepid_delegate_msisdn:
+            logger.warning(
+                "No upstream msisdn account_threepid_delegate configured on the server to "
+                "handle this request"
+            )
+            raise SynapseError(
+                400,
+                "Adding phone numbers to user account is not supported by this homeserver",
+                Codes.THREEPID_MEDIUM_NOT_SUPPORTED,
+            )
+
         body = parse_and_validate_json_object_from_request(
             request, MsisdnRequestTokenBody
         )
@@ -461,17 +472,6 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
 
             logger.info("MSISDN %s is already in use by %s", msisdn, existing_user_id)
             raise SynapseError(400, "MSISDN is already in use", Codes.THREEPID_IN_USE)
-
-        if not self.hs.config.registration.account_threepid_delegate_msisdn:
-            logger.warning(
-                "No upstream msisdn account_threepid_delegate configured on the server to "
-                "handle this request"
-            )
-            raise SynapseError(
-                400,
-                "Adding phone numbers to user account is not supported by this homeserver",
-                Codes.THREEPID_MEDIUM_NOT_SUPPORTED,
-            )
 
         ret = await self.identity_handler.requestMsisdnToken(
             self.hs.config.registration.account_threepid_delegate_msisdn,
@@ -619,7 +619,7 @@ class ThreepidRestServlet(RestServlet):
     # ThreePidBindRestServelet.PostBody with an `alias_generator` to handle
     # `threePidCreds` versus `three_pid_creds`.
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        if self.hs.config.mas.enabled or self.hs.config.experimental.msc3861.enabled:
+        if self.hs.config.mas.enabled:
             raise NotFoundError(errcode=Codes.UNRECOGNIZED)
 
         if not self.hs.config.registration.enable_3pid_changes:
@@ -911,7 +911,7 @@ class AccountStatusRestServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+    auth_delegated = hs.config.mas.enabled
 
     ThreepidRestServlet(hs).register(http_server)
     WhoamiRestServlet(hs).register(http_server)

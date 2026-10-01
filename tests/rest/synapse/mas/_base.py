@@ -25,15 +25,10 @@ class BaseTestCase(unittest.HomeserverTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config["enable_registration"] = False
-        config["experimental_features"] = {
-            "msc3861": {
-                "enabled": True,
-                "issuer": "https://example.com",
-                "client_id": "dummy",
-                "client_auth_method": "client_secret_basic",
-                "client_secret": "dummy",
-                "admin_token": self.SHARED_SECRET,
-            }
+        config["matrix_authentication_service"] = {
+            "enabled": True,
+            "endpoint": "http://localhost:8080/",
+            "secret": self.SHARED_SECRET,
         }
         return config
 

@@ -25,7 +25,7 @@ import collections
 import inspect
 import itertools
 import logging
-import typing
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from typing import (
     Any,
@@ -57,6 +57,7 @@ from synapse.logging.context import (
     run_coroutine_in_background,
     run_in_background,
 )
+from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -83,6 +84,13 @@ class AbstractObservableDeferred(Generic[_T], metaclass=abc.ABCMeta):
         """
         ...
 
+    @abc.abstractmethod
+    def has_observers(self) -> bool:
+        """Returns True if there are any observers currently observing this
+        ObservableDeferred.
+        """
+        ...
+
 
 class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
     """Wraps a deferred object so that we can add observer deferreds. These
@@ -90,6 +98,8 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
     deferred.
 
     If consumeErrors is true errors will be captured from the origin deferred.
+    In that case, errors will NOT be propagated onto any errbacks added to this
+    `ObservableDeferred`; instead the success callbacks will be called with `None`.
 
     Cancelling or otherwise resolving an observer will not affect the original
     ObservableDeferred.
@@ -122,6 +132,11 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
             for observer in observers:
                 try:
                     observer.callback(r)
+                except defer.CancelledError:
+                    # We do not want to propagate cancellations to the original
+                    # deferred, or to other observers, so we can just ignore
+                    # this.
+                    pass
                 except Exception as e:
                     logger.exception(
                         "%r threw an exception on .callback(%r), ignoring...",
@@ -145,6 +160,11 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
                 f.value.__failure__ = f
                 try:
                     observer.errback(f)
+                except defer.CancelledError:
+                    # We do not want to propagate cancellations to the original
+                    # deferred, or to other observers, so we can just ignore
+                    # this.
+                    pass
                 except Exception as e:
                     logger.exception(
                         "%r threw an exception on .errback(%r), ignoring...",
@@ -160,6 +180,7 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
 
         deferred.addCallbacks(callback, errback)
 
+    @cancellable
     def observe(self) -> "defer.Deferred[_T]":
         """Observe the underlying deferred.
 
@@ -169,7 +190,7 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
         """
         if not self._result:
             assert isinstance(self._observers, list)
-            d: "defer.Deferred[_T]" = defer.Deferred()
+            d: "defer.Deferred[_T]" = defer.Deferred(canceller=self._remove_observer)
             self._observers.append(d)
             return d
         elif self._result[0]:
@@ -179,6 +200,12 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
 
     def observers(self) -> "Collection[defer.Deferred[_T]]":
         return self._observers
+
+    def has_observers(self) -> bool:
+        """Returns True if there are any observers currently observing this
+        ObservableDeferred.
+        """
+        return bool(self._observers)
 
     def has_called(self) -> bool:
         return self._result is not None
@@ -203,6 +230,28 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
             self._result,
             self._deferred,
         )
+
+    def _remove_observer(self, observer: "defer.Deferred[_T]") -> None:
+        """Removes an observer from the list of observers.
+
+        Used as a canceller for the observer deferreds, so that if an observer
+        is cancelled it is removed from the list of observers.
+        """
+        if self._result is not None:
+            # The underlying deferred has already resolved, so the observer has
+            # already been resolved. Nothing to do.
+            return
+
+        assert isinstance(self._observers, list)
+        try:
+            self._observers.remove(observer)
+        except ValueError:
+            # The observer was not in the list. This can happen if the underlying
+            # deferred resolves at around the same time as we try to remove the
+            # observer. In this case, it's possible that we tried to remove the
+            # observer just after it was added to the list, but before it was
+            # resolved and removed from the list by the callback/errback above.
+            pass
 
 
 T = TypeVar("T")
@@ -341,6 +390,8 @@ T3 = TypeVar("T3")
 T4 = TypeVar("T4")
 T5 = TypeVar("T5")
 T6 = TypeVar("T6")
+T7 = TypeVar("T7")
+T8 = TypeVar("T8")
 
 
 @overload
@@ -470,6 +521,56 @@ async def gather_optional_coroutines(
 ) -> tuple[T1 | None, T2 | None, T3 | None, T4 | None, T5 | None, T6 | None]: ...
 
 
+@overload
+async def gather_optional_coroutines(
+    *coroutines: Unpack[
+        tuple[
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
+            Coroutine[Any, Any, T3] | None,
+            Coroutine[Any, Any, T4] | None,
+            Coroutine[Any, Any, T5] | None,
+            Coroutine[Any, Any, T6] | None,
+            Coroutine[Any, Any, T7] | None,
+        ]
+    ],
+) -> tuple[
+    T1 | None,
+    T2 | None,
+    T3 | None,
+    T4 | None,
+    T5 | None,
+    T6 | None,
+    T7 | None,
+]: ...
+
+
+@overload
+async def gather_optional_coroutines(
+    *coroutines: Unpack[
+        tuple[
+            Coroutine[Any, Any, T1] | None,
+            Coroutine[Any, Any, T2] | None,
+            Coroutine[Any, Any, T3] | None,
+            Coroutine[Any, Any, T4] | None,
+            Coroutine[Any, Any, T5] | None,
+            Coroutine[Any, Any, T6] | None,
+            Coroutine[Any, Any, T7] | None,
+            Coroutine[Any, Any, T8] | None,
+        ]
+    ],
+) -> tuple[
+    T1 | None,
+    T2 | None,
+    T3 | None,
+    T4 | None,
+    T5 | None,
+    T6 | None,
+    T7 | None,
+    T8 | None,
+]: ...
+
+
 async def gather_optional_coroutines(
     *coroutines: Unpack[tuple[Coroutine[Any, Any, T1] | None, ...]],
 ) -> tuple[T1 | None, ...]:
@@ -525,7 +626,7 @@ class _LinearizerEntry:
     # The number of things executing.
     count: int
     # Deferreds for the things blocked from executing.
-    deferreds: typing.OrderedDict["defer.Deferred[None]", Literal[1]]
+    deferreds: OrderedDict["defer.Deferred[None]", Literal[1]]
 
 
 class Linearizer:
@@ -959,6 +1060,27 @@ def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
 
     new_deferred: "defer.Deferred[T]" = defer.Deferred(handle_cancel)
     deferred.chainDeferred(new_deferred)
+    return new_deferred
+
+
+def observe_deferred(d: "defer.Deferred[T]") -> "defer.Deferred[T]":
+    """Returns a new `Deferred` that observes the given `Deferred`.
+
+    The returned `Deferred` will resolve with the same result as the given
+    `Deferred`, but will not "chain" on the deferred so that using the returned
+    deferred does not affect the given `Deferred` in any way.
+    """
+    new_deferred: "defer.Deferred[T]" = defer.Deferred()
+
+    def callback(r: T) -> T:
+        new_deferred.callback(r)
+        return r
+
+    def errback(f: Failure) -> Failure:
+        new_deferred.errback(f)
+        return f
+
+    d.addCallbacks(callback, errback)
     return new_deferred
 
 

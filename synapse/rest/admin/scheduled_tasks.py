@@ -15,7 +15,12 @@
 #
 from typing import TYPE_CHECKING
 
-from synapse.http.servlet import RestServlet, parse_integer, parse_string
+from synapse.http.servlet import (
+    RestServlet,
+    parse_integer,
+    parse_string,
+    parse_strings_from_args,
+)
 from synapse.http.site import SynapseRequest
 from synapse.rest.admin import admin_patterns, assert_requester_is_admin
 from synapse.types import JsonDict, TaskStatus
@@ -38,19 +43,33 @@ class ScheduledTasksRestServlet(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
+        # twisted.web.server.Request.args is incorrectly defined as Any | None
+        args: dict[bytes, list[bytes]] = request.args  # type: ignore
+
         # extract query params
-        action_name = parse_string(request, "action_name")
+        actions = parse_strings_from_args(args, "action_name")
         resource_id = parse_string(request, "resource_id")
-        status = parse_string(request, "status")
+        status_strings = parse_strings_from_args(
+            args,
+            "status",
+            allowed_values=[status.value for status in TaskStatus],
+        )
         # This parameter was historically called `job_status`, while the Admin API docs
         # defined it as `status`. We now support both, as `status` is generally
         # a nicer name. A v2 of this endpoint should keep only `status`.
-        if status is None:
-            status = parse_string(request, "job_status")
+        if status_strings is None:
+            status_strings = parse_strings_from_args(
+                args,
+                "job_status",
+                allowed_values=[status.value for status in TaskStatus],
+            )
         max_timestamp = parse_integer(request, "max_timestamp")
 
-        actions = [action_name] if action_name else None
-        statuses = [TaskStatus(status)] if status else None
+        statuses = (
+            [TaskStatus(status) for status in status_strings]
+            if status_strings
+            else None
+        )
 
         tasks = await self._store.get_scheduled_tasks(
             actions=actions,

@@ -41,6 +41,7 @@ from twisted.internet.defer import Deferred
 from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import AuthError
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
@@ -81,6 +82,14 @@ users_woken_by_stream_counter = Counter(
     labelnames=["stream", SERVER_NAME_LABEL],
 )
 
+wait_for_stream_token_timeout_counter = Counter(
+    "synapse_notifier_wait_for_stream_token_timeouts",
+    "Number of times we gave up waiting to catch up to a stream token, counted "
+    "once per lagging stream. `stream_key` is a `StreamToken` field name, which "
+    "is not always the replication stream name",
+    labelnames=["stream_key", SERVER_NAME_LABEL],
+)
+
 
 notifier_listeners_gauge = LaterGauge(
     name="synapse_notifier_listeners",
@@ -100,6 +109,22 @@ notifier_users_gauge = LaterGauge(
 )
 
 T = TypeVar("T")
+
+
+def _describe_lagging_streams(
+    target_token: StreamToken,
+    current_token: StreamToken,
+    lagging_stream_keys: Collection[StreamKeyType],
+) -> str:
+    """Describe how far each lagging stream has to go, for logging.
+
+    e.g. `quarantined_media_key (at 4, waiting for 6)`
+    """
+    return ", ".join(
+        f"{key.value} (at {current_token.get_field(key)}, "
+        f"waiting for {target_token.get_field(key)})"
+        for key in lagging_stream_keys
+    )
 
 
 # TODO(paul): Should be shared somewhere
@@ -210,7 +235,7 @@ class _NotifierUserStream:
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventStreamResult:
-    events: list[JsonDict | EventBase]
+    events: list[JsonDict | FilteredEvent]
     start_token: StreamToken
     end_token: StreamToken
 
@@ -526,6 +551,8 @@ class Notifier:
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
+            StreamKeyType.STICKY_EVENTS,
+            StreamKeyType.PROFILE_UPDATES,
         ],
         new_token: int,
         users: Collection[str | UserID] | None = None,
@@ -764,7 +791,7 @@ class Notifier:
             # The events fetched from each source are a JsonDict, EventBase, or
             # UserPresenceState, but see below for UserPresenceState being
             # converted to JsonDict.
-            events: list[JsonDict | EventBase] = []
+            events: list[JsonDict | FilteredEvent] = []
             end_token = from_token
 
             for keyname, source in self.event_sources.sources.get_sources():
@@ -830,32 +857,86 @@ class Notifier:
         return result
 
     async def wait_for_stream_token(self, stream_token: StreamToken) -> bool:
-        """Wait for this worker to catch up with the given stream token."""
+        """
+        Wait for this worker to catch up with the given stream token.
+
+        This is important to ensure that the worker has a proper view of the world
+        before trying to serve a request. For example, one worker can return a response
+        with some `next_batch` token, but then the next request goes to another worker
+        which is behind; if the worker assembles a response up to the token, it could be
+        missing data in the gap between where it's behind and the requested token.
+
+        ### Inavlid future tokens
+
+        We assume the token has already been validated/sanitized before being passed to
+        this function to ensure it's not some invalid future token. We consider a token
+        invalid, if the token has positions ahead of our persisted positions in the
+        database. This is important as we we don't want to wait for the stream to
+        advance in those cases (as it may never do so) (it's a waste of time for the
+        user and server).
+
+        Previously, we would sanitize and `bound_future_token(...)` within this function
+        but that leads to bad patterns upstream where people can continue to use the
+        unbounded token.
+
+        While it was possible for older Synapse versions to erroneously give out invalid
+        future tokens, this is no longer the case and its considered a Synapse
+        programming error if this ever happens. Validation/sanitization is still
+        necessary as a user can intentionally mess with numbers in the tokens being
+        provided.
+
+        Args:
+            stream_token: The token to wait for. We assume the token has already been
+            validated/sanitized to ensure it's not some invalid future token (has a
+            stream position ahead of what is in the DB). (see details above)
+
+        Returns:
+            True when this worker has caught up
+            False when we timed out waiting
+        """
         current_token = self.event_sources.get_current_token()
+        # Return early if we are already caught up
         if stream_token.is_before_or_eq(current_token):
             return True
 
-        # Work around a bug where older Synapse versions gave out tokens "from
-        # the future", i.e. that are ahead of the tokens persisted in the DB.
-        stream_token = await self.event_sources.bound_future_token(stream_token)
-
+        # Start waiting until we've caught up to the `stream_token`
         start = self.clock.time_msec()
         logged = False
         while True:
+            # Check if we are caught up to the stream token, if so return early.
+            # Equivalent to `is_before_or_eq`, except we can get the lagging
+            # stream keys for logging.
             current_token = self.event_sources.get_current_token()
-            if stream_token.is_before_or_eq(current_token):
+            lagging_stream_keys = stream_token.fields_strictly_after_token(
+                current_token
+            )
+            if not lagging_stream_keys:
                 return True
 
             now = self.clock.time_msec()
 
+            # Timed out
             if now - start > 10_000:
+                for stream_key in lagging_stream_keys:
+                    wait_for_stream_token_timeout_counter.labels(
+                        stream_key=stream_key.value,
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc()
+
+                logger.warning(
+                    "Timed out waiting for this worker's streams to advance to given token: %s",
+                    _describe_lagging_streams(
+                        stream_token, current_token, lagging_stream_keys
+                    ),
+                )
                 return False
 
             if not logged:
                 logger.info(
-                    "Waiting for current token to reach %s; currently at %s",
-                    stream_token,
-                    current_token,
+                    "Waiting for this worker's streams to advance to given token: %s",
+                    _describe_lagging_streams(
+                        stream_token, current_token, lagging_stream_keys
+                    ),
                 )
                 logged = True
 

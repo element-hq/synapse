@@ -756,6 +756,133 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
             self.assertFalse(os.path.exists(local_path))
 
 
+class ListQuarantinedMediaChangesTestCase(_AdminMediaTests):
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.server_name = hs.hostname
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
+
+    def test_no_auth(self) -> None:
+        """
+        Try to list quarantined media changes without authentication.
+        """
+
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantine_changes",
+        )
+
+        self.assertEqual(401, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.MISSING_TOKEN, channel.json_body["errcode"])
+
+    def test_requester_is_not_admin(self) -> None:
+        """
+        If the user is not a server admin, an error is returned.
+        """
+        self.other_user = self.register_user("user", "pass")
+        self.other_user_token = self.login("user", "pass")
+
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantine_changes",
+            access_token=self.other_user_token,
+        )
+
+        self.assertEqual(403, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+    def _quarantine_local_media(self, media_id: str, admin_user_tok: str) -> None:
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/media/quarantine/%s/%s"
+            % (
+                self.server_name,
+                media_id,
+            ),
+            access_token=admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+    def _local_upload(self, admin_user_tok: str) -> str:
+        response = self.helper.upload_media(
+            SMALL_PNG, tok=admin_user_tok, expect_code=200
+        )
+        origin_and_media_id = response["content_uri"][6:]  # Cut off 'mxc://'
+        _origin, media_id = origin_and_media_id.split("/")
+        return media_id
+
+    def test_list_quarantined_media(self) -> None:
+        """
+        Ensure we actually get results for each page and that pagination is seamless.
+        """
+        # Upload 105 media objects to test multiple pages
+        self.media_ids = [self._local_upload(self.admin_user_tok) for _ in range(105)]
+
+        # No changes before quarantine
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantine_changes",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(0, len(channel.json_body["changes"]))
+
+        # We expect to continue from the current stream position because we have no changes
+        self.assertEqual(1, channel.json_body["next_batch"])
+
+        # Quarantine by hash should kick in to get the other 104 media objects
+        self._quarantine_local_media(self.media_ids[0], self.admin_user_tok)
+
+        # Page 1 (implied ?from=0)
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantine_changes",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(100, len(channel.json_body["changes"]))
+        self.assertEqual(101, channel.json_body["next_batch"])
+        for row in channel.json_body["changes"]:
+            self.assertIn(
+                row["media_id"],
+                self.media_ids[0:100],
+            )
+            self.assertEqual(row["origin"], self.server_name)
+            self.assertEqual(row["quarantined"], True)
+
+        # Page 2 (explicit ?from, using next_batch)
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/media/quarantine_changes?from={channel.json_body['next_batch']}",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(5, len(channel.json_body["changes"]))
+        self.assertEqual(106, channel.json_body["next_batch"])
+        for row in channel.json_body["changes"]:
+            self.assertIn(
+                row["media_id"],
+                self.media_ids[100:],
+            )
+            self.assertEqual(row["origin"], self.server_name)
+            self.assertEqual(row["quarantined"], True)
+
+    def test_list_quarantined_media_bounds_high(self) -> None:
+        """
+        Ensure out of bounds (token stream position greater than our furthest persisted
+        position) requests with high `from` values are met with an appropriate error.
+        """
+        # Page that's very much out of range
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/media/quarantine_changes?from=900000",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+
+
 class QuarantineMediaByIDTestCase(_AdminMediaTests):
     def upload_media_and_return_media_id(self, data: bytes) -> str:
         # Upload some media into the room

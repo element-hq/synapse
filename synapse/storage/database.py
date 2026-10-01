@@ -77,6 +77,13 @@ sql_logger = logging.getLogger("synapse.storage.SQL")
 transaction_logger = logging.getLogger("synapse.storage.txn")
 perf_logger = logging.getLogger("synapse.storage.TIME")
 
+# The maximum length of the repr of a query's values that we log at DEBUG. Some
+# queries carry large payloads (e.g. to-device messages), and logging them in
+# full is not useful. Truncating also keeps the line well under AMP's 64KiB
+# per-value limit, which would otherwise break `trial -jN` test runs (c.f.
+# https://github.com/twisted/twisted/issues/12482).
+MAX_SQL_VALUE_LOG_LENGTH = 1000
+
 sql_scheduling_timer = Histogram(
     "synapse_storage_schedule_time", "sec", labelnames=[SERVER_NAME_LABEL]
 )
@@ -113,6 +120,7 @@ UNIQUE_INDEX_BACKGROUND_UPDATES = {
     "event_push_summary": "event_push_summary_unique_index2",
     "receipts_linearized": "receipts_linearized_unique_index",
     "receipts_graph": "receipts_graph_unique_index",
+    "e2e_cross_signing_signatures": "e2e_cross_signing_signatures_add_key_id_to_index",
 }
 
 
@@ -502,7 +510,13 @@ class LoggingTransaction:
         sql = self.database_engine.convert_param_style(sql)
         if args:
             try:
-                sql_logger.debug("[SQL values] {%s} %r", self.name, args[0])
+                if sql_logger.isEnabledFor(logging.DEBUG):
+                    value_repr = repr(args[0])
+                    if len(value_repr) > MAX_SQL_VALUE_LOG_LENGTH:
+                        value_repr = (
+                            value_repr[:MAX_SQL_VALUE_LOG_LENGTH] + "... [truncated]"
+                        )
+                    sql_logger.debug("[SQL values] {%s} %s", self.name, value_repr)
             except Exception:
                 # Don't let logging failures stop SQL from working
                 pass
@@ -1866,7 +1880,7 @@ class DatabasePool:
             if allow_none:
                 return None
             else:
-                raise StoreError(404, "No row found")
+                raise StoreError(404, f"No row found ({table})")
 
     @staticmethod
     def simple_select_onecol_txn(
@@ -2623,6 +2637,9 @@ def make_in_list_sql_clause(
     using the `ANY` form on postgres means that it views queries with
     different length iterables as the same, helping the query stats.
 
+    An empty `iterable` yields a constant clause: nothing can be a member of an empty
+    list, so the clause is `FALSE` (or `TRUE` when `negative`).
+
     Args:
         database_engine
         column: Name of the column
@@ -2632,6 +2649,11 @@ def make_in_list_sql_clause(
     Returns:
         A tuple of SQL query and the args
     """
+
+    if not iterable:
+        # Spell the empty case out rather than relying on each engine's handling of an
+        # empty list: sqlite permits `IN ()` but postgres does not.
+        return ("TRUE" if negative else "FALSE"), []
 
     if database_engine.supports_using_any_list:
         # This should hopefully be faster, but also makes postgres query

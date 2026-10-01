@@ -128,6 +128,10 @@ openssl x509 -req -in /conf/server.tls.csr \
 export SYNAPSE_TLS_CERT=/conf/server.tls.crt
 export SYNAPSE_TLS_KEY=/conf/server.tls.key
 
+# Add a directory for tests to add config overrides if they want
+mkdir --parents /conf/homeserver.d
+export _SYNAPSE_COMPLEMENT_EXTRA_CONFIG_DIR=/conf/homeserver.d
+
 # Run the script that writes the necessary config files and starts supervisord, which in turn
 # starts everything else
 exec /configure_workers_and_start.py "$@"

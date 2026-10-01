@@ -106,8 +106,7 @@ class MediaRepositoryResource(JsonResource):
         ThumbnailResource(hs, media_repo, media_repo.media_storage).register(
             http_server
         )
-        if hs.config.media.url_preview_enabled:
-            PreviewUrlResource(hs, media_repo, media_repo.media_storage).register(
-                http_server
-            )
+        PreviewUrlResource(hs, media_repo, media_repo.media_storage).register(
+            http_server
+        )
         MediaConfigResource(hs).register(http_server)

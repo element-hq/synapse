@@ -28,7 +28,6 @@ from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.room_versions import EventFormatVersions, RoomVersions
-from synapse.events import make_event_from_dict
 from synapse.logging.context import LoggingContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -42,6 +41,7 @@ from synapse.util.async_helpers import yieldable_gather_results
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 from tests.test_utils.event_injection import create_event, inject_event
 
 
@@ -377,7 +377,7 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
                 "type": f"test {idx}",
                 "room_id": self.room_id,
             }
-            event = make_event_from_dict(event_json, room_version=RoomVersions.V4)
+            event = make_test_event(event_json, room_version=RoomVersions.V4)
             event_id = event.event_id
             self.get_success(
                 self.store.db_pool.simple_upsert(
@@ -400,7 +400,7 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
                     {"event_id": event_id},
                     {
                         "room_id": self.room_id,
-                        "json": json.dumps(event_json),
+                        "json": json.dumps(event.get_dict()),
                         "internal_metadata": "{}",
                         "format_version": EventFormatVersions.ROOM_V4_PLUS,
                     },

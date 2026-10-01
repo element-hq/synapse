@@ -372,10 +372,12 @@ def listen_manhole(
     )
 
 
+# These listener helpers do not inspect the factory's protocol type. Erase that
+# invariant type parameter, quoting the annotation for older Twisted versions.
 def listen_tcp(
     bind_addresses: StrCollection,
     port: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     reactor: IReactorTCP = reactor,
     backlog: int = 50,
 ) -> list[Port]:
@@ -400,7 +402,7 @@ def listen_tcp(
 def listen_unix(
     path: str,
     mode: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     reactor: IReactorUNIX = reactor,
     backlog: int = 50,
 ) -> list[Port]:
@@ -497,7 +499,8 @@ def listen_http(
                     reactor=reactor,
                 )
                 logger.info(
-                    "Synapse now listening on TCP port %d (TLS)", listener_config.port
+                    "Synapse now listening on TCP port %d (TLS)",
+                    ports[0].getHost().port,
                 )
             else:
                 ports = listen_tcp(
@@ -507,7 +510,7 @@ def listen_http(
                     reactor=reactor,
                 )
                 logger.info(
-                    "Synapse now listening on TCP port %d", listener_config.port
+                    "Synapse now listening on TCP port %d", ports[0].getHost().port
                 )
 
         elif isinstance(listener_config, UnixListenerConfig):
@@ -540,7 +543,7 @@ def listen_http(
 def listen_ssl(
     bind_addresses: StrCollection,
     port: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     context_factory: IOpenSSLContextFactory,
     reactor: IReactorSSL = reactor,
     backlog: int = 50,
@@ -700,12 +703,10 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
     # Load the OIDC provider metadatas, if OIDC is enabled.
     if hs.config.oidc.oidc_enabled:
         oidc = hs.get_oidc_handler()
+        # Preload the provider metadata.
+        # This will spawn fire-and-forget background processes.
         # Loading the provider metadata also ensures the provider config is valid.
-        #
-        # FIXME: It feels a bit strange to validate and block on startup as one of these
-        # OIDC providers could be temporarily unavailable and cause Synapse to be unable
-        # to start.
-        await oidc.load_metadata()
+        oidc.preload_metadata()
 
     # Load the certificate from disk.
     refresh_certificate(hs)
@@ -776,6 +777,11 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
         #
         # PyPy does not (yet?) implement gc.freeze()
         if hasattr(gc, "freeze"):
+            logger.info(
+                "garbage collector: Freezing all allocated objects in the hopes that (almost) "
+                "everything currently allocated are things that will be used by the homeserver "
+                "for the rest of time. Doing so means less work each GC (hopefully)."
+            )
             gc.collect()
             gc.freeze()
 

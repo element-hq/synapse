@@ -47,7 +47,7 @@ from twisted.internet.interfaces import (
     IAddress,
     IDelayedCall,
     IHostResolution,
-    IOpenSSLContextFactory,
+    IOpenSSLClientConnectionCreator,
     IReactorCore,
     IReactorPluggableNameResolver,
     IResolutionReceiver,
@@ -55,6 +55,7 @@ from twisted.internet.interfaces import (
 )
 from twisted.internet.protocol import connectionDone
 from twisted.internet.task import Cooperator
+from twisted.protocols.tls import TLSMemoryBIOProtocol
 from twisted.python.failure import Failure
 from twisted.web._newclient import ResponseDone
 from twisted.web.client import (
@@ -87,8 +88,7 @@ from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, StrSequence
 from synapse.util.async_helpers import timeout_deferred
-from synapse.util.clock import Clock
-from synapse.util.duration import Duration
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
@@ -163,11 +163,6 @@ def _is_ip_blocked(
     return False
 
 
-# The delay used by the scheduler to schedule tasks "as soon as possible", while
-# still allowing other tasks to run between runs.
-_EPSILON = Duration(microseconds=1)
-
-
 def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCall]:
     """Makes a schedular suitable for a Cooperator using the given reactor.
 
@@ -176,7 +171,7 @@ def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCa
 
     def _scheduler(x: Callable[[], object]) -> IDelayedCall:
         return clock.call_later(
-            _EPSILON,
+            CLOCK_SCHEDULE_EPSILON,
             x,
         )
 
@@ -1320,7 +1315,7 @@ def encode_query_args(args: QueryParams | None) -> bytes:
     return query_str.encode("utf8")
 
 
-@implementer(IPolicyForHTTPS)
+@implementer(IPolicyForHTTPS, IOpenSSLClientConnectionCreator)
 class InsecureInterceptableContextFactory(ssl.ContextFactory):
     """
     Factory for PyOpenSSL SSL contexts which accepts any certificate for any domain.
@@ -1335,8 +1330,15 @@ class InsecureInterceptableContextFactory(ssl.ContextFactory):
     def getContext(self) -> SSL.Context:
         return self._context
 
-    def creatorForNetloc(self, hostname: bytes, port: int) -> IOpenSSLContextFactory:
+    def creatorForNetloc(
+        self, hostname: bytes, port: int
+    ) -> IOpenSSLClientConnectionCreator:
         return self
+
+    def clientConnectionForTLS(
+        self, tls_protocol: TLSMemoryBIOProtocol
+    ) -> SSL.Connection:
+        return SSL.Connection(self.getContext(), None)
 
 
 def is_unknown_endpoint(

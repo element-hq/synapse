@@ -54,11 +54,13 @@ from synapse.http.servlet import (
     assert_params_in_dict,
     parse_json_object_from_request,
     parse_string,
+    validate_json_object,
 )
 from synapse.http.site import SynapseRequest
 from synapse.metrics import SERVER_NAME_LABEL, threepid_send_requests
 from synapse.push.mailer import Mailer
 from synapse.types import JsonDict
+from synapse.types.rest.client import UserInteractiveAuthBody
 from synapse.util.duration import Duration
 from synapse.util.msisdn import phone_number_to_msisdn
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -86,6 +88,7 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
         self.server_name = hs.hostname
         self.identity_handler = hs.get_identity_handler()
         self.config = hs.config
+        self._registration_enabled = hs.config.registration.enable_registration
 
         if self.hs.config.email.can_verify_email:
             self.registration_mailer = Mailer(
@@ -109,6 +112,14 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
             raise SynapseError(
                 400, "Email-based registration has been disabled on this server"
             )
+
+        if not self._registration_enabled:
+            raise SynapseError(
+                403,
+                "Registration is disabled on this homeserver",
+                Codes.FORBIDDEN,
+            )
+
         body = parse_json_object_from_request(request)
 
         assert_params_in_dict(body, ["client_secret", "email", "send_attempt"])
@@ -329,7 +340,7 @@ class RegistrationSubmitTokenServlet(RestServlet):
 
 
 class UsernameAvailabilityRestServlet(RestServlet):
-    PATTERNS = client_patterns("/register/available")
+    PATTERNS = client_patterns("/register/available$")
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -392,7 +403,7 @@ class RegistrationTokenValidityRestServlet(RestServlet):
     """
 
     PATTERNS = client_patterns(
-        f"/register/{LoginType.REGISTRATION_TOKEN}/validity",
+        f"/register/{LoginType.REGISTRATION_TOKEN}/validity$",
         releases=("v1",),
     )
     CATEGORY = "Registration/login requests"
@@ -460,6 +471,9 @@ class RegisterRestServlet(RestServlet):
     @interactive_auth_handler
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_json_object_from_request(request)
+        # Only the `auth` field is validated here. The raw body is kept because
+        # `check_ui_auth` stores it when it creates a new UIA session.
+        validate_json_object(body, UserInteractiveAuthBody)
 
         client_addr = request.getClientAddress().host
 
@@ -898,7 +912,7 @@ class RegisterRestServlet(RestServlet):
 class RegisterAppServiceOnlyRestServlet(RestServlet):
     """An alternative registration API endpoint that only allows ASes to register
 
-    This replaces the regular /register endpoint if MSC3861. There are two notable
+    This replaces the regular /register endpoint if auth is delegated to MAS. There are two notable
     differences with the regular /register endpoint:
      - It only allows the `m.login.application_service` login type
      - It does not create a device or access token for the just-registered user
@@ -1059,7 +1073,7 @@ def _calculate_registration_flows(
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled:
         RegisterAppServiceOnlyRestServlet(hs).register(http_server)
         return
 

@@ -1,6 +1,7 @@
 # Shared-Secret Registration
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+**Note:** This API is disabled when Matrix Authentication Service integration is enabled.
+Use the [MAS Admin API](https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html) or [the MAS CLI](https://element-hq.github.io/matrix-authentication-service/reference/cli/manage.html#manage-register-user) instead.
 
 This API allows for the creation of users in an administrative and
 non-interactive way. This is generally used for bootstrapping a Synapse

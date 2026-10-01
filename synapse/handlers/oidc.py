@@ -49,18 +49,20 @@ from pymacaroons.exceptions import (
     MacaroonInvalidSignatureException,
 )
 
+from twisted.internet import defer
+from twisted.internet.defer import Deferred
 from twisted.web.client import readBody
 from twisted.web.http_headers import Headers
 
 from synapse.api.errors import SynapseError
 from synapse.config import ConfigError
 from synapse.config.oidc import OidcProviderClientSecretJwtKey, OidcProviderConfig
-from synapse.handlers.sso import MappingException, UserAttributes
+from synapse.handlers.sso import MappingException, SsoSetupError, UserAttributes
 from synapse.http.server import finish_request
 from synapse.http.servlet import parse_string
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
-from synapse.module_api import ModuleApi
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.types import JsonDict, UserID, map_username_to_mxid_localpart
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.clock import Clock
@@ -69,6 +71,7 @@ from synapse.util.macaroons import MacaroonGenerator, OidcSessionData
 from synapse.util.templates import _localpart_from_email_filter
 
 if TYPE_CHECKING:
+    from synapse.module_api import ModuleApi
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -123,6 +126,8 @@ class OidcHandler:
 
     def __init__(self, hs: "HomeServer"):
         self._sso_handler = hs.get_sso_handler()
+        # Needed for wrap_as_background_process
+        self.hs = hs
 
         provider_confs = hs.config.oidc.oidc_providers
         # we should not have been instantiated if there is no configured provider.
@@ -134,20 +139,47 @@ class OidcHandler:
             for p in provider_confs
         }
 
-    async def load_metadata(self) -> None:
-        """Validate the config and load the metadata from the remote endpoint.
+    @wrap_as_background_process("preload_oidc_metadata")
+    async def _preload_metadata_one_provider(
+        self, idp_id: str, p: "OidcProvider"
+    ) -> None:
+        """Attempt to preload the metadata from a single OIDC provider's remote endpoint
+        in the background.
 
-        Called at startup to ensure we have everything we need.
+        Will not raise exceptions, but will log at CRITICAL if an OIDC provider is broken.
         """
+
+        logger.info("Preloading OIDC provider %r", idp_id)
+        try:
+            await p.load_metadata()
+            if not p._uses_userinfo:
+                await p.load_jwks()
+        except Exception:
+            logger.critical(
+                # Include 'login' keyword for searchability.
+                "Error while preloading OIDC provider %r. Login may be broken!",
+                idp_id,
+                exc_info=True,
+            )
+
+    def preload_metadata(self) -> "Deferred[list[tuple[bool, None]]]":
+        """Attempt to preload the metadata from all the OIDC providers' remote endpoints
+        in the background.
+
+        Will not raise exceptions, but will log at CRITICAL if an OIDC provider is broken.
+
+        Can be **optionally** awaited in which case it will resolve when all
+        preloads are finished.
+        """
+
+        to_wait = []
         for idp_id, p in self._providers.items():
-            try:
-                await p.load_metadata()
-                if not p._uses_userinfo:
-                    await p.load_jwks()
-            except Exception as e:
-                raise Exception(
-                    "Error while initialising OIDC provider %r" % (idp_id,)
-                ) from e
+            to_wait.append(self._preload_metadata_one_provider(idp_id, p))
+
+        return defer.DeferredList(
+            to_wait,
+            consumeErrors=True,
+        )
 
     async def handle_oidc_callback(self, request: SynapseRequest) -> None:
         """Handle an incoming request to /_synapse/client/oidc/callback
@@ -359,6 +391,18 @@ class OidcError(Exception):
         return self.error
 
 
+class OidcDiscoveryError(SsoSetupError):
+    """
+    Used to catch and mark errors when performing OIDC discovery.
+    """
+
+
+class OidcMetadataError(SsoSetupError):
+    """
+    Used to catch and mark errors in the OIDC metadata configuration.
+    """
+
+
 class OidcProvider:
     """Wraps the config for a single OIDC IdentityProvider
 
@@ -372,6 +416,9 @@ class OidcProvider:
         macaroon_generator: MacaroonGenerator,
         provider: OidcProviderConfig,
     ):
+        # Needed here to break import loops
+        from synapse.module_api import ModuleApi
+
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
 
@@ -644,9 +691,15 @@ class OidcProvider:
 
         # load any data from the discovery endpoint, if enabled
         if self._config.discover:
-            url = get_well_known_url(self._config.issuer, external=True)
-            metadata_response = await self._http_client.get_json(url)
-            metadata.update(metadata_response)
+            try:
+                url = get_well_known_url(self._config.issuer, external=True)
+                metadata_response = await self._http_client.get_json(url)
+                metadata.update(metadata_response)
+            except Exception as e:
+                # This `Exception` bound is a bit broad, but at least expecting
+                # `twisted.internet.error.ConnectionRefusedError`
+                # and likely many other network or JSON errors.
+                raise OidcDiscoveryError() from e
 
         # override any discovered data with any settings in our config
         if self._config.authorization_endpoint:
@@ -671,7 +724,12 @@ class OidcProvider:
                 self._config.id_token_signing_alg_values_supported
             )
 
-        self._validate_metadata(metadata)
+        try:
+            self._validate_metadata(metadata)
+        except ValueError as e:
+            # Wrap this error so that we can special-case it higher up
+            # Pass through `str(e)` as the message so tests can match it.
+            raise OidcMetadataError(str(e)) from e
 
         return metadata
 
@@ -1685,7 +1743,7 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
     This is the default mapping provider.
     """
 
-    def __init__(self, config: JinjaOidcMappingConfig, module_api: ModuleApi):
+    def __init__(self, config: JinjaOidcMappingConfig, module_api: "ModuleApi"):
         self._config = config
 
     @staticmethod

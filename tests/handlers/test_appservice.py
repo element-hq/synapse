@@ -29,6 +29,7 @@ from typing import (
 )
 from unittest.mock import AsyncMock, Mock
 
+from immutabledict import immutabledict
 from parameterized import parameterized
 
 from twisted.internet import defer
@@ -36,7 +37,7 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.storage
-from synapse.api.constants import EduTypes, EventTypes
+from synapse.api.constants import EduTypes, EventTypes, ReceiptTypes
 from synapse.appservice import (
     ApplicationService,
     TransactionOneTimeKeysCount,
@@ -77,6 +78,7 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         self.reactor, self.clock = get_clock()
 
         hs = Mock()
+        hs.hostname = "test_server"
 
         def test_run_as_background_process(
             desc: "LiteralString",
@@ -340,7 +342,7 @@ class AppServiceHandlerTestCase(unittest.TestCase):
 
         event = Mock(event_id="event_1")
         self.event_source.sources.receipt.get_new_events_as = AsyncMock(
-            return_value=([event], None)
+            return_value=([event], MultiWriterStreamToken(stream=580))
         )
 
         self.handler.notify_interested_services_ephemeral(
@@ -370,7 +372,7 @@ class AppServiceHandlerTestCase(unittest.TestCase):
 
         event = Mock(event_id="event_1")
         self.event_source.sources.receipt.get_new_events_as = AsyncMock(
-            return_value=([event], None)
+            return_value=([event], MultiWriterStreamToken(stream=580))
         )
 
         self.handler.notify_interested_services_ephemeral(
@@ -568,8 +570,8 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
             # notify us because the interesting user is joined to the room where the
             # message was sent.
             self.assertEqual(service, interested_appservice)
-            self.assertEqual(events[0]["type"], "m.room.message")
-            self.assertEqual(events[0]["sender"], alice)
+            self.assertEqual(events[0].type, "m.room.message")
+            self.assertEqual(events[0].sender, alice)
         else:
             self.send_mock.assert_not_called()
 
@@ -628,8 +630,8 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         # Events sent from an interesting local user should also be picked up as
         # interesting to the appservice.
         self.assertEqual(service, interested_appservice)
-        self.assertEqual(events[0]["type"], "m.room.message")
-        self.assertEqual(events[0]["sender"], alice)
+        self.assertEqual(events[0].type, "m.room.message")
+        self.assertEqual(events[0].sender, alice)
 
     def test_sending_read_receipt_batches_to_application_services(self) -> None:
         """Tests that a large batch of read receipts are sent correctly to
@@ -702,6 +704,375 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         event_id = list(latest_read_receipt["content"].keys())[0]
         self.assertEqual(
             latest_read_receipt["content"][event_id]["m.read"], {self.local_user: {}}
+        )
+
+    def test_application_services_receive_private_read_receipts_of_namespaced_users_only(
+        self,
+    ) -> None:
+        """Tests that private read receipts are only sent to an application
+        service for users within the appservice's namespaces, while public read
+        receipts are sent regardless of the sending user.
+
+        See https://spec.matrix.org/v1.19/application-service-api/#pushing-ephemeral-data
+        """
+        # Register an application service that's interested in a certain user
+        # and room prefix
+        interested_appservice = self._register_application_service(
+            namespaces={
+                ApplicationService.NS_USERS: [
+                    {
+                        "regex": "@exclusive_as_user:.+",
+                        "exclusive": True,
+                    }
+                ],
+                ApplicationService.NS_ROOMS: [
+                    {
+                        "regex": "!fakeroom_.*",
+                        "exclusive": True,
+                    }
+                ],
+            },
+        )
+
+        room_id = "!fakeroom_private:test"
+        event_id = "$eventid"
+
+        # A public read receipt from a user outside the appservice's namespaces.
+        self.get_success(
+            self.hs.get_datastores().main.insert_receipt(
+                room_id=room_id,
+                receipt_type=ReceiptTypes.READ,
+                user_id=self.local_user,
+                event_ids=[event_id],
+                thread_id=None,
+                data={},
+            )
+        )
+        # A private read receipt from a user within the appservice's namespaces.
+        self.get_success(
+            self.hs.get_datastores().main.insert_receipt(
+                room_id=room_id,
+                receipt_type=ReceiptTypes.READ_PRIVATE,
+                user_id=self.exclusive_as_user,
+                event_ids=[event_id],
+                thread_id=None,
+                data={},
+            )
+        )
+        # A private read receipt on the same event from a user outside the
+        # appservice's namespaces.
+        self.get_success(
+            self.hs.get_datastores().main.insert_receipt(
+                room_id=room_id,
+                receipt_type=ReceiptTypes.READ_PRIVATE,
+                user_id=self.local_user,
+                event_ids=[event_id],
+                thread_id=None,
+                data={},
+            )
+        )
+
+        # Notify the appservice handler about the receipts in one go.
+        # note: stream tokens start at 2, so the three receipts above have
+        # stream IDs 2, 3 and 4.
+        self.get_success(
+            self.hs.get_application_service_handler()._notify_interested_services_ephemeral(
+                services=[interested_appservice],
+                stream_key=StreamKeyType.RECEIPT,
+                new_token=MultiWriterStreamToken(stream=4),
+                users=[self.local_user, self.exclusive_as_user],
+            )
+        )
+
+        self.send_mock.assert_called_once()
+        ephemeral_events = self.send_mock.call_args[0][2]
+
+        # All receipts for the room are batched into a single m.receipt event.
+        self.assertEqual(len(ephemeral_events), 1)
+        receipt_event = ephemeral_events[0]
+        self.assertEqual(receipt_event["type"], EduTypes.RECEIPT)
+        self.assertEqual(receipt_event["room_id"], room_id)
+
+        # The public read receipt and the namespaced user's private read receipt
+        # should have been sent, but not the other user's private read receipt.
+        self.assertEqual(
+            receipt_event["content"],
+            {
+                event_id: {
+                    ReceiptTypes.READ: {self.local_user: {}},
+                    ReceiptTypes.READ_PRIVATE: {self.exclusive_as_user: {}},
+                },
+            },
+        )
+
+    def test_sending_read_receipt_batches_with_single_token_to_application_services(
+        self,
+    ) -> None:
+        """Tests that a large batch of read receipts covered by a single stream
+        token notification (e.g. a burst arriving over federation, or an
+        application service catching up after downtime) is sent in full, rather
+        than being truncated by the per-fetch receipt limit.
+        """
+        interested_appservice = self._register_application_service(
+            namespaces={
+                ApplicationService.NS_USERS: [
+                    {
+                        "regex": "@exclusive_as_user:.+",
+                        "exclusive": True,
+                    }
+                ],
+                ApplicationService.NS_ROOMS: [
+                    {
+                        "regex": "!fakeroom_.*",
+                        "exclusive": True,
+                    }
+                ],
+            },
+        )
+
+        # Deliver a first receipt to establish a stored read receipt stream
+        # position for this appservice, as an appservice without one is
+        # fast-forwarded to the most recent receipts instead of backfilling.
+        # note: stream tokens start at 2
+        self.get_success(
+            self.hs.get_datastores().main.insert_receipt(
+                room_id="!fakeroom_bootstrap:test",
+                receipt_type="m.read",
+                user_id=self.local_user,
+                event_ids=["$eventid_bootstrap"],
+                thread_id=None,
+                data={},
+            )
+        )
+        self.get_success(
+            self.hs.get_application_service_handler()._notify_interested_services_ephemeral(
+                services=[interested_appservice],
+                stream_key=StreamKeyType.RECEIPT,
+                new_token=MultiWriterStreamToken(stream=2),
+                users=[self.exclusive_as_user],
+            )
+        )
+        self.send_mock.reset_mock()
+
+        # Insert a large burst of read receipts (300 total, past the per-fetch
+        # limit of 100), occupying stream IDs 3 to 302.
+        for i in range(300):
+            self.get_success(
+                self.hs.get_datastores().main.insert_receipt(
+                    # We have to use unique room ID + user ID combinations here, as the db query
+                    # is an upsert.
+                    room_id=f"!fakeroom_{i}:test",
+                    receipt_type="m.read",
+                    user_id=self.local_user,
+                    event_ids=[f"$eventid_{i}"],
+                    thread_id=None,
+                    data={},
+                )
+            )
+
+        # Now notify the appservice handler with a single token covering all 300
+        # read receipts at once.
+        self.get_success(
+            self.hs.get_application_service_handler()._notify_interested_services_ephemeral(
+                services=[interested_appservice],
+                stream_key=StreamKeyType.RECEIPT,
+                new_token=MultiWriterStreamToken(stream=302),
+                users=[self.exclusive_as_user],
+            )
+        )
+
+        # Using our txn send mock, we can see what the AS received. After iterating over every
+        # transaction, we'd like to see all 300 read receipts accounted for.
+        # No more, no less.
+        all_ephemeral_events = []
+        for call in self.send_mock.call_args_list:
+            ephemeral_events = call[0][2]
+            all_ephemeral_events += ephemeral_events
+
+        self.assertEqual(len(all_ephemeral_events), 300)
+
+        # The stored stream position should have caught up with the notified token.
+        self.assertEqual(
+            self.get_success(
+                self.hs.get_datastores().main.get_type_stream_id_for_appservice(
+                    interested_appservice, "read_receipt"
+                )
+            ),
+            302,
+        )
+
+    def test_read_receipts_from_lagging_writer_are_not_skipped(self) -> None:
+        """
+        With several receipt writers, a worker can be notified with a token in
+        which one writer is ahead of the others, e.g. because its replication
+        rows arrived first. The application service handler must not treat the
+        leading writer's position as the point it has caught up to, or the
+        lagging writer's receipts would be skipped for good once they arrive.
+
+        Scenario: writers `rw1` and `rw2` alternate stream IDs 1001 to 1200.
+        The worker has heard from `rw2` up to 1200 but from `rw1` only up to
+        1000, so the receipt stream watermark is still 1000.
+        """
+        interested_appservice = self._register_application_service(
+            namespaces={
+                ApplicationService.NS_ROOMS: [
+                    {
+                        "regex": "!fakeroom_.*",
+                        "exclusive": True,
+                    }
+                ],
+            },
+        )
+
+        # The application service has already been sent everything up to 1000.
+        self.get_success(
+            self.hs.get_datastores().main.set_appservice_stream_type_pos(
+                interested_appservice, "read_receipt", 1000
+            )
+        )
+
+        # Insert the receipts as the two writers would have persisted them, each
+        # in its own room so they can be told apart in what the appservice gets.
+        self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_insert_many(
+                desc="test_read_receipts_from_lagging_writer_are_not_skipped",
+                table="receipts_linearized",
+                keys=(
+                    "stream_id",
+                    "instance_name",
+                    "room_id",
+                    "receipt_type",
+                    "user_id",
+                    "event_id",
+                    "data",
+                ),
+                values=[
+                    (
+                        stream_id,
+                        "rw1" if stream_id % 2 else "rw2",
+                        f"!fakeroom_{stream_id}:test",
+                        "m.read",
+                        self.local_user,
+                        f"$eventid_{stream_id}",
+                        "{}",
+                    )
+                    for stream_id in range(1001, 1201)
+                ],
+            )
+        )
+
+        def notify(new_token: MultiWriterStreamToken) -> None:
+            self.get_success(
+                self.hs.get_application_service_handler()._notify_interested_services_ephemeral(
+                    services=[interested_appservice],
+                    stream_key=StreamKeyType.RECEIPT,
+                    new_token=new_token,
+                    users=[],
+                )
+            )
+
+        def received_stream_ids() -> list[int]:
+            return [
+                int(event["room_id"].removeprefix("!fakeroom_").removesuffix(":test"))
+                for call in self.send_mock.call_args_list
+                for event in call[0][2]
+            ]
+
+        def stored_position() -> int:
+            return self.get_success(
+                self.hs.get_datastores().main.get_type_stream_id_for_appservice(
+                    interested_appservice, "read_receipt"
+                )
+            )
+
+        # `rw2`'s rows have replicated to this worker, `rw1`'s have not.
+        notify(
+            MultiWriterStreamToken(
+                stream=1000, instance_map=immutabledict({"rw2": 1200})
+            )
+        )
+
+        # Nothing can be sent yet without risking `rw1`'s receipts being skipped,
+        # and the stored position must not move past them.
+        self.assertEqual(received_stream_ids(), [])
+        self.assertEqual(stored_position(), 1000)
+
+        # `rw1`'s rows arrive and the watermark catches up.
+        notify(MultiWriterStreamToken(stream=1200))
+
+        # Every receipt from both writers is delivered exactly once, in order.
+        self.assertEqual(received_stream_ids(), list(range(1001, 1201)))
+        self.assertEqual(stored_position(), 1200)
+
+    def test_application_services_are_fast_forwarded_on_first_read_receipt_delivery(
+        self,
+    ) -> None:
+        """Tests that an application service without a stored read receipt stream
+        position (i.e. one which has never been sent receipts before) is sent only
+        the most recent receipts, rather than the entire receipt history.
+        """
+        interested_appservice = self._register_application_service(
+            namespaces={
+                ApplicationService.NS_USERS: [
+                    {
+                        "regex": "@exclusive_as_user:.+",
+                        "exclusive": True,
+                    }
+                ],
+                ApplicationService.NS_ROOMS: [
+                    {
+                        "regex": "!fakeroom_.*",
+                        "exclusive": True,
+                    }
+                ],
+            },
+        )
+
+        # Insert 300 read receipts, occupying stream IDs 2 to 301.
+        for i in range(300):
+            self.get_success(
+                self.hs.get_datastores().main.insert_receipt(
+                    room_id=f"!fakeroom_{i}:test",
+                    receipt_type="m.read",
+                    user_id=self.local_user,
+                    event_ids=[f"$eventid_{i}"],
+                    thread_id=None,
+                    data={},
+                )
+            )
+
+        # Notify the appservice handler, which has no stored stream position for
+        # this appservice yet.
+        self.get_success(
+            self.hs.get_application_service_handler()._notify_interested_services_ephemeral(
+                services=[interested_appservice],
+                stream_key=StreamKeyType.RECEIPT,
+                new_token=MultiWriterStreamToken(stream=301),
+                users=[self.exclusive_as_user],
+            )
+        )
+
+        all_ephemeral_events = []
+        for call in self.send_mock.call_args_list:
+            ephemeral_events = call[0][2]
+            all_ephemeral_events += ephemeral_events
+
+        # Only the most recent 100 receipts (the per-fetch limit) should have been
+        # sent, not the whole history.
+        self.assertEqual(len(all_ephemeral_events), 100)
+        received_rooms = {event["room_id"] for event in all_ephemeral_events}
+        self.assertEqual(
+            received_rooms, {f"!fakeroom_{i}:test" for i in range(200, 300)}
+        )
+
+        # The stored stream position should nonetheless be at the notified token.
+        self.assertEqual(
+            self.get_success(
+                self.hs.get_datastores().main.get_type_stream_id_for_appservice(
+                    interested_appservice, "read_receipt"
+                )
+            ),
+            301,
         )
 
     @unittest.override_config(
@@ -856,7 +1227,9 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
 
         # Seed the device_inbox table with our fake messages
         self.get_success(
-            self.hs.get_datastores().main.add_messages_to_device_inbox(messages, {})
+            self.hs.get_datastores().main.add_local_messages_from_client_to_device_inbox(
+                messages
+            )
         )
 
         # Now have local_user send a final to-device message to exclusive_as_user. All unsent

@@ -38,6 +38,7 @@ from synapse.api.constants import MAX_DEPTH
 from synapse.api.errors import StoreError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
 from synapse.events import EventBase, make_event_from_dict
+from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.logging.opentracing import tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -1194,39 +1195,267 @@ class EventFederationWorkerStore(
         # Return all events where not all sets can reach them.
         return {eid for eid, n in event_to_missing_sets.items() if n}
 
+    async def get_state_dag(
+        self, room_id: str, forward_extrems: set[str]
+    ) -> dict[str, MSC4242Event]:
+        """Get the current state DAG for the given room.
+
+        This function is called when calculating a /send_join response.
+        This does not check that the room is an state DAG room, so check this
+        before calling this function!
+
+        This functions guarantees that the returned state DAG is connected.
+
+        Args:
+            room_id: The room to get the state dag for
+            forward_extrems: latest event IDs in the room. The state DAG is all events reachable from these events.
+        Returns:
+            A map of event_id => event
+        """
+
+        def _get_state_events_txn(txn: LoggingTransaction, room_id: str) -> list[str]:
+            sql = """
+                SELECT event_id FROM msc4242_state_dag_edges WHERE room_id = ?
+            """
+            txn.execute(sql, (room_id,))
+            event_ids = [ev_id for (ev_id,) in txn]
+            return event_ids
+
+        # Pull out all state events for this room using the events_by_room_and_type index.
+        event_ids = await self.db_pool.runInteraction(
+            "_get_state_events_txn",
+            _get_state_events_txn,
+            room_id,
+        )
+        event_map = await self.get_events(event_ids)
+        # Filter the returned state events to only include ones on the paths back from the forward
+        # extremities.
+        result: dict[str, MSC4242Event] = {}
+        next_ids = forward_extrems
+        seen: set[str] = set()
+        while len(next_ids) > 0:
+            # Pull the event and add the prev_state_events.
+            # We must have the event.
+            event_id = next_ids.pop()
+            if event_id in seen:
+                continue
+            seen.add(event_id)
+            ev = event_map[event_id]
+            # `prev_state_events` only exists on MSC4242 event formats, and this is only
+            # called for state DAG rooms.
+            assert supports_msc4242_state_dag(ev)
+            result[event_id] = ev
+            for prev_state_event_id in ev.prev_state_events:
+                next_ids.add(prev_state_event_id)
+
+        assert len(result) > 0  # we always return the forward extremities
+        # Assert that the create event was returned. Pick the first event (any will do) to verify
+        # that this room version supports room IDs as hashes.
+        first_event: MSC4242Event = next(iter(result.values()))
+        if first_event.room_version.msc4291_room_ids_as_hashes:
+            create_event_id = f"${room_id[1:]}"
+            assert create_event_id in result
+
+        return result
+
+    async def get_missing_events_state_dag(
+        self,
+        *,
+        room_id: str,
+        earliest_event_ids: list[str],
+        latest_event_ids: list[str],
+        limit: int,
+    ) -> list[EventBase]:
+        """Get parts of the state DAG in response to a /get_missing_events query.
+
+        Args:
+            room_id: The state DAG to look at
+            earliest_event_ids: Which events the caller has seen. These events will not be returned.
+            latest_event_ids: Which events to start walking back from via prev_state_events.
+            limit: The max number of events to return.
+        Returns:
+            A list of events, deterministically ordered according to MSC4242.
+        """
+        ids = await self.db_pool.runInteraction(
+            "get_missing_events_state_dag",
+            self._get_missing_events_state_dag_txn,
+            room_id,
+            earliest_event_ids,
+            latest_event_ids,
+            limit,
+        )
+        return await self.get_events_as_list(ids)
+
+    def _get_missing_events_state_dag_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        earliest_event_ids: list[str],
+        latest_event_ids: list[str],
+        limit: int,
+    ) -> list[str]:
+        """Walk the state DAG backward from `latest_event_ids`, stopping at
+        `limit` results or the beginning of the DAG, whichever comes first.
+
+        Earliest events are treated as already-visited: they are not emitted,
+        and their predecessors are not traversed via them.
+
+        Results are deterministic and ordered by breadth-first search (BFS), with lexicographic
+        tie-breaking among siblings at the same hops away.
+
+        Executes as a single recursive CTE in both SQLite and Postgres.
+        """
+        earliest_set = set(earliest_event_ids)
+        # Sort the seeds lexicographically by event ID: seeds are all 0 hops away from
+        # themselves, so the event ID is the only tie-breaker available for them and we need
+        # the walk to start from a deterministic order.
+        # See https://github.com/matrix-org/matrix-spec-proposals/blob/kegan/placeholder-1/proposals/4242-state-dags.md#get_missing_events
+        seed_ids = sorted(set(latest_event_ids) - earliest_set)
+        if not seed_ids or limit <= 0:
+            return []
+
+        seed_clause, seed_args = make_in_list_sql_clause(
+            self.database_engine, "e.event_id", seed_ids
+        )
+
+        # With no earliest events this is a no-op clause that is TRUE for every row.
+        earliest_clause, earliest_args = make_in_list_sql_clause(
+            self.database_engine,
+            "e.prev_state_event_id",
+            earliest_event_ids,
+            negative=True,
+        )
+
+        query = f"""
+            WITH RECURSIVE walk(event_id, hops) AS (
+                SELECT
+                    e.prev_state_event_id,
+                    1
+                FROM msc4242_state_dag_edges e
+                WHERE e.room_id = ?
+                AND {seed_clause}
+                -- The create event has no edges, so it is stored as a single row with a NULL
+                -- `prev_state_event_id`. Skipping NULLs therefore only skips that sentinel
+                -- row: the create event is still returned by the walk, because it appears as
+                -- the `prev_state_event_id` of the events that reference it.
+                AND e.prev_state_event_id IS NOT NULL
+                AND {earliest_clause}
+
+                -- `UNION` rather than `UNION ALL`: the same (event_id, hops) pair can be
+                -- reached via multiple children, and de-duplicating here stops us expanding
+                -- the same row over and over.
+                UNION
+
+                SELECT
+                    e.prev_state_event_id,
+                    w.hops + 1
+                FROM walk w
+                JOIN msc4242_state_dag_edges e
+                ON e.room_id = ?
+                AND e.event_id = w.event_id
+                WHERE e.prev_state_event_id IS NOT NULL
+                AND {earliest_clause}
+                -- Bound the recursion by `limit`: every extra hop adds at least one event to
+                -- the result, so events more than `limit` hops away can never make it into a
+                -- `limit`-sized response. This is also what makes the query safe against a
+                -- cyclic edge set: a cycle cannot be created via the normal write path, but
+                -- if one did exist the walk would still stop after `limit` hops rather than
+                -- spinning forever.
+                AND w.hops < ?
+            )
+            -- An event can be reached by several paths with different hop counts. MSC4242
+            -- orders by distance from the seed events, which is the *shortest* such path, so
+            -- collapse each event to its minimum hop count before sorting. `hops` is only
+            -- selected because we need it as the primary sort key.
+            SELECT event_id, MIN(hops) AS hops
+            FROM walk
+            GROUP BY event_id
+            ORDER BY hops, event_id
+            LIMIT ?
+        """
+
+        params: list = [room_id]
+        params.extend(seed_args)
+        params.extend(earliest_args)
+        params.append(room_id)
+        params.extend(earliest_args)
+        params.append(limit)
+        params.append(limit)
+
+        txn.execute(query, params)
+        return [row[0] for row in txn]
+
     @trace
     @tag_args
     async def get_backfill_points_in_room(
         self,
         room_id: str,
-        current_depth: int,
+        nearby_depth: int,
         limit: int,
     ) -> list[tuple[str, int]]:
         """
         Get the backward extremities to backfill from in the room along with the
         approximate depth.
 
-        Only returns events that are at a depth lower than or
-        equal to the `current_depth`. Sorted by depth, highest to lowest (descending)
-        so the closest events to the `current_depth` are first in the list.
+        Only returns events that are at a depth lower than or equal to the `nearby_depth`.
+        Sorted by depth, highest to lowest (descending) so the closest events to the
+        `nearby_depth` are first in the list.
 
-        We ignore extremities that are newer than the user's current scroll position
-        (ie, those with depth greater than `current_depth`) as:
-            1. we don't really care about getting events that have happened
-               after our current position; and
-            2. by the nature of paginating and scrolling back, we have likely
-               previously tried and failed to backfill from that extremity, so
-               to avoid getting "stuck" requesting the same backfill repeatedly
-               we drop those extremities.
+        ### Why `nearby_depth`?
+
+        We find backfill points from the backward extremities in the DAG. Backward
+        extremities are the oldest events we know of in the room but we only know of
+        them because some other event referenced them by prev_event and aren't persisted
+        in our database yet (meaning we don't know their depth specifically). So we can
+        only do approximate depth comparisons (use the depth of the known events they're
+        connected to). And we don't know if those backward extremities point to a long
+        chain/fork of history that could stretch back far enough to be visible.
+
+        This means a naive homeserver implementation that looks for backward extremities <=
+        depth of the `/messages?dir=b&from=xxx` token may overlook a backfill point that could
+        reveal more history in the window the user is currently paginating in.
+
+        We consider "nearby" as anything within range of the number of events you plan
+        to backfill from the given backfill point. This is a good heuristic as since we
+        plan to backfill N events, the chain of events from a backfill point could
+        extend back into the visible window.
+
+        Example:
+
+         - Your pagination token represents a scroll position at a depth of `100`.
+         - We have a backfill point at an approximate depth of `125`
+         - You plan to backfill `50` events from that backfill point.
+
+        When we pad the token `depth` with the number of messages we plan to backfill,
+        `100` + `50` = `150`, we find the backfill point at `125` (because <= `150`, our
+        `nearby_depth`), backfill `50` events to a depth of `75` in the timeline
+        (exposing new events that we can return `100` -> `75`).
+
+        When we don't pad our token `depth`, `100` is lower than any of the backfill
+        points so we don't pick any and miss out on backfilling any events. Without
+        something like MSC3871 to indicate gaps in the timeline, clients will most
+        likely never know they are missing any events and never try to paginate again.
+
+        Generally though, we ignore extremities that are newer than the user's current
+        scroll position (ie, those with depth greater than `nearby_depth`) as:
+            1. we don't really care about getting events that have happened after our
+               current position; and
+            2. by the nature of paginating and scrolling back, we have likely previously
+               tried and failed to backfill from that extremity, so to avoid getting
+               "stuck" requesting the same backfill repeatedly we drop those
+               extremities. Although we also have `event_failed_pull_attempts` nowadays
+               to backoff as well.
 
         Args:
             room_id: Room where we want to find the oldest events
-            current_depth: The depth at the user's current scrollback position
+            nearby_depth: Typically, this is depth at the user's current scrollback
+                position + the number of events you plan to backfill from these backfill
+                points.
             limit: The max number of backfill points to return
 
         Returns:
             List of (event_id, depth) tuples. Sorted by depth, highest to lowest
-            (descending) so the closest events to the `current_depth` are first
+            (descending) so the closest events to the `nearby_depth` are first
             in the list.
         """
 
@@ -1234,12 +1463,12 @@ class EventFederationWorkerStore(
             txn: LoggingTransaction, room_id: str
         ) -> list[tuple[str, int]]:
             # Assemble a tuple lookup of event_id -> depth for the oldest events
-            # we know of in the room. Backwards extremeties are the oldest
+            # we know of in the room. Backwards extremities are the oldest
             # events we know of in the room but we only know of them because
             # some other event referenced them by prev_event and aren't
             # persisted in our database yet (meaning we don't know their depth
             # specifically). So we need to look for the approximate depth from
-            # the events connected to the current backwards extremeties.
+            # the events connected to the current backwards extremities.
 
             if isinstance(self.database_engine, PostgresEngine):
                 least_function = "LEAST"
@@ -1259,7 +1488,7 @@ class EventFederationWorkerStore(
                 ON edge.event_id = event.event_id
                 /**
                  * We find the "oldest" events in the room by looking for
-                 * events connected to backwards extremeties (oldest events
+                 * events connected to backwards extremities (oldest events
                  * in the room that we know of so far).
                  */
                 INNER JOIN event_backward_extremities AS backward_extrem
@@ -1285,16 +1514,19 @@ class EventFederationWorkerStore(
                     AND edge.is_state is FALSE
                     /**
                      * We only want backwards extremities that are older than or at
-                     * the same position of the given `current_depth` (where older
+                     * the same position of the given `nearby_depth` (where older
                      * means less than the given depth) because we're looking backwards
-                     * from the `current_depth` when backfilling.
+                     * from the `nearby_depth` when backfilling.
                      *
-                     *                         current_depth (ignore events that come after this, ignore 2-4)
+                     * Keep in mind that `event.depth` is an approximate depth of the
+                     * backward extremity itself.
+                     *
+                     *                         nearby_depth (ignore events that come after this, ignore 2-4)
                      *                         |
                      *                         ▼
                      * <oldest-in-time> [0]<--[1]<--[2]<--[3]<--[4] <newest-in-time>
                      */
-                    AND event.depth <= ? /* current_depth */
+                    AND event.depth <= ? /* nearby_depth */
                     /**
                      * Exponential back-off (up to the upper bound) so we don't retry the
                      * same backfill point over and over. ex. 2hr, 4hr, 8hr, 16hr, etc.
@@ -1312,7 +1544,7 @@ class EventFederationWorkerStore(
                         )
                     )
                 /**
-                 * Sort from highest (closest to the `current_depth`) to the lowest depth
+                 * Sort from highest (closest to the `nearby_depth`) to the lowest depth
                  * because the closest are most relevant to backfill from first.
                  * Then tie-break on alphabetical order of the event_ids so we get a
                  * consistent ordering which is nice when asserting things in tests.
@@ -1325,7 +1557,7 @@ class EventFederationWorkerStore(
                 sql,
                 (
                     room_id,
-                    current_depth,
+                    nearby_depth,
                     self.clock.time_msec(),
                     BACKFILL_EVENT_EXPONENTIAL_BACKOFF_MAXIMUM_DOUBLING_STEPS,
                     BACKFILL_EVENT_EXPONENTIAL_BACKOFF_STEP_MILLISECONDS,
@@ -1490,6 +1722,15 @@ class EventFederationWorkerStore(
             keyvalues={"room_id": room_id},
             retcol="event_id",
             desc="get_latest_event_ids_in_room",
+        )
+        return frozenset(event_ids)
+
+    async def get_state_dag_extremities(self, room_id: str) -> frozenset[str]:
+        event_ids = await self.db_pool.simple_select_onecol(
+            table="msc4242_state_dag_forward_extremities",
+            keyvalues={"room_id": room_id},
+            retcol="event_id",
+            desc="get_state_dag_extremities",
         )
         return frozenset(event_ids)
 
@@ -1933,6 +2174,13 @@ class EventFederationWorkerStore(
         latest_events: list[str],
         limit: int,
     ) -> list[EventBase]:
+        """
+        Walk backwards in the DAG of events,
+        starting at `latest_events` and stopping at `earliest_events` (or when having reached `limit` events).
+
+        This function will check that `latest_events` and `earliest_events` are in the correct
+        room (`room_id`), appropriately ignoring any that aren't.
+        """
         ids = await self.db_pool.runInteraction(
             "get_missing_events",
             self._get_missing_events,
@@ -1951,20 +2199,49 @@ class EventFederationWorkerStore(
         latest_events: list[str],
         limit: int,
     ) -> list[str]:
+        # It's OK that this has not been filtered by correct-room,
+        # because we will only compare based on event ID from the events
+        # we happen to run into.
         seen_events = set(earliest_events)
-        front = set(latest_events) - seen_events
-        event_results: list[str] = []
 
-        query = (
-            "SELECT prev_event_id FROM event_edges "
-            "WHERE event_id = ? AND NOT is_state "
-            "LIMIT ?"
+        # Pre-filter the `latest_events` to only include those
+        # that are in this room (and that we know about)
+        # This makes events in the wrong room get treated the same as unknown events.
+        events_clause, events_args = make_in_list_sql_clause(
+            self.database_engine,
+            "event_id",
+            # Don't waste time looking at events that the requester told us
+            # they already know about.
+            # (They probably shouldn't send this in the first place)
+            set(latest_events) - seen_events,
         )
+        txn.execute(
+            f"""
+            SELECT event_id
+            FROM events
+            WHERE {events_clause} AND room_id = ?
+            """,
+            (*events_args, room_id),
+        )
+        # Start walking back from the legitimate and known `latest_events`
+        front = {latest_event_id for (latest_event_id,) in txn}
+
+        event_results: list[str] = []
 
         while front and len(event_results) < limit:
             new_front = set()
             for event_id in front:
-                txn.execute(query, (event_id, limit - len(event_results)))
+                txn.execute(
+                    """
+                    SELECT ee.prev_event_id FROM event_edges AS ee
+                    JOIN events ON events.event_id = ee.prev_event_id
+                    WHERE ee.event_id = ?
+                    AND events.room_id = ?
+                    AND NOT ee.is_state
+                    LIMIT ?
+                    """,
+                    (event_id, room_id, limit - len(event_results)),
+                )
                 new_results = {t[0] for t in txn} - seen_events
 
                 new_front |= new_results

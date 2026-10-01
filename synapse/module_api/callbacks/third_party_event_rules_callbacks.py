@@ -283,11 +283,6 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         events = await self.store.get_events(prev_state_ids.values())
         state_events = {(ev.type, ev.state_key): ev for ev in events.values()}
 
-        # Ensure that the event is frozen, to make sure that the module is not tempted
-        # to try to modify it. Any attempt to modify it at this point will invalidate
-        # the hashes and signatures.
-        event.freeze()
-
         for callback in self._check_event_allowed_callbacks:
             try:
                 res, replacement_data = await delay_cancellation(

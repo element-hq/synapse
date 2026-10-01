@@ -23,6 +23,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from synapse.handlers.room_member import NoKnownServersError, RoomMemberHandler
+from synapse.logging.opentracing import trace
 from synapse.replication.http.membership import (
     ReplicationRemoteJoinRestServlet as ReplRemoteJoin,
     ReplicationRemoteKnockRestServlet as ReplRemoteKnock,
@@ -48,6 +49,7 @@ class RoomMemberWorkerHandler(RoomMemberHandler):
         self._remote_rescind_client = ReplRescindKnock.make_client(hs)
         self._notify_change_client = ReplJoinedLeft.make_client(hs)
 
+    @trace
     async def _remote_join(
         self,
         requester: Requester,
@@ -70,6 +72,7 @@ class RoomMemberWorkerHandler(RoomMemberHandler):
 
         return ret["event_id"], ret["stream_id"]
 
+    @trace
     async def remote_reject_invite(
         self,
         invite_event_id: str,
@@ -90,6 +93,7 @@ class RoomMemberWorkerHandler(RoomMemberHandler):
         )
         return ret["event_id"], ret["stream_id"]
 
+    @trace
     async def remote_rescind_knock(
         self,
         knock_event_id: str,
@@ -118,6 +122,7 @@ class RoomMemberWorkerHandler(RoomMemberHandler):
         )
         return ret["event_id"], ret["stream_id"]
 
+    @trace
     async def remote_knock(
         self,
         requester: Requester,

@@ -84,7 +84,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
         )
         self.exclusive_user_regex = _make_exclusive_regex(self.services_cache)
         # When OAuth is enabled, force all appservices to enable MSC4190 too.
-        if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+        if hs.config.mas.enabled:
             for appservice in self.services_cache:
                 appservice.msc4190_device_management = True
 

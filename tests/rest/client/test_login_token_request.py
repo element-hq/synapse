@@ -19,8 +19,11 @@
 #
 #
 
+from http import HTTPStatus
+
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import login, login_token_request, versions
 from synapse.server import HomeServer
@@ -48,6 +51,16 @@ class LoginTokenRequestServletTestCase(unittest.HomeserverTestCase):
         self.hs.config.captcha.enable_registration_captcha = False
 
         return self.hs
+
+    def tearDown(self) -> None:
+        # MemoryReactor doesn't trigger the shutdown phases, and we want the
+        # Tokio thread pool to be stopped
+        # XXX: This logic should probably get moved somewhere else
+        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
+        for phase in ["before", "during", "after"]:
+            triggers = shutdown_triggers.get(phase, [])
+            for callbable, args, kwargs in triggers:
+                callbable(*args, **kwargs)
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.user = "user123"
@@ -101,6 +114,31 @@ class LoginTokenRequestServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
         self.assertEqual(channel.json_body["user_id"], user_id)
+
+    @override_config({"login_via_existing_session": {"enabled": True}})
+    def test_uia_null_auth(self) -> None:
+        """A null `auth` value is treated as if it was omitted."""
+        self.register_user(self.user, self.password)
+        token = self.login(self.user, self.password)
+
+        channel = self.make_request(
+            "POST", GET_TOKEN_ENDPOINT, {"auth": None}, access_token=token
+        )
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, msg=channel.result)
+        self.assertIn("session", channel.json_body)
+        self.assertIn({"stages": ["m.login.password"]}, channel.json_body["flows"])
+
+    @override_config({"login_via_existing_session": {"enabled": True}})
+    def test_uia_non_object_auth(self) -> None:
+        """A non-object `auth` value is rejected with a 400."""
+        self.register_user(self.user, self.password)
+        token = self.login(self.user, self.password)
+
+        channel = self.make_request(
+            "POST", GET_TOKEN_ENDPOINT, {"auth": "m.login.password"}, access_token=token
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, msg=channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.BAD_JSON)
 
     @override_config(
         {"login_via_existing_session": {"enabled": True, "require_ui_auth": False}}

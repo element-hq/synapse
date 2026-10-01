@@ -34,7 +34,7 @@ from synapse.util.duration import Duration
 from synapse.util.ratelimitutils import FederationRateLimiter
 
 from tests import unittest
-from tests.http.server._base import test_disconnect
+from tests.http.server._base import disconnect_and_assert
 
 
 class CancellableFederationServlet(BaseFederationServlet):
@@ -94,7 +94,7 @@ class BaseFederationServletCancellationTests(unittest.FederatingHomeserverTestCa
         # request won't be processed.
         self.pump()
 
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=True,
@@ -114,7 +114,7 @@ class BaseFederationServletCancellationTests(unittest.FederatingHomeserverTestCa
         # request won't be processed.
         self.pump()
 
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=False,

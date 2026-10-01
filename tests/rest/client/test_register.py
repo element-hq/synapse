@@ -22,7 +22,8 @@
 import datetime
 import importlib.resources as importlib_resources
 import os
-from typing import Any
+from http import HTTPStatus
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 from twisted.internet.testing import MemoryReactor
@@ -65,6 +66,17 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         hs = super().make_homeserver(reactor, clock)
         hs.get_send_email_handler()._sendmail = AsyncMock()
         return hs
+
+    def _get_sendmail_mock(self) -> AsyncMock:
+        """
+        Cast the homeserver's `_sendmail` object as an `AsyncMock`.
+
+        `_sendmail` is an `AsyncMock` (see `make_homeserver`) but this type
+        information doesn't make it through the test harness. Thus we need to
+        cast the object again.
+        """
+        sendmail = self.hs.get_send_email_handler()._sendmail
+        return cast(AsyncMock, sendmail)
 
     def test_POST_appservice_registration_valid(self) -> None:
         user_id = "@as_user_kermit:test"
@@ -172,7 +184,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400, channel.json_body)
         self.assertEqual(
             channel.json_body.get("errcode"),
-            Codes.APPSERVICE_LOGIN_UNSUPPORTED,
+            "M_APPSERVICE_LOGIN_UNSUPPORTED",
             channel.json_body,
         )
 
@@ -208,6 +220,22 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         }
         self.assertEqual(channel.code, 200, msg=channel.result)
         self.assertLessEqual(det_data.items(), channel.json_body.items())
+
+    def test_POST_null_auth(self) -> None:
+        """A null `auth` value is treated as if it was omitted."""
+        request_data = {"username": "kermit", "password": "monkey", "auth": None}
+        channel = self.make_request(b"POST", self.url, request_data)
+
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, msg=channel.result)
+        self.assertIn("session", channel.json_body)
+
+    def test_POST_non_object_auth(self) -> None:
+        """A non-object `auth` value is rejected with a 400."""
+        request_data = {"username": "kermit", "password": "monkey", "auth": ["session"]}
+        channel = self.make_request(b"POST", self.url, request_data)
+
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, msg=channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.BAD_JSON)
 
     @override_config({"enable_registration": False})
     def test_POST_disabled_registration(self) -> None:
@@ -742,10 +770,41 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
             "POST",
             b"register/email/requestToken",
             {"client_secret": "foobar", "email": email, "send_attempt": 1},
+            await_result=False,
         )
+        # Note: The endpoint intentionally adds up to 1000ms of jitter to avoid
+        # leaking whether the email address is bound to an account.
+        channel.await_result(timeout_ms=1000)
         self.assertEqual(200, channel.code, channel.result)
 
         self.assertIsNotNone(channel.json_body.get("sid"))
+
+    @unittest.override_config(
+        {
+            "public_baseurl": "https://test_server",
+            "email": {
+                "smtp_host": "mail_server",
+                "smtp_port": 2525,
+                "notif_from": "sender@host",
+            },
+        }
+    )
+    def test_request_token_allowed_when_email_flow_is_advertised(self) -> None:
+        sendmail = self._get_sendmail_mock()
+        sendmail.reset_mock()
+
+        channel = self.make_request(
+            "POST",
+            b"register/email/requestToken",
+            {
+                "client_secret": "foobar",
+                "email": "test@example.com",
+                "send_attempt": 1,
+            },
+        )
+        self.assertEqual(200, channel.code, channel.result)
+        self.assertIsNotNone(channel.json_body.get("sid"))
+        sendmail.assert_awaited_once()
 
     @unittest.override_config(
         {

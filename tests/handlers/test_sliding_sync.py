@@ -19,7 +19,6 @@
 #
 import logging
 from typing import AbstractSet
-from unittest.mock import patch
 
 import attr
 from parameterized import parameterized, parameterized_class
@@ -3018,21 +3017,6 @@ class ComputeInterestedRoomsShardTestCase(
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
 
-    def _create_room(self, room_id: str, user_id: str, tok: str) -> None:
-        """
-        Create a room with a specific room_id. We use this so that that we have a
-        consistent room_id across test runs that hashes to the same value and will be
-        sharded to a known worker in the tests.
-        """
-
-        # We control the room ID generation by patching out the
-        # `_generate_room_id` method
-        with patch(
-            "synapse.handlers.room.RoomCreationHandler._generate_room_id"
-        ) as mock:
-            mock.side_effect = lambda: room_id
-            self.helper.create_room_as(user_id, tok=tok)
-
     def test_sharded_event_persisters(self) -> None:
         """
         This test should catch bugs that would come from flawed stream position
@@ -3070,19 +3054,15 @@ class ComputeInterestedRoomsShardTestCase(
             {"worker_name": "worker3"},
         )
 
-        # Specially crafted room IDs that get persisted on different workers.
-        #
-        # Sharded to worker1
-        room_id1 = "!fooo:test"
-        # Sharded to worker2
-        room_id2 = "!bar:test"
-        # Sharded to worker3
-        room_id3 = "!quux:test"
+        # 3 different rooms, each on a different worker. Match them up based on the
+        # trailing number.
+        room_results = self._generate_rooms_on_worker(
+            user2_id, user2_tok, ["worker1", "worker2", "worker3"]
+        )
+        room_id1 = room_results["worker1"]
+        room_id2 = room_results["worker2"]
+        room_id3 = room_results["worker3"]
 
-        # Create rooms on the different workers.
-        self._create_room(room_id1, user2_id, user2_tok)
-        self._create_room(room_id2, user2_id, user2_tok)
-        self._create_room(room_id3, user2_id, user2_tok)
         join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         join_response2 = self.helper.join(room_id2, user1_id, tok=user1_tok)
         # Leave room2

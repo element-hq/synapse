@@ -1,1 +1,0 @@
-Don't retry joining partial state rooms all at once on startup.

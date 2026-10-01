@@ -19,6 +19,8 @@
 #
 #
 
+from parameterized import parameterized
+
 from twisted.internet.address import IPv6Address
 from twisted.internet.testing import MemoryReactor, StringTransport
 
@@ -48,6 +50,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # complete the connection and wire it up to a fake transport
         client_address = IPv6Address("TCP", "::1", 2345)
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -68,6 +71,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
 
         # now send an oversized request
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -92,7 +96,16 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # that.
         self.assertEqual(sent, 50 * 1024 * 1024 + 1024)
 
-    def test_content_type_multipart(self) -> None:
+    @parameterized.expand(
+        [
+            (b"multipart/form-data",),
+            # Also check with a boundary
+            (b"multipart/form-data; boundary=abc123",),
+            # Headers are case-insensitive, so test that too.
+            (b"Multipart/Form-Data",),
+        ]
+    )
+    def test_content_type_multipart(self, content_type: bytes) -> None:
         """HTTP POST requests with `content-type: multipart/form-data` should be rejected"""
         self.hs.start_listening()
 
@@ -106,6 +119,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # complete the connection and wire it up to a fake transport
         client_address = IPv6Address("TCP", "::1", 2345)
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -126,6 +140,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
 
         # now send request with content-type header
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -133,7 +148,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
             b"POST / HTTP/1.1\r\n"
             b"Connection: close\r\n"
             b"Transfer-Encoding: chunked\r\n"
-            b"Content-Type: multipart/form-data\r\n"
+            b"Content-Type: " + content_type + b"\r\n"
             b"\r\n"
             b"0\r\n"
             b"\r\n"
@@ -157,6 +172,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # complete the connection and wire it up to a fake transport
         client_address = IPv6Address("TCP", "::1", 2345)
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -193,6 +209,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # complete the connection and wire it up to a fake transport
         client_address = IPv6Address("TCP", "::1", 2345)
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -226,6 +243,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # complete the connection and wire it up to a fake transport
         client_address = IPv6Address("TCP", "::1", 2345)
         protocol = factory.buildProtocol(client_address)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 

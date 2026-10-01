@@ -21,9 +21,9 @@
 #
 
 
-import copy
 import itertools
 import logging
+from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -60,6 +60,7 @@ from synapse.api.room_versions import (
     RoomVersions,
 )
 from synapse.events import EventBase, builder, make_event_from_dict
+from synapse.events.snapshot import EventContext
 from synapse.federation.federation_base import (
     FederationBase,
     InvalidEventSignatureError,
@@ -71,8 +72,12 @@ from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
-from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
+from synapse.types import (
+    JsonDict,
+    StrCollection,
+    UserID,
+    get_domain_from_id,
+)
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
@@ -126,6 +131,9 @@ class SendJoinResult:
     # If 'partial_state' is set, a set of the servers in the room (otherwise empty).
     # Always contains the server we joined off.
     servers_in_room: AbstractSet[str]
+
+    # Only valid for state DAG rooms (MSC4242)
+    state_dag: list[EventBase] | None
 
 
 class FederationClient(FederationBase):
@@ -440,70 +448,14 @@ class FederationClient(FederationBase):
 
     @trace
     @tag_args
-    async def get_pdu_policy_recommendation(
-        self, destination: str, pdu: EventBase, timeout: int | None = None
-    ) -> str:
-        """Requests that the destination server (typically a policy server)
-        check the event and return its recommendation on how to handle the
-        event.
-
-        If the policy server could not be contacted or the policy server
-        returned an unknown recommendation, this returns an OK recommendation.
-        This type fixing behaviour is done because the typical caller will be
-        in a critical call path and would generally interpret a `None` or similar
-        response as "weird value; don't care; move on without taking action". We
-        just frontload that logic here.
-
-
-        Args:
-            destination: The remote homeserver to ask (a policy server)
-            pdu: The event to check
-            timeout: How long to try (in ms) the destination for before
-                giving up. None indicates no timeout.
-
-        Returns:
-            The policy recommendation, or RECOMMENDATION_OK if the policy server was
-            uncontactable or returned an unknown recommendation.
-        """
-
-        logger.debug(
-            "get_pdu_policy_recommendation for event_id=%s from %s",
-            pdu.event_id,
-            destination,
-        )
-
-        try:
-            res = await self.transport_layer.get_policy_recommendation_for_pdu(
-                destination, pdu, timeout=timeout
-            )
-            recommendation = res.get("recommendation")
-            if not isinstance(recommendation, str):
-                raise InvalidResponseError("recommendation is not a string")
-            if recommendation not in (RECOMMENDATION_OK, RECOMMENDATION_SPAM):
-                logger.warning(
-                    "get_pdu_policy_recommendation: unknown recommendation: %s",
-                    recommendation,
-                )
-                return RECOMMENDATION_OK
-            return recommendation
-        except Exception as e:
-            logger.warning(
-                "get_pdu_policy_recommendation: server %s responded with error, assuming OK recommendation: %s",
-                destination,
-                e,
-            )
-            return RECOMMENDATION_OK
-
-    @trace
-    @tag_args
     async def ask_policy_server_to_sign_event(
         self, destination: str, pdu: EventBase, timeout: int | None = None
-    ) -> JsonDict | None:
+    ) -> JsonDict:
         """Requests that the destination server (typically a policy server)
         sign the event as not spam.
 
         If the policy server could not be contacted or the policy server
-        returned an error, this returns no signature.
+        returned an error, that error is raised.
 
         Args:
             destination: The remote homeserver to ask (a policy server)
@@ -519,17 +471,9 @@ class FederationClient(FederationBase):
             pdu.event_id,
             destination,
         )
-        try:
-            return await self.transport_layer.ask_policy_server_to_sign_event(
-                destination, pdu, timeout=timeout
-            )
-        except Exception as e:
-            logger.warning(
-                "ask_policy_server_to_sign_event: server %s responded with error: %s",
-                destination,
-                e,
-            )
-        return None
+        return await self.transport_layer.ask_policy_server_to_sign_event(
+            destination, pdu, timeout=timeout
+        )
 
     @trace
     @tag_args
@@ -1174,6 +1118,12 @@ class FederationClient(FederationBase):
                 no servers successfully handle the request.
         """
 
+        def find_create_event(events: list[EventBase]) -> EventBase | None:
+            for e in events:
+                if (e.type, e.state_key) == (EventTypes.Create, ""):
+                    return e
+            return None
+
         async def send_request(destination: str) -> SendJoinResult:
             response = await self._do_send_join(
                 room_version, destination, pdu, omit_members=partial_state
@@ -1202,13 +1152,16 @@ class FederationClient(FederationBase):
 
             state = response.state
             auth_chain = response.auth_events
+            state_dag: list[EventBase] = []
+            if room_version.msc4242_state_dags:
+                if not response.state_dag:
+                    raise InvalidResponseError("No state_dag returned")
+                state_dag = response.state_dag
 
-            create_event = None
-            for e in state:
-                if (e.type, e.state_key) == (EventTypes.Create, ""):
-                    create_event = e
-                    break
-
+            # Validate the create event and room version are what we expect to see.
+            create_event = find_create_event(
+                state_dag if room_version.msc4242_state_dags else state
+            )
             if create_event is None:
                 # If the state doesn't have a create event then the room is
                 # invalid, and it would fail auth checks anyway.
@@ -1226,62 +1179,7 @@ class FederationClient(FederationBase):
                     % (create_room_version,)
                 )
 
-            logger.info(
-                "Processing from send_join %d events", len(state) + len(auth_chain)
-            )
-
-            # We now go and check the signatures and hashes for the event. Note
-            # that we limit how many events we process at a time to keep the
-            # memory overhead from exploding.
-            valid_pdus_map: dict[str, EventBase] = {}
-
-            async def _execute(pdu: EventBase) -> None:
-                valid_pdu = await self._check_sigs_and_hash_and_fetch_one(
-                    pdu=pdu,
-                    origin=destination,
-                    room_version=room_version,
-                )
-
-                if valid_pdu:
-                    valid_pdus_map[valid_pdu.event_id] = valid_pdu
-
-            await concurrently_execute(
-                _execute, itertools.chain(state, auth_chain), 10000
-            )
-
-            # NB: We *need* to copy to ensure that we don't have multiple
-            # references being passed on, as that causes... issues.
-            signed_state = [
-                copy.copy(valid_pdus_map[p.event_id])
-                for p in state
-                if p.event_id in valid_pdus_map
-            ]
-
-            signed_auth = [
-                valid_pdus_map[p.event_id]
-                for p in auth_chain
-                if p.event_id in valid_pdus_map
-            ]
-
-            # NB: We *need* to copy to ensure that we don't have multiple
-            # references being passed on, as that causes... issues.
-            for s in signed_state:
-                s.internal_metadata = s.internal_metadata.copy()
-
-            # double-check that the auth chain doesn't include a different create event
-            auth_chain_create_events = [
-                e.event_id
-                for e in signed_auth
-                if (e.type, e.state_key) == (EventTypes.Create, "")
-            ]
-            if auth_chain_create_events and auth_chain_create_events != [
-                create_event.event_id
-            ]:
-                raise InvalidResponseError(
-                    "Unexpected create event(s) in auth chain: %s"
-                    % (auth_chain_create_events,)
-                )
-
+            # Validate and set faster room joins fields
             servers_in_room = None
             if response.servers_in_room is not None:
                 servers_in_room = set(response.servers_in_room)
@@ -1301,14 +1199,106 @@ class FederationClient(FederationBase):
                 # Fix things up in case the remote homeserver is badly behaved.
                 servers_in_room.add(destination)
 
-            return SendJoinResult(
-                event=event,
-                state=signed_state,
-                auth_chain=signed_auth,
-                origin=destination,
-                partial_state=response.members_omitted,
-                servers_in_room=servers_in_room or frozenset(),
+            logger.info(
+                "Processing from send_join %d events",
+                len(state_dag)
+                if room_version.msc4242_state_dags
+                else (len(state) + len(auth_chain)),
             )
+
+            # We now go and check the signatures and hashes for the event. Note
+            # that we limit how many events we process at a time to keep the
+            # memory overhead from exploding.
+            valid_pdus_map: dict[str, EventBase] = {}
+
+            async def _execute(pdu: EventBase) -> None:
+                valid_pdu = await self._check_sigs_and_hash_and_fetch_one(
+                    pdu=pdu,
+                    origin=destination,
+                    room_version=room_version,
+                )
+
+                if valid_pdu:
+                    valid_pdus_map[valid_pdu.event_id] = valid_pdu
+
+            # Verify signatures/hashes on events, and make sure they all refer to the same room.
+            if room_version.msc4242_state_dags:
+                if state or auth_chain or servers_in_room:
+                    raise InvalidResponseError(
+                        "State DAG rooms must not set servers_in_room, state or auth_chain fields"
+                    )
+                await concurrently_execute(_execute, itertools.chain(state_dag), 10000)
+                # NB: We *need* to copy to ensure that we don't have multiple
+                # references being passed on, as that causes... issues.
+                signed_state_dag = [
+                    valid_pdus_map[p.event_id].deep_copy()
+                    for p in state_dag
+                    if p.event_id in valid_pdus_map
+                ]
+
+                # Verify each event is for this room (and thus has the same create event as it is v12+)
+                for state_event in signed_state_dag:
+                    if state_event.room_id != pdu.room_id:
+                        raise InvalidResponseError(
+                            "%s in state_dag belongs to room %s, not %s which we are joining"
+                            % (state_event.event_id, state_event.room_id, pdu.room_id)
+                        )
+                return SendJoinResult(
+                    event=event,
+                    state=[],
+                    auth_chain=[],
+                    state_dag=signed_state_dag,
+                    origin=destination,
+                    # The current Synapse implementation of MSC4242 does not support
+                    # faster remote room joins, so always set partial_state=False.
+                    partial_state=False,
+                    servers_in_room=frozenset(),
+                )
+            else:
+                if state_dag:
+                    raise InvalidResponseError(
+                        "Room does not support state DAGs but set state_dag field"
+                    )
+                await concurrently_execute(
+                    _execute, itertools.chain(state, auth_chain), 10000
+                )
+
+                # NB: We *need* to copy to ensure that we don't have multiple
+                # references being passed on, as that causes... issues.
+                signed_state = [
+                    valid_pdus_map[p.event_id].deep_copy()
+                    for p in state
+                    if p.event_id in valid_pdus_map
+                ]
+
+                signed_auth = [
+                    valid_pdus_map[p.event_id]
+                    for p in auth_chain
+                    if p.event_id in valid_pdus_map
+                ]
+
+                # double-check that the auth chain doesn't include a different create event
+                auth_chain_create_events = [
+                    e.event_id
+                    for e in signed_auth
+                    if (e.type, e.state_key) == (EventTypes.Create, "")
+                ]
+                if auth_chain_create_events and auth_chain_create_events != [
+                    create_event.event_id
+                ]:
+                    raise InvalidResponseError(
+                        "Unexpected create event(s) in auth chain: %s"
+                        % (auth_chain_create_events,)
+                    )
+                return SendJoinResult(
+                    event=event,
+                    state=signed_state,
+                    auth_chain=signed_auth,
+                    origin=destination,
+                    partial_state=response.members_omitted,
+                    servers_in_room=servers_in_room or frozenset(),
+                    state_dag=None,
+                )
 
         # MSC3083 defines additional error codes for room joins.
         failover_errcodes = None
@@ -1369,12 +1359,12 @@ class FederationClient(FederationBase):
         self,
         destination: str,
         room_id: str,
-        event_id: str,
         pdu: EventBase,
+        context: EventContext,
     ) -> EventBase:
         room_version = await self.store.get_room_version(room_id)
 
-        content = await self._do_send_invite(destination, pdu, room_version)
+        content = await self._do_send_invite(destination, pdu, context, room_version)
 
         pdu_dict = content["event"]
 
@@ -1395,10 +1385,20 @@ class FederationClient(FederationBase):
         return pdu
 
     async def _do_send_invite(
-        self, destination: str, pdu: EventBase, room_version: RoomVersion
+        self,
+        destination: str,
+        pdu: EventBase,
+        context: EventContext,
+        room_version: RoomVersion,
     ) -> JsonDict:
         """Actually sends the invite, first trying v2 API and falling back to
         v1 API if necessary.
+
+        Args:
+            destination:
+            pdu: Invite event
+            context:
+            room_version:
 
         Returns:
             The event as a dict as returned by the remote server
@@ -1410,6 +1410,19 @@ class FederationClient(FederationBase):
         """
         time_now = self._clock.time_msec()
 
+        # MSC4311: For the federation API, format events in `invite_room_state` as full
+        # PDU's
+        #
+        # Find the full events based on the state at the time of the invite
+        state_ids = await self.store.get_stripped_room_state_ids_from_event_context(
+            pdu,
+            context,
+        )
+        state_events = await self.store.get_events(state_ids)
+        assert set(state_ids) == set(state_events.keys()), (
+            "We should have all events available that were set as stripped state."
+        )
+
         try:
             return await self.transport_layer.send_invite_v2(
                 destination=destination,
@@ -1418,7 +1431,11 @@ class FederationClient(FederationBase):
                 content={
                     "event": pdu.get_pdu_json(time_now),
                     "room_version": room_version.identifier,
-                    "invite_room_state": pdu.unsigned.get("invite_room_state", []),
+                    "invite_room_state": [
+                        # Use full PDU's according to MSC4311
+                        state_event.get_pdu_json(time_now)
+                        for state_event in state_events.values()
+                    ],
                 },
             )
         except HttpResponseException as e:
@@ -1433,18 +1450,86 @@ class FederationClient(FederationBase):
                         "User's homeserver does not support this room version",
                         Codes.UNSUPPORTED_ROOM_VERSION,
                     )
+            # Matrix v1.18 (introduced in MSC4311) says that for a `400` response, "If
+            # `M_MISSING_PARAM` or `M_INVALID_PARAM` is returned and the request is
+            # associated with a Client-Server API request, the Client-Server API request
+            # SHOULD fail with a 5xx error rather than being passed through." (see
+            # https://spec.matrix.org/v1.18/server-server-api/#put_matrixfederationv2inviteroomideventid)
+            #
+            # But this was actually further clarified in MSC4528 that it should be
+            # translated to a `400` with `M_INCOMPATIBLE_SERVER`.
+            elif err.code == HTTPStatus.BAD_REQUEST and err.errcode in (
+                Codes.MISSING_PARAM,
+                Codes.INVALID_PARAM,
+            ):
+                raise SynapseError(
+                    400,
+                    f"Invite was rejected by the recipient's server.\n\n"
+                    f"The remote homeserver ({destination}) returned {err.code} {err.errcode} "
+                    "which indicates a compatibility problem between your homeserver and the "
+                    "homeserver you're trying to send the invite to (either one could be at fault).",
+                    # FIXME(MSC4528): Use `M_INCOMPATIBLE_SERVER` stable error code once
+                    # the MSC is merged
+                    Codes.UNKNOWN,
+                    additional_fields={
+                        "cause": err.msg,
+                        "destination_server": destination,
+                    },
+                )
             else:
                 raise err
 
         # Didn't work, try v1 API.
         # Note the v1 API returns a tuple of `(200, content)`
 
-        _, content = await self.transport_layer.send_invite_v1(
-            destination=destination,
-            room_id=pdu.room_id,
-            event_id=pdu.event_id,
-            content=pdu.get_pdu_json(time_now),
-        )
+        try:
+            # Use full PDU's for `invite_room_state` according to MSC4311
+            #
+            # With the v1 invite API, `invite_room_state` is carried inside the event
+            # instead of a separate field like in v2 so we must munge it in ourselves
+            event_json = pdu.get_pdu_json(time_now)
+            event_json.setdefault("unsigned", {})["invite_room_state"] = [
+                # Use full PDU's according to MSC4311
+                state_event.get_pdu_json(time_now)
+                for state_event in state_events.values()
+            ]
+
+            _, content = await self.transport_layer.send_invite_v1(
+                destination=destination,
+                room_id=pdu.room_id,
+                event_id=pdu.event_id,
+                content=event_json,
+            )
+        except HttpResponseException as e:
+            # Matrix v1.18 (introduced in MSC4311) says that for a `400` response, "If
+            # `M_MISSING_PARAM` or `M_INVALID_PARAM` is returned and the request is
+            # associated with a Client-Server API request, the Client-Server API request
+            # SHOULD fail with a 5xx error rather than being passed through." (see
+            # https://spec.matrix.org/v1.18/server-server-api/#put_matrixfederationv2inviteroomideventid)
+            #
+            # But this was actually further clarified in MSC4528 that it should be
+            # translated to a `400` with `M_INCOMPATIBLE_SERVER`.
+            err = e.to_synapse_error()
+            if err.code == HTTPStatus.BAD_REQUEST and err.errcode in (
+                Codes.MISSING_PARAM,
+                Codes.INVALID_PARAM,
+            ):
+                raise SynapseError(
+                    400,
+                    f"Invite was rejected by the recipient's server.\n\n"
+                    f"The remote homeserver ({destination}) returned {err.code} {err.errcode} "
+                    "which indicates a compatibility problem between your homeserver and the "
+                    "homeserver you're trying to send the invite to (either one could be at fault).",
+                    # FIXME(MSC4528): Use `M_INCOMPATIBLE_SERVER` stable error code once
+                    # the MSC is merged
+                    Codes.UNKNOWN,
+                    additional_fields={
+                        "cause": err.msg,
+                        "destination_server": destination,
+                    },
+                )
+            else:
+                raise err
         return content
 
     async def send_leave(self, destinations: Iterable[str], pdu: EventBase) -> None:
@@ -1608,6 +1693,7 @@ class FederationClient(FederationBase):
         limit: int,
         min_depth: int,
         timeout: int,
+        state_dag: bool = False,
     ) -> list[EventBase]:
         """Tries to fetch events we are missing. This is called when we receive
         an event without having received all of its ancestors.
@@ -1623,6 +1709,7 @@ class FederationClient(FederationBase):
             limit: Maximum number of events to return.
             min_depth: Minimum depth of events to return.
             timeout: Max time to wait in ms
+            state_dag: True to walk the state DAG (MSC4242 rooms)
         """
         try:
             content = await self.transport_layer.get_missing_events(
@@ -1633,11 +1720,17 @@ class FederationClient(FederationBase):
                 limit=limit,
                 min_depth=min_depth,
                 timeout=timeout,
+                state_dag=state_dag,
             )
+            received_time = self._clock.time_msec()
 
             room_version = await self.store.get_room_version(room_id)
 
-            events = parse_events_from_pdu_json(content.get("events", []), room_version)
+            events = parse_events_from_pdu_json(
+                content.get("events", []),
+                room_version,
+                received_time=received_time,
+            )
 
             signed_events = await self._check_sigs_and_hash_for_pulled_events_and_fetch(
                 destination, events, room_version=room_version
