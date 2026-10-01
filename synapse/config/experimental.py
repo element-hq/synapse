@@ -318,3 +318,6 @@ class ExperimentalConfig(Config):
 
         # MSC4512: Delegating parts of the C-S and S-S API to application services
         self.msc4512_enabled: bool = experimental.get("msc4512_enabled", False)
+
+        # MSC4507: Return additional room state from the federation hierarchy endpoint.
+        self.msc4507_enabled: bool = experimental.get("msc4507_enabled", False)
