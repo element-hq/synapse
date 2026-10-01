@@ -359,8 +359,7 @@ class DelayedEventsHandler:
 
         Raises:
             SynapseError: if the delayed event fails validation checks, or
-                if the requested delay is longer than allowed, or
-                if sending delayed events has been disallowed entirely.
+                if the requested delay is longer than allowed.
         """
         # Use standard request limiter for scheduling new delayed events.
         # TODO: Instead apply ratelimiting based on the scheduled send time.
