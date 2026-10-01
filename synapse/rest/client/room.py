@@ -525,7 +525,6 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
-        self.event_creation_handler = hs.get_event_creation_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self._msc4140_enabled = hs.config.server.msc4140_enabled
