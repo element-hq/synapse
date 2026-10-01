@@ -34,6 +34,7 @@ from typing import (
 import attr
 
 from synapse.api.errors import StoreError
+from synapse.federation.user_directory import UserDirectoryEntryModel
 from synapse.synapse_rust import segmenter as icu
 from synapse.util.stringutils import non_null_str_or_none
 
@@ -661,25 +662,29 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
     def _upsert_federated_remote_users_txn(
         self,
         txn: LoggingTransaction,
-        profiles: Sequence[_UserDirProfile],
+        homeserver: str,
+        profiles: Sequence[UserDirectoryEntryModel],
     ) -> None:
         """Update profiles, search entries and federation visibility together."""
         self._update_profiles_in_user_dir_txn(txn, profiles)
+        keys = []
+        values = []
+        for profile in profiles:
+            keys.append((profile.user_id,))
+            values.append((homeserver,))
         self.db_pool.simple_upsert_many_txn(
             txn,
             table="users_in_federated_search",
             key_names=("user_id",),
-            key_values=[(profile.user_id,) for profile in profiles],
+            key_values=keys,
             value_names=("homeserver",),
-            value_values=[
-                (get_domain_from_id(profile.user_id),) for profile in profiles
-            ],
+            value_values=values,
         )
 
     def _update_profiles_in_user_dir_txn(
         self,
         txn: LoggingTransaction,
-        profiles: Sequence[_UserDirProfile],
+        profiles: Sequence[_UserDirProfile | UserDirectoryEntryModel],
     ) -> None:
         self.db_pool.simple_upsert_many_txn(
             txn,
@@ -954,7 +959,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
     async def reconcile_federated_remote_users(
         self,
         homeserver: str,
-        users: Sequence[tuple[str, str | None, str | None]],
+        profiles: Sequence[UserDirectoryEntryModel],
         start_token: str | None,
         end_token: str | None,
     ) -> None:
@@ -969,10 +974,6 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
         Users outside this range are left untouched.
         """
 
-        profiles = [
-            _UserDirProfile(user_id, display_name, avatar_url)
-            for user_id, display_name, avatar_url in users
-        ]
         new_user_ids = {profile.user_id for profile in profiles}
 
         def _reconcile_txn(txn: LoggingTransaction) -> None:
@@ -996,7 +997,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             existing_user_ids = {row[0] for row in txn}
 
             if profiles:
-                self._upsert_federated_remote_users_txn(txn, profiles)
+                self._upsert_federated_remote_users_txn(txn, homeserver, profiles)
 
             stale_user_ids = existing_user_ids - new_user_ids
             self._remove_federated_remote_users_txn(txn, stale_user_ids)

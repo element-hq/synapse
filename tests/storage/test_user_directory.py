@@ -27,6 +27,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, UserTypes
 from synapse.appservice import ApplicationService
+from synapse.federation.user_directory import UserDirectoryEntryModel
 from synapse.rest import admin
 from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
@@ -459,12 +460,26 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         )
         self.get_success(
             self.store.reconcile_federated_remote_users(
-                "a", [(BOBBY, "bobby", None)], start_token=None, end_token=None
+                "a",
+                [
+                    UserDirectoryEntryModel(
+                        user_id=BOBBY, display_name="bobby", avatar_url=None
+                    )
+                ],
+                start_token=None,
+                end_token=None,
             )
         )
         self.get_success(
             self.store.reconcile_federated_remote_users(
-                "b", [(BOB, "bob", None)], start_token=None, end_token=None
+                "b",
+                [
+                    UserDirectoryEntryModel(
+                        user_id=BOB, display_name="bob", avatar_url=None
+                    )
+                ],
+                start_token=None,
+                end_token=None,
             )
         )
         expected_profiles = self.get_success(helper.get_profiles_in_user_directory())
@@ -498,7 +513,14 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
             with self.subTest(cleanup=cleanup):
                 self.get_success(
                     self.store.reconcile_federated_remote_users(
-                        "a", [(ALICE, "alice", None)], start_token=None, end_token=None
+                        "a",
+                        [
+                            UserDirectoryEntryModel(
+                                user_id=ALICE, display_name="alice", avatar_url=None
+                            )
+                        ],
+                        start_token=None,
+                        end_token=None,
                     )
                 )
 
@@ -852,7 +874,12 @@ class FederatedUserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(
             self.store.reconcile_federated_remote_users(
                 "remote",
-                [(user, "Rangeentry", None) for user in users],
+                [
+                    UserDirectoryEntryModel(
+                        user_id=user, display_name="Rangeentry", avatar_url=None
+                    )
+                    for user in users
+                ],
                 start_token=None,
                 end_token=None,
             )
@@ -861,7 +888,13 @@ class FederatedUserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(
             self.store.reconcile_federated_remote_users(
                 "other",
-                [(other_server_user, "Rangeentry", None)],
+                [
+                    UserDirectoryEntryModel(
+                        user_id=other_server_user,
+                        display_name="Rangeentry",
+                        avatar_url=None,
+                    )
+                ],
                 start_token=None,
                 end_token=None,
             )
@@ -901,7 +934,14 @@ class FederatedUserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(
             self.store.reconcile_federated_remote_users(
                 "remote",
-                [(user, "Beforepage", "mxc://remote/before") for user in users],
+                [
+                    UserDirectoryEntryModel(
+                        user_id=user,
+                        display_name="Beforepage",
+                        avatar_url="mxc://remote/before",
+                    )
+                    for user in users
+                ],
                 start_token=None,
                 end_token=None,
             )
@@ -910,19 +950,39 @@ class FederatedUserDirectoryStoreTestCase(HomeserverTestCase):
             self.user_dir_helper.get_profiles_in_user_directory()
         )
         imports = {(user, "remote") for user in users}
-        pages: list[
-            tuple[str | None, str | None, list[tuple[str, str | None, str | None]]]
-        ] = [
+        pages: list[tuple[str | None, str | None, list[UserDirectoryEntryModel]]] = [
             (
                 None,
                 users[1],
                 [
-                    (users[0], "Freshpage", "mxc://remote/after"),
-                    (users[1], None, None),
+                    UserDirectoryEntryModel(
+                        user_id=users[0],
+                        display_name="Freshpage",
+                        avatar_url="mxc://remote/after",
+                    ),
+                    UserDirectoryEntryModel(
+                        user_id=users[1], display_name=None, avatar_url=None
+                    ),
                 ],
             ),
-            (users[1], users[3], [(users[3], "Freshpage", None)]),
-            (users[3], None, [(users[5], "Freshpage", None)]),
+            (
+                users[1],
+                users[3],
+                [
+                    UserDirectoryEntryModel(
+                        user_id=users[3], display_name="Freshpage", avatar_url=None
+                    )
+                ],
+            ),
+            (
+                users[3],
+                None,
+                [
+                    UserDirectoryEntryModel(
+                        user_id=users[5], display_name="Freshpage", avatar_url=None
+                    )
+                ],
+            ),
         ]
         removed_by_page = [set(), {users[2]}, {users[4]}]
         old_search_results = set(users)
@@ -941,13 +1001,13 @@ class FederatedUserDirectoryStoreTestCase(HomeserverTestCase):
                     profiles.pop(user, None)
                     imports.discard((user, "remote"))
                     old_search_results.discard(user)
-                for user, display_name, avatar_url in entries:
-                    profiles[user] = ProfileInfo(
-                        display_name=display_name, avatar_url=avatar_url
+                for entry in entries:
+                    profiles[entry.user_id] = ProfileInfo(
+                        display_name=entry.display_name, avatar_url=entry.avatar_url
                     )
-                    old_search_results.discard(user)
-                    if display_name is not None:
-                        new_search_results.add(user)
+                    old_search_results.discard(entry.user_id)
+                    if entry.display_name is not None:
+                        new_search_results.add(entry.user_id)
 
                 self._assert_directory_state(profiles, imports)
                 self._assert_search_results("Beforepage", old_search_results)
@@ -956,9 +1016,17 @@ class FederatedUserDirectoryStoreTestCase(HomeserverTestCase):
     def test_reconcile_empty_tail_then_user_returns(self) -> None:
         """An empty final page removes stale users, which can be imported again."""
         entries = [
-            ("@a:remote", "Keptprofile", None),
-            ("@b:remote", "Keptprofile", None),
-            ("@c:remote", "Tailprofile", "mxc://remote/old"),
+            UserDirectoryEntryModel(
+                user_id="@a:remote", display_name="Keptprofile", avatar_url=None
+            ),
+            UserDirectoryEntryModel(
+                user_id="@b:remote", display_name="Keptprofile", avatar_url=None
+            ),
+            UserDirectoryEntryModel(
+                user_id="@c:remote",
+                display_name="Tailprofile",
+                avatar_url="mxc://remote/old",
+            ),
         ]
         self.get_success(
             self.store.reconcile_federated_remote_users(
@@ -978,8 +1046,10 @@ class FederatedUserDirectoryStoreTestCase(HomeserverTestCase):
         )
 
         profiles = {
-            user: ProfileInfo(display_name=display_name, avatar_url=avatar_url)
-            for user, display_name, avatar_url in entries[:2]
+            entry.user_id: ProfileInfo(
+                display_name=entry.display_name, avatar_url=entry.avatar_url
+            )
+            for entry in entries[:2]
         }
         imports = {(user, "remote") for user in profiles}
         self._assert_directory_state(profiles, imports)
@@ -989,7 +1059,13 @@ class FederatedUserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(
             self.store.reconcile_federated_remote_users(
                 "remote",
-                [("@c:remote", "Returnedprofile", "mxc://remote/new")],
+                [
+                    UserDirectoryEntryModel(
+                        user_id="@c:remote",
+                        display_name="Returnedprofile",
+                        avatar_url="mxc://remote/new",
+                    )
+                ],
                 start_token="@b:remote",
                 end_token=None,
             )

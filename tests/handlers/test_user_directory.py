@@ -1686,7 +1686,13 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
                 self.get_success(
                     self.store.reconcile_federated_remote_users(
                         "remote.example.com",
-                        [("@bob:remote.example.com", "Bob", None)],
+                        [
+                            UserDirectoryEntryModel(
+                                user_id="@bob:remote.example.com",
+                                display_name="Bob",
+                                avatar_url=None,
+                            )
+                        ],
                         start_token=None,
                         end_token=None,
                     )
@@ -1714,7 +1720,11 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         self.get_success(
             self.store.reconcile_federated_remote_users(
                 "remote.example.com",
-                [(user_id, "Bob", None)],
+                [
+                    UserDirectoryEntryModel(
+                        user_id=user_id, display_name="Bob", avatar_url=None
+                    )
+                ],
                 start_token=None,
                 end_token=None,
             )
@@ -2013,6 +2023,13 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         for description, profile in (
             ("omitted", {}),
             ("explicit null", {"display_name": None, "avatar_url": None}),
+            (
+                "NUL-containing fields",
+                {
+                    "display_name": "Bob\u0000Remote",
+                    "avatar_url": "mxc://remote.example.com/avatar\u0000",
+                },
+            ),
         ):
             with self.subTest(description):
                 self._run_sync_returning(
@@ -2196,7 +2213,11 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         self.get_success(
             self.store.reconcile_federated_remote_users(
                 "removed.example.com",
-                [(removed_user, "Old", None)],
+                [
+                    UserDirectoryEntryModel(
+                        user_id=removed_user, display_name="Old", avatar_url=None
+                    )
+                ],
                 start_token=None,
                 end_token=None,
             )
@@ -2311,7 +2332,14 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         self.get_success(
             self.store.reconcile_federated_remote_users(
                 destination,
-                [(alice, "Original", None), (stale, "Stale", None)],
+                [
+                    UserDirectoryEntryModel(
+                        user_id=alice, display_name="Original", avatar_url=None
+                    ),
+                    UserDirectoryEntryModel(
+                        user_id=stale, display_name="Stale", avatar_url=None
+                    ),
+                ],
                 start_token=None,
                 end_token=None,
             )
@@ -2606,7 +2634,13 @@ class FederatedUserDirectoryWorkerTestCase(unittest.HomeserverTestCase):
         self.get_success(
             self.store.reconcile_federated_remote_users(
                 "removed.example.com",
-                [("@old:removed.example.com", "Old", None)],
+                [
+                    UserDirectoryEntryModel(
+                        user_id="@old:removed.example.com",
+                        display_name="Old",
+                        avatar_url=None,
+                    )
+                ],
                 None,
                 None,
             )

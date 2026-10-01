@@ -1016,10 +1016,6 @@ class UserDirectoryHandler(StateDeltasHandler):
             # Only the worker that owns the user directory should write to it.
             return
 
-        profiles = [
-            (entry.user_id, entry.display_name, entry.avatar_url) for entry in users
-        ]  # TODO: Store will use models instead of tuples!
-
         await self.store.reconcile_federated_remote_users(
-            homeserver, profiles, start_token, end_token
+            homeserver, users, start_token, end_token
         )

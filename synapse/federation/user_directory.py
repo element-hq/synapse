@@ -12,11 +12,12 @@
 
 """Models and validation for pages of the federated user directory."""
 
-from pydantic import StrictStr, ValidationInfo, model_validator
+from pydantic import StrictStr, ValidationInfo, field_validator, model_validator
 from typing_extensions import Self
 
 from synapse.types import UserID
 from synapse.util.pydantic_models import ParseModel
+from synapse.util.stringutils import non_null_str_or_none
 
 
 class UserDirectoryEntryModel(ParseModel):
@@ -29,6 +30,13 @@ class UserDirectoryEntryModel(ParseModel):
     user_id: StrictStr
     display_name: StrictStr | None = None
     avatar_url: StrictStr | None = None
+
+    @field_validator("display_name", "avatar_url")
+    @classmethod
+    def normalize_profile_field(cls, value: str | None) -> str | None:
+        # Preserve the storage profile's handling of NUL-containing values when
+        # passing validated entries directly to the database.
+        return non_null_str_or_none(value)
 
 
 class UserDirectoryResponseModel(ParseModel):
