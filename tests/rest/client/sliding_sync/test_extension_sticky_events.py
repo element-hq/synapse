@@ -596,8 +596,8 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
 
     def test_sticky_event_limit_zero_does_not_advance(self) -> None:
         """
-        Tests that sending a limit of 0 in the Sticky Events request extension doesn't
-        advance the sticky events stream token to a future position.
+        Tests that sending a limit of 0 in the Sticky Events request extension returns no
+        sticky events and omits the extension from the response, rather than erroring.
 
         'Regression' test for a bug that _almost_ existed.
         (The `next_batch` token would be wrongly advanced internally,
