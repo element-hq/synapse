@@ -273,6 +273,10 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     ) -> list[StickyEventUpdate]:
         """Get updates to sticky events between two stream IDs.
 
+        You probably don't want to use this as it doesn't use sharded tokens.
+        Consider `_get_sticky_events_in_rooms_txn` if you are looking at a set of rooms.
+        This method is more or less internal machinery for replication.
+
         Bounds: from_id < ... <= to_id
 
         Args:
