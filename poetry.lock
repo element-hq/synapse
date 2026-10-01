@@ -1247,6 +1247,22 @@ files = [
 ]
 
 [[package]]
+name = "lxml-stubs"
+version = "0.5.1"
+description = "Type annotations for the lxml package"
+optional = true
+python-versions = "*"
+groups = ["main"]
+markers = "extra == \"saml2\" or extra == \"all\""
+files = [
+    {file = "lxml-stubs-0.5.1.tar.gz", hash = "sha256:e0ec2aa1ce92d91278b719091ce4515c12adc1d564359dfaf81efa7d4feab79d"},
+    {file = "lxml_stubs-0.5.1-py3-none-any.whl", hash = "sha256:1f689e5dbc4b9247cb09ae820c7d34daeb1fdbd1db06123814b856dae7787272"},
+]
+
+[package.extras]
+test = ["coverage[toml] (>=7.2.5)", "mypy (>=1.2.0)", "pytest (>=7.3.0)", "pytest-mypy-plugins (>=1.10.1)"]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.0.0"
 description = "Python port of markdown-it. Markdown parsing, done right!"
@@ -3613,7 +3629,7 @@ docs = ["Sphinx", "repoze.sphinx.autointerface"]
 test = ["zope.i18nmessageid", "zope.testing", "zope.testrunner (>=6.4)"]
 
 [extras]
-all = ["authlib", "beautifulsoup4", "defusedxml", "hiredis", "jaeger-client", "matrix-synapse-ldap3", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pympler", "pysaml2", "pytz", "sentry-sdk", "thrift", "tornado", "txredisapi"]
+all = ["authlib", "beautifulsoup4", "defusedxml", "hiredis", "jaeger-client", "lxml-stubs", "matrix-synapse-ldap3", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pympler", "pysaml2", "pytz", "sentry-sdk", "thrift", "tornado", "txredisapi"]
 cache-memory = ["pympler"]
 jwt = ["authlib"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
@@ -3621,7 +3637,7 @@ oidc = ["authlib"]
 opentracing = ["jaeger-client", "opentracing", "thrift", "tornado"]
 postgres = ["psycopg2", "psycopg2cffi", "psycopg2cffi-compat"]
 redis = ["hiredis", "txredisapi"]
-saml2 = ["defusedxml", "pysaml2", "pytz"]
+saml2 = ["defusedxml", "lxml-stubs", "pysaml2", "pytz"]
 sentry = ["sentry-sdk"]
 test = ["idna", "parameterized"]
 url-preview = ["beautifulsoup4"]
@@ -3629,4 +3645,4 @@ url-preview = ["beautifulsoup4"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "de01bb22d8a7d83867c60df9c8d180e0b4ccc5484f38b068434b87cd69ddd04c"
+content-hash = "b8ee2c063150549de2946f70cd557c427e16a9101052915ef23eb6dd9d8f77eb"
