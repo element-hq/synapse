@@ -82,7 +82,15 @@ from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main import DataStore
 from synapse.streams.config import PaginationConfig
-from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
+from synapse.types import (
+    Absent,
+    AbsentType,
+    JsonDict,
+    Requester,
+    StreamToken,
+    ThirdPartyInstanceID,
+    UserID,
+)
 from synapse.types.rest import RequestBodyModel
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
@@ -558,7 +566,7 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
     class DelayedEventBodyModel(RequestBodyModel):
         delay_ms: PositiveInt
         content: JsonDict
-        state_key: StrictStr | None = None
+        state_key: StrictStr | AbsentType = Absent
 
     async def _do(
         self,
@@ -578,15 +586,22 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
         if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
 
-        sticky_duration_ms: int | None = None
-        if self._msc4354_enabled and request_body.state_key is None:
-            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
+        if request_body.state_key is Absent:
+            state_key = None
+            sticky_duration_ms = (
+                parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
+                if self._msc4354_enabled
+                else None
+            )
+        else:
+            state_key = request_body.state_key
+            sticky_duration_ms = None
 
         delay_id = await self.delayed_events_handler.add(
             requester,
             room_id=room_id,
             event_type=event_type,
-            state_key=request_body.state_key,
+            state_key=state_key,
             origin_server_ts=origin_server_ts,
             content=request_body.content,
             delay=Duration(milliseconds=request_body.delay_ms),
