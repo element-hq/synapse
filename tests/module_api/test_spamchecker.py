@@ -15,6 +15,8 @@
 from http import HTTPStatus
 from typing import Literal
 
+from parameterized import parameterized
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
@@ -26,10 +28,11 @@ from synapse.api.room_versions import RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.events import make_event_from_dict
 from synapse.module_api import EventBase
-from synapse.rest import admin, login, room, room_upgrade_rest_servlet
+from synapse.rest import admin, delayed_events, login, room, room_upgrade_rest_servlet
 from synapse.server import HomeServer
 from synapse.types import Codes, JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.server import FakeChannel
@@ -42,6 +45,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
     servlets = [
         room.register_servlets,
         admin.register_servlets,
+        delayed_events.register_servlets,
         login.register_servlets,
         room_upgrade_rest_servlet.register_servlets,
     ]
@@ -296,6 +300,141 @@ class SpamCheckerTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
+    @parameterized.expand((False, True))
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_user_may_send_delayed_state_event(self, send_manually: bool) -> None:
+        """Test that the user_may_send_state_event callback is called when a delayed state event
+        is sent (not when it is scheduled), and that it receives the correct parameters.
+        """
+
+        async def user_may_send_state_event(
+            user_id: str,
+            room_id: str,
+            event_type: str,
+            state_key: str,
+            content: JsonDict,
+        ) -> Literal["NOT_SPAM"] | Codes:
+            self.did_spam_check = True
+            self.last_user_id = user_id
+            self.last_room_id = room_id
+            self.last_event_type = event_type
+            self.last_state_key = state_key
+            self.last_content = content
+            return "NOT_SPAM"
+
+        self._module_api.register_spam_checker_callbacks(
+            user_may_send_state_event=user_may_send_state_event
+        )
+        self.did_spam_check = False
+
+        channel = self.create_room({})
+
+        self.assertEqual(channel.code, 200)
+
+        room_id = channel.json_body["room_id"]
+
+        event_type = "test.event.type"
+        state_key = "test.state.key"
+        delay = Duration(seconds=10)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}",
+            content={
+                "delay_ms": delay.as_millis(),
+                "state_key": state_key,
+                "content": {"foo": "bar"},
+            },
+            access_token=self.token,
+        )
+
+        self.assertEqual(channel.code, 200)
+        self.assertFalse(self.did_spam_check)
+
+        delay_id = channel.json_body["delay_id"]
+
+        if send_manually:
+            channel = self.make_request(
+                "POST",
+                f"/_matrix/client/unstable/org.matrix.msc4140/delayed_events/{delay_id}/send",
+                access_token=self.token,
+            )
+        else:
+            # Advance time enough so the delayed event is sent
+            self.reactor.advance(delay.as_secs())
+
+        self.assertEqual(channel.code, 200)
+        self.assertTrue(self.did_spam_check)
+        self.assertEqual(self.last_user_id, self.user_id)
+        self.assertEqual(self.last_room_id, room_id)
+        self.assertEqual(self.last_event_type, event_type)
+        self.assertEqual(self.last_state_key, state_key)
+        self.assertEqual(self.last_content, {"foo": "bar"})
+
+    @parameterized.expand((False, True))
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_user_may_send_delayed_state_event_disallows(self, send_manually: bool) -> None:
+        """Test that the user_may_send_state_event callback is called when a delayed state event
+        is sent (not when it is scheduled), and that the response is honoured.
+        """
+
+        async def user_may_send_state_event(
+            user_id: str,
+            room_id: str,
+            event_type: str,
+            state_key: str,
+            content: JsonDict,
+        ) -> Literal["NOT_SPAM"] | Codes:
+            return Codes.FORBIDDEN
+
+        self._module_api.register_spam_checker_callbacks(
+            user_may_send_state_event=user_may_send_state_event
+        )
+        self.did_spam_check = False
+
+        channel = self.create_room({})
+
+        self.assertEqual(channel.code, 200)
+
+        room_id = channel.json_body["room_id"]
+
+        event_type = "test.event.type"
+        state_key = "test.state.key"
+        delay = Duration(seconds=10)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}",
+            content={
+                "delay_ms": delay.as_millis(),
+                "state_key": state_key,
+                "content": {"foo": "bar"},
+            },
+            access_token=self.token,
+        )
+
+        self.assertEqual(channel.code, 200)
+        self.assertFalse(self.did_spam_check)
+
+        delay_id = channel.json_body["delay_id"]
+
+        if send_manually:
+            channel = self.make_request(
+                "POST",
+                f"/_matrix/client/unstable/org.matrix.msc4140/delayed_events/{delay_id}/send",
+                access_token=self.token,
+            )
+            self.assertEqual(channel.code, 403)
+            self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+        else:
+            # Advance time enough so the delayed event is sent
+            self.reactor.advance(delay.as_secs())
+
+        # The state should not have been set by the delayed event
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/r0/rooms/{room_id}/state/{event_type}/{state_key}",
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, 404)
 
 class FederatedEventSpamCheckMetadataTestCase(unittest.FederatingHomeserverTestCase):
     servlets = [
