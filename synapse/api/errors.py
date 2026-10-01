@@ -1004,9 +1004,9 @@ class SlidingSyncUnknownPosition(SynapseError):
     param).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, message: str = "Unknown position") -> None:
         super().__init__(
             HTTPStatus.BAD_REQUEST,
-            msg="Unknown position",
+            msg=message,
             errcode=Codes.UNKNOWN_POS,
         )

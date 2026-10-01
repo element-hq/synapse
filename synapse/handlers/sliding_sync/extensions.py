@@ -32,6 +32,7 @@ from synapse.api.constants import (
     ProfileUpdateAction,
     StickyEvent,
 )
+from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.events.utils import FilteredEvent
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.logging.opentracing import trace
@@ -1035,12 +1036,32 @@ class SlidingSyncExtensionHandler:
         # If there is no `since` token specified, start from the beginning of the stream
         # to make sure the client receives all visible (unexpired) sticky events
         since_token = sticky_events_request.since or SlidingSyncStickyEventsToken.START
+
+        since_token_as_stream_token = await since_token.to_stream_token(self.store)
+
+        if not since_token_as_stream_token.is_before_or_eq(
+            self.event_sources.get_current_token().sticky_events_key
+        ):
+            # The since_token is before the current position as seen on this worker.
+            # This either means that this worker is lagging, or the client has a token from the future.
+            #
+            # Get the max allocated token out of the database to see which case it is.
+            max_token = await self.store.get_sticky_events_stream_id_generator().get_max_allocated_token()
+
+            if max_token < since_token_as_stream_token.get_max_stream_pos():
+                # The client has a token from the future.
+                # Innocently, this could happen if a database is rolled back by restoring from backup.
+                # Reset the sliding sync connection.
+                raise SlidingSyncUnknownPosition(
+                    "Sticky Events extension `since` parameter is from the future"
+                )
+
         (
             sticky_events_to_token,
             room_to_event_ids,
         ) = await self.store.get_sticky_events_in_rooms(
             all_interested_room_ids,
-            from_token=await since_token.to_stream_token(self.store),
+            from_token=since_token_as_stream_token,
             to_token=to_token.sticky_events_key,
             now=now,
             limit=min(sticky_events_request.limit, StickyEvent.MAX_EVENTS_IN_SYNC),
