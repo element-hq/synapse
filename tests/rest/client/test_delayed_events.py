@@ -87,7 +87,7 @@ class DelayedEventsUnstableSupportTestCase(HomeserverTestCase):
 class DelayedEventsHelperMixin(HomeserverTestCase):
     room_id: str
 
-    def _send_delayed_event_request(
+    def _make_delayed_event_request(
         self,
         *,
         room_id: str,
@@ -269,7 +269,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         delay = Duration(milliseconds=100000)
         content: JsonDict = {"message": "hello"}
         delayed_since_ts = self.hs.get_clock().time_msec()
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=delay,
             event_type=_EVENT_TYPE,
@@ -326,7 +326,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         state_event_type = _EVENT_TYPE + "_state"
         content = {"state_message": "greetings"}
         delayed_since_ts = self.hs.get_clock().time_msec()
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=delay,
             event_type=state_event_type,
@@ -385,7 +385,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         setter_key = "setter"
         setter_expected = "on_timeout"
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=900),
             event_type=_EVENT_TYPE,
@@ -440,7 +440,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.helper.join(room=self.room_id, user=guest_user_id, tok=guest_access_token)
 
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=900),
             event_type=_EVENT_TYPE,
@@ -458,7 +458,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         self.assertEqual(guest_user_id, event["sender"], event)
 
     def test_delayed_member_events_are_sent_on_timeout(self) -> None:
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=900),
             event_type="m.room.member",
@@ -591,7 +591,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         setter_key = "setter"
         setter_expected = "none"
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=1500),
             event_type=_EVENT_TYPE,
@@ -643,7 +643,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
     def test_cancel_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
         for _ in range(3):
-            channel = self._send_delayed_event_request(
+            channel = self._make_delayed_event_request(
                 room_id=self.room_id,
                 delay=Duration(milliseconds=100000),
                 event_type=_EVENT_TYPE,
@@ -715,7 +715,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         state_key = "to_send_on_request"
 
         content_property_name = "key"
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=100000),
             event_type=_EVENT_TYPE,
@@ -763,7 +763,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
     def test_send_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
         for _ in range(2):
-            channel = self._send_delayed_event_request(
+            channel = self._make_delayed_event_request(
                 room_id=self.room_id,
                 delay=Duration(milliseconds=100000),
                 event_type=_EVENT_TYPE,
@@ -792,7 +792,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         setter_key = "setter"
         setter_expected = "on_timeout"
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=1500),
             event_type=_EVENT_TYPE,
@@ -857,7 +857,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
     def test_restart_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
         for _ in range(3):
-            channel = self._send_delayed_event_request(
+            channel = self._make_delayed_event_request(
                 room_id=self.room_id,
                 delay=Duration(milliseconds=100000),
                 event_type=_EVENT_TYPE,
@@ -923,7 +923,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         setter_key = "setter"
         setter_expected = "on_timeout"
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=900),
             event_type=_EVENT_TYPE,
@@ -969,7 +969,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         state_key = "to_be_cancelled_by_other_user"
 
         setter_key = "setter"
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=900),
             event_type=_EVENT_TYPE,
@@ -1020,7 +1020,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         user1_delay_ids = []
         state_key = "to_cancel_on_deactivation"
         for state_event in True, False:
-            channel = self._send_delayed_event_request(
+            channel = self._make_delayed_event_request(
                 room_id=self.room_id,
                 delay=Duration(milliseconds=900),
                 event_type=_EVENT_TYPE,
@@ -1032,7 +1032,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             user1_delay_ids.append(channel.json_body["delay_id"])
 
         # user2 schedules a delayed event to be sent later than user1's.
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=2000),
             event_type=_EVENT_TYPE,
@@ -1121,7 +1121,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
     ) -> None:
         handler = self.hs.get_delayed_events_handler()
 
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=900),
             event_type=_EVENT_TYPE,
@@ -1241,7 +1241,7 @@ class DelayedEventsWorkerTestCase(
         store = self.hs.get_datastores().main
         handler = self.hs.get_delayed_events_handler()
 
-        channel = self._send_delayed_event_request(
+        channel = self._make_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=900),
             event_type=_EVENT_TYPE,
