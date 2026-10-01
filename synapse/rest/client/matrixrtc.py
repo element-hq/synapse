@@ -39,7 +39,7 @@ class MatrixRTCRestServlet(RestServlet):
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # Require authentication for this endpoint.
-        await self._auth.get_user_by_req(request)
+        await self._auth.get_user_by_req(request, allow_guest=True)
 
         if self._transports:
             return 200, {"rtc_transports": self._transports}
