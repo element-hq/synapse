@@ -102,6 +102,10 @@ class ApplicationService:
     # - /_matrix/federation/(unstable/[^/]+|v[^/]+)/{prefix}/.*
     ALLOWED_PROXY_PREFIXES = {"rtc/livekit"}
 
+    # Proxy prefixes under which guest users may make proxied Client-Server
+    # requests.
+    GUEST_ACCESSIBLE_PROXY_PREFIXES = {"rtc/livekit"}
+
     def __init__(
         self,
         token: str,
@@ -227,10 +231,24 @@ class ApplicationService:
             return namespace.exclusive
         return False
 
-    def _is_proxy_prefix_allowed(self, prefix: str) -> bool:
+    @staticmethod
+    def _prefix_matches(prefix: str, candidates: Iterable[str]) -> bool:
+        """Checks whether `prefix` equals or is nested under any of `candidates`."""
         return any(
-            prefix == allowed or prefix.startswith(allowed + "/")
-            for allowed in ApplicationService.ALLOWED_PROXY_PREFIXES
+            prefix == candidate or prefix.startswith(candidate + "/")
+            for candidate in candidates
+        )
+
+    def _is_proxy_prefix_allowed(self, prefix: str) -> bool:
+        return self._prefix_matches(prefix, ApplicationService.ALLOWED_PROXY_PREFIXES)
+
+    @property
+    def proxy_allows_guests(self) -> bool:
+        """Whether guest users may make proxied Client-Server requests to this
+        application service.
+        """
+        return self.proxy_prefix is not None and self._prefix_matches(
+            self.proxy_prefix, ApplicationService.GUEST_ACCESSIBLE_PROXY_PREFIXES
         )
 
     @cached(num_args=1, cache_context=True)

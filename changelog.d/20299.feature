@@ -1,1 +1,1 @@
-Allow guest user access to `/rtc/transports`.
+Allow guest user access to `/rtc/transports` and `/rtc/livekit/*`.
