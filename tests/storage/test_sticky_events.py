@@ -186,7 +186,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
 
     def test_get_sticky_events_in_rooms_token_does_not_go_backwards(self) -> None:
         """
-        Tests that the token does not get rewound, for instance if a
+        Tests `get_sticky_events_in_rooms` to make sure that the token does not get rewound, for instance if a
         different, lagging, sync worker handles a request.
         """
         instance_name = self.hs.get_instance_name()
