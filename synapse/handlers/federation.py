@@ -254,6 +254,9 @@ class FederationHandler:
         Returns:
             True if we actually tried to backfill something, otherwise False.
         """
+        if (await self.store.get_room_version(room_id)).msc4242_state_dags:
+            return False
+
         # Starting the processing time here so we can include the room backfill
         # linearizer lock queue in the timing
         processing_start_time = self.clock.time_msec() if record_time else 0
@@ -1458,6 +1461,13 @@ class FederationHandler:
         """
         if event.state_key is None:
             raise SynapseError(400, "The invite event did not have a state key")
+
+        if room_version.msc4242_state_dags:
+            raise SynapseError(
+                500,
+                "/invite is not implemented for MSC4242 state DAG rooms",
+                errcode=Codes.UNKNOWN,
+            )
 
         is_blocked = await self.store.is_room_blocked(event.room_id)
         if is_blocked:

@@ -559,7 +559,11 @@ class FederationEventHandler:
             raise SynapseError(400, "Room version mismatch")
 
         if room_version.msc4242_state_dags and not is_state_dag_connected(
-            [ev for ev in state if supports_msc4242_state_dag(ev)]
+            [
+                ev
+                for ev in itertools.chain(state, [event])
+                if supports_msc4242_state_dag(ev)
+            ]
         ):
             # We should have been given a connected state DAG. If there is a gap in it we
             # cannot calculate the state, so the response is invalid and we refuse the join.
@@ -1255,6 +1259,15 @@ class FederationEventHandler:
 
         if not missing_prevs:
             return await self._state_handler.compute_event_context(event)
+
+        if event.room_version.msc4242_state_dags:
+            raise FederationError(
+                "ERROR",
+                500,
+                "Fetching the state at missing prev_events is not implemented for "
+                "MSC4242 state DAG rooms",
+                affected=event_id,
+            )
 
         logger.info(
             "_compute_event_context_with_maybe_missing_prevs(event_id=%s): Event in room %s is missing prev_events %s: "
@@ -2684,6 +2697,12 @@ class FederationEventHandler:
             if supports_msc4242_state_dag(event):
                 return await self._load_calculated_auth_events(event, context)
             return event_auth_events.values()
+        if supports_msc4242_state_dag(event):
+            raise AuthError(
+                code=HTTPStatus.FORBIDDEN,
+                msg=f"Unknown prev_state_events {missing_auth_event_ids}; fetching them "
+                "is not implemented for MSC4242 state DAG rooms",
+            )
         if destination is None:
             # this shouldn't happen: destination must be set unless we know we have already
             # persisted the auth events.

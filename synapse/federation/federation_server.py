@@ -233,12 +233,22 @@ class FederationServer(FederationBase):
             # We pause a bit so that we don't start handling all rooms at once.
             await self._clock.sleep(Duration(seconds=random.uniform(0, 0.1)))
 
+    async def _assert_not_state_dag_room(self, room_id: str, endpoint: str) -> None:
+        room_version = await self.store.get_room_version(room_id)
+        if room_version.msc4242_state_dags:
+            raise SynapseError(
+                500,
+                f"{endpoint} is not implemented for MSC4242 state DAG rooms",
+                errcode=Codes.UNKNOWN,
+            )
+
     async def on_backfill_request(
         self, origin: str, room_id: str, versions: list[str], limit: int
     ) -> tuple[int, dict[str, Any]]:
         async with self._server_linearizer.queue((origin, room_id)):
             origin_host, _ = parse_server_name(origin)
             await self.check_server_matches_acl(origin_host, room_id)
+            await self._assert_not_state_dag_room(room_id, "/backfill")
 
             pdus = await self.handler.on_backfill_request(
                 origin, room_id, versions, limit
@@ -654,6 +664,7 @@ class FederationServer(FederationBase):
         await self._event_auth_handler.assert_host_in_room(room_id, origin)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, room_id)
+        await self._assert_not_state_dag_room(room_id, "/state")
 
         # we grab the linearizer to protect ourselves from servers which hammer
         # us. In theory we might already have the response to this query
@@ -694,6 +705,7 @@ class FederationServer(FederationBase):
         await self._event_auth_handler.assert_host_in_room(room_id, origin)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, room_id)
+        await self._assert_not_state_dag_room(room_id, "/state_ids")
 
         resp = await self._state_ids_resp_cache.wrap(
             (room_id, event_id),
@@ -1154,6 +1166,13 @@ class FederationServer(FederationBase):
         # Note that get_room_version throws if the room does not exist here.
         room_version = await self.store.get_room_version(room_id)
 
+        if room_version.msc4242_state_dags and membership_type != Membership.JOIN:
+            raise SynapseError(
+                500,
+                f"/send_{membership_type} is not implemented for MSC4242 state DAG rooms",
+                errcode=Codes.UNKNOWN,
+            )
+
         if await self.store.is_partial_state_room(room_id):
             # If our server is still only partially joined, we can't give a complete
             # response to /send_join, /send_knock or /send_leave.
@@ -1247,6 +1266,7 @@ class FederationServer(FederationBase):
             await self._event_auth_handler.assert_host_in_room(room_id, origin)
             origin_host, _ = parse_server_name(origin)
             await self.check_server_matches_acl(origin_host, room_id)
+            await self._assert_not_state_dag_room(room_id, "/event_auth")
 
             time_now = self._clock.time_msec()
             auth_pdus = await self.handler.on_event_auth(event_id, room_id)
@@ -1332,6 +1352,7 @@ class FederationServer(FederationBase):
                     origin, room_id, earliest_events, latest_events, limit
                 )
             else:
+                await self._assert_not_state_dag_room(room_id, "/get_missing_events")
                 missing_events = await self.handler.on_get_missing_events(
                     origin, room_id, earliest_events, latest_events, limit
                 )
