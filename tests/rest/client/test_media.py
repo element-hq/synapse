@@ -314,6 +314,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -380,6 +381,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -410,6 +412,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -446,6 +449,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -487,6 +491,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -522,6 +527,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -555,6 +561,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -664,6 +671,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
 
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
@@ -780,6 +788,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Extract Synapse's tcp client
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
 
         # Build a fake remote server to reply with
         server = AccumulatingProtocol()
@@ -833,6 +842,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Respond with the HTML.
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -848,6 +858,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Respond with the photo.
         client = self.reactor.tcpClients[1][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -882,6 +893,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -924,6 +936,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -964,6 +977,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1026,6 +1040,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1063,6 +1078,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1079,6 +1095,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Ensure a second request is made to the photo URL.
         client = self.reactor.tcpClients[1][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1123,6 +1140,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1172,6 +1190,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1246,6 +1265,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1269,6 +1289,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Ensure a second request is made to the oEmbed URL.
         client = self.reactor.tcpClients[1][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1287,6 +1308,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Ensure a third request is made to the photo URL.
         client = self.reactor.tcpClients[2][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1338,6 +1360,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1379,6 +1402,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1546,6 +1570,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
