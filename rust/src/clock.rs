@@ -67,6 +67,9 @@ pub fn set_virtual_time_msec(millis: u64) {
 /// the same system clock (on Linux both are
 /// `clock_gettime(CLOCK_REALTIME)`).Code that needs a monotonic clock should
 /// use [`std::time::Instant`] directly.
+///
+/// In future, this may be extended to support per-homeserver looping calls
+/// (which is why this is not a global clock).
 pub struct Clock {}
 
 impl Default for Clock {
