@@ -37,7 +37,6 @@ from synapse.api.constants import (
     CANONICALJSON_MAX_INT,
     CANONICALJSON_MIN_INT,
     MAX_PDU_SIZE,
-    EventTypes,
 )
 from synapse.api.errors import Codes, SynapseError
 from synapse.logging.opentracing import SynapseTags, set_tag, trace
@@ -55,7 +54,7 @@ from synapse.synapse_rust.events import (
 from synapse.synapse_rust.types import Requester
 from synapse.types import JsonDict
 
-from . import EventBase, StrippedStateEvent
+from . import EventBase
 
 # These are imported only to re-export them (callers import them from this
 # module); listing them in __all__ stops the unused-import lint flagging them
@@ -549,45 +548,9 @@ def strip_event(event: EventBase) -> JsonDict:
     Stripped state events can only have the `sender`, `type`, `state_key` and `content`
     properties present.
     """
-    # MSC4311: Ensure the create event is available on invites and knocks.
-    # TODO: Implement the rest of MSC4311
-    if (
-        event.room_version.msc4291_room_ids_as_hashes
-        and event.type == EventTypes.Create
-        and event.get_state_key() == ""
-    ):
-        return event.get_pdu_json()
-
     return {
         "type": event.type,
         "state_key": event.state_key,
         "content": dict(event.content),
         "sender": event.sender,
     }
-
-
-def parse_stripped_state_event(raw_stripped_event: Any) -> StrippedStateEvent | None:
-    """
-    Given a raw value from an event's `unsigned` field, attempt to parse it into a
-    `StrippedStateEvent`.
-    """
-    if isinstance(raw_stripped_event, dict):
-        # All of these fields are required
-        type = raw_stripped_event.get("type")
-        state_key = raw_stripped_event.get("state_key")
-        sender = raw_stripped_event.get("sender")
-        content = raw_stripped_event.get("content")
-        if (
-            isinstance(type, str)
-            and isinstance(state_key, str)
-            and isinstance(sender, str)
-            and isinstance(content, dict)
-        ):
-            return StrippedStateEvent(
-                type=type,
-                state_key=state_key,
-                sender=sender,
-                content=content,
-            )
-
-    return None

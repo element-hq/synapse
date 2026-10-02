@@ -1,0 +1,1 @@
+Reject user creation via the Admin API when Synapse is delegating authentication to MAS.

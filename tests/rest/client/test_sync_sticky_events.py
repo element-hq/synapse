@@ -13,6 +13,7 @@
 import json
 import sqlite3
 from dataclasses import dataclass
+from http import HTTPStatus
 from unittest.mock import patch
 from urllib.parse import quote
 
@@ -349,6 +350,125 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
             sticky_event_id,
             sticky_event_ids,
             f"Sticky event from ignored user {sticky_event_id} should not be in sticky section",
+        )
+
+    def test_newly_joined_room_gets_all_sticky_events(self) -> None:
+        """
+        Test that joining a room delivers that room's whole sticky event backlog,
+        even though those sticky events are behind the client's sync position.
+
+        > When the user joins a room, the server MUST include all unexpired sticky
+        > events for that room in their subsequent sync response.
+        > — https://github.com/matrix-org/matrix-spec-proposals/blob/d42301b17859d046953563dc7f046edd51789a12/proposals/4354-sticky-events.md#sync-api-changes
+        """
+        # A filter that excludes message events, so that the sticky events come down
+        # the sticky section rather than the timeline section.
+        filter_json = json.dumps(
+            {"room": {"timeline": {"types": ["io.element.example"]}}}
+        )
+
+        sticky_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "sticky message", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+
+        # user2 syncs before joining the room, which moves their sticky events stream
+        # position past the sticky event above.
+        user2_id = self.register_user("user2", "pass")
+        user2_token = self.login(user2_id, "pass")
+        channel = self.make_request(
+            "GET",
+            f"/sync?filter={quote(filter_json)}",
+            access_token=user2_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        since = channel.json_body["next_batch"]
+
+        # user2 joins the room
+        self.helper.join(self.room_id, user2_id, tok=user2_token)
+
+        # The next (incremental) sync gives user2 the historical sticky event.
+        channel = self.make_request(
+            "GET",
+            f"/sync?filter={quote(filter_json)}&since={since}",
+            access_token=user2_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        sticky_events = channel.json_body["rooms"]["join"][self.room_id][
+            "msc4354_sticky"
+        ]["events"]
+        self.assertEqual(
+            {sticky_event["event_id"] for sticky_event in sticky_events},
+            {sticky_event_id},
+        )
+
+    def test_displayname_change_is_not_newly_joined_room(self) -> None:
+        """
+        Test that a displayname change (`m.room.member` from `join` to `join`)
+        does not cause the room to be treated as newly joined.
+        That is to say, we do NOT send down all sticky events again in this case.
+        """
+        # A filter that excludes message events, so that the sticky events come down
+        # the sticky section rather than the timeline section.
+        # We include `m.room.member` so that we witness the membership change
+        # and receive a sync entry for the room.
+        filter_json = json.dumps({"room": {"timeline": {"types": [EventTypes.Member]}}})
+
+        sticky_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "sticky message", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+
+        # user2 joins the room and syncs, getting the sticky event and a `since`
+        # token past it.
+        user2_id = self.register_user("user2", "pass")
+        user2_token = self.login(user2_id, "pass")
+        self.helper.join(self.room_id, user2_id, tok=user2_token)
+        channel = self.make_request(
+            "GET",
+            f"/sync?filter={quote(filter_json)}",
+            access_token=user2_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        sticky_events = channel.json_body["rooms"]["join"][self.room_id][
+            "msc4354_sticky"
+        ]["events"]
+        self.assertEqual(
+            [sticky_event["event_id"] for sticky_event in sticky_events],
+            [sticky_event_id],
+        )
+        since = channel.json_body["next_batch"]
+
+        # user2 changes their display name, sending `m.room.member`
+        self.helper.send_state(
+            self.room_id,
+            EventTypes.Member,
+            {
+                "membership": "join",
+                "displayname": "some_per_room_name",
+            },
+            tok=user2_token,
+            state_key=user2_id,
+        )
+
+        # The next (incremental) sync must not transmit the sticky event again.
+        channel = self.make_request(
+            "GET",
+            f"/sync?filter={quote(filter_json)}&since={since}",
+            access_token=user2_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        room_entry = channel.json_body["rooms"]["join"][self.room_id]
+        self.assertNotIn(
+            "msc4354_sticky",
+            room_entry,
+            f"Display name change should not resend the room's sticky events: {room_entry}",
         )
 
     def test_history_visibility_bypass_for_sticky_events(self) -> None:

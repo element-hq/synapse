@@ -164,6 +164,7 @@ async def check_state_independent_auth_rules(
     store: _EventSourceStore,
     event: "EventBase",
     batched_auth_events: Mapping[str, "EventBase"] | None = None,
+    batched_rejections: Mapping[str, str] | None = None,
 ) -> None:
     """Check that an event complies with auth rules that are independent of room state
 
@@ -175,6 +176,11 @@ async def check_state_independent_auth_rules(
         event: the event being checked.
         batched_auth_events: if the event being authed is part of a batch, any events
             from the same batch that may be necessary to auth the current event
+        batched_rejections: event ID to rejection reason for any events in `batched_auth_events`
+            which have been rejected. Events in the batch have not been persisted
+            yet, so their rejection is recorded neither on the event nor in the database,
+            and the caller has to tell us. Needed for MSC4242 State DAG rooms, where
+            rejection cascades through `prev_state_events`.
 
     Raises:
         AuthError if the checks fail
@@ -244,11 +250,14 @@ async def check_state_independent_auth_rules(
                 )
             # 2.3 If there are entries which were themselves rejected under the checks performed on
             # receipt of a PDU, reject.
-            if prev_state_event.rejected_reason is not None:
+            rejected_reason = prev_state_event.rejected_reason
+            if rejected_reason is None and batched_rejections is not None:
+                rejected_reason = batched_rejections.get(prev_state_event.event_id)
+            if rejected_reason is not None:
                 raise AuthError(
                     403,
                     f"During auth for event {event.event_id} in room {event.room_id}, event has a "
-                    + f"prev_state_event which is rejected ({prev_state_event.rejected_reason}): "
+                    + f"prev_state_event which is rejected ({rejected_reason}): "
                     + f"{prev_state_event.event_id}",
                 )
 

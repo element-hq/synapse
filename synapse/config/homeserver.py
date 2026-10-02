@@ -60,6 +60,7 @@ from .server_notices import ServerNoticesConfig
 from .spam_checker import SpamCheckerConfig
 from .sso import SSOConfig
 from .stats import StatsConfig
+from .task_scheduler import TaskSchedulerConfig
 from .third_party_event_rules import ThirdPartyRulesConfig
 from .tls import TlsConfig
 from .tracer import TracerConfig
@@ -120,6 +121,7 @@ class HomeServerConfig(RootConfig):
         BackgroundUpdateConfig,
         AutoAcceptInvitesConfig,
         UserTypesConfig,
+        TaskSchedulerConfig,
         # This must be last, as it checks for conflicts with other config options.
         MasConfig,
     ]

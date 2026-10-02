@@ -36,14 +36,16 @@ class RejectionsStore(SQLBaseStore):
             desc="get_rejection_reason",
         )
 
-    async def get_rejected_events(self, event_ids: set[str]) -> set[str]:
-        """Filter the provided event IDs to only return rejected events."""
+    async def has_rejected_event_ids(self, event_ids: set[str]) -> set[str]:
+        """Filter the provided event IDs to only return rejected events.
+        This does not check if the event IDs are persisted (missing events would appear as non-rejected).
+        """
         rows = await self.db_pool.simple_select_many_batch(
             table="rejections",
             column="event_id",
             iterable=event_ids,
             retcols=("event_id",),
             keyvalues={},
-            desc="get_rejected_events",
+            desc="has_rejected_event_ids",
         )
         return {r[0] for r in rows}
