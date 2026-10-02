@@ -327,25 +327,6 @@ class RoomStateEventRestServlet(RestServlet):
 
         content = parse_json_object_from_request(request)
 
-        is_requester_admin = await self.auth.is_server_admin(requester)
-        if not is_requester_admin:
-            spam_check = (
-                await self._spam_checker_module_callbacks.user_may_send_state_event(
-                    user_id=requester.user.to_string(),
-                    room_id=room_id,
-                    event_type=event_type,
-                    state_key=state_key,
-                    content=content,
-                )
-            )
-            if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
-                raise SynapseError(
-                    403,
-                    "You are not permitted to send the state event",
-                    errcode=spam_check[0],
-                    additional_fields=spam_check[1],
-                )
-
         origin_server_ts = None
         if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
@@ -367,6 +348,25 @@ class RoomStateEventRestServlet(RestServlet):
             set_tag("delay_id", delay_id)
             ret = {"delay_id": delay_id}
             return 200, ret
+
+        is_requester_admin = await self.auth.is_server_admin(requester)
+        if not is_requester_admin:
+            spam_check = (
+                await self._spam_checker_module_callbacks.user_may_send_state_event(
+                    user_id=requester.user.to_string(),
+                    room_id=room_id,
+                    event_type=event_type,
+                    state_key=state_key,
+                    content=content,
+                )
+            )
+            if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                raise SynapseError(
+                    403,
+                    "You are not permitted to send the state event",
+                    errcode=spam_check[0],
+                    additional_fields=spam_check[1],
+                )
 
         try:
             if event_type == EventTypes.Member:
