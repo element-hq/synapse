@@ -22,7 +22,7 @@
 //!
 //! Synapse's unit tests run against a virtual reactor clock, where time only
 //! moves when a test says so. The test reactor keeps this clock in step via
-//! [`Clock::set_virtual_time`]. See `ThreadedMemoryReactorClock` in
+//! [`set_virtual_time_msec`]. See `ThreadedMemoryReactorClock` in
 //! `tests/server.py`.
 
 use std::{
@@ -30,13 +30,35 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-/// A sentinel value stored in [`Clock::virtual_millis`] while the clock is
+use pyo3::pyfunction;
+
+/// A sentinel value stored in [`VIRTUAL_MILLIS`] while the clock is
 /// reading the real time. This value indicates that the clock should read the
 /// real system time rather than a virtual time.
 ///
 /// We choose a value that will never be used in tests, namely the maximum `u64`
 /// value. This is 584 million years after the epoch.
 const REAL_TIME_SENTINEL: u64 = u64::MAX;
+
+/// The virtual time in milliseconds since the Unix epoch, or
+/// [`REAL_TIME_SENTINEL`]. Only ever set by tests, via [`set_virtual_time_msec`].
+///
+/// We use an AtomicU64 (rather than e.g. `Option<..>`) so that reads are fast
+/// and do not require locking.
+static VIRTUAL_MILLIS: AtomicU64 = AtomicU64::new(REAL_TIME_SENTINEL);
+
+/// Pin the clock to the given time, in milliseconds since the Unix epoch.
+///
+/// Only tests call this. Nothing unpins the clock, since a test reactor
+/// and the runtimes attached to it live for a single test.
+#[pyfunction]
+pub fn set_virtual_time_msec(millis: u64) {
+    if millis == REAL_TIME_SENTINEL {
+        panic!("Cannot set virtual time to the sentinel value REAL_TIME_SENTINEL");
+    }
+
+    VIRTUAL_MILLIS.store(millis, Ordering::Relaxed);
+}
 
 /// The current time as the Rust side of a homeserver sees it.
 ///
@@ -45,14 +67,7 @@ const REAL_TIME_SENTINEL: u64 = u64::MAX;
 /// the same system clock (on Linux both are
 /// `clock_gettime(CLOCK_REALTIME)`).Code that needs a monotonic clock should
 /// use [`std::time::Instant`] directly.
-pub struct Clock {
-    /// The virtual time in milliseconds since the Unix epoch, or
-    /// [`REAL_TIME_SENTINEL`]. Only ever set by tests, via
-    /// [`Clock::set_virtual_time`].
-    ///
-    /// We use an AtomicU64 so that reads are fast and do not require locking.
-    virtual_millis: AtomicU64,
-}
+pub struct Clock {}
 
 impl Default for Clock {
     fn default() -> Self {
@@ -63,9 +78,7 @@ impl Default for Clock {
 impl Clock {
     /// A clock reading the real time.
     pub fn new() -> Self {
-        Clock {
-            virtual_millis: AtomicU64::new(REAL_TIME_SENTINEL),
-        }
+        Clock {}
     }
 
     /// The current time.
@@ -73,7 +86,8 @@ impl Clock {
     /// Reads the same system clock as `synapse.util.clock.Clock.time_msec()`
     /// on the Python side. See the module docs.
     pub fn now(&self) -> SystemTime {
-        match self.virtual_millis.load(Ordering::Relaxed) {
+        // Check if virtual time is set, otherwise fall back to real time.
+        match VIRTUAL_MILLIS.load(Ordering::Relaxed) {
             // On Linux this is a vDSO call rather than a syscall, so it is
             // cheap enough to make on every read.
             REAL_TIME_SENTINEL => SystemTime::now(),
@@ -92,18 +106,6 @@ impl Clock {
             .expect("system clock was set before the Unix epoch, 1970")
             .as_millis() as u64
     }
-
-    /// Pin the clock to the given time, in milliseconds since the Unix epoch.
-    ///
-    /// Only tests call this. Nothing unpins the clock, since a test reactor
-    /// and the runtimes attached to it live for a single test.
-    pub fn set_virtual_time(&self, millis: u64) {
-        if millis == REAL_TIME_SENTINEL {
-            panic!("Cannot set virtual time to the sentinel value REAL_TIME_SENTINEL");
-        }
-
-        self.virtual_millis.store(millis, Ordering::Relaxed);
-    }
 }
 
 #[cfg(test)]
@@ -118,12 +120,12 @@ mod tests {
         let clock = Clock::new();
         assert!(clock.now_millis() > PLAUSIBLE_WALL_CLOCK_MILLIS);
 
-        clock.set_virtual_time(12345);
+        set_virtual_time_msec(12345);
         assert_eq!(clock.now_millis(), 12345);
         assert_eq!(clock.now(), UNIX_EPOCH + Duration::from_millis(12345));
 
         // Zero is a legitimate virtual time. The memory reactor starts there.
-        clock.set_virtual_time(0);
+        set_virtual_time_msec(0);
         assert_eq!(clock.now_millis(), 0);
     }
 }

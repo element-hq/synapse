@@ -23,6 +23,6 @@ class RustRuntime:
         Linux. See `rust/src/clock.rs`.
         """
 
-    def set_virtual_time_msec(self, millis: int) -> None:
-        """Pin the Rust clock to the given time. Only for tests, which run
-        against a virtual reactor clock."""
+def set_virtual_time_msec(millis: int) -> None:
+    """Pin the Rust clock to the given time. Only for tests, which run
+    against a virtual reactor clock."""

@@ -32,7 +32,7 @@ use anyhow::Context;
 use pyo3::{exceptions::PyRuntimeError, prelude::*};
 use tokio::runtime::{Handle, Runtime};
 
-use crate::clock::Clock;
+use crate::clock::{set_virtual_time_msec, Clock};
 use crate::homeserver::HomeServer;
 use crate::reactor::Reactor;
 use crate::twisted_dispatch::{self, TwistedDispatchReader, TwistedDispatcher};
@@ -233,12 +233,6 @@ impl RustRuntime {
     fn time_msec(&self) -> u64 {
         self.inner.clock.now_millis()
     }
-
-    /// Pin the clock to the given time, in milliseconds since the Unix epoch.
-    /// Only tests call this. See [`crate::clock`].
-    fn set_virtual_time_msec(&self, millis: u64) {
-        self.inner.clock.set_virtual_time(millis);
-    }
 }
 
 /// The callable registered with `HomeServer.register_sync_shutdown_handler`,
@@ -264,6 +258,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     let child_module = PyModule::new(py, "runtime")?;
 
     child_module.add_class::<RustRuntime>()?;
+    child_module.add_function(wrap_pyfunction!(set_virtual_time_msec, m)?)?;
 
     m.add_submodule(&child_module)?;
 

@@ -101,7 +101,7 @@ from synapse.storage import DataStore
 from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
-from synapse.synapse_rust.runtime import RustRuntime
+from synapse.synapse_rust.runtime import set_virtual_time_msec
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
@@ -595,11 +595,6 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self.lookups: dict[str, str] = {}
         self._thread_callbacks: deque[Callable[..., R]] = deque()
 
-        # Rust runtimes whose clocks follow this reactor's virtual time. Usually
-        # one, but worker tests (`make_worker_hs`) run several homeservers on
-        # one reactor, and each has its own runtime.
-        self._rust_runtimes: weakref.WeakSet[RustRuntime] = weakref.WeakSet()
-
         lookups = self.lookups
 
         @implementer(IResolverSimple)
@@ -628,16 +623,6 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # overwrite it again.
         self.nameResolver = SimpleResolverComplexifier(FakeResolver())
 
-    def attach_rust_runtime(self, runtime: RustRuntime) -> None:
-        """Keep the given Rust runtime's clock on this reactor's virtual time.
-
-        The Rust side has its own clock (`rust/src/clock.rs`) because much of
-        it runs without the GIL. It can't see this virtual clock, so we push
-        the time over to it now, and again on every read of `seconds()`.
-        """
-        runtime.set_virtual_time_msec(int(super().seconds() * 1000))
-        self._rust_runtimes.add(runtime)
-
     def seconds(self) -> float:
         # Set the Rust runtimes clocks to the current virtual time.
         #
@@ -647,8 +632,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # returned would be too late for them.
         now = super().seconds()
         now_msec = int(now * 1000)
-        for runtime in self._rust_runtimes:
-            runtime.set_virtual_time_msec(now_msec)
+        set_virtual_time_msec(now_msec)
         return now
 
     def run(self) -> None:
@@ -1439,18 +1423,6 @@ def setup_test_homeserver(
     # Install @cache_in_self attributes
     for key, val in extra_homeserver_attributes.items():
         setattr(hs, "_" + key, val)
-
-    # Keep the Rust side of this homeserver on the reactor's virtual clock. This
-    # constructs the runtime. That is cheap, as its tokio thread pool starts
-    # lazily, but it does register the runtime's wakeup socket with the reactor
-    # as a reader.
-    #
-    # We do this after installing attributes above so that if the test supplies
-    # its own `rust_runtime`, that's the one we attach.
-    assert isinstance(reactor, ThreadedMemoryReactorClock), (
-        "tests run against a virtual clock, which the Rust side must follow"
-    )
-    reactor.attach_rust_runtime(hs.get_rust_runtime())
 
     # Mock TLS
     hs.tls_server_context_factory = Mock()

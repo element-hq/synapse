@@ -79,12 +79,7 @@ class ClockTestCase(HomeserverTestCase):
 
 
 class RustClockTestCase(HomeserverTestCase):
-    """Tests for the Rust side's view of the time (`RustRuntime.time_msec`).
-
-    Rust can't reach the virtual reactor clock the tests run against, so the
-    test reactor pushes the time over to every runtime attached to it. See
-    `tests.server.ThreadedMemoryReactorClock.attach_rust_runtime`.
-    """
+    """Tests for the Rust side's view of the time (`RustRuntime.time_msec`)."""
 
     def test_follows_the_reactor(self) -> None:
         runtime = self.hs.get_rust_runtime()
@@ -118,7 +113,6 @@ class RustClockTestCase(HomeserverTestCase):
         """Worker tests run several homeservers, each with its own runtime, on
         one reactor. All of their clocks must move together."""
         other_runtime = RustRuntime(hs=self.hs)
-        self.reactor.attach_rust_runtime(other_runtime)
 
         self.reactor.advance(5)
 
