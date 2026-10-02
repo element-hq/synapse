@@ -432,28 +432,29 @@ class DelayedEventsStore(SQLBaseStore):
         Raises:
             NotFoundError: if there is no matching delayed event.
         """
-        rows = await self.db_pool.execute(
-            "get_delayed_event_for_user",
-            """
-            SELECT
-                room_id,
-                event_type,
-                state_key,
-                delay,
-                send_ts - delay,
-                content,
-                finalised_ts,
-                finalised_event_id,
-                finalised_error
-            FROM delayed_events
-            WHERE delay_id = ? AND user_localpart = ?
-            """,
-            delay_id,
-            user_localpart,
+        row = await self.db_pool.simple_select_one(
+            table="delayed_events",
+            keyvalues={
+                "delay_id": delay_id,
+                "user_localpart": user_localpart,
+            },
+            retcols=(
+                "room_id",
+                "event_type",
+                "state_key",
+                "delay",
+                "send_ts - delay",
+                "content",
+                "finalised_ts",
+                "finalised_event_id",
+                "finalised_error",
+            ),
+            allow_none=True,
+            desc="get_delayed_event_for_user",
         )
-        if not rows:
+        if row is None:
             raise NotFoundError("Delayed event not found")
-        row = rows[0]
+
         return DelayedEventResponse(
             delay_id,
             row[0],
