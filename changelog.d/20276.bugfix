@@ -1,0 +1,1 @@
+Fix a tight retry loop in clients using MSC4308 when a thread subscription backpagination response contains an empty subscription map.

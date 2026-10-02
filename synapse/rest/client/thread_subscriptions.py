@@ -221,11 +221,10 @@ class ThreadSubscriptionsPaginationRestServlet(RestServlet):
                     attr.asdict(_ThreadUnsubscription(bump_stamp=stream_id))
                 )
 
-        result: JsonDict = {}
-        if subscribed_threads:
-            result["subscribed"] = subscribed_threads
-        if unsubscribed_threads:
-            result["unsubscribed"] = unsubscribed_threads
+        result: JsonDict = {
+            "subscribed": subscribed_threads,
+            "unsubscribed": unsubscribed_threads,
+        }
 
         if len(subscriptions) == limit:
             # We hit the limit, so there might be more entries to return.
