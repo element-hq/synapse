@@ -1693,19 +1693,53 @@ class SyncHandler:
                     to_token=end_token.room_key,
                 )
             )
+            # A delta with `event_id=None` means the key was removed from the
+            # current state. Two things cause this:
+            #  - A state reset removed the key. State groups don't have it
+            #    either, and MSC4222 has no way to tell the client that a key
+            #    was removed, so there is nothing to send.
+            #  - The server left the room and we deleted every
+            #    `current_state_events` row for it. State groups still have
+            #    the real state at `end_token`, so we look the key up there
+            #    instead of skipping it.
+            # See https://github.com/element-hq/synapse/issues/18793
+            cleared_state_keys: set[tuple[str, str]] = set()
             for delta in deltas:
+                key = (delta.event_type, delta.state_key)
                 if delta.event_id is None:
-                    # There was a state reset and this state entry is no longer
-                    # present, but we have no way of informing the client about
-                    # this, so we just skip it for now.
+                    # When the server leaves, every key in the room gets such a
+                    # delta, so we only look up the keys that need it. A key
+                    # that changed earlier in the window already has its own
+                    # delta with an event ID; only the events persisted together
+                    # with the leave lack one, and those end the timeline. The
+                    # syncing user's own membership is always looked up, as the
+                    # timeline filter may have removed their leave.
+                    if key in timeline_state or key == (
+                        EventTypes.Member,
+                        sync_config.user.to_string(),
+                    ):
+                        cleared_state_keys.add(key)
                     continue
 
                 # Note that deltas are in stream ordering, so if there are
                 # multiple deltas for a given type/state_key we'll always pick
                 # the latest one.
-                key = (delta.event_type, delta.state_key)
                 delta_state_ids[key] = delta.event_id
                 changed_keys.add(key)
+                cleared_state_keys.discard(key)
+
+            if cleared_state_keys:
+                state_at_end = await self._state_storage_controller.get_state_ids_at(
+                    room_id,
+                    stream_position=end_token,
+                    state_filter=StateFilter.from_types(cleared_state_keys),
+                    await_full_state=await_full_state,
+                )
+                # The latest delta for these keys was the removal, so the state
+                # at `end_token` replaces any earlier delta for the same key
+                # (e.g. a display name change before the leave).
+                delta_state_ids.update(state_at_end)
+                changed_keys.update(state_at_end)
 
             return delta_state_ids, changed_keys
 
