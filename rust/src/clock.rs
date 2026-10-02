@@ -20,13 +20,11 @@
 //! homeserver's [`RustRuntime`](crate::runtime::RustRuntime) owns a [`Clock`]
 //! that can be read without the GIL.
 //!
-//! It is a *wall* clock, and so is `synapse.util.clock.Clock.time_msec()` on
-//! the Python side. Synapse does nothing to keep the two in sync. They agree
-//! because they read the same system clock. The Python one calls the
-//! reactor's `seconds()`, which is `time.time()`. This one calls
-//! [`SystemTime::now`]. On Linux both are `clock_gettime(CLOCK_REALTIME)`.
-//! Code that needs a monotonic clock should use [`std::time::Instant`]
-//! directly.
+//! Like `synapse.util.clock.Clock` on the Python side, this is a wall clock.
+//! While these are two separate, independent implementations, they both read
+//! the same system clock (on Linux both are
+//! `clock_gettime(CLOCK_REALTIME)`).Code that needs a monotonic clock should
+//! use [`std::time::Instant`] directly.
 //!
 //! Synapse's unit tests run against a virtual reactor clock, where time only
 //! moves when a test says so. The test reactor keeps this clock in step via
