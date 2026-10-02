@@ -2143,29 +2143,21 @@ class FederationEventHandler:
                     # The events being persisted aren't in the database yet, so pull the
                     # auth events out of `event_map`, which holds the whole state DAG,
                     # including the events we had already persisted before this join.
+                    missing_auth_event_ids = set(calculated_auth_event_ids).difference(
+                        event_map
+                    )
+                    if missing_auth_event_ids:
+                        raise SynapseError(
+                            502,
+                            f"state DAG is missing the calculated auth events {missing_auth_event_ids} "
+                            f"for event {event.event_id}",
+                        )
                     calculated_auth_events = {
                         event_id: event_map[event_id]
                         for event_id in calculated_auth_event_ids
                     }
-                    # In theory we should not be missing any auth events because event_map contains
-                    # the entire state DAG, but if we do we can ask the database if it knows about them.
-                    missing_auth_event_ids = set(calculated_auth_event_ids).difference(
-                        calculated_auth_events
-                    )
-                    if missing_auth_event_ids:
-                        calculated_auth_events.update(
-                            await self._store.get_events(
-                                missing_auth_event_ids,
-                                # Allow rejected events so events which depend on them fail with coherent
-                                # error messages. If we filtered them out here, we'd instead fail with
-                                # a missing events error which is misleading.
-                                allow_rejected=True,
-                                redact_behaviour=EventRedactBehaviour.as_is,
-                            )
-                        )
                     # In order to run auth rule checks we need the events referenced in the event
                     # (prev_state_events) and the events we calculated (auth_events) so load them now.
-                    # If we are missing any, auth rule checks will produce a coherent error message.
                     batched_auth_events = {
                         event_id: event_map[event_id]
                         for event_id in itertools.chain(
