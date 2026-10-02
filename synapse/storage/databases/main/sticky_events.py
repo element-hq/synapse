@@ -891,6 +891,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                 (
                     room_id,
                     next_to_send_sticky_event_stream_position,
+                    now_millis,
                     user_is_local_like_pattern(self.hs),
                     limit,
                 ),
