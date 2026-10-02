@@ -805,6 +805,8 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                 3. event IDs of backlogged sticky events (between 1 and `limit` of them)
         """
 
+        now_millis = self.clock.time_msec()
+
         def _get_backlogged_sticky_events_for_destination_txn(
             txn: LoggingTransaction,
         ) -> tuple[RoomID, StickyEventStreamPosition, list[str]] | None:
@@ -880,6 +882,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                 FROM sticky_events
                 WHERE room_id = ?
                     AND ? <= stream_id
+                    AND ? < expires_at
                     -- filter to locally-originating sticky events
                     AND sender LIKE ?
                 ORDER BY stream_id ASC
@@ -925,6 +928,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                         ON se.room_id = backlog.room_id
                         -- filter to locally-originating sticky events
                         AND se.sender LIKE ?
+                        AND ? < se.expires_at
                         AND backlog.sticky_events_stream_position <= se.stream_id
                     WHERE se.event_id IS NULL
                         AND backlog.destination = ?
@@ -932,7 +936,12 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                 DELETE FROM destination_rooms_sticky_events_backlog
                 WHERE destination = ? AND room_id IN (SELECT room_id FROM to_clean_up)
                 """,
-                (user_is_local_like_pattern(self.hs), destination, destination),
+                (
+                    user_is_local_like_pattern(self.hs),
+                    now_millis,
+                    destination,
+                    destination,
+                ),
             )
 
         return await self.db_pool.runInteraction(
