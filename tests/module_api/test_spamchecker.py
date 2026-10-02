@@ -372,7 +372,9 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
     @parameterized.expand((False, True))
     @unittest.override_config({"max_event_delay_duration": "24h"})
-    def test_user_may_send_delayed_state_event_disallows(self, send_manually: bool) -> None:
+    def test_user_may_send_delayed_state_event_disallows(
+        self, send_manually: bool
+    ) -> None:
         """Test that the user_may_send_state_event callback is called when a delayed state event
         is sent (not when it is scheduled), and that the response is honoured.
         """
@@ -435,6 +437,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
             access_token=self.token,
         )
         self.assertEqual(channel.code, 404)
+
 
 class FederatedEventSpamCheckMetadataTestCase(unittest.FederatingHomeserverTestCase):
     servlets = [
