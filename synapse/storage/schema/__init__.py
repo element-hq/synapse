@@ -177,6 +177,8 @@ Changes in SCHEMA_VERSION = 94
     - MSC4242: Add state DAG tables.
     - MSC4429/MSC4262: Track updates to user profile fields via a new stream.
     - Add an `inserted_ts` column to the `state_groups_persisting` table.
+    - MSC4140: Add columns to the `delayed_events` table to keep track of delayed events
+      that have been sent, cancelled, or failed to be sent due to an error.
 """
 
 
