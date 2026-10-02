@@ -1527,6 +1527,7 @@ class FetchMissingStateDagEventsTests(unittest.FederatingHomeserverTestCase):
         self._prepare_handler(set(), linear, {("C",): ["A", "B", "FOREIGN"]})
         self._assert_fetches(linear, "C", ["A", "B"])
 
+
 class BackfilledStateDagEventTests(unittest.FederatingHomeserverTestCase):
     servlets = [
         admin.register_servlets,
