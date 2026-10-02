@@ -929,18 +929,18 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
             self.hs.get_datastores().main.get_event(realtime_id)
         )
 
-        # Append to `_pending_pdus` rather than calling `send_pdu`, because
+        # Manually append to `_pending_pdus` rather than calling `send_pdu`, because
         # `send_pdu` will trigger `attempt_new_transaction()`,
         # but we want to be in control here so we can inspect each transaction
         # individually.
-        per_dest_queue._pending_pdus.append(realtime_event)
+        per_dest_queue._pending_pdus[realtime_event.event_id] = realtime_event
 
         # Transaction 1 (normal) sends the real-time queued PDU...
         transaction = self.run_transaction(per_dest_queue)
         assert transaction is not None
         self.assertEqual([pdu.event_id for pdu in transaction.pdus], [realtime_id])
         # (...and it is removed from the queue once the transaction completes)
-        self.assertEqual(per_dest_queue._pending_pdus, [])
+        self.assertEqual(list(per_dest_queue._pending_pdus), [])
 
         # Transaction 2 sends the sticky event backlog
         transaction = self.run_transaction(per_dest_queue)

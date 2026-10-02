@@ -20,6 +20,7 @@
 #
 #
 import datetime
+import itertools
 import logging
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Hashable, Iterable
@@ -144,12 +145,6 @@ class _PreparedTransaction:
     When the transaction completes, this should be stored as our position in the events stream.
     """
 
-    main_queue: bool
-    """
-    True if and only if these events were from the 'main' queue
-    (not the sticky event backlog).
-    """
-
     sticky_events: _StickyEventsTransactionInfo | None
     """
     Information useful for transactions sending backlogged sticky events.
@@ -241,7 +236,7 @@ class PerDestinationQueue:
         self._last_successful_stream_ordering: int | None = None
 
         # a queue of pending PDUs
-        self._pending_pdus: list[EventBase] = []
+        self._pending_pdus: OrderedDict[str, EventBase] = OrderedDict()
 
         # XXX this is never actually used: see
         # https://github.com/matrix-org/synapse/issues/7549
@@ -306,7 +301,7 @@ class PerDestinationQueue:
         if not self._catching_up or self._last_successful_stream_ordering is None:
             # only enqueue the PDU if we are not catching up (False) or do not
             # yet know if we have anything to catch up (None)
-            self._pending_pdus.append(pdu)
+            self._pending_pdus[pdu.event_id] = pdu
         else:
             assert pdu.internal_metadata.stream_ordering
             self._catchup_last_skipped = pdu.internal_metadata.stream_ordering
@@ -857,7 +852,7 @@ class PerDestinationQueue:
         This throws away the PDU queue.
         """
         self._catching_up = True
-        self._pending_pdus = []
+        self._pending_pdus = OrderedDict()
 
     async def _prepare_transaction(self) -> _PreparedTransaction | None:
         """
@@ -1014,7 +1009,9 @@ class PerDestinationQueue:
 
         # Now we look for any PDUs to send, by getting up to 50 PDUs from the
         # queue
-        pdus = self._pending_pdus[:MAX_PDUS_PER_TRANSACTION]
+        pdus: tuple[EventBase, ...] = tuple(
+            itertools.islice(self._pending_pdus.values(), MAX_PDUS_PER_TRANSACTION)
+        )
 
         if not pdus and not pending_edus:
             # There is nothing to send. There's also nothing to record upon
@@ -1034,7 +1031,6 @@ class PerDestinationQueue:
             to_device_message_stream_id=device_stream_id_upon_completion,
             device_list_stream_id=device_list_id_upon_completion,
             last_stream_ordering=last_stream_ordering,
-            main_queue=True,
             # This is not part of the sticky events backlog flow,
             # so don't advance that
             sticky_events=None,
@@ -1048,8 +1044,9 @@ class PerDestinationQueue:
         through the various streams we have now got.
         """
         # Successfully sent transactions, so we remove pending PDUs from the queue
-        if transaction.main_queue:
-            self._pending_pdus = self._pending_pdus[len(transaction.pdus) :]
+        for pdu in transaction.pdus:
+            # Remove sent events from queue
+            self._pending_pdus.pop(pdu.event_id, None)
 
         # Succeeded to send the transaction so we record where we have sent up
         # to in the various streams
@@ -1196,8 +1193,6 @@ class StickyEventBacklogTracker:
             device_list_stream_id=None,
             to_device_message_stream_id=None,
             last_stream_ordering=None,
-            # These events are not from the main queue, so don't advance the main queue
-            main_queue=False,
             # Upon completion, advance in the sticky backlog stream
             sticky_events=_StickyEventsTransactionInfo(
                 room_id=room_id,
