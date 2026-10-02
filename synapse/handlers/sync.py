@@ -23,6 +23,7 @@ import itertools
 import json
 import logging
 import os
+from collections import OrderedDict
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -74,6 +75,7 @@ from synapse.types import (
     MutableStateMap,
     Requester,
     RoomStreamToken,
+    StateKey,
     StateMap,
     StrCollection,
     StreamKeyType,
@@ -128,6 +130,96 @@ LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE = 16
 # A random key generated on server startup, for the lazy loaded profile fields cache.
 # Since this is a per-process cache, we don't care if the key is different per process.
 LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY = os.urandom(32)
+
+
+@attr.s(slots=True, auto_attribs=True)
+class LazyLoadedMembersCache:
+    """The membership events a lazy-loading client has been sent, so that later
+    syncs can leave them out. One per (user, device).
+
+    A member may only be left out if the client processed the response that
+    carried it. Each entry therefore records the `next_batch` position of the
+    response that carried it. A client that has processed a response syncs
+    from its `next_batch` next, so a request from `since` means the client
+    processed every response up to `since` and none after it. `start_request`
+    forgets the entries recorded after `since`. They were in responses the
+    client lost, by timing out a slow request and retrying it (#19978) or by
+    reloading from an older persisted token (#20278). Entries recorded at or
+    before `since` stay, so a client resuming from a token a few minutes old is
+    only sent again what it lost in those minutes. An initial sync forgets
+    everything.
+
+    Forgetting everything whenever `since` is before the newest entry would be
+    simpler, and `_newest` alone would suffice. But Element Web only persists
+    its sync token every few minutes and resumes from it on every reload, so
+    that would re-send every cached member on each reload.
+
+    The notifier may build several results for one long-poll and returns only
+    the first non-empty one. An empty result carries no members, so it records
+    nothing.
+
+    Leaving out a member the client never received loses it for good. A
+    `state_after` client does not apply state from the timeline, and a `state`
+    client only sees the membership changes that fall inside the timeline.
+    """
+
+    # user_id -> (event_id of the membership we last sent, room position of the
+    # `next_batch` of the response that carried it). Least recently used first.
+    #
+    # Not an `LruCache`, as that cannot be iterated over and `start_request`
+    # needs to check every entry's position against `since`.
+    _sent: OrderedDict[str, tuple[str, RoomStreamToken]] = attr.Factory(OrderedDict)
+
+    # An upper bound on the positions of the entries, so that `start_request`
+    # need not look at them when nothing was recorded after `since`. That is the
+    # steady state, where `since` is the `next_batch` of the last response.
+    _newest: RoomStreamToken | None = None
+
+    def start_request(self, since_token: StreamToken | None) -> None:
+        """Forget the members the client did not receive. Called at the start of
+        each sync request for this device."""
+        if since_token is None:
+            self._sent.clear()
+            self._newest = None
+            return
+
+        # Check for the common case where nothing has been recorded after
+        # `since`.
+        since = since_token.room_key
+        if self._newest is None or self._newest.is_before_or_eq(since):
+            return
+
+        # Remove all entries that were sent after `since`. This only has
+        # `LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE` entries.
+        for user_id, (_, sent_at) in list(self._sent.items()):
+            if not sent_at.is_before_or_eq(since):
+                del self._sent[user_id]
+
+        # Everything left is at or before `since`.
+        self._newest = since
+
+    def was_sent(self, user_id: str, event_id: str) -> bool:
+        """Whether `event_id` is the membership of `user_id` we last sent."""
+        entry = self._sent.get(user_id)
+        if entry is None or entry[0] != event_id:
+            return False
+        self._sent.move_to_end(user_id)
+        return True
+
+    def mark_sent(self, user_id: str, event_id: str, next_batch: StreamToken) -> None:
+        """Record that `event_id` is being sent in the response ending at
+        `next_batch`."""
+        sent_at = next_batch.room_key
+        self._sent[user_id] = (event_id, sent_at)
+        self._sent.move_to_end(user_id)
+        while len(self._sent) > LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE:
+            self._sent.popitem(last=False)
+
+        # Only move the bound forwards. Positions taken by this process only
+        # ever advance, but a response that started earlier may record its
+        # entries after a later one has.
+        if self._newest is None or self._newest.is_before_or_eq(sent_at):
+            self._newest = sent_at
 
 
 SyncRequestKey = tuple[Any, ...]
@@ -345,9 +437,9 @@ class SyncHandler:
             timeout=hs.config.caches.sync_response_cache_duration,
         )
 
-        # ExpiringCache((User, Device)) -> LruCache(user_id => event_id)
+        # ExpiringCache((User, Device)) -> LazyLoadedMembersCache
         self.lazy_loaded_members_cache: ExpiringCache[
-            tuple[str, str | None], LruCache[str, str]
+            tuple[str, str | None], LazyLoadedMembersCache
         ] = ExpiringCache(
             cache_name="lazy_loaded_members_cache",
             server_name=self.server_name,
@@ -1088,7 +1180,7 @@ class SyncHandler:
             member_ids[hero_id]
             for hero_id in summary["m.heroes"]
             if (
-                cache.get(hero_id) != member_ids[hero_id]
+                not cache.was_sent(hero_id, member_ids[hero_id])
                 and hero_id not in existing_members
             )
         ]
@@ -1096,27 +1188,21 @@ class SyncHandler:
         missing_hero_state = await self.store.get_events(missing_hero_event_ids)
 
         for s in missing_hero_state.values():
-            cache.set(s.state_key, s.event_id)
+            cache.mark_sent(s.state_key, s.event_id, now_token)
             state[(EventTypes.Member, s.state_key)] = s
 
         return summary
 
     def get_lazy_loaded_members_cache(
         self, cache_key: tuple[str, str | None]
-    ) -> LruCache[str, str]:
-        # FIXME: This cache may be subject to losing members in the case that
-        # a sync is interrupted and retried, see https://github.com/element-hq/synapse/issues/19978
-        cache: LruCache[str, str] | None = self.lazy_loaded_members_cache.get(cache_key)
+    ) -> LazyLoadedMembersCache:
+        cache = self.lazy_loaded_members_cache.get(cache_key)
         if cache is None:
-            logger.debug("creating LruCache for %r", cache_key)
-            cache = LruCache(
-                max_size=LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE,
-                clock=self.clock,
-                server_name=self.server_name,
-            )
+            logger.debug("creating LazyLoadedMembersCache for %r", cache_key)
+            cache = LazyLoadedMembersCache()
             self.lazy_loaded_members_cache[cache_key] = cache
         else:
-            logger.debug("found LruCache for %r", cache_key)
+            logger.debug("found LazyLoadedMembersCache for %r", cache_key)
         return cache
 
     def get_lazy_loaded_profile_fields_cache(
@@ -1155,6 +1241,7 @@ class SyncHandler:
         sync_config: SyncConfig,
         since_token: StreamToken | None,
         end_token: StreamToken,
+        now_token: StreamToken,
         full_state: bool,
         joined: bool,
     ) -> MutableStateMap[EventBase]:
@@ -1169,6 +1256,7 @@ class SyncHandler:
             end_token: Token of the end of the current batch. Normally this will be
                 the same as the global "now_token", but if the user has left the room,
                 the point just after their leave event.
+            now_token: The `next_batch` token of the response being built.
             full_state: Whether to force returning the full state.
                 `lazy_load_members` still applies when `full_state` is `True`.
             joined: whether the user is currently joined to the room
@@ -1254,6 +1342,11 @@ class SyncHandler:
             # sync's timeline and the start of the current sync's timeline.
             # See the docstring above for details.
             state_ids: StateMap[str]
+            # The keys in `state_ids` whose state changed since `since_token`.
+            # These are sent whether or not the lazy-loaded members cache says
+            # the client has them. The rest are memberships fetched for
+            # timeline senders, which the client may already have.
+            changed_keys: set[StateKey] = set()
             # We need to know whether the state we fetch may be partial, so check
             # whether the room is partial stated *before* fetching it.
             is_partial_state_room = await self.store.is_partial_state_room(room_id)
@@ -1273,7 +1366,10 @@ class SyncHandler:
                 # is indeed the case.
                 assert since_token is not None
 
-                state_ids = await self._compute_state_delta_for_incremental_sync(
+                (
+                    state_ids,
+                    changed_keys,
+                ) = await self._compute_state_delta_for_incremental_sync(
                     room_id,
                     sync_config,
                     batch,
@@ -1309,30 +1405,28 @@ class SyncHandler:
                 cache_key = (sync_config.user.to_string(), sync_config.device_id)
                 cache = self.get_lazy_loaded_members_cache(cache_key)
 
-                # if it's a new sync sequence, then assume the client has had
-                # amnesia and doesn't want any recent lazy-loaded members
-                # de-duplicated.
-                if since_token is None:
-                    logger.debug("clearing LruCache for %r", cache_key)
-                    cache.clear()
-                else:
-                    # only send members which aren't in our LruCache (either
-                    # because they're new to this client or have been pushed out
-                    # of the cache)
-                    logger.debug("filtering state from %r...", state_ids)
-                    state_ids = {
-                        t: event_id
-                        for t, event_id in state_ids.items()
-                        if cache.get(t[1]) != event_id
-                    }
-                    logger.debug("...to %r", state_ids)
+                # Only send members which aren't in our cache (either because
+                # they're new to this client or have been pushed out of the
+                # cache). For an initial sync the cache has already been
+                # cleared.
+                #
+                # A state change since `since_token` is always sent, regardless
+                # of whether it was previously sent to the client (e.g due to a
+                # client retrying the request).
+                logger.debug("filtering state from %r...", state_ids)
+                state_ids = {
+                    t: event_id
+                    for t, event_id in state_ids.items()
+                    if t in changed_keys or not cache.was_sent(t[1], event_id)
+                }
+                logger.debug("...to %r", state_ids)
 
-                # add any member IDs we are about to send into our LruCache
+                # add any member IDs we are about to send into our cache
                 for t, event_id in itertools.chain(
                     state_ids.items(), timeline_state.items()
                 ):
                     if t[0] == EventTypes.Member:
-                        cache.set(t[1], event_id)
+                        cache.mark_sent(t[1], event_id, now_token)
 
         state: dict[str, EventBase] = {}
         if state_ids:
@@ -1505,14 +1599,16 @@ class SyncHandler:
         members_to_fetch: set[str] | None,
         timeline_state: StateMap[str],
         joined: bool,
-    ) -> StateMap[str]:
+    ) -> tuple[StateMap[str], set[StateKey]]:
         """Calculate the state events to be included in an incremental sync response.
 
         If lazy-loading of membership events is enabled (as indicated by
         `members_to_fetch` being not-`None`), the result will include the membership
         events for each member in `members_to_fetch`. The caller
         (`compute_state_delta`) is responsible for keeping track of which membership
-        events we have already sent to the client, and hence ripping them out.
+        events we have already sent to the client, and hence ripping them out. It
+        may only rip out entries that are not state changes, so this also returns
+        the keys whose state changed since `since_token`.
 
         Note that whether this returns the state at the start or the end of the
         batch depends on `sync_config.use_state_after` (c.f. MSC4222).
@@ -1533,7 +1629,10 @@ class SyncHandler:
 
         Returns:
             A map from (type, state_key) to event_id, for each event that we believe
-            should be included in the `state` or `state_after` part of the sync response.
+            should be included in the `state` or `state_after` part of the sync
+            response, and the subset of its keys whose state changed since
+            `since_token`. The other keys are memberships fetched for timeline
+            senders, which the client may have been sent before.
         """
         if members_to_fetch is not None:
             # Lazy-loading is enabled. Only return the state that is needed.
@@ -1549,6 +1648,7 @@ class SyncHandler:
         # timeline. If at the end we can just use the current state delta stream.
         if sync_config.use_state_after:
             delta_state_ids: MutableStateMap[str] = {}
+            changed_keys: set[StateKey] = set()
 
             if members_to_fetch:
                 # We're lazy-loading, so the client might need some more member
@@ -1603,9 +1703,11 @@ class SyncHandler:
                 # Note that deltas are in stream ordering, so if there are
                 # multiple deltas for a given type/state_key we'll always pick
                 # the latest one.
-                delta_state_ids[(delta.event_type, delta.state_key)] = delta.event_id
+                key = (delta.event_type, delta.state_key)
+                delta_state_ids[key] = delta.event_id
+                changed_keys.add(key)
 
-            return delta_state_ids
+            return delta_state_ids, changed_keys
 
         # For a non-gappy sync if the events in the timeline are simply a linear
         # chain (i.e. no merging/branching of the graph), then we know the state
@@ -1653,7 +1755,9 @@ class SyncHandler:
                             await_full_state=False,
                         )
                     )
-            return state_ids
+            # A linear, non-gappy timeline means the only changes to the `state`
+            # are lazy-loaded members.
+            return state_ids, set()
 
         if batch:
             state_at_timeline_start = (
@@ -1712,7 +1816,16 @@ class SyncHandler:
             lazy_load_members=lazy_load_members,
         )
 
-        return state_ids
+        # Everything that differs from the state at the previous sync is a
+        # change. What is left is the memberships of timeline senders that
+        # `_calculate_state` adds back for lazy loading.
+        changed_keys = {
+            key
+            for key, event_id in state_ids.items()
+            if state_at_previous_sync.get(key) != event_id
+        }
+
+        return state_ids, changed_keys
 
     async def _find_missing_partial_state_memberships(
         self,
@@ -2650,7 +2763,13 @@ class SyncHandler:
         """
 
         since_token = sync_result_builder.since_token
-        user_id = sync_result_builder.sync_config.user.to_string()
+        sync_config = sync_result_builder.sync_config
+        user_id = sync_config.user.to_string()
+
+        if sync_config.filter_collection.lazy_load_members():
+            self.get_lazy_loaded_members_cache(
+                (user_id, sync_config.device_id)
+            ).start_request(since_token)
 
         blocks_all_rooms = (
             sync_result_builder.sync_config.filter_collection.blocks_all_rooms()
@@ -3318,6 +3437,7 @@ class SyncHandler:
                     sync_config,
                     since_token,
                     room_builder.end_token,
+                    now_token,
                     full_state=full_state,
                     joined=room_builder.rtype == "joined",
                 )
