@@ -236,10 +236,11 @@ class FederationServer(FederationBase):
     async def _assert_not_state_dag_room(self, room_id: str, endpoint: str) -> None:
         room_version = await self.store.get_room_version(room_id)
         if room_version.msc4242_state_dags:
+            # Not 5xx else the server will back off from us
             raise SynapseError(
-                500,
+                400,
                 f"{endpoint} is not implemented for MSC4242 state DAG rooms",
-                errcode=Codes.UNKNOWN,
+                errcode=Codes.UNRECOGNIZED,
             )
 
     async def on_backfill_request(
@@ -1167,10 +1168,11 @@ class FederationServer(FederationBase):
         room_version = await self.store.get_room_version(room_id)
 
         if room_version.msc4242_state_dags and membership_type != Membership.JOIN:
+            # 4xx rather than 5xx, so the caller does not back off from us
             raise SynapseError(
-                500,
+                400,
                 f"/send_{membership_type} is not implemented for MSC4242 state DAG rooms",
-                errcode=Codes.UNKNOWN,
+                errcode=Codes.UNRECOGNIZED,
             )
 
         if await self.store.is_partial_state_room(room_id):

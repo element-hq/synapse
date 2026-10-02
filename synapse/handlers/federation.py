@@ -1463,10 +1463,11 @@ class FederationHandler:
             raise SynapseError(400, "The invite event did not have a state key")
 
         if room_version.msc4242_state_dags:
+            # 4xx rather than 5xx, so the caller does not back off from us
             raise SynapseError(
-                500,
+                400,
                 "/invite is not implemented for MSC4242 state DAG rooms",
-                errcode=Codes.UNKNOWN,
+                errcode=Codes.UNRECOGNIZED,
             )
 
         is_blocked = await self.store.is_room_blocked(event.room_id)
