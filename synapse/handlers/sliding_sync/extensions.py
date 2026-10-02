@@ -1042,16 +1042,21 @@ class SlidingSyncExtensionHandler:
         if not since_token_as_stream_token.is_before_or_eq(
             self.event_sources.get_current_token().sticky_events_key
         ):
-            # The since_token is before the current position as seen on this worker.
-            # This either means that this worker is lagging, or the client has a token from the future.
+            # The `since_token` is *after* the current position as seen on this worker.
+            # This either means that this worker is lagging, or the client has a token
+            # from the future. The client having a future token could happen maliciously
+            # where someone intentionally messes with the token or innocently if a
+            # database was rolled back by restoring from backup.
             #
             # Get the max allocated token out of the database to see which case it is.
             max_token = await self.store.get_sticky_events_stream_id_generator().get_max_allocated_token()
 
             if max_token < since_token_as_stream_token.get_max_stream_pos():
                 # The client has a token from the future.
-                # Innocently, this could happen if a database is rolled back by restoring from backup.
-                # Reset the sliding sync connection.
+                #
+                # We could wait until we reach the token but we might as well not waste
+                # our resources on an invalid state scenario. Reset the sliding sync
+                # connection.
                 raise SlidingSyncUnknownPosition(
                     "The `org.matrix.msc4354.sticky_events` extension `since` token is considered "
                     "invalid because it includes stream positions greater than the furthest "
