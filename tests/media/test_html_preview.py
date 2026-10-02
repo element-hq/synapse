@@ -380,7 +380,7 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
         self.assertEqual(og, {"og:description": "Some text."})
 
     def test_image(self) -> None:
-        """Test the ensures an image can be pulled from the HTML."""
+        """Test that ensures an image can be pulled from the HTML."""
 
         # Tags is a list of two-element tuples: the HTML tag and the expected image which
         # is chosen.
