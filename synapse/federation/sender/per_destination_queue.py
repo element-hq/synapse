@@ -1009,7 +1009,7 @@ class PerDestinationQueue:
 
         # Now we look for any PDUs to send, by getting up to 50 PDUs from the
         # queue
-        pdus: tuple[EventBase, ...] = tuple(
+        pdus: list[EventBase] = list(
             itertools.islice(self._pending_pdus.values(), MAX_PDUS_PER_TRANSACTION)
         )
 
