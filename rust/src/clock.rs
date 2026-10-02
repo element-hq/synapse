@@ -20,12 +20,6 @@
 //! homeserver's [`RustRuntime`](crate::runtime::RustRuntime) owns a [`Clock`]
 //! that can be read without the GIL.
 //!
-//! Like `synapse.util.clock.Clock` on the Python side, this is a wall clock.
-//! While these are two separate, independent implementations, they both read
-//! the same system clock (on Linux both are
-//! `clock_gettime(CLOCK_REALTIME)`).Code that needs a monotonic clock should
-//! use [`std::time::Instant`] directly.
-//!
 //! Synapse's unit tests run against a virtual reactor clock, where time only
 //! moves when a test says so. The test reactor keeps this clock in step via
 //! [`Clock::set_virtual_time`]. See `ThreadedMemoryReactorClock` in
@@ -45,6 +39,12 @@ use std::{
 const REAL_TIME_SENTINEL: u64 = u64::MAX;
 
 /// The current time as the Rust side of a homeserver sees it.
+///
+/// Like `synapse.util.clock.Clock` on the Python side, this is a wall clock.
+/// While these are two separate, independent implementations, they both read
+/// the same system clock (on Linux both are
+/// `clock_gettime(CLOCK_REALTIME)`).Code that needs a monotonic clock should
+/// use [`std::time::Instant`] directly.
 pub struct Clock {
     /// The virtual time in milliseconds since the Unix epoch, or
     /// [`REAL_TIME_SENTINEL`]. Only ever set by tests, via
