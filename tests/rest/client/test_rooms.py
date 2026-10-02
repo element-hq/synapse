@@ -3080,10 +3080,10 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         )
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
-    def test_delayed_event_with_null_state(self) -> None:
+    def test_delayed_event_with_null_state_key(self) -> None:
         """
         Test that the dedicated endpoint fails to schedule a message event
-        with a "state" of None in the request body.
+        with a "state_key" of `None` in the request body.
         """
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
