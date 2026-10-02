@@ -289,7 +289,7 @@ information.
     # User directory search requests
     ^/_matrix/client/(r0|v3|unstable)/user_directory/search$
 
-    # Unstable MSC4140 support
+    # Unstable MSC4140 support (delayed event scheduling & management)
     ^/_matrix/client/unstable/org.matrix.msc4140/rooms/.*/delayed_event/
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events/[^/]+/restart$
 
