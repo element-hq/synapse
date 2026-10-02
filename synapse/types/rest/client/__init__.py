@@ -42,6 +42,7 @@ from synapse.types import (
     AbsentType,
     MultiWriterStreamToken,
     NonNegativeStrictInt,
+    UnresolvedMultiWriterStreamToken,
 )
 from synapse.types.rest import RequestBodyModel
 from synapse.util.threepids import validate_email
@@ -163,17 +164,17 @@ class SlidingSyncStickyEventsToken:
     PATTERN = re.compile(r"^sticky_([0-9]+|m[0-9]+(~[0-9]+\.[0-9]+)*)$")
     START: ClassVar["SlidingSyncStickyEventsToken"]
 
-    def __init__(self, *, serialised_stream_token: str) -> None:
-        self._serialised_stream_token = serialised_stream_token
+    def __init__(self, *, stream_token: UnresolvedMultiWriterStreamToken) -> None:
+        self._stream_token = stream_token
 
     @classmethod
     async def from_stream_token(
         cls, store: "DataStore", token: MultiWriterStreamToken
     ) -> "SlidingSyncStickyEventsToken":
-        return cls(serialised_stream_token=await token.to_string(store))
+        return cls(stream_token=await token.to_unresolved(store))
 
     async def to_stream_token(self, store: "DataStore") -> MultiWriterStreamToken:
-        return await MultiWriterStreamToken.parse(store, self._serialised_stream_token)
+        return await MultiWriterStreamToken.from_unresolved(store, self._stream_token)
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -208,7 +209,10 @@ class SlidingSyncStickyEventsToken:
             match = cls.PATTERN.match(v)
             if match is None:
                 raise ValueError(f"Invalid SlidingSyncStickyEventsToken format: {v!r}")
-            return cls(serialised_stream_token=match.group(1))
+
+            return cls(
+                stream_token=UnresolvedMultiWriterStreamToken.parse(match.group(1))
+            )
         raise ValueError(f"Cannot parse SlidingSyncStickyEventsToken from {type(v)}")
 
     def serialise(self) -> str:
@@ -217,7 +221,7 @@ class SlidingSyncStickyEventsToken:
 
         The inverse of `_validate`.
         """
-        return f"sticky_{self._serialised_stream_token}"
+        return f"sticky_{self._stream_token.to_string()}"
 
     def __repr__(self) -> str:
         # Use the serialised form as debug output.
@@ -226,7 +230,7 @@ class SlidingSyncStickyEventsToken:
 
 # Starting reading a stream at 0 ensures all stream fact rows will be read
 SlidingSyncStickyEventsToken.START = SlidingSyncStickyEventsToken(
-    serialised_stream_token="0"
+    stream_token=UnresolvedMultiWriterStreamToken(stream=0)
 )
 
 
