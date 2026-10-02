@@ -755,8 +755,8 @@ class PerDestinationQueue:
                     # These are the events we actually sent in this successful catch-up transaction
                     event_stream_orderings_sent_in_transaction={
                         # unwrap: these events have been persisted so `stream_ordering` is not None
-                        unwrap(pdu.internal_metadata.stream_ordering)
-                        for pdu in room_catchup_pdus
+                        unwrap(room_catchup_pdu.internal_metadata.stream_ordering)
+                        for room_catchup_pdu in room_catchup_pdus
                     },
                 )
                 self._sticky_event_backlog_tracker.notify_potential_new_backlog()
