@@ -2039,7 +2039,7 @@ class FederationEventHandler:
         # our own decisions and tell the auth rules about them.
         rejected_event_id_to_reason_map: dict[str, str] = {}
 
-        async def prev_state_maps(event: EventBase) -> dict[int, StateMap[str]]:
+        async def prev_state_maps(event: MSC4242Event) -> dict[int, StateMap[str]]:
             """The state at each of an event's `prev_state_events`, by state group.
 
             A `prev_state_event` processed earlier in this batch has not been persisted
@@ -2058,7 +2058,8 @@ class FederationEventHandler:
                 # the database knows the state at it.
                 groups = (
                     await self._state_storage_controller.get_state_group_for_events(
-                        missing, await_full_state=False,
+                        missing,
+                        await_full_state=False,
                     )
                 )
                 unknown = [
@@ -2094,7 +2095,7 @@ class FederationEventHandler:
                 for prev_state_event_id in event.prev_state_events
             }
 
-        async def process(event: EventBase) -> EventPersistencePair:
+        async def process(event: MSC4242Event) -> EventPersistencePair:
             assert supports_msc4242_state_dag(event)
             with nested_logging_context(suffix=event.event_id):
                 # On a /send_join the events in this batch are not persisted until we
@@ -2205,6 +2206,9 @@ class FederationEventHandler:
 
         if from_send_join:
             for i, event in enumerate(sorted_events):
+                assert supports_msc4242_state_dag(
+                    event
+                )  # to convert from EventBase to MSC4242Event
                 event_and_context = await process(event)
                 if event_and_context[1].rejected is not None:
                     has_rejected_events = True
@@ -2227,6 +2231,9 @@ class FederationEventHandler:
                 )
         else:
             for event in sorted_events:
+                assert supports_msc4242_state_dag(
+                    event
+                )  # to convert from EventBase to MSC4242Event
                 event_and_context = await process(event)
                 if event_and_context[1].rejected is not None:
                     has_rejected_events = True
