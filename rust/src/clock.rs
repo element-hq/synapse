@@ -38,15 +38,19 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-/// Stored in [`Clock::virtual_millis`] while the clock is reading the real
-/// time. No test will pin the clock to it, since as a timestamp it is 584
-/// million years after the epoch.
-const REAL_TIME: u64 = u64::MAX;
+/// A sentinel value stored in [`Clock::virtual_millis`] while the clock is
+/// reading the real time. This value indicates that the clock should read the
+/// real system time rather than a virtual time.
+///
+/// We choose a value that will never be used in tests, namely the maximum `u64`
+/// value. This is 584 million years after the epoch.
+const REAL_TIME_SENTINEL: u64 = u64::MAX;
 
 /// The current time as the Rust side of a homeserver sees it.
 pub struct Clock {
-    /// The virtual time in milliseconds since the Unix epoch, or [`REAL_TIME`].
-    /// Only ever set by tests, via [`Clock::set_virtual_time`].
+    /// The virtual time in milliseconds since the Unix epoch, or
+    /// [`REAL_TIME_SENTINEL`]. Only ever set by tests, via
+    /// [`Clock::set_virtual_time`].
     virtual_millis: AtomicU64,
 }
 
@@ -60,7 +64,7 @@ impl Clock {
     /// A clock reading the real time.
     pub fn new() -> Self {
         Clock {
-            virtual_millis: AtomicU64::new(REAL_TIME),
+            virtual_millis: AtomicU64::new(REAL_TIME_SENTINEL),
         }
     }
 
@@ -72,7 +76,7 @@ impl Clock {
         match self.virtual_millis.load(Ordering::Relaxed) {
             // On Linux this is a vDSO call rather than a syscall, so it is
             // cheap enough to make on every read.
-            REAL_TIME => SystemTime::now(),
+            REAL_TIME_SENTINEL => SystemTime::now(),
             virtual_millis => UNIX_EPOCH + Duration::from_millis(virtual_millis),
         }
     }
@@ -91,6 +95,10 @@ impl Clock {
     /// Only tests call this. Nothing unpins the clock, since a test reactor
     /// and the runtimes attached to it live for a single test.
     pub fn set_virtual_time(&self, millis: u64) {
+        if millis == REAL_TIME_SENTINEL {
+            panic!("Cannot set virtual time to the sentinel value REAL_TIME_SENTINEL");
+        }
+
         self.virtual_millis.store(millis, Ordering::Relaxed);
     }
 }
