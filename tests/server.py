@@ -1443,8 +1443,10 @@ def setup_test_homeserver(
     # Keep the Rust side of this homeserver on the reactor's virtual clock. This
     # constructs the runtime. That is cheap, as its tokio thread pool starts
     # lazily, but it does register the runtime's wakeup socket with the reactor
-    # as a reader. It comes after the attributes above so that a test-supplied
-    # `rust_runtime` is the one attached.
+    # as a reader.
+    #
+    # We do this after installing attributes above so that if the test supplies
+    # its own `rust_runtime`, that's the one we attach.
     assert isinstance(reactor, ThreadedMemoryReactorClock), (
         "tests run against a virtual clock, which the Rust side must follow"
     )
