@@ -164,9 +164,6 @@ class DelayedEventsHelperMixin(HomeserverTestCase):
             self.fail(f"Did not find any event with matching delay_id {delay_id}")
         return found
 
-    def _advance_time_to_send_delayed_event(self) -> None:
-        self.reactor.advance(Duration(seconds=1).as_secs())
-
 
 class DelayedEventsTestCaseBase(DelayedEventsHelperMixin):
     """Room and user fixtures, and request helpers, for the delayed events tests."""
@@ -411,7 +408,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         self.assertListEqual([], self._get_delayed_events())
         content = self.helper.get_state(
             self.room_id,
@@ -451,7 +449,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         event = self._check_for_delayed_event_in_sync(
             guest_access_token, delay_id, True
         )
@@ -487,7 +486,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertEqual("join", content.get("membership"), content)
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         self.assertListEqual([], self._get_delayed_events())
         content = self.helper.get_state(
             self.room_id,
@@ -605,7 +605,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         events = self._get_delayed_events()
         self.assertEqual(1, len(events), events)
         content = self._get_delayed_event_content(events[0])
@@ -624,7 +625,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertListEqual([], self._get_delayed_events())
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         content = self.helper.get_state(
             self.room_id,
             _EVENT_TYPE,
@@ -729,7 +731,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         events = self._get_delayed_events()
         self.assertEqual(1, len(events), events)
         content = self._get_delayed_event_content(events[0])
@@ -806,7 +809,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         events = self._get_delayed_events()
         self.assertEqual(1, len(events), events)
         content = self._get_delayed_event_content(events[0])
@@ -824,7 +828,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         events = self._get_delayed_events()
         self.assertEqual(1, len(events), events)
         content = self._get_delayed_event_content(events[0])
@@ -837,7 +842,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         self.assertListEqual([], self._get_delayed_events())
         content = self.helper.get_state(
             self.room_id,
@@ -951,7 +957,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         events = self._get_delayed_events()
         self.assertEqual(1, len(events), events)
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         content = self.helper.get_state(
             self.room_id,
             _EVENT_TYPE,
@@ -997,7 +1004,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertListEqual([], self._get_delayed_events())
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         content = self.helper.get_state(
             self.room_id,
             _EVENT_TYPE,
@@ -1090,7 +1098,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
 
         # Nothing gets sent when user1's delayed events would have timed out.
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         for delay_id in user1_delay_ids:
             self._check_for_delayed_event_in_sync(
                 self.user2_access_token, delay_id, False
@@ -1107,7 +1116,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         self._check_for_delayed_event_in_sync(
             self.user2_access_token, user2_delay_id, False
         )
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         for delay_id in user1_delay_ids:
             self._check_for_delayed_event_in_sync(
                 self.user2_access_token, delay_id, False
@@ -1176,7 +1186,8 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         self.assertListEqual([], self._get_delayed_events())
 
         event = self._check_for_delayed_event_in_sync(
@@ -1233,7 +1244,8 @@ class DelayedEventsWorkerTestCase(
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
-        self._advance_time_to_send_delayed_event()
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         self._check_for_delayed_event_in_sync(self.access_token, delay_id, True)
 
     def test_delayed_events_are_cancelled_on_deactivation_from_worker(self) -> None:
