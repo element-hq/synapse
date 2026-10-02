@@ -770,8 +770,8 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     ) -> tuple[RoomID, StickyEventStreamPosition, list[str]] | None:
         """
         From the `destination_rooms_sticky_events_backlog` table, if there are backlogged
-        sticky events to send to the given destination, returns up to 50 IDs of sticky
-        events from one room.
+        sticky events to send to the given destination, returns up to the `limit` of sticky
+        event IDs from one room.
 
         The sticky events are constrained to originating from this server:
 
