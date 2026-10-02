@@ -2904,7 +2904,26 @@ class RoomDelayedEventTestCase(RoomBase):
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_send_delayed_message_event(self) -> None:
-        """Test sending a valid delayed message event, and that repeating the request is a no-op."""
+        """Test sending a valid delayed message event."""
+        method, path, body = self.build_delayed_event_request(
+            room_id=self.room_id,
+            delay=Duration(milliseconds=2000),
+            event_type="m.room.message",
+            content={"body": "test", "msgtype": "m.text"},
+        )
+        channel = self.make_request(
+            method,
+            path,
+            body,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_send_delayed_message_event_with_txnid(self) -> None:
+        """
+        Test that repeated requests to schedule a delayed message event
+        with `PUT` and the same transaction ID are idempotent.
+        """
         method, path, body = self.build_delayed_event_request(
             room_id=self.room_id,
             delay=Duration(milliseconds=2000),
