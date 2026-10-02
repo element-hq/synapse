@@ -1,0 +1,1 @@
+Forbid changing display name in membership events in local rooms if `enable_set_displayname` is disabled.
