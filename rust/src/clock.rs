@@ -1,0 +1,134 @@
+/*
+ * This file is licensed under the Affero General Public License (AGPL) version 3.
+ *
+ * Copyright (C) 2026 Element Creations Ltd
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * See the GNU Affero General Public License for more details:
+ * <https://www.gnu.org/licenses/agpl-3.0.html>.
+ *
+ */
+
+//! A clock for the Rust side of Synapse.
+//!
+//! Rust code often needs the current time somewhere it cannot cheaply ask
+//! Python for it, such as on a tokio worker without the GIL. Each
+//! homeserver's [`RustRuntime`](crate::runtime::RustRuntime) owns a [`Clock`]
+//! that can be read without the GIL.
+//!
+//! Synapse's unit tests run against a virtual reactor clock, where time only
+//! moves when a test says so. The test reactor keeps this clock in step via
+//! [`set_virtual_time_msec`]. See `ThreadedMemoryReactorClock` in
+//! `tests/server.py`.
+
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use pyo3::pyfunction;
+
+/// A sentinel value stored in [`VIRTUAL_MILLIS`] while the clock is
+/// reading the real time. This value indicates that the clock should read the
+/// real system time rather than a virtual time.
+///
+/// We choose a value that will never be used in tests, namely the maximum `u64`
+/// value. This is 584 million years after the epoch.
+const REAL_TIME_SENTINEL: u64 = u64::MAX;
+
+/// The virtual time in milliseconds since the Unix epoch, or
+/// [`REAL_TIME_SENTINEL`]. Only ever set by tests, via [`set_virtual_time_msec`].
+///
+/// We use an AtomicU64 (rather than e.g. `Option<..>`) so that reads are fast
+/// and do not require locking.
+static VIRTUAL_MILLIS: AtomicU64 = AtomicU64::new(REAL_TIME_SENTINEL);
+
+/// Pin the clock to the given time, in milliseconds since the Unix epoch.
+///
+/// Only tests call this. Nothing unpins the clock, since a test reactor
+/// and the runtimes attached to it live for a single test.
+#[pyfunction]
+pub fn set_virtual_time_msec(millis: u64) {
+    if millis == REAL_TIME_SENTINEL {
+        panic!("Cannot set virtual time to the sentinel value REAL_TIME_SENTINEL");
+    }
+
+    VIRTUAL_MILLIS.store(millis, Ordering::Relaxed);
+}
+
+/// The current time as the Rust side of a homeserver sees it.
+///
+/// Like `synapse.util.clock.Clock` on the Python side, this is a wall clock.
+/// While these are two separate, independent implementations, they both read
+/// the same system clock (on Linux both are
+/// `clock_gettime(CLOCK_REALTIME)`).Code that needs a monotonic clock should
+/// use [`std::time::Instant`] directly.
+///
+/// In future, this may be extended to support per-homeserver looping calls
+/// (which is why this is not a global clock).
+pub struct Clock {}
+
+impl Default for Clock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Clock {
+    /// A clock reading the real time.
+    pub fn new() -> Self {
+        Clock {}
+    }
+
+    /// The current time.
+    ///
+    /// Reads the same system clock as `synapse.util.clock.Clock.time_msec()`
+    /// on the Python side. See the module docs.
+    pub fn now(&self) -> SystemTime {
+        // Check if virtual time is set, otherwise fall back to real time.
+        match VIRTUAL_MILLIS.load(Ordering::Relaxed) {
+            // On Linux this is a vDSO call rather than a syscall, so it is
+            // cheap enough to make on every read.
+            REAL_TIME_SENTINEL => SystemTime::now(),
+            virtual_millis => UNIX_EPOCH + Duration::from_millis(virtual_millis),
+        }
+    }
+
+    /// [`Clock::now`] in milliseconds since the Unix epoch.
+    ///
+    /// Panics if the system clock is set before the Unix epoch, 1970. This was
+    /// checked at startup, so this panic should only ever occur if the system
+    /// clock is manually set before the Unix epoch during runtime.
+    pub fn now_millis(&self) -> u64 {
+        self.now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock was set before the Unix epoch, 1970")
+            .as_millis() as u64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn virtual_time_overrides_the_real_clock() {
+        // Any real wall clock reads later than this (2020-09-13).
+        const PLAUSIBLE_WALL_CLOCK_MILLIS: u64 = 1_600_000_000_000;
+
+        let clock = Clock::new();
+        assert!(clock.now_millis() > PLAUSIBLE_WALL_CLOCK_MILLIS);
+
+        set_virtual_time_msec(12345);
+        assert_eq!(clock.now_millis(), 12345);
+        assert_eq!(clock.now(), UNIX_EPOCH + Duration::from_millis(12345));
+
+        // Zero is a legitimate virtual time. The memory reactor starts there.
+        set_virtual_time_msec(0);
+        assert_eq!(clock.now_millis(), 0);
+    }
+}
