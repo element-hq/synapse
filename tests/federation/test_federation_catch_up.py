@@ -740,12 +740,15 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # Advance for the federation sender to trigger on those newly-sent events
         self.reactor.advance(0)
 
-        # Now trigger a catch-up loop
+        # Now trigger a catch-up loop manually
+        # We do this explicitly instead of `attempt_new_transaction` because we don't want a
+        # regular transaction to take place afterwards, which might muddy our test.
         self.get_success(per_dest_queue._catch_up_transmission_loop())
 
         # First sanity-check what got sent and what the state of the 'regular'
         # catch-up is.
         # Each room's latest local event (forward extremity) was sent, oldest first.
+        # (This is because catch-up transactions only send forward extremities where possible.)
         self.assertEqual(
             [pdu.event_id for pdu in sent_pdus],
             [event_id_4, sticky_id_5, event_id_6],
@@ -871,7 +874,8 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         self.reactor.advance(0)
 
         # Trigger regular federation catch-up and then the sticky event catch-up
-        # (2 transactions, without having to retrigger)
+        # (2 transactions, without having to retrigger the loop by calling
+        # `attempt_new_transaction` again)
         per_dest_queue.attempt_new_transaction()
         assert per_dest_queue.active_transmission_loop is not None
         self.get_success(per_dest_queue.active_transmission_loop)

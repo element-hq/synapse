@@ -773,6 +773,17 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         sticky events to send to the given destination, returns up to the `limit` of sticky
         event IDs from one room.
 
+        Only processing one room at once is an arbitrary choice, motivated by regular catch-up transactions
+        only processing one room at once.
+        It is also slightly simpler for us to keep track of.
+        We have comments related to old catch-up transaction behaviour, explaining why we send only forward extremities
+        (because it is relatively intensive for a server to receive events from several places in the DAG at once).
+        As sticky event catch-up transactions seem to meet this 'relatively intensive' category, it seems to make sense
+        to keep the transaction complexity down (which may be a reason to reduce the limit in the future).
+        Sending events, no more than 1 hour old, from only one room _probably_ means that they can benefit from cache
+        warmth at the receiving server.
+        With that said, we can still consider changing this later. It was just the ambient thought process going into this.
+
         The sticky events are constrained to originating from this server:
 
         > Attempt to **push** their own[^origin] sticky events to all joined servers
