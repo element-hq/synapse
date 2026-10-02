@@ -372,7 +372,13 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
 
     def test_image(self) -> None:
         """Test the spots an image can be pulled from ."""
-        # Ordered listed of tags, we'll pop off the top and keep testing.
+
+        # Tags is a list of two-element tuples: the HTML tag and the expected image which
+        # is chosen.
+        #
+        # They're in a particular order such that we can prove "higher" priority tags
+        # are parsed out first, e.g. OpenGraph, then meta tags, then images of a certain
+        # height/width, favicons, etc.
         tags = [
             (
                 b"""<meta property="og:image" content="https://example.com/meta-prop.png">""",
