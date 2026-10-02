@@ -456,14 +456,14 @@ class DelayedEventsStore(SQLBaseStore):
             raise NotFoundError("Delayed event not found")
 
         return DelayedEventResponse(
-            delay_id,
-            row[0],
-            row[1],
-            row[2],
-            row[3],
-            row[4],
-            row[5],
-            _make_finalised_details(row[6], row[7], row[8]),
+            delay_id=delay_id,
+            room_id=row[0],
+            type=row[1],
+            state_key=row[2],
+            delay_ms=row[3],
+            delayed_since_ts=row[4],
+            content=row[5],
+            finalised=_make_finalised_details(row[6], row[7], row[8]),
         )
 
     async def get_all_delayed_events_for_user(
