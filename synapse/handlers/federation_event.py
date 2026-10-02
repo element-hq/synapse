@@ -1845,10 +1845,12 @@ class FederationEventHandler:
         if seen_remotes:
             for s in seen_remotes:
                 unseen_event_map.pop(s, None)
-            rejected_event_ids = await self._store.has_rejected_event_ids(seen_remotes)
-            if len(rejected_event_ids) > 0:
-                has_rejected_events = True
-                if is_state_dag_room:
+            if is_state_dag_room:
+                rejected_event_ids = await self._store.has_rejected_event_ids(
+                    seen_remotes
+                )
+                if len(rejected_event_ids) > 0:
+                    has_rejected_events = True
                     # The copies in `event_map` came off the wire, so they claim to be
                     # unrejected even for events we rejected when we first saw them, e.g
                     # during an earlier join of this room. Swap in the persisted copies,
