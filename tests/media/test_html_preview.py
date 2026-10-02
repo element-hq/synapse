@@ -20,8 +20,6 @@
 #
 from unittest.mock import patch
 
-from bs4 import ParserRejectedMarkup
-
 from synapse.media.preview_html import (
     decode_body,
     parse_html_to_open_graph,
@@ -328,7 +326,7 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
         """A valid body with no tree in it."""
         with patch(
             "bs4.BeautifulSoup",
-            side_effect=ParserRejectedMarkup("Invalid markup"),
+            side_effect=bs4.ParserRejectedMarkup("Invalid markup"),
         ):
             self.assertIsNone(decode_body(b"<html></html>", "https://example.com/"))
 
