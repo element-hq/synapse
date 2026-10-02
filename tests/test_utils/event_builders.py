@@ -112,6 +112,20 @@ def make_test_pdu_event(
     defaults as `make_test_event` before delegating.
     """
     pdu = {**default_event_fields(room_version), **pdu}
+
+    # For room versions where the create event's room_id is derived from its
+    # event ID (v11+ format), omit the default room_id on create events so each
+    # create event ends up with a distinct room_id.
+    #
+    # We can't do this in the `default_event_fields` as we don't know the event
+    # type at that point.
+    if (
+        room_version.msc4291_room_ids_as_hashes
+        and pdu["type"] == "m.room.create"
+        and pdu["state_key"] == ""
+    ):
+        pdu.pop("room_id", None)
+
     return event_from_pdu_json(pdu, room_version, received_time=received_time)
 
 

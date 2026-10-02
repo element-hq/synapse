@@ -39,6 +39,7 @@ def connect_logging_client(
     # written.
     factory = reactor.tcpClients.pop(client_id)[2]
     client = factory.buildProtocol(None)
+    assert isinstance(client, Protocol)
     server = AccumulatingProtocol()
     server.makeConnection(FakeTransport(client, reactor))
     client.makeConnection(FakeTransport(server, reactor, autoflush=False))

@@ -5,11 +5,11 @@ go 1.25.0
 require (
 	github.com/matrix-org/complement v0.0.0-20251120181401-44111a2a8a9d
 	github.com/matrix-org/gomatrixserverlib v0.0.0-20250813150445-9f5070a65744
-	github.com/tidwall/gjson v1.18.0
+	github.com/tidwall/gjson v1.19.0
 )
 
 require (
-	github.com/docker/docker v28.3.3+incompatible
+	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/hashicorp/go-set/v3 v3.0.0 // indirect
 	github.com/moby/sys/atomicwriter v0.1.0 // indirect
@@ -30,7 +30,6 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/matrix-org/gomatrix v0.0.0-20220926102614-ceba4d9f7530 // indirect
 	github.com/matrix-org/util v0.0.0-20221111132719-399730281e66 // indirect

@@ -198,8 +198,6 @@ class FederationServer(FederationBase):
             hs.config.federation.federation_metrics_domains
         )
 
-        self._room_prejoin_state_types = hs.config.api.room_prejoin_state
-
         # Whether we have started handling old events in the staging area.
         self._started_handling_of_staged_events = False
 
@@ -235,12 +233,23 @@ class FederationServer(FederationBase):
             # We pause a bit so that we don't start handling all rooms at once.
             await self._clock.sleep(Duration(seconds=random.uniform(0, 0.1)))
 
+    async def _assert_not_state_dag_room(self, room_id: str, endpoint: str) -> None:
+        room_version = await self.store.get_room_version(room_id)
+        if room_version.msc4242_state_dags:
+            # Not 5xx else the server will back off from us
+            raise SynapseError(
+                400,
+                f"{endpoint} is not implemented for MSC4242 state DAG rooms",
+                errcode=Codes.UNRECOGNIZED,
+            )
+
     async def on_backfill_request(
         self, origin: str, room_id: str, versions: list[str], limit: int
     ) -> tuple[int, dict[str, Any]]:
         async with self._server_linearizer.queue((origin, room_id)):
             origin_host, _ = parse_server_name(origin)
             await self.check_server_matches_acl(origin_host, room_id)
+            await self._assert_not_state_dag_room(room_id, "/backfill")
 
             pdus = await self.handler.on_backfill_request(
                 origin, room_id, versions, limit
@@ -656,6 +665,7 @@ class FederationServer(FederationBase):
         await self._event_auth_handler.assert_host_in_room(room_id, origin)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, room_id)
+        await self._assert_not_state_dag_room(room_id, "/state")
 
         # we grab the linearizer to protect ourselves from servers which hammer
         # us. In theory we might already have the response to this query
@@ -696,6 +706,7 @@ class FederationServer(FederationBase):
         await self._event_auth_handler.assert_host_in_room(room_id, origin)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, room_id)
+        await self._assert_not_state_dag_room(room_id, "/state_ids")
 
         resp = await self._state_ids_resp_cache.wrap(
             (room_id, event_id),
@@ -817,8 +828,27 @@ class FederationServer(FederationBase):
         return {"event": pdu.get_templated_pdu_json(), "room_version": room_version}
 
     async def on_invite_request(
-        self, origin: str, content: JsonDict, room_version_id: str
+        self,
+        *,
+        origin: str,
+        expected_room_id: str,
+        expected_event_id: str,
+        event_json: JsonDict,
+        room_version_id: str,
     ) -> dict[str, Any]:
+        """
+        Args:
+            origin:
+            expected_room_id: The room ID specified in the
+                `/_matrix/federation/v1/invite/{roomId}/{eventId}` request that we expect to
+                match in the actual event itself.
+            expected_event_id: The event ID specified in the
+                `/_matrix/federation/v1/invite/{roomId}/{eventId}` request that we expect to
+                match in the actual event itself.
+            event_json:
+            room_version_id:
+        """
+
         room_version = KNOWN_ROOM_VERSIONS.get(room_version_id)
         if not room_version:
             raise SynapseError(
@@ -827,9 +857,21 @@ class FederationServer(FederationBase):
                 Codes.UNSUPPORTED_ROOM_VERSION,
             )
 
-        pdu = event_from_pdu_json(content, room_version)
+        pdu = event_from_pdu_json(event_json, room_version)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, pdu.room_id)
+        if pdu.event_id != expected_event_id:
+            raise SynapseError(
+                400,
+                "Invite event ID must match event ID specified in the federation `/invite` request",
+                Codes.INVALID_PARAM,
+            )
+        if pdu.room_id != expected_room_id:
+            raise SynapseError(
+                400,
+                "The room_id specified in the invite event must match room ID specified in the federation `/invite` request",
+                Codes.INVALID_PARAM,
+            )
         if await self._spam_checker_module_callbacks.should_drop_federated_event(pdu):
             logger.info(
                 "Federated event contains spam, dropping %s",
@@ -842,7 +884,11 @@ class FederationServer(FederationBase):
             errmsg = f"event id {pdu.event_id}: {e}"
             logger.warning("%s", errmsg)
             raise SynapseError(403, errmsg, Codes.FORBIDDEN)
-        ret_pdu = await self.handler.on_invite_request(origin, pdu, room_version)
+        ret_pdu = await self.handler.on_invite_request(
+            origin=origin,
+            event=pdu,
+            room_version=room_version,
+        )
         time_now = self._clock.time_msec()
         return {"event": ret_pdu.get_pdu_json(time_now)}
 
@@ -1061,19 +1107,31 @@ class FederationServer(FederationBase):
         Returns:
             The stripped room state.
         """
-        _, context = await self._on_send_membership_event(
+        time_now = self._clock.time_msec()
+
+        event, context = await self._on_send_membership_event(
             origin, content, Membership.KNOCK, room_id
         )
 
-        # Retrieve stripped state events from the room and send them back to the remote
-        # server. This will allow the remote server's clients to display information
-        # related to the room while the knock request is pending.
-        stripped_room_state = (
-            await self.store.get_stripped_room_state_from_event_context(
-                context, self._room_prejoin_state_types
-            )
+        # MSC4311: For the federation API, format events in `knock_room_state` as full
+        # PDU's
+        #
+        # Find the full events based on the state at the time of the knock
+        state_ids = await self.store.get_stripped_room_state_ids_from_event_context(
+            event, context
         )
-        return {"knock_room_state": stripped_room_state}
+        state_events = await self.store.get_events(state_ids)
+        assert set(state_ids) == set(state_events.keys()), (
+            "We should have all events available that were set as stripped state."
+        )
+
+        return {
+            "knock_room_state": [
+                # Use full PDU's according to MSC4311
+                state_event.get_pdu_json(time_now)
+                for state_event in state_events.values()
+            ]
+        }
 
     async def _on_send_membership_event(
         self, origin: str, content: JsonDict, membership_type: str, room_id: str
@@ -1108,6 +1166,14 @@ class FederationServer(FederationBase):
 
         # Note that get_room_version throws if the room does not exist here.
         room_version = await self.store.get_room_version(room_id)
+
+        if room_version.msc4242_state_dags and membership_type != Membership.JOIN:
+            # 4xx rather than 5xx, so the caller does not back off from us
+            raise SynapseError(
+                400,
+                f"/send_{membership_type} is not implemented for MSC4242 state DAG rooms",
+                errcode=Codes.UNRECOGNIZED,
+            )
 
         if await self.store.is_partial_state_room(room_id):
             # If our server is still only partially joined, we can't give a complete
@@ -1202,6 +1268,7 @@ class FederationServer(FederationBase):
             await self._event_auth_handler.assert_host_in_room(room_id, origin)
             origin_host, _ = parse_server_name(origin)
             await self.check_server_matches_acl(origin_host, room_id)
+            await self._assert_not_state_dag_room(room_id, "/event_auth")
 
             time_now = self._clock.time_msec()
             auth_pdus = await self.handler.on_event_auth(event_id, room_id)
@@ -1287,6 +1354,7 @@ class FederationServer(FederationBase):
                     origin, room_id, earliest_events, latest_events, limit
                 )
             else:
+                await self._assert_not_state_dag_room(room_id, "/get_missing_events")
                 missing_events = await self.handler.on_get_missing_events(
                     origin, room_id, earliest_events, latest_events, limit
                 )

@@ -124,7 +124,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -420,7 +419,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -521,7 +519,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -718,7 +715,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -838,6 +834,12 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
         room_version = self.get_success(main_store.get_room_version(room_id))
 
+        # This test requires a user that is not the room creator. Infinite power levels
+        # from MSC4289 change the dynamics of the power level state resolution later to
+        # not fallback on `origin_server_ts` as described in more detail below.
+        ernie_user_id = self.register_user("ernie", "test")
+        ernie_tok = self.login("ernie", "test")
+        self.helper.join(room_id, user=ernie_user_id, tok=ernie_tok)
         # Add another local user to the room. This user is going to be kicked in a
         # rejected event.
         bert_user_id = self.register_user("bert", "test")
@@ -846,13 +848,13 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         # Allow the remote user to kick bert.
         # The remote user is going to send a rejected power levels event later on and we
-        # need state resolution to order it before another power levels event kermit is
+        # need state resolution to order it before another power levels event ernie is
         # going to send later on. Hence we give both users the same power level, so that
         # ties are broken by `origin_server_ts`.
         self.helper.send_state(
             room_id,
             "m.room.power_levels",
-            {"users": {kermit_user_id: 100, OTHER_USER: 100}},
+            {"users": {ernie_user_id: 100, OTHER_USER: 100}},
             tok=kermit_tok,
         )
 
@@ -891,7 +893,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [other_member_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         initial_state_map[("m.room.power_levels", "")],
                         # The event will be rejected because of the duplicated auth
                         # event.
@@ -940,7 +941,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [rejected_power_levels_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         rejected_power_levels_event.event_id,
                         initial_state_map[("m.room.member", bert_user_id)],
                         initial_state_map[("m.room.member", OTHER_USER)],
@@ -1018,8 +1018,8 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                 self.helper.send_state(
                     room_id,
                     "m.room.power_levels",
-                    {"users": {kermit_user_id: 100, OTHER_USER: 100, bert_user_id: 1}},
-                    tok=kermit_tok,
+                    {"users": {ernie_user_id: 100, OTHER_USER: 100, bert_user_id: 1}},
+                    tok=ernie_tok,
                 )["event_id"]
             )
         )
@@ -1054,7 +1054,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [rejected_kick_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         initial_state_map[("m.room.power_levels", "")],
                         initial_state_map[("m.room.member", OTHER_USER)],
                     ],
@@ -1082,7 +1081,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                         missing_event.event_id,
                     ],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         new_power_levels_event.event_id,
                         initial_state_map[("m.room.member", OTHER_USER)],
                     ],
@@ -1528,3 +1526,137 @@ class FetchMissingStateDagEventsTests(unittest.FederatingHomeserverTestCase):
         linear["FOREIGN"] = foreign
         self._prepare_handler(set(), linear, {("C",): ["A", "B", "FOREIGN"]})
         self._assert_fetches(linear, "C", ["A", "B"])
+
+
+class BackfilledStateDagEventTests(unittest.FederatingHomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    @unittest.override_config({"experimental_features": {"msc4242_enabled": True}})
+    def test_backfilled_state_events_update_current_state(self) -> None:
+        """State events we only learn about through backfill must reach the current state.
+
+        An event's `prev_events` can reach state events which its `prev_state_events` do
+        not. This should not normally happen but the protocol allows it, so we have to handle it.
+        The state DAG walk in /get_missing_events only follows `prev_state_events`,
+        so those state events are never fetched that way, and we first see them when the
+        `prev_events` graph is backfilled. They are still state events which nothing in
+        our state DAG references, so they belong on the state DAG frontier and therefore
+        change the current state.
+
+            prev_state_events graph        We know MEMBER and TOPIC
+                                           Sx = state event
+            MEMBER <- TOPIC                Backfill hands us S4 and S5, forking at MEMBER
+                  `-- S4 <- S5
+
+        The frontier becomes {TOPIC, S5}, so S5 has to be merged into the current state.
+        """
+        OTHER_USER = f"@user:{self.OTHER_SERVER_NAME}"
+        main_store = self.hs.get_datastores().main
+        federation_event_handler = self.hs.get_federation_event_handler()
+
+        user_id = self.register_user("kermit", "test")
+        tok = self.login("kermit", "test")
+        room_id = self.helper.create_room_as(
+            room_creator=user_id,
+            tok=tok,
+            room_version=RoomVersions.MSC4242v12.identifier,
+        )
+        room_version = self.get_success(main_store.get_room_version(room_id))
+        self.assertTrue(room_version.msc4242_state_dags)
+
+        # allow the remote user to send state events
+        self.helper.send_state(
+            room_id,
+            "m.room.power_levels",
+            {"events_default": 0, "state_default": 0},
+            tok=tok,
+        )
+
+        # add the remote user to the room. The backfilled branch forks here.
+        member_event = self.get_success(
+            event_injection.inject_member_event(self.hs, room_id, OTHER_USER, "join")
+        )
+
+        # Move the state DAG locally, so that the backfill below is a genuine fork
+        # rather than an extension of the only branch we have.
+        topic_event_id = self.helper.send_state(
+            room_id, "m.room.topic", {"topic": "local"}, tok=tok
+        )["event_id"]
+
+        extremities_before = self.get_success(
+            main_store.get_state_dag_extremities(room_id)
+        )
+        self.assertIncludes({topic_event_id}, extremities_before, exact=True)
+
+        # S4 and S5 are a branch of the state DAG which we have never been told about:
+        # nothing we hold references them via `prev_state_events`, so the state DAG walk
+        # would never have fetched them.
+        s4 = make_test_event(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "type": "test_state_type",
+                    "state_key": "",
+                    "room_id": room_id,
+                    "sender": OTHER_USER,
+                    "prev_events": [member_event.event_id],
+                    "prev_state_events": [member_event.event_id],
+                    "origin_server_ts": 1,
+                    "depth": 10,
+                    "content": {"body": "s4"},
+                },
+                room_version,
+            ),
+            room_version,
+        )
+        s5 = make_test_event(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "type": "test_state_type",
+                    "state_key": "",
+                    "room_id": room_id,
+                    "sender": OTHER_USER,
+                    "prev_events": [s4.event_id],
+                    "prev_state_events": [s4.event_id],
+                    "origin_server_ts": 2,
+                    "depth": 11,
+                    "content": {"body": "s5"},
+                },
+                room_version,
+            ),
+            room_version,
+        )
+
+        self.get_success(
+            federation_event_handler._process_pulled_events(
+                self.OTHER_SERVER_NAME, [s4, s5], backfilled=True
+            )
+        )
+
+        # The tip of the backfilled branch is now a state DAG forward extremity, and the
+        # branch we already had still is too: the fork is unmerged in the state DAG.
+        extremities_after = self.get_success(
+            main_store.get_state_dag_extremities(room_id)
+        )
+        self.assertIncludes(
+            {topic_event_id, s5.event_id},
+            extremities_after,
+            exact=True,
+            message="the backfilled state event did not become a state DAG forward extremity",
+        )
+
+        # ...and resolving that frontier is what the current state must reflect.
+        state_map = self.get_success(main_store.get_partial_current_state_ids(room_id))
+        self.assertEqual(
+            state_map.get(("test_state_type", "")),
+            s5.event_id,
+            "the state event learned through backfill is not part of the current state",
+        )
+        self.assertEqual(
+            state_map.get(("m.room.topic", "")),
+            topic_event_id,
+            "merging in the backfilled branch lost the state on the branch we had",
+        )

@@ -29,6 +29,7 @@ from twisted.internet import defer
 from twisted.internet._sslverify import ClientTLSOptions
 from twisted.internet.address import IPv4Address, IPv6Address
 from twisted.internet.defer import ensureDeferred
+from twisted.internet.endpoints import _WrappingFactory
 from twisted.internet.interfaces import IProtocolFactory
 from twisted.internet.ssl import ContextFactory
 from twisted.mail import interfaces, smtp
@@ -134,6 +135,7 @@ class SendEmailHandlerTestCaseIPv4(HomeserverTestCase):
         server_protocol.callLater = self.reactor.callLater  # type: ignore[assignment]
 
         client_protocol = client_factory.buildProtocol(None)
+        assert client_protocol is not None
         client_protocol.makeConnection(FakeTransport(server_protocol, self.reactor))
         server_protocol.makeConnection(
             FakeTransport(
@@ -187,8 +189,11 @@ class SendEmailHandlerTestCaseIPv4(HomeserverTestCase):
         self.assertEqual(host, self.reactor.lookups["localhost"])
         self.assertEqual(port, 465)
         # We need to make sure that TLS is happenning
-        context_factory = client_factory._wrappedFactory._testingContextFactory
-        self.assertIsInstance(context_factory, ClientTLSOptions)
+        assert isinstance(client_factory, _WrappingFactory)
+        context_factory = getattr(
+            client_factory._wrappedFactory, "_testingContextFactory", None
+        )
+        assert isinstance(context_factory, ClientTLSOptions)
         self.assertEqual(context_factory._hostname, "example.org")  # tlsname
         # And since we use endpoints, they go through reactor.connectTCP
         # which works differently to connectSSL on the testing reactor
@@ -201,6 +206,7 @@ class SendEmailHandlerTestCaseIPv4(HomeserverTestCase):
         server_protocol.callLater = self.reactor.callLater  # type: ignore[assignment]
 
         client_protocol = client_factory.buildProtocol(None)
+        assert client_protocol is not None
         client_protocol.makeConnection(FakeTransport(server_protocol, self.reactor))
         server_protocol.makeConnection(
             FakeTransport(
