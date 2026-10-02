@@ -639,9 +639,11 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self._rust_runtimes.add(runtime)
 
     def seconds(self) -> float:
-        # The push lives here rather than in `advance()` because Twisted's
-        # `Clock.advance` bumps the time and then fires the calls that came
-        # due. Those calls read `seconds()`, so pushing after `super().advance()`
+        # Set the Rust runtimes clocks to the current virtual time.
+        #
+        # This lives here rather than in `advance()` because Twisted's
+        # `Clock.advance` bumps the time and then fires the calls that came due.
+        # Those calls read `seconds()`, so pushing after `super().advance()`
         # returned would be too late for them.
         now = super().seconds()
         now_msec = int(now * 1000)
