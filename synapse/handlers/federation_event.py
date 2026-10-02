@@ -2039,6 +2039,9 @@ class FederationEventHandler:
         Returns:
             True if any of the events were rejected.
         """
+        for event in sorted_events:
+            self._sanity_check_event(event)
+
         has_rejected_events = False
         events_and_contexts_to_persist: list[EventPersistencePair] = []
         event_id_to_state_group: dict[str, int] = {}
