@@ -1053,9 +1053,13 @@ class SlidingSyncExtensionHandler:
                 # Innocently, this could happen if a database is rolled back by restoring from backup.
                 # Reset the sliding sync connection.
                 raise SlidingSyncUnknownPosition(
-                    "Sticky Events extension `since` parameter is from the future"
+                    "The `org.matrix.msc4354.sticky_events` extension `since` token is considered "
+                    "invalid because it includes stream positions greater than the furthest "
+                    "persisted position across all of the workers. This indicates either a Synapse "
+                    "programming error (as we should never hand out invalid future tokens), database "
+                    "was rolled back, or a fabricated `from` token. If you've modified the token, "
+                    "you can try paginating from the beginning again.",
                 )
-
         (
             sticky_events_to_token,
             room_to_event_ids,
