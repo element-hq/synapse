@@ -1049,6 +1049,7 @@ class SlidingSyncExtensionHandler:
             # database was rolled back by restoring from backup.
             #
             # Get the max allocated token out of the database to see which case it is.
+            # (For efficiency, we only do this after the non-database common case check.)
             max_token = await self.store.get_sticky_events_stream_id_generator().get_max_allocated_token()
 
             if max_token < since_token_as_stream_token.get_max_stream_pos():
