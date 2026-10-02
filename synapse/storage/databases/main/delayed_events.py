@@ -71,6 +71,13 @@ class DelayedEventDetails(EventDetails):
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
+class FinalisedDetails:
+    finalised_ts: int
+    event_id: str | None
+    error: JsonDict | None = attr.ib(converter=attr.converters.optional(db_to_json))
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
 class DelayedEventResponse:
     """The representation of a delayed event in API format."""
 
@@ -81,9 +88,7 @@ class DelayedEventResponse:
     delay_ms: int
     delayed_since_ts: int
     content: JsonDict = attr.ib(converter=db_to_json)
-    # Present only for finalised delayed events (MSC4140): `finalised_ts`, plus
-    # `event_id` if the event was sent, or `error` if sending it failed.
-    finalised: JsonDict | None = None
+    finalised: FinalisedDetails | None = None
 
     def asdict(self) -> JsonDict:
         return attr.asdict(self, filter=lambda _attr, v: v is not None)
@@ -457,7 +462,7 @@ class DelayedEventsStore(SQLBaseStore):
             row[3],
             row[4],
             row[5],
-            _make_finalised_dict(row[6], row[7], row[8]),
+            _make_finalised_details(row[6], row[7], row[8]),
         )
 
     async def get_all_delayed_events_for_user(
@@ -988,23 +993,19 @@ def _generate_delay_id() -> DelayID:
     return DelayID(f"syd_{stringutils.random_string(20)}")
 
 
-def _make_finalised_dict(
+def _make_finalised_details(
     finalised_ts: int | None,
     finalised_event_id: str | None,
     finalised_error: str | None,
-) -> JsonDict | None:
+) -> FinalisedDetails | None:
     """
     Builds the `finalised` object of a delayed event's API representation
     from its stored finalisation columns, or returns None if it is not finalised.
     """
     if finalised_ts is None:
         return None
-    finalised: JsonDict = {"finalised_ts": finalised_ts}
-    if finalised_event_id is not None:
-        finalised["event_id"] = finalised_event_id
-    elif finalised_error is not None:
-        finalised["error"] = db_to_json(finalised_error)
-    return finalised
+    else:
+        return FinalisedDetails(finalised_ts, finalised_event_id, finalised_error)
 
 
 def _generate_cancelled_by_state_update_json() -> str:
