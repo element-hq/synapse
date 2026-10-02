@@ -544,7 +544,14 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
 
         txn.execute(
             q,
-            (after_destination, now_time_ms, after_destination, now_time_ms),
+            (
+                after_destination,
+                now_time_ms,
+                after_destination,
+                now_time_ms,
+                after_destination,
+                now_time_ms,
+            ),
         )
         destinations = [row[0] for row in txn]
 
