@@ -90,6 +90,25 @@ def get_attribute(tag: "Tag", attribute_name: str) -> str:
     return attribute
 
 
+def get_float_attribute(tag: "Tag", attribute_name: str) -> float:
+    """
+    Get an attribute from a beautifulsoup tag and parses it as a float, if it cannot be
+    parsed then return 0..
+
+    Args:
+        tag: The Tag object to get the attribute from.
+        attribute_name: The name of the attribute to get.
+
+    Returns:
+        The attribute value as a float or 0 if it cannot be parsed.
+    """
+    attribute = get_attribute(tag, attribute_name)
+    try:
+        return float(attribute)
+    except ValueError:
+        return 0
+
+
 def _get_meta_tags(
     soup: "BeautifulSoup",
     property: str,
@@ -237,14 +256,14 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
             )
             images = sorted(
                 filter(
-                    lambda tag: int(get_attribute(tag, "width")) > 10
-                    and int(get_attribute(tag, "height")) > 10,
+                    lambda tag: get_float_attribute(tag, "width") > 10
+                    and get_float_attribute(tag, "height") > 10,
                     raw_images,
                 ),
                 key=lambda i: (
                     -1
-                    * float(get_attribute(i, "width"))
-                    * float(get_attribute(i, "height"))
+                    * get_float_attribute(i, "width")
+                    * get_float_attribute(i, "height")
                 ),
             )
             # If no images were found, try to find *any* images.
@@ -357,6 +376,10 @@ def _iterate_over_text(
         if type(el) == NavigableString:  # noqa: E721
             yield str(el)
         elif isinstance(el, Tag) and el.name not in tags_to_ignore:
+            # If the element isn't meant for display, ignore it.
+            if el.get("role") in ARIA_ROLES_TO_IGNORE:
+                continue
+
             # We add to the stack all the element's children.
             #
             # We iterate in reverse order so that earlier pieces of text appear

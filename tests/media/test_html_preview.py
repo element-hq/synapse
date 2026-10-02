@@ -18,6 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from unittest.mock import patch
+
+from bs4 import ParserRejectedMarkup
 
 from synapse.media.preview_html import (
     decode_body,
@@ -321,6 +324,14 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
         soup = decode_body(html, "http://example.com/test.html")
         self.assertIsNone(soup)
 
+    def test_no_soup(self) -> None:
+        """A valid body with no tree in it."""
+        with patch(
+            "bs4.BeautifulSoup",
+            side_effect=ParserRejectedMarkup("Invalid markup"),
+        ):
+            self.assertIsNone(decode_body(b"<html></html>", "https://example.com/"))
+
     def test_xml(self) -> None:
         """Test decoding XML and ensure it works properly."""
         # Note that the strip() call is important to ensure the xml tag starts
@@ -371,7 +382,7 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
         self.assertEqual(og, {"og:description": "Some text."})
 
     def test_image(self) -> None:
-        """Test the spots an image can be pulled from ."""
+        """Test the ensures an image can be pulled from the HTML."""
 
         # Tags is a list of two-element tuples: the HTML tag and the expected image which
         # is chosen.
@@ -436,6 +447,25 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
 
             # Remove the highest remaining priority item.
             tags.pop(0)
+
+    def test_image_bad_height_width(self) -> None:
+        """A bad height/width should be ignored."""
+
+        html = b"""<html>
+            <img src="http://example.com/no-height-width.png">
+            <img src="http://example.com/bad-height-width.png" height="a" width="a">
+        </html>"""
+        tree = decode_body(html, "http://example.com/test.html")
+        assert tree is not None
+        og = parse_html_to_open_graph(tree)
+        self.assertEqual(
+            og,
+            {
+                "og:title": None,
+                "og:description": None,
+                "og:image": "http://example.com/no-height-width.png",
+            },
+        )
 
     def test_twitter_tag(self) -> None:
         """Twitter card tags should be used if nothing else is available."""
@@ -522,5 +552,39 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
             {
                 "og:title": None,
                 "og:description": "Welcome\n\nthe bold\n\nand underlined text\n\nand\n\nsome\n\ntail text",
+            },
+        )
+
+    def test_ignored_tags(self) -> None:
+        """Test ignored elements."""
+        html = b"""
+           <header>Foo bar</header>
+           <div>A real description</div>
+           """
+        tree = decode_body(html, "http://example.com/test.html")
+        assert tree is not None
+        og = parse_html_to_open_graph(tree)
+        self.assertEqual(
+            og,
+            {
+                "og:title": None,
+                "og:description": "A real description",
+            },
+        )
+
+    def test_aria_tags(self) -> None:
+        """Test ignored elements."""
+        html = b"""
+        <div role="menu">Foo bar</div>
+        <div>A real description</div>
+        """
+        tree = decode_body(html, "http://example.com/test.html")
+        assert tree is not None
+        og = parse_html_to_open_graph(tree)
+        self.assertEqual(
+            og,
+            {
+                "og:title": None,
+                "og:description": "A real description",
             },
         )
