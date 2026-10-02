@@ -29,7 +29,7 @@ from synapse.api.errors import Codes
 from synapse.rest.client import login, push_rule, room
 from synapse.types import JsonDict
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, override_config
 
 
 class PushRuleAttributesTestCase(HomeserverTestCase):
@@ -427,9 +427,39 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
 
-    def test_contains_user_name(self) -> None:
+    @parameterized.expand(
+        [
+            ("global/override/.m.rule.contains_display_name",),
+            ("global/content/.m.rule.contains_user_name",),
+            ("global/override/.m.rule.roomnotif",),
+        ]
+    )
+    def test_legacy_mention_rules_removed(self, rule_path: str) -> None:
         """
-        Tests that `contains_user_name` rule is present and have proper value in `pattern`.
+        Tests that the legacy mention rules, which Matrix v1.17 (MSC4210) removed
+        from the base rule set, are not served by default.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+
+        channel = self.make_request(
+            "GET", f"/pushrules/{rule_path}", access_token=token
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        _, kind, rule_id = rule_path.split("/")
+        channel = self.make_request("GET", "/pushrules/", access_token=token)
+        self.assertEqual(channel.code, 200)
+        self.assertNotIn(
+            rule_id, [rule["rule_id"] for rule in channel.json_body["global"][kind]]
+        )
+
+    @override_config({"experimental_features": {"msc4210_enabled": False}})
+    def test_contains_user_name_with_legacy_mentions(self) -> None:
+        """
+        Tests that, when the legacy mention rules are restored, the
+        `contains_user_name` rule is present and has the proper value in `pattern`.
         """
         username = "bob"
         self.register_user(username, "pass")
