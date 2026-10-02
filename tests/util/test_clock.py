@@ -93,7 +93,8 @@ class RustClockTestCase(HomeserverTestCase):
     def test_is_up_to_date_inside_a_looping_call(self) -> None:
         """Rust must see the new time from callbacks fired *during* an advance.
 
-        This is why the test reactor hooks `seconds()` rather than `advance()`.
+        This is why the test reactor moves the Rust clock *before* it calls
+        `super().advance()`, which is what fires those callbacks.
         """
         runtime = self.hs.get_rust_runtime()
         seen: list[int] = []

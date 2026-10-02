@@ -595,6 +595,9 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self.lookups: dict[str, str] = {}
         self._thread_callbacks: deque[Callable[..., R]] = deque()
 
+        # Pin the Rust clock to our virtual time. `advance()` keeps it in step.
+        set_virtual_time_msec(int(self.seconds() * 1000))
+
         lookups = self.lookups
 
         @implementer(IResolverSimple)
@@ -622,18 +625,6 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # happen after `super().__init__()` so that the base class doesn't
         # overwrite it again.
         self.nameResolver = SimpleResolverComplexifier(FakeResolver())
-
-    def seconds(self) -> float:
-        # Set the Rust runtimes clocks to the current virtual time.
-        #
-        # This lives here rather than in `advance()` because Twisted's
-        # `Clock.advance` bumps the time and then fires the calls that came due.
-        # Those calls read `seconds()`, so pushing after `super().advance()`
-        # returned would be too late for them.
-        now = super().seconds()
-        now_msec = int(now * 1000)
-        set_virtual_time_msec(now_msec)
-        return now
 
     def run(self) -> None:
         """
@@ -749,6 +740,10 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         return conn
 
     def advance(self, amount: float) -> None:
+        # Move the Rust clock before `super().advance()` fires any callbacks,
+        # since those may read it.
+        set_virtual_time_msec(int((self.seconds() + amount) * 1000))
+
         # first advance our reactor's time, and run any "callLater" callbacks that
         # makes ready
         super().advance(amount)
