@@ -1,0 +1,1 @@
+Make `update_synapse_database.py --run-background-updates` exit with an error instead of hanging when a background update fails.
