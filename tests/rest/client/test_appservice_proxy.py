@@ -23,7 +23,7 @@ from twisted.internet.testing import MemoryReactor
 from twisted.web.http_headers import Headers
 
 from synapse.rest import admin
-from synapse.rest.client import appservice_proxy, login
+from synapse.rest.client import appservice_proxy, login, register
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -41,6 +41,7 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
     servlets = [
         admin.register_servlets,
         login.register_servlets,
+        register.register_servlets,
         appservice_proxy.register_servlets,
     ]
 
@@ -67,6 +68,7 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
         config.setdefault("experimental_features", {}).setdefault(
             "msc4512_enabled", True
         )
+        config["allow_guest_access"] = True
         return config
 
     def prepare(self, _reactor: MemoryReactor, _clock: Clock, hs: HomeServer) -> None:
@@ -315,6 +317,38 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 500)
         self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN")
         self.agent.request.assert_called()
+
+    def test_guest_request_is_proxied(self) -> None:
+        """Guests may access the LiveKit endpoints under `rtc/livekit` (MSC4195)."""
+        channel = self.make_request(
+            "POST", "/_matrix/client/v3/register?kind=guest", b"{}"
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        guest_user_id = channel.json_body["user_id"]
+        guest_access_token = channel.json_body["access_token"]
+
+        self.agent.request = Mock(
+            return_value=defer.succeed(
+                FakeResponse.json(code=200, payload={"hello": "guest"})
+            )
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/{VERSIONED_PREFIX}/some/path",
+            shorthand=False,
+            access_token=guest_access_token,
+        )
+
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {"hello": "guest"})
+
+        (_args, kwargs) = self.agent.request.call_args
+        headers: Headers = kwargs["headers"]
+        self.assertEqual(
+            headers.getRawHeaders(b"X-Matrix-User-Identifier"),
+            [guest_user_id.encode("ascii")],
+        )
 
     def test_unauthenticated_get_is_rejected(self) -> None:
         self.agent.request = Mock(
