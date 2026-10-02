@@ -244,6 +244,7 @@ async def filter_and_transform_events_for_client(
 
 async def filter_event_for_clients_with_state(
     store: DataStore,
+    clock: Clock,
     user_ids: StrCollection,
     event: EventBase,
     context: EventContext,
@@ -339,7 +340,9 @@ async def filter_event_for_clients_with_state(
     return {
         user_id
         for user_id in allowed_user_ids
-        if _check_membership(user_id, event, visibility, state_map, is_peeking).allowed
+        if _check_membership(
+            user_id, event, visibility, state_map, is_peeking, clock
+        ).allowed
     }
 
 
@@ -459,7 +462,9 @@ def _check_client_allowed_to_see_event(
     ):
         return event
 
-    membership_result = _check_membership(user_id, event, visibility, state, is_peeking)
+    membership_result = _check_membership(
+        user_id, event, visibility, state, is_peeking, clock
+    )
     if not membership_result.allowed:
         filtered_event_logger.debug(
             "_check_client_allowed_to_see_event(event=%s): Filtered out event because the user can't see the event because of their membership, membership_result.allowed=%s membership_result.joined=%s",
@@ -500,6 +505,7 @@ def _check_membership(
     visibility: str,
     state: StateMap[EventBase],
     is_peeking: bool,
+    clock: Clock,
 ) -> _CheckMembershipReturn:
     """Check whether the user can see the event due to their membership"""
     # If the event is the user's own membership event, use the 'most joined'
@@ -540,6 +546,18 @@ def _check_membership(
     # they can see it.
     if membership == Membership.JOIN:
         return _CheckMembershipReturn(True, True)
+
+    if not is_peeking:
+        # > History visibility **checks** MUST NOT be applied to sticky events. This applies to all endpoints where the sticky events could be returned.
+        # > Any joined user or server is authorised to see sticky events for the duration they remain sticky.[^hisvis]
+        # > — https://github.com/matrix-org/matrix-spec-proposals/blob/3635b765267452eb452cd2ced963aee52d1fd185/proposals/4354-sticky-events.md#L101-L102
+        sticky_duration = event.sticky_duration()
+        if (
+            sticky_duration is not None
+            # Check the event is still sticky
+            and clock.time_msec() < event.origin_server_ts + sticky_duration.as_millis()
+        ):
+            return _CheckMembershipReturn(True, False)
 
     # otherwise, it depends on the room visibility.
 
