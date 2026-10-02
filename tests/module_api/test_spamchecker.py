@@ -302,7 +302,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
     @parameterized.expand((False, True))
     @unittest.override_config({"max_event_delay_duration": "24h"})
-    def test_user_may_send_delayed_state_event(self, send_manually: bool) -> None:
+    def test_user_may_send_state_event_with_delay(self, send_manually: bool) -> None:
         """Test that the user_may_send_state_event callback is called when a delayed state event
         is sent (not when it is scheduled), and that it receives the correct parameters.
         """
@@ -372,7 +372,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
     @parameterized.expand((False, True))
     @unittest.override_config({"max_event_delay_duration": "24h"})
-    def test_user_may_send_delayed_state_event_disallows(
+    def test_user_may_send_state_event_disallows_with_delay(
         self, send_manually: bool
     ) -> None:
         """Test that the user_may_send_state_event callback is called when a delayed state event
