@@ -51,6 +51,8 @@ pub struct Clock {
     /// The virtual time in milliseconds since the Unix epoch, or
     /// [`REAL_TIME_SENTINEL`]. Only ever set by tests, via
     /// [`Clock::set_virtual_time`].
+    ///
+    /// We use an AtomicU64 so that reads are fast and do not require locking.
     virtual_millis: AtomicU64,
 }
 
