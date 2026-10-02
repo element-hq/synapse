@@ -994,7 +994,8 @@ class ServerConfig(Config):
             self.max_event_delay_duration = Duration()
 
         # The maximum number of delayed events a user may have scheduled at a time.
-        # (Defined here despite being experimental to be near the other MSC4140 config)
+        # (Defined here despite being experimental to be near the other MSC4140 config,
+        # because either config controls whether delayed events are enabled or not)
         experimental = config.get("experimental_features") or {}
         self.max_delayed_events_per_user: int = experimental.get(
             "msc4140_max_delayed_events_per_user", 100
@@ -1006,34 +1007,6 @@ class ServerConfig(Config):
             raise ConfigError(
                 "'msc4140_max_delayed_events_per_user' must be a non-negative integer",
                 ("experimental", "msc4140_max_delayed_events_per_user"),
-            )
-
-        # How long a finalised delayed event (one that has been sent, cancelled, or
-        # failed to be sent) is retained for lookup. 0 disables retention.
-        finalised_retention_period_ms = self.parse_duration(
-            experimental.get("msc4140_finalised_retention_period", "7d")
-        )
-        if finalised_retention_period_ms < 0:
-            raise ConfigError(
-                "'msc4140_finalised_retention_period' must be a non-negative duration",
-                ("experimental", "msc4140_finalised_retention_period"),
-            )
-        self.msc4140_finalised_retention_period = Duration(
-            milliseconds=finalised_retention_period_ms
-        )
-
-        # The maximum number of finalised delayed events retained per user.
-        # 0 disables retention.
-        self.msc4140_finalised_retention_limit_per_user: int = experimental.get(
-            "msc4140_finalised_retention_limit_per_user", 1000
-        )
-        if (
-            not isinstance(self.msc4140_finalised_retention_limit_per_user, int)
-            or self.msc4140_finalised_retention_limit_per_user < 0
-        ):
-            raise ConfigError(
-                "'msc4140_finalised_retention_limit_per_user' must be a non-negative integer",
-                ("experimental", "msc4140_finalised_retention_limit_per_user"),
             )
 
         self.msc4140_enabled = bool(

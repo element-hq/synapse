@@ -339,8 +339,8 @@ class DelayedEventsHandler:
     async def _prune_finalised_events(self) -> None:
         await self._store.prune_finalised_delayed_events(
             self._get_current_ts(),
-            self._config.server.msc4140_finalised_retention_period.as_millis(),
-            self._config.server.msc4140_finalised_retention_limit_per_user,
+            self._config.experimental.msc4140_finalised_retention_period.as_millis(),
+            self._config.experimental.msc4140_finalised_retention_limit_per_user,
         )
 
     async def add(
