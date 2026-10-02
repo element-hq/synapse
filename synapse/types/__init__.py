@@ -1041,62 +1041,53 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
     """
 
     @classmethod
-    async def parse(cls, store: "DataStore", string: str) -> "MultiWriterStreamToken":
+    async def parse(cls, store: "DataStore", string: str) -> Self:
+        unresolved = UnresolvedMultiWriterStreamToken.parse(string)
+        return await cls.from_unresolved(store, unresolved)
+
+    @classmethod
+    async def from_unresolved(
+        cls, store: "DataStore", unresolved: "UnresolvedMultiWriterStreamToken"
+    ) -> Self:
         try:
-            if string[0].isdigit():
-                return cls(stream=int(string))
-            if string[0] == "m":
-                parts = string[1:].split("~")
-                stream = int(parts[0])
-
-                instance_map = {}
-                for part in parts[1:]:
-                    if not part:
-                        # Handle tokens of the form `m5~`, which were created by
-                        # a bug
-                        continue
-
-                    key, value = part.split(".")
-                    instance_id = int(key)
-                    pos = int(value)
-
-                    instance_name = await store.get_name_from_instance_id(instance_id)
-                    instance_map[instance_name] = pos
-
-                return cls(
-                    stream=stream,
-                    instance_map=immutabledict(instance_map),
-                )
+            return cls(
+                stream=unresolved.stream,
+                instance_map=immutabledict(
+                    {
+                        (await store.get_name_from_instance_id(instance_id)): pos
+                        for instance_id, pos in unresolved.instance_id_to_stream_pos.items()
+                    }
+                ),
+            )
         except CancelledError:
             raise
         except Exception:
             # We log an exception here as even though this *might* be a client
             # handing a bad token, its more likely that Synapse returned a bad
             # token (and we really want to catch those!).
+            # TODO(2026): reivilibre: I'm less convinced this makes sense nowadays.
             logger.exception("Failed to parse stream token: %r", string)
         raise SynapseError(400, "Invalid stream token %r" % (string,))
 
     async def to_string(self, store: "DataStore") -> str:
         """See class level docstring for information about the format."""
+        return (await self.to_unresolved(store)).to_string()
 
-        if self.instance_map:
-            entries = []
-            for name, pos in self.instance_map.items():
-                if pos <= self.stream:
-                    # Ignore instances who are below the minimum stream position
-                    # (we might know they've advanced without seeing a recent
-                    # write from them).
-                    continue
-
-                instance_id = await store.get_id_for_instance(name)
-                entries.append(f"{instance_id}.{pos}")
-
-            if entries:
-                encoded_map = "~".join(entries)
-                return f"m{self.stream}~{encoded_map}"
-            return str(self.stream)
-        else:
-            return str(self.stream)
+    async def to_unresolved(
+        self, store: "DataStore"
+    ) -> "UnresolvedMultiWriterStreamToken":
+        """
+        Converts this token to its unresolved form, so that it can be used without database access.
+        """
+        return UnresolvedMultiWriterStreamToken(
+            stream=self.stream,
+            instance_id_to_stream_pos=immutabledict(
+                {
+                    (await store.get_id_for_instance(instance_name)): pos
+                    for instance_name, pos in self.instance_map.items()
+                }
+            ),
+        )
 
     @staticmethod
     def is_stream_position_in_range(
@@ -1139,6 +1130,91 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
         return (
             f"MultiWriterStreamToken(stream: {self.stream}, instances: {{{instances}}})"
         )
+
+
+@attr.s(auto_attribs=True, frozen=True, slots=True, order=False)
+class UnresolvedMultiWriterStreamToken:
+    """
+    `MultiWriterStreamToken`, but unresolved raw form where the instance names are not available.
+    This unresolved form is suitable for (de)serialising without database access.
+    Converting to or from a `MultiWriterStreamToken` requires database access to resolve instance (worker) names.
+
+    Serialised as either:
+        - the bare `stream` position (e.g. `42`); or
+        - if any writer is ahead of that position,
+            as `m{stream}~{id}.{pos}~{id}.{pos}...`, where:
+            each `id` is the writer's ID from the `instance_map` table
+            (see `DataStore.get_id_for_instance`)
+    """
+
+    stream: int
+    """
+    The baseline stream position.
+
+    All stream facts with stream ID numerically lower than this are unconditionally before this token.
+    """
+
+    instance_id_to_stream_pos: Mapping[int, int] = immutabledict()
+    """
+    Positions by writing instance that are ahead of the baseline (`stream`) position.
+    """
+
+    @classmethod
+    def parse(cls, string: str) -> Self:
+        try:
+            if string[0].isdigit():
+                return cls(stream=int(string))
+            if string[0] == "m":
+                parts = string[1:].split("~")
+                stream = int(parts[0])
+                instance_id_to_stream_pos = {}
+
+                for part in parts[1:]:
+                    if not part:
+                        # Handle tokens of the form `m5~`, which were created by
+                        # a bug
+                        continue
+
+                    key, value = part.split(".")
+                    instance_id = int(key)
+                    pos = int(value)
+
+                    instance_id_to_stream_pos[instance_id] = pos
+
+                return cls(
+                    stream=stream,
+                    instance_id_to_stream_pos=immutabledict(instance_id_to_stream_pos),
+                )
+        except CancelledError:
+            raise
+        except Exception:
+            # We log an exception here as even though this *might* be a client
+            # handing a bad token, its more likely that Synapse returned a bad
+            # token (and we really want to catch those!).
+            # TODO(2026): reivilibre: I'm less convinced this makes sense nowadays.
+            logger.exception("Failed to parse stream token: %r", string)
+        raise SynapseError(400, "Invalid stream token %r" % (string,))
+
+    def to_string(self) -> str:
+        """See class level docstring for information about the format."""
+
+        if self.instance_id_to_stream_pos:
+            entries = []
+            for instance_id, pos in self.instance_id_to_stream_pos.items():
+                if pos <= self.stream:
+                    # Ignore instances who are below the minimum stream position
+                    # (we might know they've advanced without seeing a recent
+                    # write from them).
+                    continue
+
+                entries.append(f"{instance_id}.{pos}")
+
+            if entries:
+                encoded_map = "~".join(entries)
+                return f"m{self.stream}~{encoded_map}"
+            return str(self.stream)
+        else:
+            return str(self.stream)
 
 
 class StreamKeyType(Enum):
