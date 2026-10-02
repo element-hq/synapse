@@ -318,3 +318,23 @@ class ExperimentalConfig(Config):
 
         # MSC4512: Delegating parts of the C-S and S-S API to application services
         self.msc4512_enabled: bool = experimental.get("msc4512_enabled", False)
+
+        # Pre-MSC implementation of federated user directory fetching.
+        self.bwi_federated_user_dir_enabled: bool = experimental.get(
+            "bwi_federated_user_dir_enabled", False
+        )
+
+        self.bwi_federated_user_dir_federation_fetch_timeout: int = self.parse_duration(
+            experimental.get("bwi_federated_user_dir_federation_fetch_timeout", 2000)
+        )
+
+        self.bwi_federated_user_dir_sync_interval_ms: int = self.parse_duration(
+            experimental.get("bwi_federated_user_dir_sync_interval", "4h")
+        )
+
+        if self.bwi_federated_user_dir_enabled:
+            if self.bwi_federated_user_dir_sync_interval_ms < 1:
+                raise ConfigError(
+                    "experimental_features.bwi_federated_user_dir_sync_interval must "
+                    "be positive"
+                )

@@ -1,0 +1,1 @@
+Pre-MSC implementation of a federated user directory.

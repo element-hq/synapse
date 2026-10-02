@@ -21,9 +21,13 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Sequence
 
+from pydantic import ValidationError
+
+from twisted.internet import defer
 from twisted.internet.interfaces import IDelayedCall
+from twisted.python.failure import Failure
 
 import synapse.metrics
 from synapse.api.constants import (
@@ -33,13 +37,23 @@ from synapse.api.constants import (
     Membership,
     ProfileFields,
 )
-from synapse.api.errors import Codes, SynapseError
+from synapse.api.errors import (
+    Codes,
+    HttpResponseException,
+    RequestSendFailed,
+    SynapseError,
+)
+from synapse.federation.user_directory import UserDirectoryEntryModel
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
+from synapse.http.client import is_unknown_endpoint
+from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import UserID
+from synapse.util.async_helpers import concurrently_execute, delay_cancellation
 from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
@@ -62,6 +76,12 @@ MAX_SERVERS_TO_REFRESH_PROFILES_FOR_IN_ONE_GO = 5
 # As long as we have servers to refresh (without backoff), keep adding more
 # every 15 seconds.
 INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES = Duration(seconds=15)
+
+# Bound the number of remote directories synchronized at once.
+MAX_CONCURRENT_USER_DIRECTORY_DESTINATIONS = 2
+
+# Bound the pages retained per destination while database updates are running.
+MAX_CONCURRENT_USER_DIRECTORY_PAGE_UPDATES = 4
 
 
 def calculate_time_of_next_retry(now_ts: int, retry_count: int) -> int:
@@ -114,7 +134,12 @@ class UserDirectoryHandler(StateDeltasHandler):
         )
         self.show_locked_users = hs.config.userdirectory.show_locked_users
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self.hs = hs  # nb must be called this for @wrap_as_background_process. #NOTE Why do we use _hs instead of hs? # Must be named `hs` for @wrap_as_background_process
         self._hs = hs
+        self._federation_client = hs.get_federation_client()
+        self._federated_user_directory_fetch_timeout = (
+            hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout
+        )
 
         # The current position in the current_state_delta stream
         self.pos: int | None = None
@@ -146,6 +171,19 @@ class UserDirectoryHandler(StateDeltasHandler):
             self._refresh_remote_profiles_call_later = self.clock.call_later(
                 Duration(seconds=10),
                 self.kick_off_remote_profile_refresh_process,
+            )
+
+        # Periodically sync remote homeservers' user directories into our own,
+        # on the worker responsible for updating the user directory.
+        if (
+            hs.config.experimental.bwi_federated_user_dir_enabled
+            and self.update_user_directory
+        ):
+            self.clock.looping_call(
+                self._sync_federated_user_directory,
+                Duration(
+                    milliseconds=hs.config.experimental.bwi_federated_user_dir_sync_interval_ms
+                ),
             )
 
     async def search_users(
@@ -512,7 +550,10 @@ class UserDirectoryHandler(StateDeltasHandler):
         if not self.is_mine_id(user_id):
             rooms_user_is_in = await self.store.get_user_dir_rooms_user_is_in(user_id)
 
-            if len(rooms_user_is_in) == 0:
+            if (
+                not rooms_user_is_in
+                and not await self.store.is_user_in_federated_search(user_id)
+            ):
                 logger.debug("Removing user %r from directory", user_id)
                 await self.store.remove_from_user_dir(user_id)
 
@@ -784,3 +825,197 @@ class UserDirectoryHandler(StateDeltasHandler):
                         profile.get(ProfileFields.AVATAR_URL)
                     ),
                 )
+
+    @wrap_as_background_process("federated_user_directory_sync")
+    async def _sync_federated_user_directory(self) -> None:
+        """Sync federated user directories from whitelisted homeservers.
+
+        Bound both concurrent destinations and their page updates.
+        A failed destination does not prevent other destinations from syncing.
+
+        Remove imports from homeservers no longer in the whitelist before fetching.
+        """
+        if not self.update_user_directory:
+            # Only the worker that owns the user directory should write to it.
+            return
+
+        whitelist = self.hs.config.federation.federation_domain_whitelist or {}
+        destinations: list[str] = [
+            destination for destination in whitelist if destination != self.server_name
+        ]
+
+        # Clean up removed sources even when no destinations remain.
+        # An empty or unset whitelist clears all federation imports.
+        await self.store.prune_federated_remote_users(destinations)
+
+        if not destinations:
+            logger.debug(
+                "Ending federated user directory sync: "
+                "no remote destinations configured in federation_domain_whitelist"
+            )
+            return
+
+        async def sync_destination(destination: str) -> None:
+            try:
+                total_reconciled = (
+                    await self._sync_federated_user_directory_for_destination(
+                        destination
+                    )
+                )
+            except RequestSendFailed as e:
+                logger.warning(
+                    "Failed to fetch federated user directory [destination=%s]: %s",
+                    destination,
+                    e,
+                )
+            except HttpResponseException as e:
+                if e.code == HTTPStatus.NOT_FOUND or is_unknown_endpoint(e):
+                    logger.info(
+                        "Federated user directory is unsupported or disabled "
+                        "[destination=%s]",
+                        destination,
+                    )
+                else:
+                    logger.warning(
+                        "Remote federated user directory returned an HTTP error "
+                        "[destination=%s, code=%d]: %s",
+                        destination,
+                        e.code,
+                        e,
+                    )
+            except ValidationError as e:
+                logger.warning(
+                    "Invalid federated user directory response [destination=%s]: %s",
+                    destination,
+                    e,
+                )
+            except Exception:
+                logger.exception(
+                    "Unexpected error synchronizing federated user "
+                    "directory [destination=%s]",
+                    destination,
+                )
+            else:
+                logger.debug(
+                    "Federated user directory sync reconciled %d remote users "
+                    "[destination=%s]",
+                    total_reconciled,
+                    destination,
+                )
+
+        # Keep the background context alive until all destination syncs finish.
+        await concurrently_execute(
+            sync_destination,
+            destinations,
+            MAX_CONCURRENT_USER_DIRECTORY_DESTINATIONS,
+            delay_cancellation=True,
+        )
+
+    async def _sync_federated_user_directory_for_destination(
+        self, destination: str
+    ) -> int:
+        """Fetch pages in order while persisting a bounded number concurrently.
+
+        On failure, stop starting pages and wait for outstanding writes. Completed
+        pages stay committed; the next sync starts from the beginning. Pages do
+        not share a remote snapshot, so remote changes may require another sync.
+
+        Returns the number of entries reconciled after a successful full traversal.
+        """
+        total_reconciled = 0
+        start_token: str | None = None
+        slots = defer.DeferredSemaphore(MAX_CONCURRENT_USER_DIRECTORY_PAGE_UPDATES)
+        pending: set[defer.Deferred[None]] = set()
+        failures: list[Failure] = []
+
+        def page_finished(result: None | Failure, task: "defer.Deferred[None]") -> None:
+            pending.remove(task)
+            if isinstance(result, Failure):
+                if failures:
+                    logger.warning(
+                        "Additional federated user directory update failed "
+                        "[destination=%s]",
+                        destination,
+                        exc_info=(result.type, result.value, result.tb),
+                    )
+                failures.append(result)
+            # Releasing a slot can immediately resume the fetch loop.
+            slots.release()
+
+        try:
+            while True:
+                await make_deferred_yieldable(slots.acquire())
+                try:
+                    if failures:
+                        slots.release()
+                        break
+                    response = await self._federation_client.user_directory_fetch(
+                        destination,
+                        start_token,
+                        self._federated_user_directory_fetch_timeout,
+                    )
+                    # A previous update may have failed while this page was fetched.
+                    if failures:
+                        slots.release()
+                        break
+                except BaseException:
+                    slots.release()
+                    raise
+
+                task = run_in_background(
+                    self.reconcile_remote_users,
+                    destination,
+                    response.results,
+                    start_token,
+                    response.next_token,
+                )
+                pending.add(task)
+                task.addBoth(page_finished, task)
+                total_reconciled += len(response.results)
+
+                # The empty final page also needs reconciliation to clear the tail.
+                if response.next_token is None:
+                    break
+                start_token = response.next_token
+        except defer.CancelledError:
+            raise
+        except Exception:
+            if not failures:
+                failures.append(Failure())
+            else:
+                logger.warning(
+                    "Federated user directory fetch also failed [destination=%s]",
+                    destination,
+                    exc_info=True,
+                )
+        finally:
+            # Database transactions may finish even after cancellation. Keep their
+            # logging context alive until all started updates have completed.
+            await make_deferred_yieldable(
+                delay_cancellation(defer.DeferredList(tuple(pending)))
+            )
+
+        if failures:
+            failures[0].raiseException()
+        return total_reconciled
+
+    async def reconcile_remote_users(
+        self,
+        homeserver: str,
+        users: Sequence[UserDirectoryEntryModel],
+        start_token: str | None,
+        end_token: str | None,
+    ) -> None:
+        """Persist a complete, validated page from a remote homeserver.
+
+        The caller must validate the entire page with user_directory_fetch before
+        calling this method. Missing users are pruned only in the range
+        (start_token, end_token]; None represents an unbounded endpoint.
+        """
+        if not self.update_user_directory:
+            # Only the worker that owns the user directory should write to it.
+            return
+
+        await self.store.reconcile_federated_remote_users(
+            homeserver, users, start_token, end_token
+        )
