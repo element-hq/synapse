@@ -84,12 +84,15 @@ impl Clock {
     }
 
     /// [`Clock::now`] in milliseconds since the Unix epoch.
+    ///
+    /// Panics if the system clock is set before the Unix epoch, 1970. This was
+    /// checked at startup, so this panic should only ever occur if the system
+    /// clock is manually set before the Unix epoch during runtime.
     pub fn now_millis(&self) -> u64 {
         self.now()
             .duration_since(UNIX_EPOCH)
-            // Only fails if the system clock is set before 1970. Callers
-            // would rather have a number than an error.
-            .map_or(0, |duration| duration.as_millis() as u64)
+            .expect("system clock was set before the Unix epoch, 1970")
+            .as_millis() as u64
     }
 
     /// Pin the clock to the given time, in milliseconds since the Unix epoch.
