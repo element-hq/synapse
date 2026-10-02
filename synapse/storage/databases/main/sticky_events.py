@@ -1065,6 +1065,10 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                         AND ? < se.event_stream_ordering
                         AND se.event_stream_ordering < ?
 
+                        -- Only consider locally-sent events
+                        -- as we're not responsible for sending other servers' events
+                        AND se.sender LIKE ?
+
                         -- Exclude sticky events that we in fact did just send (3)
                         -- se.event_stream_ordering NOT IN event_stream_orderings_sent_in_transaction
                         AND {not_event_stream_ordering_in_clause}
@@ -1085,6 +1089,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                     old_last_successfully_sent_stream_ordering,
                     old_last_successfully_sent_stream_ordering,
                     new_last_successfully_sent_stream_ordering,
+                    user_is_local_like_pattern(self.hs),
                     *not_event_stream_ordering_in_args,
                 ),
             )
