@@ -35,10 +35,12 @@ from synapse.handlers.devicemessage import (
 )
 from synapse.rest import admin
 from synapse.rest.client import login, sendtodevice, sync
+from synapse.rest.client.sendtodevice import UNKNOWN_RECIPIENT_SET, recipient_set_hash
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
+from tests.server import FakeChannel
 from tests.unittest import HomeserverTestCase, override_config
 
 
@@ -586,3 +588,104 @@ class SendToDeviceTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
         messages = channel.json_body.get("to_device", {}).get("events", [])
         self.assertEqual(len(messages), 50)
+
+
+class SharedToDeviceTestCase(HomeserverTestCase):
+    """`/sendToDevice` with the content once and a cached recipient set."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        sendtodevice.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault(
+            "experimental_features", {"photon_shared_to_device_enabled": True}
+        )
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sender = self.register_user("sender", "pass")
+        self.sender_tok = self.login("sender", "pass", "S")
+        self.tokens = {}
+        for name in ("a", "b", "c", "d"):
+            user = self.register_user(name, "pass")
+            self.tokens[(user, name.upper())] = self.login(name, "pass", name.upper())
+        self.txn = 0
+
+    def send(self, recipients: JsonDict, body: str) -> FakeChannel:
+        self.txn += 1
+        return self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/sendToDevice/m.test/{self.txn}",
+            content={"content": {"body": body}, "recipients": recipients},
+            access_token=self.sender_tok,
+        )
+
+    def received(self) -> set[tuple[str, str]]:
+        """Which devices have a message they haven't seen yet, consuming it."""
+        got = set()
+        for (user, device), tok in self.tokens.items():
+            since = getattr(self, f"since_{device}", None)
+            path = "/sync" + (f"?since={since}" if since else "")
+            channel = self.make_request("GET", path, access_token=tok)
+            setattr(self, f"since_{device}", channel.json_body["next_batch"])
+            if channel.json_body.get("to_device", {}).get("events"):
+                got.add((user, device))
+        return got
+
+    def pair(self, name: str) -> tuple[str, str]:
+        return (f"@{name}:test", name.upper())
+
+    def test_base_plus_add_minus_remove(self) -> None:
+        a, b, c, d = (self.pair(n) for n in "abcd")
+        abc = recipient_set_hash(frozenset([a, b, c]))
+
+        # Full list seeds hash(a b c).
+        self.assertEqual(self.send({"add": [a, b, c]}, "1").code, 200)
+        self.assertEqual(self.received(), {a, b, c})
+
+        # hash(a b c) + d, which seeds hash(a b c d).
+        self.assertEqual(self.send({"base": abc, "add": [d]}, "2").code, 200)
+        self.assertEqual(self.received(), {a, b, c, d})
+        abcd = recipient_set_hash(frozenset([a, b, c, d]))
+
+        # hash(a b c d) - b.
+        self.assertEqual(self.send({"base": abcd, "remove": [b]}, "3").code, 200)
+        self.assertEqual(self.received(), {a, c, d})
+
+        # The older base is still usable.
+        self.assertEqual(self.send({"base": abc}, "4").code, 200)
+        self.assertEqual(self.received(), {a, b, c})
+
+    def test_unknown_base(self) -> None:
+        channel = self.send({"base": "nope", "add": [self.pair("a")]}, "x")
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], UNKNOWN_RECIPIENT_SET)
+        self.assertEqual(self.received(), set())
+
+    def test_sets_are_per_sending_device(self) -> None:
+        a = self.pair("a")
+        self.assertEqual(self.send({"add": [a]}, "1").code, 200)
+        other_tok = self.login("sender", "pass", "S2")
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/v3/sendToDevice/m.test/other",
+            content={
+                "content": {},
+                "recipients": {"base": recipient_set_hash(frozenset([a]))},
+            },
+            access_token=other_tok,
+        )
+        self.assertEqual(channel.json_body["errcode"], UNKNOWN_RECIPIENT_SET)
+
+    @override_config(
+        {"experimental_features": {"photon_shared_to_device_enabled": False}}
+    )
+    def test_disabled(self) -> None:
+        channel = self.send({"add": [self.pair("a")]}, "x")
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], Codes.MISSING_PARAM)

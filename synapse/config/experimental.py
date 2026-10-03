@@ -318,3 +318,9 @@ class ExperimentalConfig(Config):
 
         # MSC4512: Delegating parts of the C-S and S-S API to application services
         self.msc4512_enabled: bool = experimental.get("msc4512_enabled", False)
+
+        # Photon: `/sendToDevice` with the content once and a recipient set
+        # given as a delta against a server-cached set.
+        self.photon_shared_to_device_enabled: bool = experimental.get(
+            "photon_shared_to_device_enabled", False
+        )
