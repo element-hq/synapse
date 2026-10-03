@@ -16,29 +16,26 @@
 //! Tracks the result of the cursor's most recent `execute`.
 //!
 //! [`tokio_postgres`] returns rows as a [`RowStream`] that is consumed lazily,
-//! so a cursor only ever holds onto the *current* query's stream plus the
-//! metadata (column names, rowcount) derived from it.
+//! so a cursor only ever holds the current query's stream plus the metadata
+//! (column names, rowcount) derived from it.
 //!
-//! The lifecycle is modelled as an explicit state machine ([`CursorQueryState`])
-//! so that illegal field combinations are unrepresentable, and so that fetching
-//! after the result set has been reported exhausted is a clean error rather
-//! than undefined behaviour (re-polling a finished stream surfaces as a
-//! spurious "connection closed"). The row stream is [`Fuse`]d, which lets an
-//! exhausted-but-not-yet-reported stream sit safely in the `Active` state: a
-//! fused stream keeps yielding `None` instead of re-polling its completed
-//! inner stream.
+//! The lifecycle is an explicit state machine ([`CursorQueryState`]), so
+//! impossible field combinations cannot be represented and a fetch after the
+//! result set was reported exhausted is a specific error. Polling a finished
+//! `RowStream` again would instead fail with a misleading "connection closed".
+//! The stream is [`Fuse`]d, so a stream that has ended but whose end has not
+//! yet been reported can stay in the `Active` state: a fused stream keeps
+//! yielding `None` instead of polling its completed inner stream.
 //!
 //! ## Generic over the stream
 //!
-//! The state machine is generic over the underlying stream type `S`, defaulting
-//! to [`RowStream`] (the only stream used in production). The
-//! [`CursorRowStream`] trait abstracts the three things the logic needs from a
-//! stream beyond [`futures::Stream`] itself — the affected-row count, how to
-//! turn a row into a Python tuple, and how to render a stream error as a
-//! `PyErr`. This is what lets the state-machine logic (exhaustion handling,
-//! state transitions, error recovery) be unit-tested against an in-memory fake
-//! stream with no live Postgres server; see the tests at the bottom of the
-//! module.
+//! The state machine is generic over the stream type `S`, defaulting to
+//! [`RowStream`], the only stream used in production. The [`CursorRowStream`]
+//! trait covers what the logic needs from a stream beyond [`futures::Stream`]:
+//! the affected-row count, how to turn a row into a Python tuple, and how to
+//! turn a stream error into a `PyErr`. That lets the state transitions,
+//! exhaustion handling and error recovery be unit-tested against an in-memory
+//! stream with no Postgres server. See the tests at the bottom of the module.
 
 use std::{mem, pin::Pin};
 
@@ -58,16 +55,14 @@ use crate::database::postgres::{
     value::pg_row_to_py,
 };
 
-/// The capabilities the cursor state machine needs from the underlying row
-/// stream, beyond [`futures::Stream`] itself.
+/// What the cursor state machine needs from the row stream beyond
+/// [`futures::Stream`] itself.
 ///
-/// Implemented for [`tokio_postgres::RowStream`] in production; the unit tests
-/// provide an in-memory implementation so the state-machine logic can be
-/// exercised without a live database.
+/// Implemented for [`tokio_postgres::RowStream`] in production. The unit tests
+/// implement it for an in-memory stream.
 ///
-/// The bounds (`Send` + [`Ungil`] on the stream and its row/error types) are
-/// what let the rows and errors cross the GIL-release boundary in the
-/// `block_on*` helpers.
+/// The `Send` and [`Ungil`] bounds on the stream and its row and error types
+/// let them cross the GIL release in the `block_on*` helpers.
 pub trait CursorRowStream:
     futures::Stream<Item = Result<Self::Row, Self::Error>> + Send + Ungil + Sized
 {
@@ -113,40 +108,37 @@ pub enum CursorQueryState<S = RowStream> {
     /// No query has been executed yet, or the previous result set was reset by
     /// the next `execute`. Fetching is an error.
     Idle,
-    /// A query is in flight; rows can be fetched. Exhaustion has not yet been
-    /// reported to the caller.
+    /// A query has been executed and rows can be fetched. The end of the
+    /// result set has not yet been reported to the caller.
     Active {
         /// Live row stream for the current query.
         stream: FusedStream<S>,
-        /// Handle to the runtime the stream is driven on (the extension's
-        /// shared tokio runtime; see [`crate::tokio_runtime`]), for the
-        /// blocking `fetch_*` calls.
+        /// The runtime the blocking `fetch_*` calls drive the stream on. This
+        /// is the extension's shared tokio runtime, see
+        /// [`crate::tokio_runtime`].
         handle: Handle,
-        /// Column names for the result set (empty for a DML statement).
+        /// Column names of the result set, empty for a statement that returns
+        /// no rows.
         ///
-        /// TODO: currently write-only; kept to back a future PEP-249
-        /// `Cursor.description` accessor.
+        /// TODO: not read yet. Kept for a PEP-249 `Cursor.description`
+        /// accessor.
         description: Vec<String>,
     },
-    /// The result set has been fully consumed and exhaustion reported — a fetch
-    /// returned `None`/`[]`, or `fetch_all`/`rowcount` drained it. Any further
-    /// `fetch_*` is a programming error; `rowcount` still returns the count.
+    /// The result set has been fully consumed and its end reported: a fetch
+    /// returned `None` or an empty batch, or `fetch_all`/`rowcount` drained
+    /// it. A further `fetch_*` is an error. `rowcount` still returns the count.
     Closed {
-        /// Column names for the result set, carried over from `Active` so they
-        /// survive once the rows are gone.
-        ///
-        /// TODO: currently write-only; like `Active::description` it is kept to
-        /// back a future PEP-249 `Cursor.description` accessor.
+        /// Column names of the result set, carried over from `Active`. See the
+        /// TODO there.
         description: Vec<String>,
         /// PEP-249 `rowcount` from the command tag, if it was captured.
         rowcount: Option<u64>,
     },
 }
 
-// Implemented by hand rather than derived: a derived `Default` would add an
-// `S: Default` bound (which `RowStream` doesn't satisfy), even though the
-// default state (`Idle`) doesn't depend on `S` at all. The hand-written impl is
-// therefore *not* equivalent to the derive clippy suggests, so we silence it.
+// Not derived: `#[derive(Default)]` would add an `S: Default` bound, which
+// `RowStream` doesn't satisfy, even though `Idle` holds no `S`. The derive
+// clippy suggests is therefore not equivalent, hence the allow.
 #[allow(clippy::derivable_impls)]
 impl<S> Default for CursorQueryState<S> {
     fn default() -> Self {
@@ -166,13 +158,13 @@ impl<S: CursorRowStream> CursorQueryState<S> {
         *self = Self::Idle;
     }
 
-    /// Record the stream and column metadata for a newly-started query.
+    /// Record the stream and column names of a newly started query.
     ///
-    /// `description` is the list of column names (empty for a DML statement);
-    /// taking it as a plain `Vec<String>` rather than the driver's column
-    /// metadata keeps this layer decoupled from `tokio_postgres::Column` and so
-    /// testable. `handle` is the runtime the blocking `fetch_*` calls drive
-    /// the stream on.
+    /// `description` is the list of column names, empty for a statement that
+    /// returns no rows. It is a plain `Vec<String>` rather than
+    /// `tokio_postgres::Column` metadata so this module does not depend on the
+    /// driver's types and can be tested without them. `handle` is the runtime
+    /// the blocking `fetch_*` calls drive the stream on.
     pub fn on_query_start(&mut self, stream: S, description: Vec<String>, handle: Handle) {
         *self = Self::Active {
             stream: Box::pin(stream.fuse()),
@@ -206,20 +198,17 @@ impl<S: CursorRowStream> CursorQueryState<S> {
 
     /// Fetch the next batch of rows.
     ///
-    /// This method will block on the first row if it's not immediately
-    /// available, but will return any additional rows that are also ready
-    /// without blocking.
-    ///
-    /// This is a convenience for Python code that wants to avoid the overhead
-    /// of calling `fetch_one` repeatedly, but still wants to avoid blocking on
-    /// the entire result set.
+    /// Blocks until the first row is available, then adds any further rows
+    /// that are already buffered without blocking again. `capacity` sizes the
+    /// returned buffer and does not cap the batch. This lets Python iterate a
+    /// large result set without a call per row (`fetch_one`) and without
+    /// waiting for the whole result set (`fetch_all`).
     ///
     /// An empty batch reports exhaustion and moves the cursor to `Closed`, so a
-    /// subsequent fetch is an error. Note that the call that returns the final
-    /// rows and the call that reports the empty batch may be distinct: a batch
-    /// that runs into the end of the stream still returns the rows it has and
-    /// leaves the report to the next call. On a stream error the cursor is
-    /// reset to `Idle` and the error surfaced to Python.
+    /// subsequent fetch is an error. A batch that reaches the end of the stream
+    /// still returns the rows it has, so the empty batch always comes from a
+    /// later call. On a stream error the cursor is reset to `Idle` and the
+    /// error surfaced to Python.
     pub fn fetch_next_batch<'py>(
         &mut self,
         py: Python<'py>,
@@ -230,11 +219,11 @@ impl<S: CursorRowStream> CursorQueryState<S> {
         };
 
         match pull_ready_batch(stream, py, capacity, handle) {
-            // We have rows to return now; stay `Active`. If the end of the
-            // stream was reached while draining, the fused stream will report
-            // it as an empty batch on the next call.
+            // Rows to return, so stay `Active`. If the batch reached the end
+            // of the stream, the fused stream reports that as an empty batch
+            // on the next call.
             Ok(Some(buffer)) => Ok(buffer),
-            // The stream was already exhausted: report it and close.
+            // No first row: the stream was already exhausted.
             Ok(None) => {
                 self.close_drained();
                 Ok(Vec::new())
@@ -278,10 +267,9 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     /// of an already-exhausted (`Closed`) cursor returns the captured count
     /// rather than erroring, per PEP-249.
     pub fn rowcount<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
-        // `rows_affected()` is only valid after the stream is drained, so we
-        // drain it here. This is OK as in Python the rowcount should only be
-        // accessed for queries that DO NOT return rows, e.g. INSERT, UPDATE,
-        // DELETE.
+        // The command tag, and so the count, only arrives once the stream is
+        // drained. Draining discards any unfetched rows, which is fine: callers
+        // only read `rowcount` after INSERT, UPDATE or DELETE.
         if let Self::Active { stream, handle, .. } = self {
             if let Err(err) = drain_stream(stream.as_mut()).block_on(py, handle) {
                 *self = Self::Idle;
@@ -295,10 +283,8 @@ impl<S: CursorRowStream> CursorQueryState<S> {
                 rowcount: Some(rowcount),
                 ..
             } => Ok(PyInt::new(py, *rowcount)),
-            // No rowcount known: either we're `Idle` (no query run, or reset by
-            // an earlier error), or `Closed` with a command tag that carried no
-            // count. The stream is always drained by the block above before we
-            // get here, so "not yet drained" isn't a case. PEP-249 says -1.
+            // `Idle` (no query, or reset by an earlier error), or a command
+            // tag without a count. PEP-249 says -1 for an unknown rowcount.
             _ => Ok(PyInt::new(py, -1)),
         }
     }
@@ -315,10 +301,9 @@ impl<S: CursorRowStream> CursorQueryState<S> {
         }
     }
 
-    /// Move an `Active` cursor whose stream has been fully drained to
-    /// `Closed`, capturing the command tag's affected-row count. The count is
-    /// only valid once the stream is drained, which is why every caller drains
-    /// (or observes the end of) the stream first.
+    /// Move an `Active` cursor to `Closed`, capturing the command tag's
+    /// affected-row count. The count only arrives once the stream is drained,
+    /// so callers drain the stream, or observe its end, first.
     ///
     /// A no-op in any other state.
     fn close_drained(&mut self) {
@@ -338,17 +323,16 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     }
 }
 
-/// Pull the first row (blocking until it arrives) plus any rows that are
-/// already buffered, without blocking again.
+/// Block for the first row, then add any rows that are already buffered
+/// without blocking again.
 ///
-/// Returns `Ok(None)` if the stream is already exhausted (there was no first
-/// row). End-of-stream reached while draining the ready rows is *not* reported
-/// here — we return the rows we have and leave the empty-batch report to a
-/// later call; the fused stream makes re-polling safe.
+/// Returns `Ok(None)` if there is no first row because the stream is already
+/// exhausted. Reaching the end of the stream after the first row is not
+/// reported here. The rows collected so far are returned, and the next call
+/// finds the fused stream still yielding `None`.
 ///
-/// Expects the stream of an `Active` cursor; `fetch_next_batch` is its only
-/// caller and only invokes it in that state. A mid-drain stream error discards
-/// the partially-built buffer and propagates, leaving the caller to reset.
+/// A stream error part way through discards the rows collected so far and is
+/// returned. The caller resets the state.
 fn pull_ready_batch<'py, S: CursorRowStream>(
     stream: &mut FusedStream<S>,
     py: Python<'py>,
@@ -367,15 +351,11 @@ fn pull_ready_batch<'py, S: CursorRowStream>(
 
     loop {
         match stream.as_mut().get_next_if_ready() {
-            // Not ready yet: return what we have (non-empty — we pushed the
-            // first row above).
+            // Not ready yet.
             None => break,
-            // A row is already available.
             Some(Some(Ok(row))) => buffer.push(S::row_to_py(py, &row)?),
-            // The stream errored.
             Some(Some(Err(err))) => return Err(S::stream_err(err)),
-            // End of stream: stop, leaving the empty-batch report to the next
-            // call.
+            // End of stream. The next call reports it as an empty batch.
             Some(None) => break,
         }
     }
@@ -394,16 +374,14 @@ async fn drain_stream<S: CursorRowStream>(mut stream: Pin<&mut Fuse<S>>) -> Resu
 
 #[cfg(test)]
 mod tests {
-    //! The state machine is driven here by an in-memory [`FakeStream`] instead
-    //! of a live [`RowStream`], so these tests cover the exhaustion handling,
-    //! the state transitions, and the error recovery without any Postgres
-    //! server. Rows are simple integer tuples; that's enough to assert the
-    //! plumbing carries values through `row_to_py`.
+    //! These tests drive the state machine with in-memory streams instead of
+    //! a live [`RowStream`], so they need no Postgres server. Rows are integer
+    //! tuples, enough to check that values pass through `row_to_py`.
     //!
-    //! Note the one thing they deliberately *don't* cover: [`FakeStream`]'s
-    //! `poll_next` is always `Poll::Ready`, so the GIL-release / blocking path
-    //! in the `block_on*` helpers is never exercised here (it has its own tests
-    //! in `helpers`). These tests are purely about the state-machine logic.
+    //! [`FakeStream`] is always ready. [`SteppedStream`] can also return
+    //! `Pending`, for the partial-batch and blocking paths of
+    //! `fetch_next_batch`. The `block_on*` helpers themselves are tested in
+    //! `helpers`.
 
     use std::{
         collections::VecDeque,
@@ -415,10 +393,8 @@ mod tests {
 
     use super::*;
 
-    /// A handle to a process-wide runtime standing in for the shared one,
-    /// passed into `on_query_start` just as production code passes the shared
-    /// runtime's handle. [`FakeStream`] is always `Poll::Ready`, so nothing
-    /// here actually parks on the runtime.
+    /// A handle to a process-wide test runtime, standing in for the shared
+    /// runtime production code passes to `on_query_start`.
     fn runtime_handle() -> Handle {
         static RUNTIME: std::sync::OnceLock<Runtime> = std::sync::OnceLock::new();
         RUNTIME
@@ -452,7 +428,7 @@ mod tests {
         type Item = Result<FakeRow, FakeError>;
 
         fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            // Every item is immediately available; `None` once drained.
+            // Every item is ready immediately, then `None`.
             Poll::Ready(self.items.pop_front())
         }
     }
@@ -774,7 +750,7 @@ mod tests {
     fn fetch_next_batch_capacity_is_a_hint_not_a_limit() {
         Python::initialize();
         Python::attach(|py| {
-            // `capacity` only sizes the buffer; all ready rows are returned
+            // `capacity` only sizes the buffer. All ready rows are returned
             // even when there are more of them than the hint.
             let mut state = active_with(vec![vec![1], vec![2], vec![3]], Some(0));
             let batch = state.fetch_next_batch(py, 1).unwrap();
@@ -855,10 +831,10 @@ mod tests {
         });
     }
 
-    /// A stream that can report "not ready yet" mid-way through, so we can
-    /// exercise the *partial batch* behaviour the always-ready [`FakeStream`]
-    /// can't reach: `fetch_next_batch` should block for the first row, then
-    /// return only the rows that are immediately ready.
+    /// A stream that can report "not ready yet" part way through, which the
+    /// always-ready [`FakeStream`] cannot. Used to check that
+    /// `fetch_next_batch` blocks for the first row and then returns only the
+    /// rows that are immediately ready.
     struct SteppedStream {
         steps: VecDeque<Step>,
     }
@@ -910,8 +886,8 @@ mod tests {
     fn fetch_next_batch_returns_partial_batch_when_next_is_not_ready() {
         Python::initialize();
         Python::attach(|py| {
-            // Row 1 is ready; row 2 is "not ready yet" (a Pending poll); row 3
-            // is ready behind it.
+            // Row 1 is ready, row 2 is not ready yet (one Pending poll), and
+            // row 3 is ready behind it.
             let mut state = CursorQueryState::<SteppedStream>::new();
             state.on_query_start(
                 SteppedStream {
