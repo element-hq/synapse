@@ -1,0 +1,1 @@
+Speed up sending large JSON responses on busy workers by writing them to the transport in one go.
