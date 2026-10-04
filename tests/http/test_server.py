@@ -17,7 +17,7 @@ from unittest.mock import Mock
 
 from twisted.web.server import Request
 
-from synapse.http.server import _ByteProducer
+from synapse.http.server import _FinishOnFlushProducer
 from synapse.logging.context import (
     LoggingContext,
 )
@@ -31,12 +31,10 @@ try:
 except ImportError:
     jaeger_client = None  # type: ignore
 
-from synapse.util.iterutils import chunk_seq
-
 from tests.unittest import TestCase
 
 
-class ByteProducerTestCase(TestCase):
+class FinishOnFlushProducerTestCase(TestCase):
     if jaeger_client is None:
         skip = "Requires jaeger_client"  # type: ignore[unreachable]
 
@@ -70,49 +68,51 @@ class ByteProducerTestCase(TestCase):
             nonlocal written_buffer
             written_buffer += data
 
-            # Pause after the first write, as the transport does when its send
-            # buffer fills up.
-            if request.write.call_count == 1:
-                request.registerProducer.call_args.args[0].pauseProducing()
+            # Pause on write, as the transport does when its send buffer fills
+            # up.
+            request.registerProducer.call_args.args[0].pauseProducing()
 
         request.write.side_effect = write
 
-        ## 3. Now we start writing the bytes to the request via the
-        ## _ByteProducer. This should not log any errors or warnings.
+        ## 3. Now we write the bytes to the request via the
+        ## _FinishOnFlushProducer. This should not log any errors or warnings.
         with (
             self.assertNoLogs("synapse.logging.context", "WARNING"),
             self.assertNoLogs("synapse.logging.scopecontextmanager", "ERROR"),
         ):
-            # The data that we write to the request via the _ByteProducer. This
-            # is arbitrary and large to ensure multiple chunks are written. It
-            # needs to be big enough that _ByteProducer will not try and batch
-            # up the chunks internally (if it does then the assertion that we
-            # have multiple writes below will fail).
             buffer_to_write = b"x" * 6000
 
-            # The initial write happens within the request log context and span
+            # The write happens within the request log context and span
             with (
                 LoggingContext(name="request", server_name="test_server"),
                 start_active_span("servlet"),
             ):
-                # Break the buffer into chunks for writing. We use an arbitrary
-                # chunk size that ensures we have a few distinct writes.
-                iterable = chunk_seq(buffer_to_write, 2000)
+                producer = _FinishOnFlushProducer(
+                    cast(Request, request), buffer_to_write
+                )
 
-                # Start writing the data. The _ByteProducer will start writing
-                # immediately on construction.
-                producer = _ByteProducer(cast(Request, request), iterable)
-
-                # The request paused after the first write, and so it should not
-                # have finished yet.
+                # The whole body should have been written in one go, but the
+                # request was paused, so it should not have finished yet.
+                request.write.assert_called_once()
+                self.assertEqual(written_buffer, buffer_to_write)
                 request.finish.assert_not_called()
-                self.assertLess(len(written_buffer), len(buffer_to_write))
-                self.assertTrue(producer._paused)
 
             # Mimic the request resuming the producer. This happens from the
             # reactor and so outside the request log context.
             producer.resumeProducing()
 
-            # All data should now be written and the request should be finished.
+            # Once the transport has drained, the request should be finished.
             request.finish.assert_called_once()
-            self.assertEqual(written_buffer, buffer_to_write)
+            request.write.assert_called_once()
+
+    def test_unpaused_response(self) -> None:
+        """Test that a response which the transport doesn't need to buffer is
+        finished immediately.
+        """
+        request = Mock(spec=Request)
+
+        _FinishOnFlushProducer(cast(Request, request), b"x" * 10)
+
+        request.write.assert_called_once_with(b"x" * 10)
+        request.unregisterProducer.assert_called_once()
+        request.finish.assert_called_once()
