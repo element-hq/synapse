@@ -290,11 +290,11 @@ def _check_path_allowed_for_appservice(
         )
     pattern = re.compile(
         r"^/_matrix/federation/(?:unstable/[^/]+|v[^/]+)/%s(/.*)?$"
-        % (re.escape(appservice.proxy_prefix),)
+        % (re.escape(appservice.proxy_prefix.path),)
     )
     if pattern.match(path) is None:
         raise SynapseError(
             HTTPStatus.FORBIDDEN,
-            f"Path must be under /_matrix/federation/<version>/{appservice.proxy_prefix}",
+            f"Path must be under /_matrix/federation/<version>/{appservice.proxy_prefix.path}",
             Codes.AS_FEDPROXY_PATH_NOT_ALLOWED,
         )

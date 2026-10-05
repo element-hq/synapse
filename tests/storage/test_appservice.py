@@ -662,7 +662,8 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
             self.hs,
         )
         (appservice,) = store.get_app_services()
-        self.assertEqual(appservice.proxy_prefix, "rtc/livekit")
+        assert appservice.proxy_prefix is not None
+        self.assertEqual(appservice.proxy_prefix.path, "rtc/livekit")
         self.assertEqual(appservice.proxy_url, "http://proxy")
 
     def test_proxy_prefix_requires_proxy_url(self) -> None:

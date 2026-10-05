@@ -82,6 +82,27 @@ class Namespace:
     regex: Pattern[str]
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class ProxyPrefix:
+    """A path prefix under which requests are proxied to an application service
+    (MSC4512).
+    """
+
+    # The path prefix, applied after the version segment(s) (either /vX/ or
+    # /unstable/foo/):
+    # - /_matrix/client/(unstable/[^/]+|v[^/]+)/{path}/.*
+    # - /_matrix/federation/(unstable/[^/]+|v[^/]+)/{path}/.*
+    # Must not end with a slash.
+    path: str
+
+    # Whether guest users may make proxied Client-Server requests under this prefix.
+    allows_guests: bool
+
+    def contains(self, path: str) -> bool:
+        """Whether `path` equals or is nested under this prefix."""
+        return path == self.path or path.startswith(self.path + "/")
+
+
 class ApplicationService:
     """Defines an application service. This definition is mostly what is
     provided to the /register AS API.
@@ -97,14 +118,10 @@ class ApplicationService:
     # values.
     NS_LIST = [NS_USERS, NS_ALIASES, NS_ROOMS]
 
-    # Prefixes are applied after the version segment(s) (either /vX/ or /unstable/foo/):
-    # - /_matrix/client/(unstable/[^/]+|v[^/]+)/{prefix}/.*
-    # - /_matrix/federation/(unstable/[^/]+|v[^/]+)/{prefix}/.*
-    ALLOWED_PROXY_PREFIXES = {"rtc/livekit"}
-
-    # Proxy prefixes under which guest users may make proxied Client-Server
-    # requests.
-    GUEST_ACCESSIBLE_ALLOWED_PROXY_PREFIXES = {"rtc/livekit"}
+    # API prefixes that an application service may claim for proxying.
+    ALLOWED_PROXY_PREFIXES = (
+        ProxyPrefix(path="rtc/livekit", allows_guests=True),
+    )
 
     def __init__(
         self,
@@ -132,9 +149,7 @@ class ApplicationService:
         self.proxy_url = (
             proxy_url.rstrip("/") if isinstance(proxy_url, str) else None
         )  # proxy_url must not end with a slash
-        self.proxy_prefix = (
-            proxy_prefix.rstrip("/") if isinstance(proxy_prefix, str) else None
-        )  # proxy_prefix must not end with a slash
+        self.proxy_prefix = self._parse_proxy_prefix(proxy_prefix, self.proxy_url)
         self.hs_token = hs_token
         # The full Matrix ID for this application service's sender.
         self.sender = sender
@@ -159,14 +174,6 @@ class ApplicationService:
 
         if "|" in self.id:
             raise Exception("application service ID cannot contain '|' character")
-
-        if (self.proxy_prefix is None) != (self.proxy_url is None):
-            raise KeyError("proxy_url and proxy_prefix must always be set together")
-        if proxy_prefix is not None:
-            if not proxy_prefix or not self.proxy_url:
-                raise ValueError("proxy_prefix and proxy_url must be non-empty strings")
-            if not self._is_proxy_prefix_allowed(proxy_prefix):
-                raise ValueError(f"cannot claim reserved proxy prefix {proxy_prefix!r}")
 
         # .protocols is a publicly visible field
         if protocols:
@@ -232,24 +239,32 @@ class ApplicationService:
         return False
 
     @staticmethod
-    def _prefix_matches(prefix: str, candidates: Iterable[str]) -> bool:
-        """Checks whether `prefix` equals or is nested under any of `candidates`."""
-        return any(
-            prefix == candidate or prefix.startswith(candidate + "/")
-            for candidate in candidates
-        )
+    def _parse_proxy_prefix(
+        proxy_prefix: str | None, proxy_url: str | None
+    ) -> ProxyPrefix | None:
+        """Validates the supplied proxy prefix.
 
-    def _is_proxy_prefix_allowed(self, prefix: str) -> bool:
-        return self._prefix_matches(prefix, ApplicationService.ALLOWED_PROXY_PREFIXES)
+        Returns:
+            A `ProxyPrefix` with the configured path and the properties of the
+            allowed prefix it falls under, or None if no prefix is configured.
 
-    def proxy_allows_guests(self) -> bool:
-        """Whether guest users may make proxied Client-Server requests to this
-        application service.
+        Raises:
+            KeyError: if only one of `proxy_prefix` and `proxy_url` is set.
+            ValueError: if `proxy_prefix` or `proxy_url` is empty, or if
+                `proxy_prefix` is not under any allowed prefix.
         """
-        return self.proxy_prefix is not None and self._prefix_matches(
-            self.proxy_prefix,
-            ApplicationService.GUEST_ACCESSIBLE_ALLOWED_PROXY_PREFIXES,
-        )
+        if (proxy_prefix is None) != (proxy_url is None):
+            raise KeyError("proxy_url and proxy_prefix must always be set together")
+        if proxy_prefix is None:
+            return None
+        if not proxy_prefix or not proxy_url:
+            raise ValueError("proxy_prefix and proxy_url must be non-empty strings")
+
+        path = proxy_prefix.rstrip("/")  # must not end with a slash
+        for allowed in ApplicationService.ALLOWED_PROXY_PREFIXES:
+            if allowed.contains(path):
+                return attr.evolve(allowed, path=path)
+        raise ValueError(f"cannot claim reserved proxy prefix {proxy_prefix!r}")
 
     @cached(num_args=1, cache_context=True)
     async def _matches_user_in_member_list(

@@ -95,16 +95,15 @@ def load_appservices(
                     )
                 seen_as_tokens[appservice.token] = config_file
                 if appservice.proxy_prefix is not None:
+                    proxy_prefix = appservice.proxy_prefix.path
                     for seen_prefix, seen_file in seen_proxy_prefixes.items():
-                        if _proxy_prefixes_overlap(
-                            appservice.proxy_prefix, seen_prefix
-                        ):
+                        if _proxy_prefixes_overlap(proxy_prefix, seen_prefix):
                             raise ConfigError(
                                 "io.element.msc4512.proxy_prefix values must not overlap across "
                                 "application services: "
-                                f"{appservice.proxy_prefix} (files: {config_file}, {seen_file})"
+                                f"{proxy_prefix} (files: {config_file}, {seen_file})"
                             )
-                    seen_proxy_prefixes[appservice.proxy_prefix] = config_file
+                    seen_proxy_prefixes[proxy_prefix] = config_file
                 logger.info("Loaded application service: %s", appservice)
                 appservices.append(appservice)
         except Exception as e:

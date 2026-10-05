@@ -27,6 +27,7 @@ from twisted.internet import defer
 from synapse.appservice import (
     ApplicationService,
     Namespace,
+    ProxyPrefix,
     Scopes,
 )
 from synapse.types import UserID
@@ -323,42 +324,18 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
             proxy_url="http://proxy.example.com",
             proxy_prefix="rtc/livekit",
         )
-        self.assertEqual(service.proxy_prefix, "rtc/livekit")
+        self.assertEqual(
+            service.proxy_prefix, ProxyPrefix(path="rtc/livekit", allows_guests=True)
+        )
         self.assertEqual(service.proxy_url, "http://proxy.example.com")
 
-    def test_proxy_allows_guests_for_livekit_prefix(self) -> None:
-        service = self._make_service(
-            proxy_url="http://proxy.example.com",
-            proxy_prefix="rtc/livekit",
-        )
-        self.assertTrue(service.proxy_allows_guests())
-
-    def test_proxy_allows_guests_for_nested_livekit_prefix(self) -> None:
+    def test_nested_livekit_proxy_prefix_allows_guests(self) -> None:
         service = self._make_service(
             proxy_url="http://proxy.example.com",
             proxy_prefix="rtc/livekit/foo",
         )
-        self.assertTrue(service.proxy_allows_guests())
-
-    def test_proxy_does_not_allow_guests_without_proxy_prefix(self) -> None:
-        service = self._make_service()
-        self.assertFalse(service.proxy_allows_guests())
-
-    def test_proxy_does_not_allow_guests_for_other_prefix(self) -> None:
-        # The constructor rejects prefixes outside ALLOWED_PROXY_PREFIXES, so
-        # exercise the matching logic directly for a non-guest prefix.
-        self.assertFalse(
-            ApplicationService._prefix_matches(
-                "rtc/livekitfoo",
-                ApplicationService.GUEST_ACCESSIBLE_ALLOWED_PROXY_PREFIXES,
-            )
-        )
-        self.assertFalse(
-            ApplicationService._prefix_matches(
-                "other/prefix",
-                ApplicationService.GUEST_ACCESSIBLE_ALLOWED_PROXY_PREFIXES,
-            )
-        )
+        assert service.proxy_prefix is not None
+        self.assertTrue(service.proxy_prefix.allows_guests)
 
     def test_proxy_url_trailing_slash_is_stripped(self) -> None:
         service = self._make_service(
@@ -372,7 +349,8 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
             proxy_url="http://proxy.example.com",
             proxy_prefix="rtc/livekit/foo",
         )
-        self.assertEqual(service.proxy_prefix, "rtc/livekit/foo")
+        assert service.proxy_prefix is not None
+        self.assertEqual(service.proxy_prefix.path, "rtc/livekit/foo")
 
     def test_disallowed_proxy_prefix_raises(self) -> None:
         with self.assertRaises(ValueError):
@@ -390,4 +368,5 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
             proxy_url="http://proxy.example.com",
             proxy_prefix="rtc/livekit/foo/",
         )
-        self.assertEqual(service.proxy_prefix, "rtc/livekit/foo")
+        assert service.proxy_prefix is not None
+        self.assertEqual(service.proxy_prefix.path, "rtc/livekit/foo")
