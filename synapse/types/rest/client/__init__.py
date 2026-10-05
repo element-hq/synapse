@@ -148,7 +148,7 @@ class SlidingSyncStickyEventsToken:
     and then accepted as the `since` parameter in the requests of the same extension.
 
     Current format:
-        SlidingSyncStickyEventsToken ::= 'sticky_' MultiWriterStreamToken
+        SlidingSyncStickyEventsToken ::= 'sticky_' UnresolvedMultiWriterStreamToken
 
     where `MultiWriterStreamToken` is the serialised form of a (potentially sharded)
     `MultiWriterStreamToken` for the sticky events stream, e.g. `42` or `m42~1.45`.
@@ -164,17 +164,21 @@ class SlidingSyncStickyEventsToken:
     PATTERN = re.compile(r"^sticky_([0-9]+|m[0-9]+(~[0-9]+\.[0-9]+)*)$")
     START: ClassVar["SlidingSyncStickyEventsToken"]
 
-    def __init__(self, *, stream_token: UnresolvedMultiWriterStreamToken) -> None:
-        self._stream_token = stream_token
+    def __init__(
+        self, *, unresolved_stream_token: UnresolvedMultiWriterStreamToken
+    ) -> None:
+        self._unresolved_stream_token = unresolved_stream_token
 
     @classmethod
     async def from_stream_token(
         cls, store: "DataStore", token: MultiWriterStreamToken
     ) -> "SlidingSyncStickyEventsToken":
-        return cls(stream_token=await token.to_unresolved(store))
+        return cls(unresolved_stream_token=await token.to_unresolved(store))
 
     async def to_stream_token(self, store: "DataStore") -> MultiWriterStreamToken:
-        return await MultiWriterStreamToken.from_unresolved(store, self._stream_token)
+        return await MultiWriterStreamToken.from_unresolved(
+            store, self._unresolved_stream_token
+        )
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -211,7 +215,9 @@ class SlidingSyncStickyEventsToken:
                 raise ValueError(f"Invalid SlidingSyncStickyEventsToken format: {v!r}")
 
             return cls(
-                stream_token=UnresolvedMultiWriterStreamToken.parse(match.group(1))
+                unresolved_stream_token=UnresolvedMultiWriterStreamToken.parse(
+                    match.group(1)
+                )
             )
         raise ValueError(f"Cannot parse SlidingSyncStickyEventsToken from {type(v)}")
 
@@ -221,7 +227,7 @@ class SlidingSyncStickyEventsToken:
 
         The inverse of `_validate`.
         """
-        return f"sticky_{self._stream_token.to_string()}"
+        return f"sticky_{self._unresolved_stream_token.to_string()}"
 
     def __repr__(self) -> str:
         # Use the serialised form as debug output.
@@ -230,7 +236,7 @@ class SlidingSyncStickyEventsToken:
 
 # Starting reading a stream at 0 ensures all stream fact rows will be read
 SlidingSyncStickyEventsToken.START = SlidingSyncStickyEventsToken(
-    stream_token=UnresolvedMultiWriterStreamToken(stream=0)
+    unresolved_stream_token=UnresolvedMultiWriterStreamToken(stream=0)
 )
 
 
