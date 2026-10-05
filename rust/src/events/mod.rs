@@ -48,7 +48,7 @@
 //!   string describing why auth rejected the event.
 //!
 
-use std::sync::Arc;
+use std::{cmp::min, sync::Arc};
 
 use anyhow::Error;
 use pyo3::{
@@ -445,6 +445,35 @@ impl Event {
         let duration = std::cmp::min(duration, MAX_DURATION);
 
         Ok(Some(duration))
+    }
+
+    /// If this event has the `msc4354_sticky` top-level field and is eligible
+    /// to be sticky (isn't spammy), returns a timestamp (in milliseconds since the epoch) of
+    /// the expiry of the event's stickiness, as seen locally on this homeserver.
+    ///
+    /// It is the caller's responsibility to check this time is not in the past.
+    fn locally_sticky_until_ts(&self) -> PyResult<Option<i64>> {
+        let Some(sticky_duration) = self.sticky_duration()? else {
+            return Ok(None);
+        };
+        let Some(received_ts) = self.internal_metadata.get_received_ts()? else {
+            // Either this event hasn't been persisted or this event is from before Synapse v0.16.0
+            // If before v0.16.0, we don't want this event to be sticky (even if someone was prescient
+            // enough to create a Sticky Event with a forged `origin_server_ts` far into the future...)
+            return Ok(None);
+        };
+
+        // Clamp to when it was received so a forged origin timestamp can't produce
+        // an event that is sticky beyond the 1 hour cap.
+        let start_ts = min(
+            self.parsed_event.common_fields.origin_server_ts,
+            received_ts,
+        );
+
+        // From this, calculate the stickiness expiry time.
+        // The `as i64` cast is safe as sticky durations are capped to an
+        // hour, which is well within the i64 range.
+        Ok(Some(start_ts + sticky_duration.as_millis() as i64))
     }
 
     fn __str__(&self) -> PyResult<String> {

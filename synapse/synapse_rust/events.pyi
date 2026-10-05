@@ -325,6 +325,15 @@ class Event:
         See [`Self::locally_sticky_until_ts`] to get the effective stickiness expiry timestamp.
         """
 
+    def locally_sticky_until_ts(self) -> int | None:
+        """
+        If this event has the `msc4354_sticky` top-level field and is eligible
+        to be sticky (isn't spammy), returns a timestamp (in milliseconds since the epoch) of
+        the expiry of the event's stickiness, as seen locally on this homeserver.
+
+        It is the caller's responsibility to check this time is not in the past.
+        """
+
 class ThreadAggregation:
     """The bundled thread summary for an event."""
 

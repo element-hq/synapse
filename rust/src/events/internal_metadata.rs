@@ -661,7 +661,7 @@ impl EventInternalMetadata {
     }
 
     #[getter]
-    fn get_received_ts(&self) -> PyResult<Option<i64>> {
+    pub fn get_received_ts(&self) -> PyResult<Option<i64>> {
         Ok(self.read_inner()?.received_ts)
     }
     #[setter]
