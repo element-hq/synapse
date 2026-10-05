@@ -48,7 +48,7 @@ from unittest.mock import Mock, patch
 
 import attr
 from incremental import Version
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, override
 from zope.interface import implementer
 
 import twisted
@@ -739,6 +739,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
 
         return conn
 
+    @override
     def advance(self, amount: float) -> None:
         # Move the Rust clock before `super().advance()` fires any callbacks,
         # since those may read it.
