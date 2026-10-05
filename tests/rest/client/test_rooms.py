@@ -3124,9 +3124,10 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         )
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
-    def test_send_delayed_state_event(self) -> None:
+    def test_send_delayed_state_event_with_txnid(self) -> None:
         """
-        Test sending a valid delayed state event, and that repeating the request is a no-op.
+        Test that repeated requests to schedule a delayed state event
+        with `PUT` and the same transaction ID are idempotent.
         Note that only the dedicated endpoint can test this, as the one based on /state
         does not support idempotent requests by using a transaction ID.
         """
