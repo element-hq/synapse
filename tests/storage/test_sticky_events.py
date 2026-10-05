@@ -421,6 +421,72 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         # ...nor shown to clients down sync.
         self.assertEqual(self._get_visible_sticky_event_ids(), set())
 
+    def test_redacted_in_same_batch_not_tracked(self) -> None:
+        """
+        Tests that a sticky event which is persisted in the same batch as a redaction of it
+        is not sent down to clients over sync and is not added to the `sticky_events` table.
+        """
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        self.helper.join(self.room_id, user2_id, tok=user2_tok)
+
+        persist_controller = self.hs.get_storage_controllers().persistence
+        assert persist_controller is not None
+
+        sticky_event, sticky_event_context = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room_id,
+                sender=user2_id,
+                type=EventTypes.Message,
+                content={"body": "sticky", "msgtype": "m.text"},
+                # Corresponds to StickyEvent.EVENT_FIELD_NAME
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=1).as_millis()
+                ),
+            )
+        )
+        redaction_event, redaction_event_context = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room_id,
+                sender=user2_id,
+                type=EventTypes.Redaction,
+                content={
+                    "reason": "nothing here but us trees",
+                    "redacts": sticky_event.event_id,
+                },
+            )
+        )
+
+        # Persist both events in a single batch.
+        self.get_success(
+            persist_controller.persist_events(
+                [
+                    (sticky_event, sticky_event_context),
+                    (redaction_event, redaction_event_context),
+                ]
+            )
+        )
+
+        # The event should have been persisted in its redacted form.
+        event = self.get_success(self.store.get_event(sticky_event.event_id))
+        self.assertEqual(event.internal_metadata.redacted_by, redaction_event.event_id)
+        self.assertEqual(event.content, {})
+        self.assertIsNone(event.sticky_duration())
+
+        # Since it is redacted, it must not have been added to the sticky_events
+        # table...
+        sticky_events = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="sticky_events", keyvalues=None, retcols=("event_id",)
+            )
+        )
+        self.assertEqual(sticky_events, [])
+
+        # ...nor shown to clients down sync.
+        self.assertEqual(self._get_visible_sticky_event_ids(), set())
+
     def test_soft_failed_events_are_tracked(self) -> None:
         """
         Tests that sticky events marked as soft_failed ARE inserted
