@@ -1,0 +1,1 @@
+Fix a bug where a server joining a room over federation could miss an event that was sent while its join was being handled. Contributed by @FrenchGithubUser and @nikzen @Famedly.

@@ -83,6 +83,7 @@ from synapse.types import (
     StreamToken,
     UserID,
     create_requester,
+    get_domain_from_id,
 )
 from synapse.types.state import StateFilter
 from synapse.util import log_failure, unwrapFirstError
@@ -2213,7 +2214,63 @@ class EventCreationHandler:
 
         run_in_background(_notify)
 
+        # An event whose prev_events were chosen before a remote join was persisted, but
+        # which is itself persisted after the join, becomes a sibling of the join rather
+        # than a descendant. We send it only to the hosts that were in the room before
+        # it, which does not include the joining server, so that server would not learn
+        # about it until something later references it. Tie the forward extremities
+        # together with a dummy event, which the joining server backfills from. This is
+        # best-effort recovery and must never fail the event that was just persisted.
+        room_id = persisted_events[-1].room_id
+        try:
+            if await self._forward_extremities_need_tying_after_join(room_id):
+                await self._send_dummy_event_after_room_join(room_id)
+        except Exception:
+            logger.exception(
+                "Failed to tie forward extremities together after persisting events "
+                "in room %s",
+                room_id,
+            )
+
         return persisted_events[-1]
+
+    async def _forward_extremities_need_tying_after_join(self, room_id: str) -> bool:
+        """Whether the room's forward extremities include an event that a server which
+        joined concurrently will not have received from us.
+
+        When a server joins over federation its join event's prev_events are frozen at
+        make_join time, so an event created around the same time becomes a sibling of
+        the join rather than a descendant. The federation sender routes such an event
+        only to the hosts in the room before it, which excludes the joining server, so
+        that server never learns about it until something later references it.
+
+        This fires from two places, for the two orderings of the race: after persisting
+        local events (for an event persisted after the join) and after persisting a
+        remote join (`FederationServer.on_send_join_request`, for an event persisted
+        before it). In both, the caller ties the extremities together with a dummy
+        event that the joining server backfills from.
+        """
+        extremity_ids = await self.store.get_latest_event_ids_in_room(room_id)
+        if len(extremity_ids) < 2:
+            return False
+        extremities = [
+            event
+            for event in await self.store.get_events_as_list(extremity_ids)
+            if not event.internal_metadata.is_outlier()
+            and event.type != EventTypes.Dummy
+        ]
+        for event in extremities:
+            hosts_before_event = await self.state.get_hosts_in_room_at_events(
+                room_id, event_ids=event.prev_event_ids()
+            )
+            if any(
+                get_domain_from_id(other.sender) not in hosts_before_event
+                and not self.hs.is_mine_id(other.sender)
+                for other in extremities
+                if other.event_id != event.event_id
+            ):
+                return True
+        return False
 
     async def is_admin_redaction(
         self, event_type: str, sender: str, redacts: str | None
