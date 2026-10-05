@@ -119,9 +119,7 @@ class ApplicationService:
     NS_LIST = [NS_USERS, NS_ALIASES, NS_ROOMS]
 
     # API prefixes that an application service may claim for proxying.
-    ALLOWED_PROXY_PREFIXES = (
-        ProxyPrefix(path="rtc/livekit", allows_guests=True),
-    )
+    ALLOWED_PROXY_PREFIXES = (ProxyPrefix(path="rtc/livekit", allows_guests=True),)
 
     def __init__(
         self,
