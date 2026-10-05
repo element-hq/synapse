@@ -1803,7 +1803,7 @@ class EventCreationHandler:
                     if e.code == HTTPStatus.CONFLICT:
                         raise PartialStateConflictError()
                     raise
-                stream_id = result["stream_id"]
+
                 event_id = result["event_id"]
 
                 # If we batch persisted events we return the last persisted event, otherwise
@@ -1817,9 +1817,10 @@ class EventCreationHandler:
                     event = await self.store.get_event(event_id)
                 else:
                     # If we newly persisted the event then we need to update its
-                    # stream_ordering entry manually (as it was persisted on
-                    # another worker).
-                    event.internal_metadata.stream_ordering = stream_id
+                    # stream_ordering and received_ts entries manually
+                    # (as it was persisted on another worker).
+                    event.internal_metadata.stream_ordering = result["stream_id"]
+                    event.internal_metadata.received_ts = result["received_ts"]
                     event.internal_metadata.instance_name = writer_instance
 
                 return event

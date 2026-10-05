@@ -21,8 +21,8 @@
 //! Implements the internal metadata class attached to events.
 //!
 //! The internal metadata is a bit like a `TypedDict`, in that most of
-//! it is stored as a JSON dict in the DB (the exceptions being `outlier`
-//! and `stream_ordering` which have their own columns in the database).
+//! it is stored as a JSON dict in the DB (the exceptions being `outlier`,
+//! `received_ts` and `stream_ordering` which have their own columns in the database).
 //! Most events have zero, or only a few, of these keys
 //! set. Therefore, since we care more about memory size than performance here,
 //! we store these fields in a mapping.
@@ -272,6 +272,14 @@ struct EventInternalMetadataInner {
 
     /// The stream ordering of this event. None, until it has been persisted.
     pub stream_ordering: Option<NonZeroI64>,
+
+    /// The timestamp of receipt (in milliseconds since the epoch) of this event.
+    ///
+    /// None in two cases:
+    /// - before the event has been persisted
+    /// - events before Synapse v0.16.0 do not have this available
+    pub received_ts: Option<i64>,
+
     pub instance_name: Option<String>,
 
     /// The event ID of the redaction event, if this event has been redacted.
@@ -567,6 +575,7 @@ impl EventInternalMetadata {
             inner: Arc::new(RwLock::new(EventInternalMetadataInner {
                 data,
                 stream_ordering: None,
+                received_ts: None,
                 instance_name: None,
                 redacted_by: None,
                 outlier: false,
@@ -643,6 +652,16 @@ impl EventInternalMetadata {
     #[setter]
     fn set_stream_ordering(&self, val: Option<NonZeroI64>) -> PyResult<()> {
         self.write_inner()?.stream_ordering = val;
+        Ok(())
+    }
+
+    #[getter]
+    fn get_received_ts(&self) -> PyResult<Option<i64>> {
+        Ok(self.read_inner()?.received_ts)
+    }
+    #[setter]
+    fn set_received_ts(&self, val: Option<i64>) -> PyResult<()> {
+        self.write_inner()?.received_ts = val;
         Ok(())
     }
 

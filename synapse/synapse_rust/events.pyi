@@ -21,6 +21,14 @@ class EventInternalMetadata:
 
     stream_ordering: int | None
     """the stream ordering of this event. None, until it has been persisted."""
+    received_ts: int | None
+    """
+    The timestamp of receipt (in milliseconds since the epoch) of this event.
+
+    None in two cases:
+    - before the event has been persisted
+    - events before Synapse v0.16.0 do not have this available.
+    """
     instance_name: str | None
     """the instance name of the server that persisted this event. None, until it has been persisted."""
     redacted_by: str | None
