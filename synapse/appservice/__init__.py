@@ -104,7 +104,7 @@ class ApplicationService:
 
     # Proxy prefixes under which guest users may make proxied Client-Server
     # requests.
-    GUEST_ACCESSIBLE_PROXY_PREFIXES = {"rtc/livekit"}
+    GUEST_ACCESSIBLE_ALLOWED_PROXY_PREFIXES = {"rtc/livekit"}
 
     def __init__(
         self,
@@ -248,7 +248,8 @@ class ApplicationService:
         application service.
         """
         return self.proxy_prefix is not None and self._prefix_matches(
-            self.proxy_prefix, ApplicationService.GUEST_ACCESSIBLE_PROXY_PREFIXES
+            self.proxy_prefix,
+            ApplicationService.GUEST_ACCESSIBLE_ALLOWED_PROXY_PREFIXES,
         )
 
     @cached(num_args=1, cache_context=True)

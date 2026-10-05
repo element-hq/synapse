@@ -349,12 +349,14 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
         # exercise the matching logic directly for a non-guest prefix.
         self.assertFalse(
             ApplicationService._prefix_matches(
-                "rtc/livekitfoo", ApplicationService.GUEST_ACCESSIBLE_PROXY_PREFIXES
+                "rtc/livekitfoo",
+                ApplicationService.GUEST_ACCESSIBLE_ALLOWED_PROXY_PREFIXES,
             )
         )
         self.assertFalse(
             ApplicationService._prefix_matches(
-                "other/prefix", ApplicationService.GUEST_ACCESSIBLE_PROXY_PREFIXES
+                "other/prefix",
+                ApplicationService.GUEST_ACCESSIBLE_ALLOWED_PROXY_PREFIXES,
             )
         )
 
