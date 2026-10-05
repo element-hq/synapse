@@ -1815,6 +1815,12 @@ class EventCreationHandler:
                     # been de-duplicated, so we replace the given event with the
                     # one already persisted.
                     event = await self.store.get_event(event_id)
+                elif "received_ts" not in result:
+                    # COMPATIBILITY (remove after one release):
+                    # We can hit this in a rolling upgrade where the event_persister worker
+                    # hasn't been upgraded yet and so we can't populate the `received_ts`.
+                    # Replace our copy of the event with one pulled from the database.
+                    event = await self.store.get_event(event_id)
                 else:
                     # If we newly persisted the event then we need to update its
                     # stream_ordering and received_ts entries manually
