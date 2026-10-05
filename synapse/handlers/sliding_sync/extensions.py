@@ -1052,6 +1052,20 @@ class SlidingSyncExtensionHandler:
             # (For efficiency, we only do this after the non-database common case check.)
             max_token = await self.store.get_sticky_events_stream_id_generator().get_max_allocated_token()
 
+            # It may be tempting to wonder why we don't do anything about the 'worker lagging'
+            # case, such as waiting for streams to catch up.
+            # The case where this worker is lagging should not happen in practice because:
+            # assuming the client didn't mess with the `since` token, it must have been
+            # produced as a `to_token` in a previous request, where the response-wide `next_pos`
+            # is equal to or later than the token given by this extension.
+            #
+            # Then in this request, the client will present that `next_pos` as the `pos` for the
+            # entire request and `wait_for_stream_token` (which is called with the request-level pos tokens)
+            # will cause us to wait for worker lag on that token, including the sticky events stream.
+            #
+            # (It also doesn't actually matter since `get_sticky_events_in_rooms` will just return
+            # an empty result and is safe against rewinding the token.)
+
             if max_token < since_token_as_stream_token.get_max_stream_pos():
                 # The client has a token from the future.
                 #
