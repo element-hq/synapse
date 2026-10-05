@@ -338,7 +338,6 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
                 "origin_server_ts": 1,
                 "content": {"membership": Membership.JOIN},
                 "auth_events": [
-                    state_map[(EventTypes.Create, "")].event_id,
                     state_map[(EventTypes.JoinRules, "")].event_id,
                 ],
                 "prev_events": list(prev_event_ids),

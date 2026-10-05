@@ -62,7 +62,7 @@ from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_
 from synapse.rest import admin
 from synapse.rest.client import login, media
 from synapse.server import HomeServer
-from synapse.types import JsonDict, RoomAlias
+from synapse.types import JsonDict, RoomAlias, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -1444,6 +1444,15 @@ def _make_stale_mpo() -> bytes:
     return data[:primary_size]
 
 
+def _make_webp(alpha: int) -> bytes:
+    """Build a small WebP whose pixels all have the given alpha."""
+    out = BytesIO()
+    Image.new("RGBA", (64, 64), (255, 0, 0, alpha)).save(
+        out, format="WEBP", lossless=True
+    )
+    return out.getvalue()
+
+
 class ThumbnailerAnimatedTestCase(unittest.TestCase):
     """Tests that the thumbnailer only animates when explicitly asked to."""
 
@@ -1589,3 +1598,132 @@ class ThumbnailerAnimatedTestCase(unittest.TestCase):
         self.assertEqual(Image.open(out).format, "WEBP")
         self.assertFalse(getattr(Image.open(out), "is_animated", False))
         self.assert_is_first_frame(out)
+
+
+class ThumbnailerTransparencyTestCase(unittest.TestCase):
+    """Tests the transparency detection that picks the thumbnail format."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tempdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tempdir, ignore_errors=True)
+
+    def _thumbnailer(self, name: str, data: bytes) -> Thumbnailer:
+        path = os.path.join(self.tempdir, name)
+        with open(path, "wb") as f:
+            f.write(data)
+        thumbnailer = Thumbnailer(path)
+        self.addCleanup(thumbnailer.close)
+        return thumbnailer
+
+    def test_transparent_webp(self) -> None:
+        thumbnailer = self._thumbnailer("transparent.webp", _make_webp(0))
+        self.assertTrue(thumbnailer.has_transparency)
+
+    def test_partially_transparent_webp(self) -> None:
+        thumbnailer = self._thumbnailer("partial.webp", _make_webp(128))
+        self.assertTrue(thumbnailer.has_transparency)
+
+    def test_opaque_webp(self) -> None:
+        thumbnailer = self._thumbnailer("opaque.webp", _make_webp(255))
+        self.assertFalse(thumbnailer.has_transparency)
+
+    def test_unused_alpha_channel(self) -> None:
+        """An alpha channel that is fully opaque doesn't count as transparency."""
+        out = BytesIO()
+        Image.new("RGBA", (64, 64), (255, 0, 0, 255)).save(out, format="PNG")
+        thumbnailer = self._thumbnailer("opaque_rgba.png", out.getvalue())
+        self.assertEqual(thumbnailer.image.mode, "RGBA")
+        self.assertFalse(thumbnailer.has_transparency)
+
+    def test_palette_transparency(self) -> None:
+        """Palette images signal transparency through an index, not a channel."""
+        out = BytesIO()
+        Image.new("P", (64, 64)).save(out, format="PNG", transparency=0)
+        thumbnailer = self._thumbnailer("palette.png", out.getvalue())
+        self.assertEqual(thumbnailer.image.mode, "P")
+        self.assertTrue(thumbnailer.has_transparency)
+
+    def test_cmyk_jpeg(self) -> None:
+        thumbnailer = self._thumbnailer("opaque.jpg", SMALL_CMYK_JPEG)
+        self.assertFalse(thumbnailer.has_transparency)
+
+    def test_png_thumbnail_keeps_alpha(self) -> None:
+        """The PNG we switch to actually retains the transparency."""
+        thumbnailer = self._thumbnailer("transparent.webp", _make_webp(0))
+        result = Image.open(thumbnailer.scale(32, 32, "image/png"))
+        self.assertEqual(result.format, "PNG")
+        pixel = result.convert("RGBA").getpixel((16, 16))
+        assert isinstance(pixel, tuple)
+        self.assertEqual(pixel[3], 0)
+
+
+class ThumbnailFormatTestCase(unittest.HomeserverTestCase):
+    """Tests that transparent sources aren't flattened onto a black background."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        media.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.media_repo = hs.get_media_repository()
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+    def create_resource_dict(self) -> dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def _upload(self, data: bytes, media_type: str) -> str:
+        """Upload the given media and return its media ID."""
+        mxc = self.get_success(
+            self.media_repo.create_or_update_content(
+                media_type,
+                "test",
+                BytesIO(data),
+                len(data),
+                UserID.from_string(self.user),
+            )
+        )
+        return mxc.media_id
+
+    def _thumbnail_types(self, media_id: str) -> set[str]:
+        thumbnails = self.get_success(self.store.get_local_media_thumbnails(media_id))
+        self.assertTrue(thumbnails, "no thumbnails were generated")
+        return {thumbnail.type for thumbnail in thumbnails}
+
+    def test_transparent_webp_thumbnails_as_png(self) -> None:
+        media_id = self._upload(_make_webp(0), "image/webp")
+        self.assertEqual(self._thumbnail_types(media_id), {"image/png"})
+
+    def test_opaque_webp_thumbnails_as_jpeg(self) -> None:
+        media_id = self._upload(_make_webp(255), "image/webp")
+        self.assertEqual(self._thumbnail_types(media_id), {"image/jpeg"})
+
+    def test_animated_thumbnail_is_still_webp(self) -> None:
+        """Transparency detection doesn't disturb the animated thumbnails."""
+        media_id = self._upload(_make_animated_gif(), "image/gif")
+        self.assertIn(ANIMATED_THUMBNAIL_TYPE, self._thumbnail_types(media_id))
+
+    def test_served_thumbnail_keeps_transparency(self) -> None:
+        """The thumbnail a client actually receives still has its alpha channel."""
+        media_id = self._upload(_make_webp(0), "image/webp")
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/test/{media_id}"
+            "?width=32&height=32&method=scale",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.headers.getRawHeaders(b"Content-Type"), [b"image/png"])
+
+        thumbnail = Image.open(BytesIO(channel.result["body"]))
+        pixel = thumbnail.convert("RGBA").getpixel((16, 16))
+        assert isinstance(pixel, tuple)
+        self.assertEqual(pixel[3], 0)

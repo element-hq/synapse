@@ -203,6 +203,9 @@ class ExperimentalConfig(Config):
         # See https://github.com/element-hq/synapse/issues/19524
         self.msc4370_enabled = experimental.get("msc4370_enabled", False)
 
+        # MSC4502: Targeted and unrestricted room member queries
+        self.msc4502_enabled: bool = experimental.get("msc4502_enabled", False)
+
         auth_delegated = (config.get("matrix_authentication_service") or {}).get(
             "enabled", False
         )
@@ -309,3 +312,6 @@ class ExperimentalConfig(Config):
 
         # MSC4491: Invite reasons in room creation
         self.msc4491_enabled: bool = experimental.get("msc4491_enabled", False)
+
+        # MSC4512: Delegating parts of the C-S and S-S API to application services
+        self.msc4512_enabled: bool = experimental.get("msc4512_enabled", False)

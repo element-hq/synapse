@@ -40,6 +40,7 @@ use pyo3::{
 };
 
 use crate::deferred::run_python_awaitable;
+use crate::reactor::Reactor;
 use crate::storage::db::{
     DatabasePool, DbRow, DbValue, ErasedInteraction, ErasedResult, Transaction,
 };
@@ -112,13 +113,13 @@ pub struct PythonDatabasePoolWrapper {
     /// never gets garbage collected and never points back at the homeserver, so it is
     /// not part of any reference cycle. Ideally, we could worry about it but
     /// practically probably doesn't matter.
-    reactor: Py<PyAny>,
+    reactor: Reactor,
 }
 
 impl PythonDatabasePoolWrapper {
     /// Build a wrapper around the Python `DatabasePool` (e.g.
     /// `hs.get_datastores().main.db_pool`) and the Twisted `reactor`.
-    pub fn new(database_pool: &Bound<'_, PyAny>, reactor: Py<PyAny>) -> PyResult<Self> {
+    pub fn new(database_pool: &Bound<'_, PyAny>, reactor: Reactor) -> PyResult<Self> {
         Ok(Self {
             database_pool_py_ref: PyWeakrefReference::new(database_pool)?.unbind(),
             reactor,

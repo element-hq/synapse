@@ -32,7 +32,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
-from synapse.api.room_versions import RoomVersion, RoomVersions
+from synapse.api.room_versions import RoomVersion
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.federation.transport.client import SendJoinResponse
@@ -188,13 +188,11 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
         # Create a remote room
         room_creator_user_id = f"@remote-user:{self.OTHER_SERVER_NAME}"
-        remote_room_id = f"!remote-room:{self.OTHER_SERVER_NAME}"
-        room_version = RoomVersions.V11
+        room_version = self.hs.config.server.default_room_version
 
         room_create_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
-                    "room_id": remote_room_id,
                     "sender": room_creator_user_id,
                     "depth": 1,
                     "origin_server_ts": 1,
@@ -210,6 +208,8 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             room_version=room_version,
         )
 
+        remote_room_id = room_create_event.room_id
+
         creator_membership_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
@@ -220,7 +220,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     "type": EventTypes.Member,
                     "state_key": room_creator_user_id,
                     "content": {"membership": Membership.JOIN},
-                    "auth_events": [room_create_event.event_id],
+                    "auth_events": [],
                     "prev_events": [room_create_event.event_id],
                 }
             ),
@@ -239,7 +239,6 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     "state_key": local_user1_id,
                     "content": {"membership": Membership.INVITE},
                     "auth_events": [
-                        room_create_event.event_id,
                         creator_membership_event.event_id,
                     ],
                     "prev_events": [creator_membership_event.event_id],
@@ -300,7 +299,6 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 "state_key": local_user1_id,
                 "content": {"membership": Membership.JOIN},
                 "auth_events": [
-                    room_create_event.event_id,
                     user1_invite_membership_event.event_id,
                 ],
                 "prev_events": [user1_invite_membership_event.event_id],
@@ -542,9 +540,6 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     "state_key": local_user2_id,
                     "content": {"membership": Membership.INVITE},
                     "auth_events": [
-                        remote_room_join_result.state_map[
-                            (EventTypes.Create, "")
-                        ].event_id,
                         remote_room_join_result.state_map[
                             (
                                 EventTypes.Member,

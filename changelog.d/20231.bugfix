@@ -1,0 +1,1 @@
+Requires `require_auth_for_profile_requests` to be enabled to enable `limit_profile_requests_to_users_who_share_rooms`.

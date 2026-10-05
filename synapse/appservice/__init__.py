@@ -63,6 +63,14 @@ TransactionOneTimeKeysCount = dict[str, dict[str, dict[str, int]]]
 TransactionUnusedFallbackKeys = dict[str, dict[str, list[str]]]
 
 
+class Scopes(str, Enum):
+    """
+    All known scopes assignable to application services for extended privileges.
+    """
+
+    QUERY_ROOM_MEMBERSHIP = "urn:matrix:client:io.element.msc4502:rooms:is_joined"
+
+
 class ApplicationServiceState(Enum):
     DOWN = "down"
     UP = "up"
@@ -89,6 +97,11 @@ class ApplicationService:
     # values.
     NS_LIST = [NS_USERS, NS_ALIASES, NS_ROOMS]
 
+    # Prefixes are applied after the version segment(s) (either /vX/ or /unstable/foo/):
+    # - /_matrix/client/(unstable/[^/]+|v[^/]+)/{prefix}/.*
+    # - /_matrix/federation/(unstable/[^/]+|v[^/]+)/{prefix}/.*
+    ALLOWED_PROXY_PREFIXES = {"rtc/livekit"}
+
     def __init__(
         self,
         token: str,
@@ -104,11 +117,20 @@ class ApplicationService:
         supports_unstable_ephemeral: bool = False,
         msc3202_transaction_extensions: bool = False,
         msc4190_device_management: bool = False,
+        scopes: Iterable[str] = frozenset(),
+        proxy_prefix: str | None = None,
+        proxy_url: str | None = None,
     ):
         self.token = token
         self.url = (
             url.rstrip("/") if isinstance(url, str) else None
         )  # url must not end with a slash
+        self.proxy_url = (
+            proxy_url.rstrip("/") if isinstance(proxy_url, str) else None
+        )  # proxy_url must not end with a slash
+        self.proxy_prefix = (
+            proxy_prefix.rstrip("/") if isinstance(proxy_prefix, str) else None
+        )  # proxy_prefix must not end with a slash
         self.hs_token = hs_token
         # The full Matrix ID for this application service's sender.
         self.sender = sender
@@ -134,11 +156,24 @@ class ApplicationService:
         if "|" in self.id:
             raise Exception("application service ID cannot contain '|' character")
 
+        if (self.proxy_prefix is None) != (self.proxy_url is None):
+            raise KeyError("proxy_url and proxy_prefix must always be set together")
+        if proxy_prefix is not None:
+            if not proxy_prefix or not self.proxy_url:
+                raise ValueError("proxy_prefix and proxy_url must be non-empty strings")
+            if not self._is_proxy_prefix_allowed(proxy_prefix):
+                raise ValueError(f"cannot claim reserved proxy prefix {proxy_prefix!r}")
+
         # .protocols is a publicly visible field
         if protocols:
             self.protocols = set(protocols)
         else:
             self.protocols = set()
+
+        self.scopes = set(scopes)
+        unknown_scopes = self.scopes - frozenset(Scopes)
+        if unknown_scopes:
+            raise ValueError(f"Unknown application service scope(s): {unknown_scopes}")
 
         self.rate_limited = rate_limited
 
@@ -191,6 +226,12 @@ class ApplicationService:
         if namespace:
             return namespace.exclusive
         return False
+
+    def _is_proxy_prefix_allowed(self, prefix: str) -> bool:
+        return any(
+            prefix == allowed or prefix.startswith(allowed + "/")
+            for allowed in ApplicationService.ALLOWED_PROXY_PREFIXES
+        )
 
     @cached(num_args=1, cache_context=True)
     async def _matches_user_in_member_list(
@@ -378,6 +419,9 @@ class ApplicationService:
 
     def is_interested_in_protocol(self, protocol: str) -> bool:
         return protocol in self.protocols
+
+    def has_scope(self, scope: Scopes) -> bool:
+        return scope in self.scopes
 
     def is_exclusive_alias(self, alias: str) -> bool:
         return self._is_exclusive(ApplicationService.NS_ALIASES, alias)

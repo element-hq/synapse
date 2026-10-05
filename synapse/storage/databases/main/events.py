@@ -23,6 +23,7 @@ import collections
 import itertools
 import logging
 from collections import OrderedDict
+from collections.abc import Set
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -56,7 +57,6 @@ from synapse.events import (
 )
 from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventPersistencePair
-from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
@@ -269,7 +269,9 @@ class PersistEventsStore:
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
-        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -377,6 +379,24 @@ class PersistEventsStore:
                     )
                 )
 
+            sticky_events_to_un_soft_fail: set[str] = set()
+            if self._msc4354_enabled and state_delta_for_room is not None:
+                # When we change the room's current state with `state_delta_for_room`,
+                # that might cause some previously soft-failed sticky events to now pass
+                # the state-dependent auth checks.
+                # In other words, the sticky events could have been valid if they had
+                # waited for these state changes.
+                # For that reason, we give sticky events a second chance.
+                # We compute them here and then un-soft-fail them atomically with the
+                # persistence of the events.
+                sticky_events_to_un_soft_fail = (
+                    await self.store.compute_sticky_events_to_un_soft_fail(
+                        room_id,
+                        events_and_contexts,
+                        state_delta_for_room,
+                    )
+                )
+
             await self.db_pool.runInteraction(
                 "persist_events",
                 self._persist_events_txn,
@@ -388,6 +408,7 @@ class PersistEventsStore:
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
                 new_state_dag_forward_extremities=new_state_dag_forward_extremities,
+                sticky_events_to_un_soft_fail=sticky_events_to_un_soft_fail,
             )
             persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
                 len(events_and_contexts)
@@ -1053,6 +1074,7 @@ class PersistEventsStore:
         new_event_links: dict[str, NewEventChainLinks],
         sliding_sync_table_changes: SlidingSyncTableChanges | None,
         new_state_dag_forward_extremities: set[str] | None = None,
+        sticky_events_to_un_soft_fail: Set[str] = frozenset(),
     ) -> None:
         """Insert some number of room events into the necessary database tables.
 
@@ -1081,6 +1103,8 @@ class PersistEventsStore:
                 `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
                 derived from the given `delta_state` (see
                 `_calculate_sliding_sync_table_changes(...)`)
+            sticky_events_to_un_soft_fail:
+                Sticky events which will be un-soft-failed when persisting the events.
 
         Raises:
             PartialStateConflictError: if attempting to persist a partial state event in
@@ -1210,6 +1234,13 @@ class PersistEventsStore:
             self.store.insert_sticky_events_txn(
                 txn, [ev for ev, _ in events_and_contexts]
             )
+
+            # Un-soft-fail any sticky events that the state delta applied just above
+            # has made valid.
+            if sticky_events_to_un_soft_fail:
+                self.store.un_soft_fail_sticky_events_txn(
+                    txn, sticky_events_to_un_soft_fail
+                )
 
         # We only update the sliding sync tables for non-backfilled events.
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
@@ -1797,6 +1828,11 @@ class PersistEventsStore:
             stream_id: This is expected to be the minimum `stream_ordering` for the
                 batch of events that we are persisting; which means we do not end up in a
                 situation where workers see events before the `current_state_delta` updates.
+                Note that this stamps a row *before* its own event; readers that pair
+                deltas with the events in the same window bound each delta on its
+                event's position instead, see
+                `get_current_state_deltas_for_room_by_event_position(...)`, which stays
+                correct if this stamp is ever changed.
                 FIXME: However, this function also gets called with next upcoming
                 `stream_ordering` when we re-sync the state of a partial stated room (see
                 `update_current_state(...)`) which may be "correct" but it would be good to
@@ -2121,7 +2157,7 @@ class PersistEventsStore:
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
 
-        if self._msc4429_enabled:
+        if self._include_profile_updates_in_sync:
             # Handle changes to the profile updates stream.
             # We've already done a bunch of work calculating the changes needed
             # for the sliding sync tables, so we may as well re-use that information
@@ -2378,7 +2414,7 @@ class PersistEventsStore:
             stripped_state_map: MutableStateMap[StrippedStateEvent] = {}
             if isinstance(unsigned_stripped_state_events, list):
                 for raw_stripped_event in unsigned_stripped_state_events:
-                    stripped_state_event = parse_stripped_state_event(
+                    stripped_state_event = StrippedStateEvent.from_json_dict(
                         raw_stripped_event
                     )
                     if stripped_state_event is not None:

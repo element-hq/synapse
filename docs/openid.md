@@ -140,7 +140,7 @@ The synapse config will look like this:
 3. Add a rule with any name to add the `preferred_username` claim. 
 (See https://auth0.com/docs/customize/rules/create-rules for more information on how to create rules.)
    
-   <details>
+  <details>
     <summary>Code sample</summary>
 
     ```js

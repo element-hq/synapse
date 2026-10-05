@@ -1,0 +1,1 @@
+Remove the ability to send state events that are sticky, as this feature was removed from [MSC4354: Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354).

@@ -1,0 +1,1 @@
+Fix a bug where push badge counts could ignore notifications in one room based on another room's summarised counts.
