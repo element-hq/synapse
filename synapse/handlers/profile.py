@@ -985,9 +985,9 @@ class ProfileHandler:
         self, target_user: UserID, requester: UserID | None = None
     ) -> None:
         """Checks whether a profile query is allowed. If the
-        'require_auth_for_profile_requests' config flag is set to True and a
-        'requester' is provided, the query is only allowed if the two users
-        share a room.
+        'limit_profile_requests_to_users_who_share_rooms' config flag is set to
+        True and a 'requester' is provided, the query is only allowed if the two
+        users share a room.
 
         Args:
             target_user: The owner of the queried profile.

@@ -569,6 +569,20 @@ class ServerConfig(Config):
             False,
         )
 
+        # The shared-room check needs to know who is asking, and profile requests
+        # are only authenticated when `require_auth_for_profile_requests` is set.
+        # Without it the limit would silently never apply, so refuse to start.
+        if (
+            self.limit_profile_requests_to_users_who_share_rooms
+            and not self.require_auth_for_profile_requests
+        ):
+            raise ConfigError(
+                "'limit_profile_requests_to_users_who_share_rooms' can only be"
+                " enforced on authenticated requests, so"
+                " 'require_auth_for_profile_requests' must also be enabled.",
+                ("limit_profile_requests_to_users_who_share_rooms",),
+            )
+
         # Whether to retrieve and display profile data for a user when they
         # are invited to a room
         self.include_profile_data_on_invite = config.get(

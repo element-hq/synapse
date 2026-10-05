@@ -502,6 +502,8 @@ class StickyEvent:
     Maximum number of sticky events to include in /sync.
 
     This is the default specified in the MSC. Chosen arbitrarily.
+
+    Does not apply when joining a new room, see https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r3021907998
     """
 
 

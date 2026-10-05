@@ -486,7 +486,11 @@ class AuthHandler:
         """
 
         sid: str | None = None
-        authdict = clientdict.pop("auth", {})
+        # `auth` is optional, so an explicit `null` means the same as `{}`, ie. no
+        # auth stage attempted yet.
+        authdict = clientdict.pop("auth", None)
+        if authdict is None:
+            authdict = {}
         if "session" in authdict:
             sid = authdict["session"]
 
@@ -647,7 +651,7 @@ class AuthHandler:
                 not send a session ID, returns None.
         """
         sid = None
-        if clientdict and "auth" in clientdict:
+        if clientdict and clientdict.get("auth") is not None:
             authdict = clientdict["auth"]
             if "session" in authdict:
                 sid = authdict["session"]

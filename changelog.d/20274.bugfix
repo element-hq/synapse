@@ -1,0 +1,1 @@
+Fix a bug where sending a `null` or non-object `auth` to an endpoint requiring user-interactive authentication returned a 500 error. Contributed by @ankit373.
