@@ -396,10 +396,30 @@ impl Event {
         Ok(new_event)
     }
 
-    /// If this event has the `msc4354_sticky` top-level field, returns a
-    /// `SynapseDuration` representing the sticky duration. Otherwise returns
-    /// `None`.
-    fn sticky_duration(&self) -> Option<SynapseDuration> {
+    /// If this event has the `msc4354_sticky` top-level field and is eligible
+    /// to be sticky, returns a `SynapseDuration` representing the sticky duration.
+    /// Otherwise returns `None`.
+    ///
+    /// The duration is capped at 1 hour according to MSC4354.
+    /// Spammy events (according to spam checkers and policy servers) are not eligible to be sticky
+    /// so we return `None` for those.
+    ///
+    /// See [`Self::locally_sticky_until_ts`] to get the effective stickiness expiry timestamp.
+    fn sticky_duration(&self) -> PyResult<Option<SynapseDuration>> {
+        if self.internal_metadata.policy_server_spammy()?
+            || self.internal_metadata.spam_checker_spammy()?
+            || self.rejected_reason.is_some()
+        {
+            // Spammy and rejected events are not sticky.
+            //
+            // As per MSC4354:
+            // > Policy servers and similar homeserver-specific anti-spam techniques (e.g. custom spam checker modules) still apply to these events,
+            // > including events received over federation. If the anti-spam technique classifies a sticky event as spam,
+            // > it is treated as a regular non-sticky event and does not enjoy the properties that an unexpired sticky event does.
+            // > — https://github.com/matrix-org/matrix-spec-proposals/pull/4354/files#diff-d76bc1a1d612c6da37d024f5b57f7b8352939b8db8a7ee9c6b71c1a848359afdR107
+            return Ok(None);
+        }
+
         const MAX_DURATION: SynapseDuration = SynapseDuration::from_hours(1);
 
         let sticky_obj = self
@@ -410,19 +430,21 @@ impl Event {
 
         let sticky_obj = match sticky_obj {
             Some(serde_json::Value::Object(obj)) => obj,
-            _ => return None,
+            _ => return Ok(None),
         };
 
         // Check for a valid duration field. The MSC requires `duration_ms` to
         // be a non-negative integer. If it's missing or invalid, we treat the
         // event as non-sticky by returning `None`.
-        let duration_ms = sticky_obj.get("duration_ms")?.as_u64()?;
+        let Some(duration_ms) = sticky_obj.get("duration_ms").and_then(|v| v.as_u64()) else {
+            return Ok(None);
+        };
 
         let duration = SynapseDuration::from_milliseconds(duration_ms);
 
         let duration = std::cmp::min(duration, MAX_DURATION);
 
-        Some(duration)
+        Ok(Some(duration))
     }
 
     fn __str__(&self) -> PyResult<String> {

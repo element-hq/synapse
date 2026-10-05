@@ -519,7 +519,7 @@ fn serialize_event_value(
     }
 
     if config.msc4354_enabled {
-        if let Some(sticky_duration) = event.sticky_duration() {
+        if let Some(sticky_duration) = event.sticky_duration()? {
             // min() ensures the origin server can't claim a time in the future
             // to exceed the stickiness duration limit.
             //
