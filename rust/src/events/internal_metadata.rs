@@ -544,6 +544,11 @@ impl EventInternalMetadata {
     pub fn policy_server_spammy(&self) -> PyResult<bool> {
         Ok(self.read_inner()?.get_policy_server_spammy())
     }
+
+    /// Whether a spam checker marked this event as spammy.
+    pub fn spam_checker_spammy(&self) -> PyResult<bool> {
+        Ok(self.read_inner()?.get_spam_checker_spammy())
+    }
 }
 
 /// Helper to convert `None` to an `AttributeError` for a property getter.
