@@ -70,6 +70,8 @@ pub fn set_virtual_time_msec(millis: u64) {
 ///
 /// In future, this may be extended to support per-homeserver looping calls
 /// (which is why this is not a global clock).
+///
+/// See [`crate::clock`] docs for more details.
 pub struct Clock {}
 
 impl Default for Clock {
