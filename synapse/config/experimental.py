@@ -191,6 +191,9 @@ class ExperimentalConfig(Config):
             "msc4069_profile_inhibit_propagation", False
         )
 
+        # MSC4075: MatrixRTC invites and notifications
+        self.msc4075_enabled: bool = experimental.get("msc4075_enabled", False)
+
         # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version:
         # See: https://github.com/element-hq/synapse/issues/19434
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)

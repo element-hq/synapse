@@ -23,7 +23,7 @@ import json
 import logging
 import time
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Generator
+from typing import TYPE_CHECKING, Any, Generator, Optional
 
 import attr
 from zope.interface import implementer
@@ -907,7 +907,10 @@ class SynapseSite(ProxySite):
         self.server_version_string = server_version_string.encode("ascii")
         self.connections: list[Protocol] = []
 
-    def buildProtocol(self, addr: IAddress) -> SynapseProtocol:
+    # Twisted 26.4.0 types HTTPFactory.buildProtocol as returning its concrete
+    # `_GenericHTTPChannelProtocol` wrapper. We intentionally return our own HTTPChannel
+    # subclass instead. Thus we add a type-ignore.
+    def buildProtocol(self, addr: Optional[IAddress]) -> SynapseProtocol:  # type: ignore[override]
         protocol = SynapseProtocol(
             self,
             self.server_name,

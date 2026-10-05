@@ -342,6 +342,43 @@ class KeyQueryTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
 
+    def test_device_signing_null_or_non_object_auth(self) -> None:
+        """A null `auth` asks for UIA like an omitted one, and a non-object `auth`
+        is rejected, rather than either causing a 500."""
+        password = "wonderland"
+        device_id = "ABCDEFGHI"
+        alice_id = self.register_user("alice", password)
+        alice_token = self.login("alice", password, device_id=device_id)
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/device_signing/upload",
+            self.make_device_keys(alice_id, device_id),
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        keys = self.make_device_keys(alice_id, device_id)
+        keys["auth"] = None
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/device_signing/upload",
+            keys,
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
+        self.assertIn("session", channel.json_body)
+
+        keys["auth"] = "m.login.password"
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/device_signing/upload",
+            keys,
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.BAD_JSON)
+
 
 class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
     servlets = [
