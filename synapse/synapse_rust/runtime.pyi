@@ -18,9 +18,8 @@ class RustRuntime:
         `hs.get_clock().time_msec()`.
 
         The current time in milliseconds since the Unix epoch, as the Rust side
-        sees it. Nothing keeps this in sync with `Clock.time_msec()`. They agree
-        because both read the system clock, `clock_gettime(CLOCK_REALTIME)` on
-        Linux. See `rust/src/clock.rs`.
+        sees it. This and `Clock.time_msec()` agree because both read the system
+        clock, `clock_gettime(CLOCK_REALTIME)` on Linux.
         """
 
 def set_virtual_time_msec(millis: int) -> None:
