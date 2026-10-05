@@ -28,6 +28,7 @@ from twisted.internet import defer
 from twisted.internet.defer import Deferred, TimeoutError
 from twisted.internet.error import ConnectingCancelledError, DNSLookupError
 from twisted.internet.testing import MemoryReactor, StringTransport
+from twisted.python.failure import Failure
 from twisted.web.client import Agent, ResponseNeverReceived
 from twisted.web.http import HTTPChannel
 from twisted.web.http_headers import Headers
@@ -112,6 +113,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # complete the connection and wire it up to a fake transport
         protocol = factory.buildProtocol(None)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -169,7 +171,7 @@ class FederationClientTests(HomeserverTestCase):
         self.assertEqual(host, "1.2.3.4")
         self.assertEqual(port, 8008)
         e = Exception("go away")
-        factory.clientConnectionFailed(None, e)
+        factory.clientConnectionFailed(self.reactor.connectors[0], Failure(e))
         self.pump(0.5)
 
         f = self.failureResultOf(d)
@@ -231,6 +233,7 @@ class FederationClientTests(HomeserverTestCase):
 
         conn = Mock()
         client = clients[0][2].buildProtocol(None)
+        assert client is not None
         client.makeConnection(conn)
 
         # Deferred is still without a result
@@ -327,6 +330,7 @@ class FederationClientTests(HomeserverTestCase):
         conn = Mock()
         clients = self.reactor.tcpClients
         client = clients[0][2].buildProtocol(None)
+        assert client is not None
         client.makeConnection(conn)
 
         # Deferred does not have a result
@@ -369,6 +373,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # complete the connection and wire it up to a fake transport
         protocol = factory.buildProtocol(None)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -394,6 +399,7 @@ class FederationClientTests(HomeserverTestCase):
         self.assertEqual(host, "1.2.3.4")
         self.assertEqual(port, 8008)
         protocol = factory.buildProtocol(None)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -450,6 +456,7 @@ class FederationClientTests(HomeserverTestCase):
         conn = Mock()
         clients = self.reactor.tcpClients
         client = clients[0][2].buildProtocol(None)
+        assert client is not None
         client.makeConnection(conn)
 
         # Deferred does not have a result
@@ -487,6 +494,7 @@ class FederationClientTests(HomeserverTestCase):
         conn = Mock()
         clients = self.reactor.tcpClients
         client = clients[0][2].buildProtocol(None)
+        assert client is not None
         client.makeConnection(conn)
 
         # Deferred does not have a result
@@ -526,6 +534,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # complete the connection and wire it up to a fake transport
         client = factory.buildProtocol(None)
+        assert client is not None
         conn = StringTransport()
         client.makeConnection(conn)
 
@@ -581,6 +590,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # complete the connection and wire it up to a fake transport
         client = factory.buildProtocol(None)
+        assert client is not None
         conn = StringTransport()
         client.makeConnection(conn)
 
@@ -617,6 +627,7 @@ class FederationClientTests(HomeserverTestCase):
         clients = self.reactor.tcpClients
         self.assertEqual(len(clients), 1)
         client = clients[0][2].buildProtocol(None)
+        assert client is not None
         server = HTTPChannel()
 
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -642,6 +653,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # complete the connection and wire it up to a fake transport
         client = factory.buildProtocol(None)
+        assert client is not None
         conn = StringTransport()
         client.makeConnection(conn)
 
@@ -690,6 +702,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # complete the connection and wire it up to a fake transport
         protocol = factory.buildProtocol(None)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 
@@ -736,6 +749,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # complete the connection and wire it up to a fake transport
         protocol = factory.buildProtocol(None)
+        assert protocol is not None
         transport = StringTransport()
         protocol.makeConnection(transport)
 

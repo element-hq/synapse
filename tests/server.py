@@ -717,7 +717,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self,
         host: str,
         port: int,
-        factory: ClientFactory,
+        factory: "ClientFactory[Any]",
         timeout: float = 30,
         bindAddress: tuple[str, int] | None = None,
     ) -> IConnector:
@@ -889,9 +889,15 @@ def make_fake_db_pool(
 
     pool.runWithConnection = runWithConnection  # type: ignore[method-assign]
     pool.runInteraction = runInteraction  # type: ignore[assignment]
-    # Replace the thread pool with a threadless 'thread' pool
+
+    # First, stop the original thread pool.
+    pool.threadpool.stop()
+    # Then, replace it with a threadless 'thread' pool
     pool.threadpool = ThreadPool(reactor)
+
+    # Start it up.
     pool.running = True
+
     return pool
 
 
@@ -1171,6 +1177,7 @@ def connect_client(
     """
     factory = reactor.tcpClients.pop(client_id)[2]
     client = factory.buildProtocol(None)
+    assert client is not None
     server = AccumulatingProtocol()
     server.makeConnection(FakeTransport(client, reactor))
     client.makeConnection(FakeTransport(server, reactor))
