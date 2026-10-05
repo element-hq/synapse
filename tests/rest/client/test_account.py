@@ -313,11 +313,9 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         # Assert we can't log in with the new password
         self.attempt_wrong_password_login("kermit", new_password)
 
-    @unittest.override_config({"request_token_inhibit_3pid_errors": True})
     def test_password_reset_bad_email_inhibit_error(self) -> None:
         """Test that triggering a password reset with an email address that isn't bound
-        to an account doesn't leak the lack of binding for that address if configured
-        that way.
+        to an account doesn't leak the lack of binding for that address by default.
         """
         self.register_user("kermit", "monkey")
         self.login("kermit", "monkey")
@@ -329,6 +327,25 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         session_id = self._request_token(email, client_secret)
 
         self.assertIsNotNone(session_id)
+        self.assertEqual(len(self.email_attempts), 0)
+
+    @unittest.override_config({"request_token_inhibit_3pid_errors": False})
+    def test_password_reset_bad_email_explicit_false(self) -> None:
+        """Test that triggering a password reset with an email address that isn't bound
+        to an account raises an error if request_token_inhibit_3pid_errors is explicitly False.
+        """
+        self.register_user("kermit", "monkey")
+        self.login("kermit", "monkey")
+
+        email = "test@example.com"
+
+        client_secret = "foobar"
+
+        with self.assertRaises(HttpResponseException) as cm:
+            self._request_token(email, client_secret)
+
+        self.assertEqual(cm.exception.code, 400)
+        self.assertEqual(len(self.email_attempts), 0)
 
     def test_password_reset_redirection(self) -> None:
         """Test basic password reset flow"""
@@ -1011,6 +1028,7 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
     def test_add_valid_email(self) -> None:
         self._add_email(self.email, self.email)
 
+    @unittest.override_config({"request_token_inhibit_3pid_errors": False})
     def test_add_valid_email_second_time(self) -> None:
         self._add_email(self.email, self.email)
         self._request_token_invalid_email(
@@ -1019,6 +1037,7 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
             expected_error="Email is already in use",
         )
 
+    @unittest.override_config({"request_token_inhibit_3pid_errors": False})
     def test_add_valid_email_second_time_canonicalise(self) -> None:
         self._add_email(self.email, self.email)
         self._request_token_invalid_email(
