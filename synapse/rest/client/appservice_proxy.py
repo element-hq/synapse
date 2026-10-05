@@ -36,7 +36,7 @@ def _make_proxy_callback(
 ) -> ServletCallback:
     async def _proxy(request: SynapseRequest, **kwargs: str) -> None:
         requester = await hs.get_auth().get_user_by_req(
-            request, allow_guest=appservice.proxy_allows_guests
+            request, allow_guest=appservice.proxy_allows_guests()
         )
 
         await ratelimiter.ratelimit(requester)

@@ -331,18 +331,18 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
             proxy_url="http://proxy.example.com",
             proxy_prefix="rtc/livekit",
         )
-        self.assertTrue(service.proxy_allows_guests)
+        self.assertTrue(service.proxy_allows_guests())
 
     def test_proxy_allows_guests_for_nested_livekit_prefix(self) -> None:
         service = self._make_service(
             proxy_url="http://proxy.example.com",
             proxy_prefix="rtc/livekit/foo",
         )
-        self.assertTrue(service.proxy_allows_guests)
+        self.assertTrue(service.proxy_allows_guests())
 
     def test_proxy_does_not_allow_guests_without_proxy_prefix(self) -> None:
         service = self._make_service()
-        self.assertFalse(service.proxy_allows_guests)
+        self.assertFalse(service.proxy_allows_guests())
 
     def test_proxy_does_not_allow_guests_for_other_prefix(self) -> None:
         # The constructor rejects prefixes outside ALLOWED_PROXY_PREFIXES, so

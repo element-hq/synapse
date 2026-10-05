@@ -242,7 +242,6 @@ class ApplicationService:
     def _is_proxy_prefix_allowed(self, prefix: str) -> bool:
         return self._prefix_matches(prefix, ApplicationService.ALLOWED_PROXY_PREFIXES)
 
-    @property
     def proxy_allows_guests(self) -> bool:
         """Whether guest users may make proxied Client-Server requests to this
         application service.
