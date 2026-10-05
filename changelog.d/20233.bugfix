@@ -1,0 +1,1 @@
+Send all of a room's [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) down legacy `/sync` when a user joins it.
