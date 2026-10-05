@@ -389,8 +389,15 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             sticky_duration = ev.sticky_duration()
             if sticky_duration is None:
                 continue
+            if ev.internal_metadata.received_ts is None:
+                # Event was persisted before Synapse v0.16.0, when
+                # sticky events were not supported.
+                continue
             # Calculate the end time as start_time + effective sticky duration
-            expires_at = min(ev.origin_server_ts, now_ms) + sticky_duration.as_millis()
+            expires_at = (
+                min(ev.origin_server_ts, ev.internal_metadata.received_ts)
+                + sticky_duration.as_millis()
+            )
             # Filter out already expired sticky events
             if expires_at <= now_ms:
                 continue
