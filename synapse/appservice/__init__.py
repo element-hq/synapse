@@ -102,10 +102,6 @@ class ProxyPrefix:
     Whether guest users may make proxied Client-Server requests under this prefix.
     """
 
-    def contains(self, path: str) -> bool:
-        """Whether `path` equals or is nested under this prefix."""
-        return path == self.path_prefix or path.startswith(self.path_prefix + "/")
-
 
 class ApplicationService:
     """Defines an application service. This definition is mostly what is
@@ -249,15 +245,15 @@ class ApplicationService:
         """Validates the supplied proxy prefix.
 
         Args:
-            proxy_prefix : The proxy_prefix value read from the registration file.
-            proxy_url : The proxy_url value read from the registration file.
+            proxy_prefix: The proxy_prefix value read from the registration file.
+            proxy_url: The proxy_url value read from the registration file.
         Returns:
-            A `ProxyPrefix` with the configured path and the properties of the
-            allowed prefix it falls under, or None if no prefix is configured.
+            The matching entry from `ALLOWED_PROXY_PREFIXES`, or None if no prefix
+            is configured.
         Raises:
             KeyError: if only one of `proxy_prefix` and `proxy_url` is set.
             ValueError: if `proxy_prefix` or `proxy_url` is empty, or if
-                `proxy_prefix` is not under any allowed prefix.
+                `proxy_prefix` is not an allowed prefix.
         """
         if (proxy_prefix is None) != (proxy_url is None):
             raise KeyError("proxy_url and proxy_prefix must always be set together")
@@ -268,8 +264,8 @@ class ApplicationService:
 
         path = proxy_prefix.rstrip("/")  # must not end with a slash
         for allowed_proxy_prefix in ApplicationService.ALLOWED_PROXY_PREFIXES:
-            if allowed_proxy_prefix.contains(path):
-                return attr.evolve(allowed_proxy_prefix, path=path)
+            if allowed_proxy_prefix.path_prefix == path:
+                return allowed_proxy_prefix
         raise ValueError(f"cannot claim reserved proxy prefix {proxy_prefix!r}")
 
     @cached(num_args=1, cache_context=True)
