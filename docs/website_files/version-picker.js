@@ -19,15 +19,15 @@ function initializeVersionDropdown(dropdown, dropdownMenu) {
         this.classList.toggle('active');
         dropdownMenu.style.display = (dropdownMenu.style.display === 'block') ? 'none' : 'block';
     });
-  
+
     // Remove the 'active' class and hide the dropdown menu on focusout
     dropdown.addEventListener('focusout', function () {
         this.classList.remove('active');
         dropdownMenu.style.display = 'none';
     });
-  
+
     // Handle item selection within the dropdown menu
-    const dropdownMenuItems = dropdownMenu.querySelectorAll('li');    
+    const dropdownMenuItems = dropdownMenu.querySelectorAll('li');
     dropdownMenuItems.forEach(function (item) {
         item.addEventListener('click', function () {
             dropdownMenuItems.forEach(function (item) {
@@ -54,9 +54,7 @@ function fetchVersions(dropdown, dropdownMenu) {
     return new Promise((resolve, reject) => {
         window.addEventListener("load", () => {
 
-            fetch("https://api.github.com/repos/element-hq/synapse/git/trees/gh-pages", {
-                cache: "force-cache",
-            }).then(res => 
+            fetch("https://api.github.com/repos/element-hq/synapse/git/trees/gh-pages").then(res =>
                 res.json()
             ).then(resObject => {
                 const excluded = ['dev-docs', 'v1.91.0', 'v1.80.0', 'v1.69.0'];
@@ -68,13 +66,13 @@ function fetchVersions(dropdown, dropdownMenu) {
                     const li = document.createElement("li");
                     li.textContent = version;
                     li.id = version;
-    
+
                     if (window.SYNAPSE_VERSION === version) {
                         li.classList.add('active');
                         dropdown.querySelector('span').textContent = version;
                         dropdown.querySelector('input').value = version;
                     }
-    
+
                     dropdownMenu.appendChild(li);
                 });
 
@@ -136,12 +134,12 @@ function sortVersions(a, b) {
 function changeVersion(url, newVersion) {
     const parsedURL = new URL(url);
     const pathSegments = parsedURL.pathname.split('/');
-  
+
     // Modify the version
     pathSegments[2] = newVersion;
 
     // Reconstruct the URL
     parsedURL.pathname = pathSegments.join('/');
-  
+
     return parsedURL.href;
 }
