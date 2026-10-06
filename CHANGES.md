@@ -12,7 +12,7 @@
 ## Bugfixes
 
 - Fix a bug where read receipts could be permanently skipped and never sent to application services if more than 100 read receipts arrived in a single stream update. ([\#20108](https://github.com/element-hq/synapse/issues/20108))
-- Use sharded tokens in [MSC4354: Sticky Events] sync and sliding sync, preventing events appearing in multiple sync responses. ([\#20186](https://github.com/element-hq/synapse/issues/20186))
+- Use sharded tokens in [MSC4354: Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) sync and sliding sync, preventing events appearing in multiple sync responses. ([\#20186](https://github.com/element-hq/synapse/issues/20186))
 - Tell clients to remove local profile information for users after leaving the last room shared with them. ([\#20203](https://github.com/element-hq/synapse/issues/20203))
 - Do not include `og:image` in responses to `/preview_url` when the media was automatically quarantined by hash matching. ([\#20211](https://github.com/element-hq/synapse/issues/20211))
 - Requires `require_auth_for_profile_requests` to be enabled to enable `limit_profile_requests_to_users_who_share_rooms`. ([\#20231](https://github.com/element-hq/synapse/issues/20231))
