@@ -149,10 +149,9 @@ class ApplicationService:
         self.url = (
             url.rstrip("/") if isinstance(url, str) else None
         )  # url must not end with a slash
-        self.proxy_url = (
-            proxy_url.rstrip("/") if isinstance(proxy_url, str) else None
-        )  # proxy_url must not end with a slash
-        self.proxy_prefix = self._parse_proxy_prefix(proxy_prefix, self.proxy_url)
+        self.proxy_prefix, self.proxy_url = self._parse_proxy_config(
+            proxy_prefix, proxy_url
+        )
         self.hs_token = hs_token
         # The full Matrix ID for this application service's sender.
         self.sender = sender
@@ -242,17 +241,18 @@ class ApplicationService:
         return False
 
     @staticmethod
-    def _parse_proxy_prefix(
+    def _parse_proxy_config(
         proxy_prefix: str | None, proxy_url: str | None
-    ) -> ProxyPrefix | None:
-        """Validates the supplied proxy prefix.
+    ) -> tuple[ProxyPrefix | None, str | None]:
+        """Validates the supplied proxy configuration.
 
         Args:
             proxy_prefix: The proxy_prefix value read from the registration file.
             proxy_url: The proxy_url value read from the registration file.
         Returns:
-            The matching entry from `ALLOWED_PROXY_PREFIXES`, or None if no prefix
-            is configured.
+            The matching entry from `ALLOWED_PROXY_PREFIXES` and the proxy URL
+            without a trailing slash, or `(None, None)` if proxying is not
+            configured.
         Raises:
             KeyError: if only one of `proxy_prefix` and `proxy_url` is set.
             ValueError: if `proxy_prefix` or `proxy_url` is empty, or if
@@ -260,15 +260,16 @@ class ApplicationService:
         """
         if (proxy_prefix is None) != (proxy_url is None):
             raise KeyError("proxy_url and proxy_prefix must always be set together")
-        if proxy_prefix is None:
-            return None
+        if proxy_prefix is None or proxy_url is None:
+            return None, None
         if not proxy_prefix or not proxy_url:
             raise ValueError("proxy_prefix and proxy_url must be non-empty strings")
 
         path = proxy_prefix.rstrip("/")  # must not end with a slash
+        url = proxy_url.rstrip("/")  # must not end with a slash
         for allowed_proxy_prefix in ApplicationService.ALLOWED_PROXY_PREFIXES:
             if allowed_proxy_prefix.path_prefix == path:
-                return allowed_proxy_prefix
+                return allowed_proxy_prefix, url
         raise ValueError(f"cannot claim reserved proxy prefix {proxy_prefix!r}")
 
     @cached(num_args=1, cache_context=True)
