@@ -1078,12 +1078,22 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             {("m.room.member", alice): leave_event},
         )
 
+    @parameterized.expand(
+        [(True,), (False,)],
+        name_func=lambda func, num, p: (
+            f"{func.__name__}_{'existing' if p.args[0] else 'new'}_topic"
+        ),
+    )
     def test_state_after_leave_last_local_user_with_state_change_persisted_together(
-        self,
+        self, topic_existed: bool
     ) -> None:
         """When another state event is persisted in the same batch as the last local
         user's leave, both the leave and that state event must appear in state_after
-        on an incremental sync.
+        on an incremental sync, whether or not the room already had that state.
+
+        When the server leaves, it writes a delta without an event ID for each key
+        already in the room state, and no delta at all for a new key, so the two
+        cases are recovered differently.
         """
         if not self.use_state_after:
             self.skipTest("Only relevant for `state_after` (MSC4222)")
@@ -1094,6 +1104,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         alice_requester = create_requester(alice)
 
         room_id = self.helper.create_room_as(alice, tok=alice_tok)
+        if topic_existed:
+            self.helper.send_state(
+                room_id, EventTypes.Topic, {"topic": "before leaving"}, tok=alice_tok
+            )
 
         # Sync up to get a since_token.
         initial_sync_result = self.get_success(
@@ -1104,10 +1118,9 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             )
         )
 
-        # Alice sets the room's first topic and leaves, with both events persisted
-        # in one batch. She is the last local user, so the server clears
-        # current_state_events for this room, and neither event gets a delta of its
-        # own.
+        # Alice sets the topic and leaves, with both events persisted in one batch.
+        # She is the last local user, so the server clears current_state_events for
+        # this room, and neither event gets a delta of its own.
         self.get_success(
             self.hs.get_event_creation_handler().create_and_send_new_client_events(
                 requester=alice_requester,
