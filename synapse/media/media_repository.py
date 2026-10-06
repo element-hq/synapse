@@ -175,6 +175,9 @@ class MediaRepository:
         self._media_retention_local_media_lifetime_ms = (
             hs.config.media.media_retention_local_media_lifetime_ms
         )
+        self._media_retention_keep_local_media_below_filesize = (
+            hs.config.media.media_retention_keep_local_media_below_filesize
+        )
         self._media_retention_remote_media_lifetime_ms = (
             hs.config.media.media_retention_remote_media_lifetime_ms
         )
@@ -1600,6 +1603,7 @@ class MediaRepository:
 
             await self.delete_old_local_media(
                 before_ts=local_media_threshold_timestamp_ms,
+                size_gt=self._media_retention_keep_local_media_below_filesize,
                 keep_profiles=True,
                 delete_quarantined_media=False,
                 delete_protected_media=False,
