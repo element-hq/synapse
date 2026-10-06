@@ -1706,13 +1706,15 @@ class SyncHandler:
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
                 if delta.event_id is None:
-                    # When the server leaves, every key in the room gets such a
-                    # delta, so we only look up the keys that need it. A key
-                    # that changed earlier in the window already has its own
-                    # delta with an event ID; only the events persisted together
-                    # with the leave lack one, and those end the timeline. The
-                    # syncing user's own membership is always looked up, as the
-                    # timeline filter may have removed their leave.
+                    # When the server leaves, every key of the room's state gets
+                    # such a delta, so looking them all up would return the whole
+                    # room state. We only need the keys that changed in the
+                    # persist batch that made the server leave (e.g. the leave
+                    # itself), as only those have no delta with an event ID. Keys
+                    # that changed earlier already have one. That batch ends the
+                    # timeline, so we look up the keys in `timeline_state`. We
+                    # also always look up the syncing user's own membership, as
+                    # the client's timeline filter may have removed their leave.
                     if key in timeline_state or key == (
                         EventTypes.Member,
                         sync_config.user.to_string(),
