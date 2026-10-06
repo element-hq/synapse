@@ -1695,26 +1695,24 @@ class SyncHandler:
             )
             # A delta with `event_id=None` means the key was removed from the
             # current state. Two things cause this:
-            #  - A state reset removed the key. State groups don't have it
-            #    either, and MSC4222 has no way to tell the client that a key
-            #    was removed, so there is nothing to send.
-            #  - The server left the room and we deleted every
-            #    `current_state_events` row for it. State groups still have
-            #    the real state at `end_token`, so we look the key up there
-            #    instead of skipping it.
+            #  - A state reset removed the key. MSC4222 can't tell the client a
+            #    key was removed, so there is nothing to send for it.
+            #  - The server left the room (its last local user left). It writes
+            #    such a delta for every key of the room state, instead of deltas
+            #    for the events persisted together with the leave, including the
+            #    leave itself. State groups still have the state at `end_token`,
+            #    so we look those keys up there.
             cleared_state_keys: set[tuple[str, str]] = set()
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
                 if delta.event_id is None:
-                    # When the server leaves, every key of the room's state gets
-                    # such a delta, so looking them all up would return the whole
-                    # room state. We only need the keys that changed in the
-                    # persist batch that made the server leave (e.g. the leave
-                    # itself), as only those have no delta with an event ID. Keys
-                    # that changed earlier already have one. That batch ends the
-                    # timeline, so we look up the keys in `timeline_state`. We
-                    # also always look up the syncing user's own membership, as
-                    # the client's timeline filter may have removed their leave.
+                    # Look up the key if:
+                    #  - it is in the timeline. Only the events persisted together
+                    #    with the leave lack a delta with their event ID, and they
+                    #    end the timeline. State changed before them already has
+                    #    one, so we don't need to look up the whole room state.
+                    #  - OR it is the user's own membership, in case a filter
+                    #    removed their leave from the timeline.
                     if key in timeline_state or key == (
                         EventTypes.Member,
                         sync_config.user.to_string(),
@@ -1736,9 +1734,8 @@ class SyncHandler:
                     state_filter=StateFilter.from_types(cleared_state_keys),
                     await_full_state=await_full_state,
                 )
-                # The latest delta for these keys was the removal, so the state
-                # at `end_token` replaces any earlier delta for the same key
-                # (e.g. a display name change before the leave).
+                # This replaces any earlier delta for the same key, e.g. a
+                # display name change before the leave.
                 delta_state_ids.update(state_at_end)
                 changed_keys.update(state_at_end)
 
