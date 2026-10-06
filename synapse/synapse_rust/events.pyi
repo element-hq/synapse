@@ -23,7 +23,7 @@ class EventInternalMetadata:
     """the stream ordering of this event. None, until it has been persisted."""
     received_ts: int | None
     """
-    The timestamp of receipt (in milliseconds since the epoch) of this event.
+    The timestamp of receipt on this server (in milliseconds since the epoch) of this event.
 
     None in two cases:
     - before the event has been persisted

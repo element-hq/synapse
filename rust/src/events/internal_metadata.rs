@@ -273,7 +273,7 @@ struct EventInternalMetadataInner {
     /// The stream ordering of this event. None, until it has been persisted.
     pub stream_ordering: Option<NonZeroI64>,
 
-    /// The timestamp of receipt (in milliseconds since the epoch) of this event.
+    /// The timestamp of receipt on this server (in milliseconds since the epoch) of this event.
     ///
     /// None in two cases:
     /// - before the event has been persisted

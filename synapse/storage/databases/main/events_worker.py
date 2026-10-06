@@ -170,7 +170,7 @@ class _EventRow:
 
         stream_ordering: stream ordering for this event
 
-        received_ts: time of receipt of this event, in milliseconds since the Unix epoch.
+        received_ts: timestamp of receipt of this event on this server, in milliseconds since the Unix epoch.
 
         json: json-encoded event structure
 
