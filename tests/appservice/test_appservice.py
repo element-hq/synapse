@@ -325,7 +325,7 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
             proxy_prefix="rtc/livekit",
         )
         self.assertEqual(
-            service.proxy_prefix, ProxyPrefix(path="rtc/livekit", allows_guests=True)
+            service.proxy_prefix, ProxyPrefix(path="rtc/livekit", allow_guests=True)
         )
         self.assertEqual(service.proxy_url, "http://proxy.example.com")
 
@@ -335,7 +335,7 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
             proxy_prefix="rtc/livekit/foo",
         )
         assert service.proxy_prefix is not None
-        self.assertTrue(service.proxy_prefix.allows_guests)
+        self.assertTrue(service.proxy_prefix.allow_guests)
 
     def test_proxy_url_trailing_slash_is_stripped(self) -> None:
         service = self._make_service(

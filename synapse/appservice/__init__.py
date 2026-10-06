@@ -96,7 +96,7 @@ class ProxyPrefix:
     path: str
 
     # Whether guest users may make proxied Client-Server requests under this prefix.
-    allows_guests: bool
+    allow_guests: bool
 
     def contains(self, path: str) -> bool:
         """Whether `path` equals or is nested under this prefix."""
@@ -119,7 +119,7 @@ class ApplicationService:
     NS_LIST = [NS_USERS, NS_ALIASES, NS_ROOMS]
 
     # API prefixes that an application service may claim for proxying.
-    ALLOWED_PROXY_PREFIXES = (ProxyPrefix(path="rtc/livekit", allows_guests=True),)
+    ALLOWED_PROXY_PREFIXES = (ProxyPrefix(path="rtc/livekit", allow_guests=True),)
 
     def __init__(
         self,

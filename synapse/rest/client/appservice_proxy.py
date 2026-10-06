@@ -37,7 +37,7 @@ def _make_proxy_callback(
     async def _proxy(request: SynapseRequest, **kwargs: str) -> None:
         assert appservice.proxy_prefix is not None
         requester = await hs.get_auth().get_user_by_req(
-            request, allow_guest=appservice.proxy_prefix.allows_guests
+            request, allow_guest=appservice.proxy_prefix.allow_guests
         )
 
         await ratelimiter.ratelimit(requester)
