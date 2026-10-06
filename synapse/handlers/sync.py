@@ -1702,7 +1702,6 @@ class SyncHandler:
             #    `current_state_events` row for it. State groups still have
             #    the real state at `end_token`, so we look the key up there
             #    instead of skipping it.
-            # See https://github.com/element-hq/synapse/issues/18793
             cleared_state_keys: set[tuple[str, str]] = set()
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
