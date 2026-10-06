@@ -3,11 +3,11 @@
 ## Features
 
 - Advertise support for Matrix v1.14. Contributed by @famedly. ([\#20137](https://github.com/element-hq/synapse/issues/20137))
+- Advertise support for Matrix v1.15. ([\#20286](https://github.com/element-hq/synapse/issues/20286))
 - Catch up [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) to remote homeservers that have missed them. ([\#20165](https://github.com/element-hq/synapse/issues/20165))
 - Add push rules for [MSC4075](https://github.com/matrix-org/matrix-spec-proposals/pull/4075): MatrixRTC invites and notifications. ([\#20227](https://github.com/element-hq/synapse/issues/20227))
 - Make the task scheduler concurrency configurable via `task_scheduler.max_concurrent_tasks`, defaulting to 5. ([\#20230](https://github.com/element-hq/synapse/issues/20230))
 - Cancel a user's scheduled [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140) delayed events when their account is deactivated. ([\#20247](https://github.com/element-hq/synapse/issues/20247))
-- Advertise support for Matrix v1.15. ([\#20286](https://github.com/element-hq/synapse/issues/20286))
 
 ## Bugfixes
 
