@@ -1816,7 +1816,7 @@ class EventCreationHandler:
                     # one already persisted.
                     event = await self.store.get_event(event_id)
                 elif "received_ts" not in result:
-                    # COMPATIBILITY (remove after one release):
+                    # FIXME: COMPATIBILITY (remove after one release):
                     # We can hit this in a rolling upgrade where the event_persister worker
                     # hasn't been upgraded yet and so we can't populate the `received_ts`.
                     # Replace our copy of the event with one pulled from the database.
