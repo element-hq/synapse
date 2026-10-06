@@ -885,6 +885,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         server to clear current_state_events), the leave event must still appear
         in state_after on an incremental sync.
 
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+
         Regression test for https://github.com/element-hq/synapse/issues/18793
         """
         if not self.use_state_after:
