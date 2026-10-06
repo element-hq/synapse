@@ -885,6 +885,33 @@ def parse_json_object_from_request(
 Model = TypeVar("Model", bound=BaseModel)
 
 
+def _format_pydantic_error(e: ValidationError) -> str:
+    """Condense a pydantic ValidationError into a client-friendly message.
+
+    Avoids leaking internal details (model class names, raw input values,
+    pydantic documentation URLs) that clients cannot act upon.
+    See https://github.com/element-hq/synapse/issues/20309.
+    """
+    parts = []
+    for err in e.errors():
+        loc = ".".join(str(p) for p in err.get("loc", ()))
+        msg = err.get("msg", "invalid value")
+        err_type = err.get("type", "")
+        if err_type == "missing":
+            parts.append(
+                f"Missing required field '{loc}'" if loc else "Missing required field"
+            )
+        elif loc:
+            parts.append(f"'{loc}': {msg}")
+        else:
+            parts.append(msg)
+    if not parts:
+        return "Invalid request body."
+    if len(parts) == 1:
+        return parts[0] + "."
+    return "; ".join(parts) + "."
+
+
 def validate_json_object(content: JsonDict, model_type: type[Model]) -> Model:
     """Validate a deserialized JSON object using the given pydantic model.
 
@@ -909,7 +936,9 @@ def validate_json_object(content: JsonDict, model_type: type[Model]) -> Model:
             elif err_type == "value_error":
                 errcode = Codes.INVALID_PARAM
 
-        raise SynapseError(HTTPStatus.BAD_REQUEST, str(e), errcode=errcode)
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST, _format_pydantic_error(e), errcode=errcode
+        )
 
     return instance
 
