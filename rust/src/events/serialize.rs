@@ -519,18 +519,12 @@ fn serialize_event_value(
     }
 
     if config.msc4354_enabled {
-        if let Some(sticky_duration) = event.sticky_duration()? {
-            // min() ensures the origin server can't claim a time in the future
-            // to exceed the stickiness duration limit.
-            //
-            // The `as i64` cast is safe as sticky duration are capped to an
-            // hour, which is well within the i64 range.
-            let expires_at = std::cmp::min(event.origin_server_ts(), time_now_ms)
-                + sticky_duration.as_millis() as i64;
-            if expires_at > time_now_ms {
+        if let Some(sticky_expiry_until) = event.locally_sticky_until_ts()? {
+            let sticky_remaining_ms = sticky_expiry_until - time_now_ms;
+            if sticky_remaining_ms > 0 {
                 unsigned.insert(
                     unsigned_field::STICKY_TTL.to_owned(),
-                    Value::Number(Number::from(expires_at - time_now_ms)),
+                    Value::Number(Number::from(sticky_remaining_ms)),
                 );
             }
         }
