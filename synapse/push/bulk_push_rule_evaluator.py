@@ -492,9 +492,6 @@ class BulkPushRuleEvaluator:
             )
 
         for uid, rules in rules_by_user.items():
-            if event.sender == uid:
-                continue
-
             display_name = None
             profile = profiles.get(uid)
             if profile:
