@@ -246,10 +246,12 @@ class ApplicationService:
     ) -> ProxyPrefix | None:
         """Validates the supplied proxy prefix.
 
+        Args:
+            proxy_prefix : The proxy_prefix value read from the registration file.
+            proxy_url : The proxy_url value read from the registration file.
         Returns:
             A `ProxyPrefix` with the configured path and the properties of the
             allowed prefix it falls under, or None if no prefix is configured.
-
         Raises:
             KeyError: if only one of `proxy_prefix` and `proxy_url` is set.
             ValueError: if `proxy_prefix` or `proxy_url` is empty, or if
