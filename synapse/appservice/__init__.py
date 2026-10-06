@@ -88,15 +88,19 @@ class ProxyPrefix:
     (MSC4512).
     """
 
-    # The path prefix, applied after the version segment(s) (either /vX/ or
-    # /unstable/foo/):
-    # - /_matrix/client/(unstable/[^/]+|v[^/]+)/{path}/.*
-    # - /_matrix/federation/(unstable/[^/]+|v[^/]+)/{path}/.*
-    # Must not end with a slash.
     path: str
+    """
+    The path prefix, applied after the version segment(s) (either /vX/ or
+    /unstable/foo/):
+    - /_matrix/client/(unstable/[^/]+|v[^/]+)/{path}/.*
+    - /_matrix/federation/(unstable/[^/]+|v[^/]+)/{path}/.*
+    Must not end with a slash.
+    """
 
-    # Whether guest users may make proxied Client-Server requests under this prefix.
     allow_guests: bool
+    """
+    Whether guest users may make proxied Client-Server requests under this prefix.
+    """
 
     def contains(self, path: str) -> bool:
         """Whether `path` equals or is nested under this prefix."""
