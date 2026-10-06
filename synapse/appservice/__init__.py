@@ -265,9 +265,9 @@ class ApplicationService:
             raise ValueError("proxy_prefix and proxy_url must be non-empty strings")
 
         path = proxy_prefix.rstrip("/")  # must not end with a slash
-        for allowed in ApplicationService.ALLOWED_PROXY_PREFIXES:
-            if allowed.contains(path):
-                return attr.evolve(allowed, path=path)
+        for allowed_proxy_prefix in ApplicationService.ALLOWED_PROXY_PREFIXES:
+            if allowed_proxy_prefix.contains(path):
+                return attr.evolve(allowed_proxy_prefix, path=path)
         raise ValueError(f"cannot claim reserved proxy prefix {proxy_prefix!r}")
 
     @cached(num_args=1, cache_context=True)
