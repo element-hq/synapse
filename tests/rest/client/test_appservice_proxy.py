@@ -318,6 +318,7 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN")
         self.agent.request.assert_called()
 
+    # TODO: Add a test for an allowed proxy prefix that doesn't allow guest access.
     def test_guest_request_is_proxied(self) -> None:
         """Guests may access the LiveKit endpoints under `rtc/livekit` (MSC4195)."""
         channel = self.make_request(
