@@ -349,7 +349,6 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
         Skips inserting events:
             - if they are considered spammy by the policy server;
-              (unsure if correct, track: https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r2727593350)
             - if they are considered spammy by a Synapse spam checker module;
             - if they are rejected;
             - if they are outliers (they should be reconsidered for insertion when de-outliered); or

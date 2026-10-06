@@ -416,7 +416,7 @@ impl Event {
             // > Policy servers and similar homeserver-specific anti-spam techniques (e.g. custom spam checker modules) still apply to these events,
             // > including events received over federation. If the anti-spam technique classifies a sticky event as spam,
             // > it is treated as a regular non-sticky event and does not enjoy the properties that an unexpired sticky event does.
-            // > — https://github.com/matrix-org/matrix-spec-proposals/pull/4354/files#diff-d76bc1a1d612c6da37d024f5b57f7b8352939b8db8a7ee9c6b71c1a848359afdR107
+            // > — https://github.com/matrix-org/matrix-spec-proposals/blob/35bf5589c313c81b74c60969701f4657acb9ccb6/proposals/4354-sticky-events.md?plain=1#L107
             return Ok(None);
         }
 
