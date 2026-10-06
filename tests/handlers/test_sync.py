@@ -1094,9 +1094,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         alice_requester = create_requester(alice)
 
         room_id = self.helper.create_room_as(alice, tok=alice_tok)
-        self.helper.send_state(
-            room_id, EventTypes.Topic, {"topic": "before leaving"}, tok=alice_tok
-        )
 
         # Sync up to get a since_token.
         initial_sync_result = self.get_success(
@@ -1107,8 +1104,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             )
         )
 
-        # Alice changes the topic and leaves, with both events persisted in one
-        # batch. She is the last local user, so the server clears
+        # Alice sets the room's first topic and leaves, with both events persisted
+        # in one batch. She is the last local user, so the server clears
         # current_state_events for this room, and neither event gets a delta of its
         # own.
         self.get_success(
