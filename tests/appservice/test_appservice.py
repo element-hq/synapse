@@ -325,7 +325,8 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
             proxy_prefix="rtc/livekit",
         )
         self.assertEqual(
-            service.proxy_prefix, ProxyPrefix(path="rtc/livekit", allow_guests=True)
+            service.proxy_prefix,
+            ProxyPrefix(path_prefix="rtc/livekit", allow_guests=True),
         )
         self.assertEqual(service.proxy_url, "http://proxy.example.com")
 
@@ -350,7 +351,7 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
             proxy_prefix="rtc/livekit/foo",
         )
         assert service.proxy_prefix is not None
-        self.assertEqual(service.proxy_prefix.path, "rtc/livekit/foo")
+        self.assertEqual(service.proxy_prefix.path_prefix, "rtc/livekit/foo")
 
     def test_disallowed_proxy_prefix_raises(self) -> None:
         with self.assertRaises(ValueError):
@@ -369,4 +370,4 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
             proxy_prefix="rtc/livekit/foo/",
         )
         assert service.proxy_prefix is not None
-        self.assertEqual(service.proxy_prefix.path, "rtc/livekit/foo")
+        self.assertEqual(service.proxy_prefix.path_prefix, "rtc/livekit/foo")

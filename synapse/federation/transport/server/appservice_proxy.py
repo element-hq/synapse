@@ -102,7 +102,7 @@ def register_servlets(
 
         pattern = re.compile(
             r"^/_matrix/federation/(?:unstable/[^/]+|v[^/]+)/%s(/.*)?$"
-            % (re.escape(appservice.proxy_prefix.path),)
+            % (re.escape(appservice.proxy_prefix.path_prefix),)
         )
         callback = _make_proxy_callback(hs, authenticator, ratelimiter, appservice)
 

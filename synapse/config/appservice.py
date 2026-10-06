@@ -95,7 +95,7 @@ def load_appservices(
                     )
                 seen_as_tokens[appservice.token] = config_file
                 if appservice.proxy_prefix is not None:
-                    proxy_prefix_path = appservice.proxy_prefix.path
+                    proxy_prefix_path = appservice.proxy_prefix.path_prefix
                     for seen_prefix, seen_file in seen_proxy_prefixes.items():
                         if _proxy_prefixes_overlap(proxy_prefix_path, seen_prefix):
                             raise ConfigError(

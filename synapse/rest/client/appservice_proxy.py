@@ -72,7 +72,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
 
         pattern = re.compile(
             r"^/_matrix/client/(?:unstable/[^/]+|v[^/]+)/%s(/.*)?$"
-            % (re.escape(appservice.proxy_prefix.path),)
+            % (re.escape(appservice.proxy_prefix.path_prefix),)
         )
         callback = _make_proxy_callback(hs, ratelimiter, appservice)
 
