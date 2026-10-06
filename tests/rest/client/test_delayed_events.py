@@ -115,7 +115,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.reactor.advance(Duration(days=1).as_secs())
 
     def test_delayed_events_empty_on_startup(self) -> None:
-        self.assertListEqual([], self._get_delayed_events())
+        scheduled, finalised = self._get_delayed_events()
+        self.assertListEqual([], scheduled)
+        self.assertListEqual([], finalised)
 
     def test_delayed_event_lookup(self) -> None:
         # Schedule a message event
@@ -216,7 +218,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         # Test that the list lookup retrieves the same items (with legacy fields included)
         self.assertEqual(
-            self._get_delayed_events(),
+            self._get_scheduled_delayed_events(),
             [
                 event
                 | {
@@ -248,9 +250,13 @@ class DelayedEventsTestCase(HomeserverTestCase):
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
-        events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
-        content = self._get_delayed_event_content(events[0])
+        scheduled, finalised = self._get_delayed_events()
+        self.assertEqual(1, len(scheduled), scheduled)
+        self.assertListEqual([], finalised)
+
+        scheduled_event = scheduled[0]
+        content = self._get_delayed_event_content(scheduled_event)
+
         self.assertEqual(setter_expected, content.get(setter_key), content)
         self.helper.get_state(
             self.room_id,
@@ -261,7 +267,17 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
 
         self.reactor.advance(1)
-        self.assertListEqual([], self._get_delayed_events())
+        scheduled, finalised = self._get_delayed_events()
+        self.assertListEqual([], scheduled)
+        self.assertEqual(1, len(finalised), finalised)
+
+        finalised_event_info = finalised[0]
+        self.assertDictEqual(scheduled_event, finalised_event_info["delayed_event"])
+        self.assertEqual("send", finalised_event_info["outcome"])
+        self.assertEqual("delay", finalised_event_info["reason"])
+        self.assertNotIn("error", finalised_event_info)
+        self.assertIsNotNone(finalised_event_info["event_id"])
+
         content = self.helper.get_state(
             self.room_id,
             _EVENT_TYPE,
@@ -292,9 +308,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
-        events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
-        content = self._get_delayed_event_content(events[0])
+        scheduled = self._get_scheduled_delayed_events()
+        self.assertEqual(1, len(scheduled), scheduled)
+        content = self._get_delayed_event_content(scheduled[0])
         self.assertEqual("leave", content.get("membership"), content)
         self.assertEqual("Delayed kick", content.get("reason"), content)
 
@@ -307,7 +323,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual("join", content.get("membership"), content)
 
         self.reactor.advance(1)
-        self.assertListEqual([], self._get_delayed_events())
+        self.assertListEqual([], self._get_scheduled_delayed_events())
         content = self.helper.get_state(
             self.room_id,
             "m.room.member",
@@ -421,9 +437,11 @@ class DelayedEventsTestCase(HomeserverTestCase):
         assert delay_id is not None
 
         self.reactor.advance(1)
-        events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
-        content = self._get_delayed_event_content(events[0])
+        scheduled = self._get_scheduled_delayed_events()
+        self.assertEqual(1, len(scheduled), scheduled)
+
+        scheduled_event = scheduled[0]
+        content = self._get_delayed_event_content(scheduled_event)
         self.assertEqual(setter_expected, content.get(setter_key), content)
         self.helper.get_state(
             self.room_id,
@@ -435,7 +453,17 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         channel = self._update_delayed_event(delay_id, "cancel", action_in_path)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-        self.assertListEqual([], self._get_delayed_events())
+
+        scheduled, finalised = self._get_delayed_events()
+        self.assertListEqual([], scheduled)
+        self.assertEqual(1, len(finalised), finalised)
+
+        finalised_event_info = finalised[0]
+        self.assertDictEqual(scheduled_event, finalised_event_info["delayed_event"])
+        self.assertEqual("cancel", finalised_event_info["outcome"])
+        self.assertEqual("action", finalised_event_info["reason"])
+        self.assertNotIn("error", finalised_event_info)
+        self.assertNotIn("event_id", finalised_event_info)
 
         self.reactor.advance(1)
         content = self.helper.get_state(
@@ -526,9 +554,11 @@ class DelayedEventsTestCase(HomeserverTestCase):
         assert delay_id is not None
 
         self.reactor.advance(1)
-        events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
-        content = self._get_delayed_event_content(events[0])
+        scheduled = self._get_scheduled_delayed_events()
+        self.assertEqual(1, len(scheduled), scheduled)
+
+        scheduled_event = scheduled[0]
+        content = self._get_delayed_event_content(scheduled_event)
         self.assertEqual(content_value, content.get(content_property_name), content)
         self.helper.get_state(
             self.room_id,
@@ -540,7 +570,18 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         channel = self._update_delayed_event(delay_id, "send", action_in_path)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-        self.assertListEqual([], self._get_delayed_events())
+
+        scheduled, finalised = self._get_delayed_events()
+        self.assertListEqual([], scheduled)
+        self.assertEqual(1, len(finalised), finalised)
+
+        finalised_event_info = finalised[0]
+        self.assertDictEqual(scheduled_event, finalised_event_info["delayed_event"])
+        self.assertEqual("send", finalised_event_info["outcome"])
+        self.assertEqual("action", finalised_event_info["reason"])
+        self.assertNotIn("error", finalised_event_info)
+        self.assertIsNotNone(finalised_event_info["event_id"])
+
         content = self.helper.get_state(
             self.room_id,
             _EVENT_TYPE,
@@ -593,9 +634,11 @@ class DelayedEventsTestCase(HomeserverTestCase):
         assert delay_id is not None
 
         self.reactor.advance(1)
-        events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
-        content = self._get_delayed_event_content(events[0])
+        scheduled = self._get_scheduled_delayed_events()
+        self.assertEqual(1, len(scheduled), scheduled)
+
+        scheduled_event = scheduled[0]
+        content = self._get_delayed_event_content(scheduled_event)
         self.assertEqual(setter_expected, content.get(setter_key), content)
         self.helper.get_state(
             self.room_id,
@@ -609,9 +652,12 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         self.reactor.advance(1)
-        events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
-        content = self._get_delayed_event_content(events[0])
+
+        scheduled, finalised = self._get_delayed_events()
+        self.assertEqual(1, len(scheduled), scheduled)
+        self.assertListEqual([], finalised)
+
+        content = self._get_delayed_event_content(scheduled[0])
         self.assertEqual(setter_expected, content.get(setter_key), content)
         self.helper.get_state(
             self.room_id,
@@ -622,7 +668,16 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
 
         self.reactor.advance(1)
-        self.assertListEqual([], self._get_delayed_events())
+        scheduled, finalised = self._get_delayed_events()
+        self.assertListEqual([], scheduled)
+        self.assertEqual(1, len(finalised), finalised)
+
+        finalised_event_info = finalised[0]
+        self.assertEqual("send", finalised_event_info["outcome"])
+        self.assertEqual("delay", finalised_event_info["reason"])
+        self.assertNotIn("error", finalised_event_info)
+        self.assertIsNotNone(finalised_event_info["event_id"])
+
         content = self.helper.get_state(
             self.room_id,
             _EVENT_TYPE,
@@ -703,8 +758,8 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
-        events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
+        scheduled = self._get_scheduled_delayed_events()
+        self.assertEqual(1, len(scheduled), scheduled)
 
         self.helper.send_state(
             self.room_id,
@@ -715,8 +770,8 @@ class DelayedEventsTestCase(HomeserverTestCase):
             self.user1_access_token,
             state_key=state_key,
         )
-        events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
+        scheduled = self._get_scheduled_delayed_events()
+        self.assertEqual(1, len(scheduled), scheduled)
 
         self.reactor.advance(1)
         content = self.helper.get_state(
@@ -747,8 +802,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
-        events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
+        scheduled = self._get_scheduled_delayed_events()
+        self.assertEqual(1, len(scheduled), scheduled)
+        scheduled_event = scheduled[0]
 
         setter_expected = "other_user"
         self.helper.send_state(
@@ -760,7 +816,23 @@ class DelayedEventsTestCase(HomeserverTestCase):
             self.user2_access_token,
             state_key=state_key,
         )
-        self.assertListEqual([], self._get_delayed_events())
+
+        scheduled, finalised = self._get_delayed_events()
+        self.assertListEqual([], scheduled)
+        self.assertEqual(1, len(finalised), finalised)
+
+        finalised_event_info = finalised[0]
+        self.assertDictEqual(scheduled_event, finalised_event_info["delayed_event"])
+        self.assertEqual("cancel", finalised_event_info["outcome"])
+        self.assertEqual("error", finalised_event_info["reason"])
+        self.assert_dict(
+            {
+                "errcode": "M_UNKNOWN",
+                "org.matrix.msc4140.errcode": "M_CANCELLED_BY_STATE_UPDATE",
+            },
+            finalised_event_info["error"],
+        )
+        self.assertNotIn("event_id", finalised_event_info)
 
         self.reactor.advance(1)
         content = self.helper.get_state(
@@ -898,7 +970,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertIsNone(handler._next_delayed_event_call)
 
-    def _get_delayed_events(self) -> list[JsonDict]:
+    def _get_delayed_events(self) -> tuple[list[JsonDict], list[JsonDict]]:
         channel = self.make_request(
             "GET",
             PATH_PREFIX,
@@ -906,13 +978,56 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        key = "delayed_events"
-        self.assertIn(key, channel.json_body)
+        scheduled = self._validate_scheduled_delayed_events(channel.json_body)
+        finalised = self._validate_finalised_delayed_events(channel.json_body)
 
-        events = channel.json_body[key]
-        self.assertIsInstance(events, list)
+        return scheduled, finalised
 
-        return events
+    def _get_scheduled_delayed_events(self) -> list[JsonDict]:
+        channel = self.make_request(
+            "GET",
+            PATH_PREFIX + "?status=scheduled",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        scheduled = self._validate_scheduled_delayed_events(channel.json_body)
+
+        return scheduled
+
+    def _get_finalised_delayed_events(self) -> list[JsonDict]:
+        channel = self.make_request(
+            "GET",
+            PATH_PREFIX + "?status=finalised",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        finalised = self._validate_finalised_delayed_events(channel.json_body)
+
+        return finalised
+
+    def _validate_scheduled_delayed_events(self, json_body: JsonDict) -> list[JsonDict]:
+        key = "scheduled"
+        self.assertIn(key, json_body)
+
+        scheduled = json_body[key]
+        self.assertIsInstance(scheduled, list)
+
+        return scheduled
+
+    def _validate_finalised_delayed_events(self, json_body: JsonDict) -> list[JsonDict]:
+        key = "finalised"
+        self.assertIn(key, json_body)
+
+        finalised = json_body[key]
+        self.assertIsInstance(finalised, list)
+
+        for item in finalised:
+            for key in ("delayed_event", "outcome", "reason", "origin_server_ts"):
+                self.assertIsNotNone(item.get(key))
+
+        return finalised
 
     def _get_delayed_event_content(self, event: JsonDict) -> JsonDict:
         key = "content"
