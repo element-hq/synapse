@@ -1732,7 +1732,11 @@ class SyncHandler:
                     room_id,
                     stream_position=end_token,
                     state_filter=StateFilter.from_types(cleared_state_keys),
-                    await_full_state=await_full_state,
+                    # Don't wait for the full state: partial state already has
+                    # the user's own membership. Waiting for the full state
+                    # could trigger a known issue where the resync never
+                    # finishes.
+                    await_full_state=False,
                 )
                 # This replaces any earlier delta for the same key, e.g. a
                 # display name change before the leave.
