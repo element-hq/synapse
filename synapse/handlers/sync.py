@@ -1702,9 +1702,12 @@ class SyncHandler:
             #    `current_state_events` row for it. State groups still have
             #    the real state at `end_token`, so we look the key up there
             #    instead of skipping it.
+            own_membership_key = (EventTypes.Member, sync_config.user.to_string())
             cleared_state_keys: set[tuple[str, str]] = set()
+            keys_with_deltas: set[StateKey] = set()
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
+                keys_with_deltas.add(key)
                 if delta.event_id is None:
                     # When the server leaves, every key of the room's state gets
                     # such a delta, so looking them all up would return the whole
@@ -1715,10 +1718,7 @@ class SyncHandler:
                     # timeline, so we look up the keys in `timeline_state`. We
                     # also always look up the syncing user's own membership, as
                     # the client's timeline filter may have removed their leave.
-                    if key in timeline_state or key == (
-                        EventTypes.Member,
-                        sync_config.user.to_string(),
-                    ):
+                    if key in timeline_state or key == own_membership_key:
                         cleared_state_keys.add(key)
                     continue
 
@@ -1728,6 +1728,15 @@ class SyncHandler:
                 delta_state_ids[key] = delta.event_id
                 changed_keys.add(key)
                 cleared_state_keys.discard(key)
+
+            if own_membership_key in cleared_state_keys:
+                # The server left the room in this window. It only wrote deltas
+                # for the keys that were in the room state before the batch that
+                # made it leave, so the keys that batch added have no delta at
+                # all. Look up the keys in the timeline that have no delta too.
+                cleared_state_keys.update(
+                    key for key in timeline_state if key not in keys_with_deltas
+                )
 
             if cleared_state_keys:
                 state_at_end = await self._state_storage_controller.get_state_ids_at(
