@@ -28,9 +28,12 @@ from synapse.logging.opentracing import set_tag
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.replication.http.delayed_events import (
     ReplicationAddedDelayedEventRestServlet,
+    ReplicationCancelDelayedEventsForUserRestServlet,
 )
 from synapse.storage.databases.main.delayed_events import (
     DelayedEventDetails,
+    DelayedEventResponse,
+    DelayedEventResponseLegacyCompat,
     EventType,
     StateKey,
     Timestamp,
@@ -127,6 +130,9 @@ class DelayedEventsHandler:
             )
         else:
             self._repl_client = ReplicationAddedDelayedEventRestServlet.make_client(hs)
+            self._cancel_all_for_user_client = (
+                ReplicationCancelDelayedEventsForUserRestServlet.make_client(hs)
+            )
 
     @property
     def _is_master(self) -> bool:
@@ -371,9 +377,9 @@ class DelayedEventsHandler:
             requested_delay = delay.as_millis()
             max_delay = self._config.server.max_event_delay_duration.as_millis()
             raise SynapseError(
-                HTTPStatus.FORBIDDEN,
+                HTTPStatus.BAD_REQUEST,
                 f"The requested delay ({requested_delay}ms) exceeds the allowed maximum ({max_delay}ms)",
-                Codes.FORBIDDEN,
+                Codes.DELAY_TOO_LARGE,
             )
 
         self._event_creation_handler.validator.validate_builder(
@@ -434,6 +440,30 @@ class DelayedEventsHandler:
         await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.cancel_delayed_event(delay_id)
+
+        if self._next_send_ts_changed(next_send_ts):
+            self._schedule_next_at_or_none(next_send_ts)
+
+    async def cancel_all_for_user(self, user_localpart: str) -> None:
+        """
+        Cancels the scheduled delivery of all delayed events owned by the local user
+        with the given localpart, e.g. because their account is being deactivated.
+
+        Delayed events that are already being sent are left alone.
+
+        Goes through replication if this is not the main process, as only the
+        main process handles sending delayed events.
+        """
+        if not self._is_master:
+            await self._cancel_all_for_user_client(
+                instance_name=MAIN_PROCESS_INSTANCE_NAME,
+                user_localpart=user_localpart,
+            )
+            return
+
+        await make_deferred_yieldable(self._initialized_from_db)
+
+        next_send_ts = await self._store.cancel_delayed_events_for_user(user_localpart)
 
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
@@ -549,8 +579,30 @@ class DelayedEventsHandler:
         else:
             self._next_delayed_event_call.reset(delay_duration.as_secs())
 
-    async def get_all_for_user(self, requester: Requester) -> list[JsonDict]:
-        """Return all pending delayed events requested by the given user."""
+    async def get_for_user(
+        self, requester: Requester, delay_id: str
+    ) -> DelayedEventResponse:
+        """
+        Return the specified pending delayed event requested by the given user.
+
+        Raises:
+            NotFoundError: if no matching delayed event could be found.
+        """
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
+        return await self._store.get_delayed_event_for_user(
+            delay_id,
+            requester.user.localpart,
+        )
+
+    async def get_all_for_user(
+        self, requester: Requester
+    ) -> list[DelayedEventResponseLegacyCompat]:
+        """
+        Return all pending delayed events owned by the given user.
+        Includes fields from earlier revisions of MSC4140 for
+        compatibility with clients that still expect them.
+        """
+        # TODO: Remove legacy fields once stable
         await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
         return await self._store.get_all_delayed_events_for_user(
             requester.user.localpart

@@ -33,9 +33,11 @@ from synapse.api.constants import (
     ReceiptTypes,
     RelationTypes,
 )
+from synapse.events import EventBase
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -43,7 +45,11 @@ from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
 from tests.rest.client.test_rooms import make_request_with_cancellation_test
-from tests.server import TimedOutException
+from tests.server import FakeChannel, TimedOutException
+from tests.test_utils.event_injection import (
+    inject_event,
+    persist_message_and_state_event_in_one_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -393,6 +399,9 @@ class SyncKnockTestCase(KnockingStrippedStateEventHelperMixin):
         self.check_knock_room_state_against_room_state(
             room_state_events, self.expected_room_state
         )
+        # Ensure the events have been stripped
+        for event in room_state_events:
+            self.assertNotIn("signatures", event)
 
 
 class SyncCreateEventInPrejoinStateTestCase(unittest.HomeserverTestCase):
@@ -496,7 +505,7 @@ class UnreadMessagesTestCase(unittest.HomeserverTestCase):
             self.room_id,
             EventTypes.PowerLevels,
             {
-                "users": {self.user_id: 100, self.user2: 100},
+                "users": {self.user2: 100},
                 "users_default": 0,
                 "events": {
                     "m.room.name": 50,
@@ -1272,3 +1281,737 @@ class SyncCancellationTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+
+class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
+    """Tests for the MSC4222 invariant that any state event served in a sync
+    response's *timeline* is reflected in `state_after` (unless it lost state
+    resolution): `state at since` + `state_after` must equal the state at the
+    end of the timeline. See
+    https://github.com/matrix-org/matrix-spec-proposals/pull/4222.
+
+    This breaks when the `since` token falls inside a persist batch: the
+    `current_state_delta_stream` row for a state event persisted in a batch is
+    stamped with the *minimum* stream ordering of the batch, so such a token
+    selects the event for the timeline but not its delta. A worker reading the
+    events stream from replication routinely observes such a token, which is
+    why this is seen on worker deployments and not on a single process.
+
+    `test_state_after_with_token_inside_persist_batch` reproduces this end to
+    end with a hand-built `since` token. Its preconditions -- the batch-minimum
+    stamp, and that the events replication stream really hands out a token
+    inside a batch -- are pinned in `tests/storage/test_state_deltas.py` and
+    `tests/replication/tcp/streams/test_events.py`.
+
+    The remaining tests guard that whatever repairs this reports the *resolved*
+    state at the end of the timeline rather than replaying the timeline.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+
+        self.alice = self.register_user("alice", "password")
+        self.alice_tok = self.login("alice", "password")
+        self.bob = self.register_user("bob", "password")
+        self.bob_tok = self.login("bob", "password")
+
+        self.get_success(
+            self.store.set_features_for_user(
+                self.alice, {ExperimentalFeature.MSC4222: True}
+            )
+        )
+
+        # Named room, so that hero calculation doesn't inject current
+        # membership state into the response and confuse the assertions.
+        self.room_id = self.helper.create_room_as(
+            self.alice, tok=self.alice_tok, extra_content={"name": "test room"}
+        )
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+
+    def _sync_url(self, lazy_load_members: bool, timeline_limit: int = 10) -> str:
+        # The default `timeline_limit` of 10 is arbitrary: comfortably more
+        # events than any test here produces between syncs, so the timeline is
+        # never truncated unless a test passes a smaller limit on purpose.
+        sync_filter: JsonDict = {"room": {"timeline": {"limit": timeline_limit}}}
+        if lazy_load_members:
+            sync_filter["room"]["state"] = {"lazy_load_members": True}
+        return f"/sync?filter={json.dumps(sync_filter)}&org.matrix.msc4222.use_state_after=true"
+
+    def _sync(self, sync_url: str, since: str | None = None) -> JsonDict:
+        url = sync_url if since is None else f"{sync_url}&since={since}"
+        channel = self.make_request("GET", url, access_token=self.alice_tok)
+        self.assertEqual(channel.code, 200, channel.result)
+        return channel.json_body
+
+    def _joined_room(self, response: JsonDict) -> JsonDict:
+        rooms = response["rooms"].get("join", {})
+        self.assertIn(self.room_id, rooms, f"room missing from sync: {response}")
+        return rooms[self.room_id]
+
+    def _timeline_ids(self, room: JsonDict) -> list[str]:
+        return [e["event_id"] for e in room["timeline"]["events"]]
+
+    def _state_after_ids(self, room: JsonDict) -> list[str]:
+        return [e["event_id"] for e in room["org.matrix.msc4222.state_after"]["events"]]
+
+    def _persist_batch(self) -> tuple[EventBase, EventBase]:
+        return self.get_success(
+            persist_message_and_state_event_in_one_batch(
+                self.hs, self.room_id, self.alice
+            )
+        )
+
+    def _assert_state_after_is_current_state(self, room: JsonDict) -> None:
+        """For a joined room `end_token` is the global `now_token`, so every
+        entry in `state_after` must be the room's current state for that key.
+
+        This is the guard against "fix" shapes that seed `state_after` straight
+        from the timeline: a state event can be in the timeline and *not* be the
+        state at the end of it.
+        """
+        current_state = self.get_success(
+            self.store.get_partial_current_state_ids(self.room_id)
+        )
+        current_ids = set(current_state.values())
+        for event in room["org.matrix.msc4222.state_after"]["events"]:
+            self.assertIn(
+                event["event_id"],
+                current_ids,
+                f"state_after reports {event['type']}/{event['state_key']} = "
+                f"{event['event_id']}, which is not the current state "
+                f"({current_state.get((event['type'], event['state_key']))})",
+            )
+
+    # ------------------------------------------------------------------
+    # The persist-batch window
+    # ------------------------------------------------------------------
+
+    def test_state_after_with_token_inside_persist_batch(self) -> None:
+        """The end-to-end symptom of the batch-minimum stamp: if a client's
+        `since` token lands strictly inside a persist batch (which a *reader*
+        worker can
+        observe, because it advances its events-stream position from replication
+        RDATA batches that may split a persist batch), the state event is in the
+        timeline of the next sync and must also be in `state_after`.
+        """
+        sync_url = self._sync_url(lazy_load_members=False)
+        base = self._sync(sync_url)["next_batch"]
+        base_token = self.get_success(StreamToken.from_string(self.store, base))
+
+        message, state_event = self._persist_batch()
+        message_pos = message.internal_metadata.stream_ordering
+        assert message_pos is not None
+
+        # A token positioned just after the message but before the state event
+        # -- i.e. in the middle of the persist batch.
+        split_token = base_token.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=message_pos)
+        )
+
+        deltas_up_to_split = self.get_success(
+            self.store.get_current_state_deltas_for_room(
+                self.room_id,
+                from_token=base_token.room_key,
+                to_token=RoomStreamToken(stream=message_pos),
+            )
+        )
+        self.assertIn(
+            state_event.event_id,
+            [d.event_id for d in deltas_up_to_split],
+            "expected the delta to be visible *before* its event",
+        )
+
+        split_since = self.get_success(split_token.to_string(self.store))
+        room = self._joined_room(self._sync(sync_url, split_since))
+        self.assertIn(state_event.event_id, self._timeline_ids(room))
+        self.assertIn(
+            state_event.event_id,
+            self._state_after_ids(room),
+            f"state event in timeline but missing from state_after when the "
+            f"since token splits a persist batch: {room}",
+        )
+
+    # ------------------------------------------------------------------
+    # Guards: `state_after` must be the *resolved* state, not a replay of
+    # the timeline
+    # ------------------------------------------------------------------
+
+    def test_state_res_loser_alone_in_timeline(self) -> None:
+        """A state event that appears in the timeline but *loses* state
+        resolution must not be reported in `state_after` -- `state_after` is
+        the resolved state at the end of the timeline, not a replay of the
+        timeline.
+
+        Here the client has already synced past the first of two conflicting
+        events, so the second one arrives alone in the timeline with no delta of
+        its own.
+        """
+        sync_url = self._sync_url(lazy_load_members=False)
+
+        fork_point = self.get_success(self.store.get_prev_events_for_room(self.room_id))
+
+        # Pin the state resolution outcome: conflicted events at the same
+        # mainline position are applied in `(origin_server_ts, event_id)`
+        # order with the last application winning, so giving the first event
+        # the later timestamp makes it deterministically beat the second one.
+        now = self.clock.time_msec()
+
+        first = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=self.room_id,
+                type="m.call.member",
+                state_key=self.alice,
+                sender=self.alice,
+                content={"memberships": [{"device_id": "FIRST"}]},
+                prev_event_ids=fork_point,
+                origin_server_ts=now + 1000,
+            )
+        )
+
+        # The client syncs past the first event.
+        since = self._sync(sync_url)["next_batch"]
+
+        # A conflicting event forked off the same point arrives afterwards.
+        second = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=self.room_id,
+                type="m.call.member",
+                state_key=self.alice,
+                sender=self.alice,
+                content={"memberships": [{"device_id": "SECOND"}]},
+                prev_event_ids=fork_point,
+                origin_server_ts=now,
+            )
+        )
+
+        current_state = self.get_success(
+            self.store.get_partial_current_state_ids(self.room_id)
+        )
+        self.assertEqual(
+            current_state[("m.call.member", self.alice)],
+            first.event_id,
+            "test setup: expected the first event to win state resolution",
+        )
+
+        room = self._joined_room(self._sync(sync_url, since))
+        self.assertIn(second.event_id, self._timeline_ids(room))
+        self._assert_state_after_is_current_state(room)
+        self.assertNotIn(
+            second.event_id,
+            self._state_after_ids(room),
+            "a state-res loser leaked into state_after",
+        )
+
+    def test_state_after_is_current_state_with_split_token(self) -> None:
+        """Whatever mechanism repairs the persist-batch window must not report
+        anything other than the state at the end of the timeline."""
+        sync_url = self._sync_url(lazy_load_members=False)
+        base = self._sync(sync_url)["next_batch"]
+        base_token = self.get_success(StreamToken.from_string(self.store, base))
+
+        message, state_event = self._persist_batch()
+        message_pos = message.internal_metadata.stream_ordering
+        assert message_pos is not None
+
+        split_token = base_token.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=message_pos)
+        )
+        since = self.get_success(split_token.to_string(self.store))
+
+        room = self._joined_room(self._sync(sync_url, since))
+        self._assert_state_after_is_current_state(room)
+        self.assertIn(state_event.event_id, self._state_after_ids(room))
+
+    def test_gappy_timeline_with_split_token(self) -> None:
+        """The gappy variant of the persist-batch window: the `since` token
+        splits a persist batch *and* the timeline is truncated so that the
+        state event falls outside the window. The state event is then in
+        neither the timeline nor the deltas, but it is a state change since
+        `since`, so `state_after` must still report it -- with `limited: true`
+        the client relies entirely on `state_after` to bridge the gap.
+        """
+        sync_url = self._sync_url(lazy_load_members=False, timeline_limit=3)
+        base = self._sync(sync_url)["next_batch"]
+        base_token = self.get_success(StreamToken.from_string(self.store, base))
+
+        message, state_event = self._persist_batch()
+        message_pos = message.internal_metadata.stream_ordering
+        assert message_pos is not None
+
+        # Push the state event out of the timeline window: more fillers than
+        # the timeline limit of 3, so the window holds fillers only.
+        for i in range(10):
+            self.helper.send(self.room_id, body=f"filler {i}", tok=self.bob_tok)
+
+        split_token = base_token.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=message_pos)
+        )
+        since = self.get_success(split_token.to_string(self.store))
+
+        room = self._joined_room(self._sync(sync_url, since))
+        self.assertTrue(room["timeline"].get("limited"), room)
+        self.assertNotIn(state_event.event_id, self._timeline_ids(room))
+        self.assertIn(
+            state_event.event_id,
+            self._state_after_ids(room),
+            f"state event outside a truncated timeline is missing from "
+            f"state_after when the since token splits a persist batch: {room}",
+        )
+
+
+class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
+    """Tests MSC4222 `state_after` behaviour for rooms the syncing user has
+    left (i.e. rooms in the `leave` section of the sync response)."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+
+    def test_archived_room_state_after_not_newer_than_leave(self) -> None:
+        """`state_after` for a left room must be the state at the end of that
+        room's timeline, i.e. at the user's leave point — never state from
+        after the leave.
+
+        Scenario: with lazy-loading of members and `use_state_after` enabled,
+        Alice does an incremental sync covering the window in which Bob sent a
+        message and Alice then left. Bob changed his per-room displayname
+        *after* Alice's leave; that post-leave membership event must NOT
+        appear in Alice's `state_after` for the left room.
+        """
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login("alice", "password")
+        bob = self.register_user("bob", "password")
+        bob_tok = self.login("bob", "password")
+
+        # Opt Alice in to MSC4222.
+        self.get_success(
+            self.store.set_features_for_user(alice, {ExperimentalFeature.MSC4222: True})
+        )
+
+        # Name the room to avoid heroes: those come from the *current*
+        # summary — a separate leak path from the one under test.
+        room_id = self.helper.create_room_as(
+            alice, tok=alice_tok, extra_content={"name": "Some room name"}
+        )
+        self.helper.join(room_id, bob, tok=bob_tok)
+
+        # Bob's membership as it will stand at Alice's leave point.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/rooms/{room_id}/state/m.room.member/{bob}?format=event",
+            access_token=alice_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        bob_member_event_id_at_leave = channel.json_body["event_id"]
+
+        # Lazy-load members; `include_redundant_members` bypasses the members
+        # cache so Bob's membership appears in the incremental sync below.
+        sync_filter = json.dumps(
+            {
+                "room": {
+                    "state": {
+                        "lazy_load_members": True,
+                        "include_redundant_members": True,
+                    },
+                }
+            }
+        )
+        sync_url = f"/sync?filter={sync_filter}&org.matrix.msc4222.use_state_after=true"
+
+        # Initial sync.
+        channel = self.make_request("GET", sync_url, access_token=alice_tok)
+        self.assertEqual(channel.code, 200, channel.result)
+        since = channel.json_body["next_batch"]
+
+        # Bob becomes a timeline sender in the next sync window.
+        self.helper.send(room_id, body="hello", tok=bob_tok)
+
+        # Alice leaves the room.
+        self.helper.leave(room_id, alice, tok=alice_tok)
+
+        # Bob's membership changes AFTER Alice's leave.
+        post_leave_member_event = self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            {"membership": "join", "displayname": "bob-post-leave"},
+            tok=bob_tok,
+            state_key=bob,
+        )
+        post_leave_member_event_id = post_leave_member_event["event_id"]
+
+        # Incremental sync: the room is in the `leave` section.
+        channel = self.make_request(
+            "GET", f"{sync_url}&since={since}", access_token=alice_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        left_room = channel.json_body["rooms"]["leave"][room_id]
+        state_after_events = left_room["org.matrix.msc4222.state_after"]["events"]
+
+        # Post-leave state must not appear in `state_after`.
+        self.assertNotIn(
+            post_leave_member_event_id,
+            [e["event_id"] for e in state_after_events],
+            f"state_after contains state from after the user's leave: "
+            f"{state_after_events}",
+        )
+
+        # Bob's membership must be the one at the leave point.
+        self.assertEqual(
+            [
+                e["event_id"]
+                for e in state_after_events
+                if e["type"] == EventTypes.Member and e["state_key"] == bob
+            ],
+            [bob_member_event_id_at_leave],
+        )
+
+
+class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
+    """Tests for the per-device cache of lazy-loaded members already sent.
+
+    A membership left out of a response as already sent is lost for good if
+    the client never processed the response that carried it. The cache must
+    only trust a response once the client has synced from its `next_batch`.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.alice = self.register_user("alice", "password")
+        self.alice_device = "alice_device"
+        self.alice_tok = self.login("alice", "password", device_id=self.alice_device)
+        self.bob = self.register_user("bob", "password")
+        self.bob_tok = self.login("bob", "password")
+
+        self.get_success(
+            hs.get_datastores().main.set_features_for_user(
+                self.alice, {ExperimentalFeature.MSC4222: True}
+            )
+        )
+
+        # Named room, so that hero calculation doesn't inject current
+        # membership state into the response and confuse the assertions.
+        self.room_id = self.helper.create_room_as(
+            self.alice, tok=self.alice_tok, extra_content={"name": "test room"}
+        )
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+
+        # Push bob's join out of the initial sync's timeline, so that his
+        # membership has not been sent to the client when a test starts.
+        for i in range(10):
+            self.helper.send(self.room_id, body=f"pad {i}", tok=self.alice_tok)
+
+    def _sync_request(
+        self,
+        use_state_after: bool,
+        since: str | None = None,
+        *,
+        timeline_limit: int = 10,
+        timeline_not_types: list[str] | None = None,
+        timeout_ms: int = 0,
+        await_result: bool = True,
+    ) -> FakeChannel:
+        """Make a lazy-loading `/sync` request as alice."""
+        timeline_filter: JsonDict = {"limit": timeline_limit}
+        if timeline_not_types is not None:
+            timeline_filter["not_types"] = timeline_not_types
+        sync_filter: JsonDict = {
+            "room": {
+                "timeline": timeline_filter,
+                "state": {"lazy_load_members": True},
+            }
+        }
+        url = f"/sync?filter={json.dumps(sync_filter)}&timeout={timeout_ms}"
+        if use_state_after:
+            url += "&org.matrix.msc4222.use_state_after=true"
+        if since is not None:
+            url += f"&since={since}"
+        return self.make_request(
+            "GET", url, access_token=self.alice_tok, await_result=await_result
+        )
+
+    def _sync(
+        self,
+        use_state_after: bool,
+        since: str | None = None,
+        *,
+        timeline_limit: int = 10,
+        timeline_not_types: list[str] | None = None,
+    ) -> JsonDict:
+        """Sync as alice and return the response body."""
+        channel = self._sync_request(
+            use_state_after,
+            since,
+            timeline_limit=timeline_limit,
+            timeline_not_types=timeline_not_types,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        return channel.json_body
+
+    def _room(self, response: JsonDict) -> JsonDict:
+        """Extract the room dict for the test room from a sync response."""
+        rooms = response["rooms"].get("join", {})
+        self.assertIn(self.room_id, rooms, f"room missing from sync: {response}")
+        return rooms[self.room_id]
+
+    def _timeline_ids(self, response: JsonDict) -> list[str]:
+        return [e["event_id"] for e in self._room(response)["timeline"]["events"]]
+
+    def _state_events(
+        self, response: JsonDict, use_state_after: bool
+    ) -> list[JsonDict]:
+        """Extract the list of state events from the test room in a sync response."""
+        key = "org.matrix.msc4222.state_after" if use_state_after else "state"
+        return self._room(response)[key]["events"]
+
+    def _state_ids(self, response: JsonDict, use_state_after: bool) -> list[str]:
+        """Extract the list of state event IDs from the test room in a sync
+        response."""
+        return [e["event_id"] for e in self._state_events(response, use_state_after)]
+
+    def _members_in_state(self, response: JsonDict, use_state_after: bool) -> list[str]:
+        """Extract the list of member state keys from the test room in a sync
+        response."""
+        return [
+            e["state_key"]
+            for e in self._state_events(response, use_state_after)
+            if e["type"] == EventTypes.Member
+        ]
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_member_sent_once_when_acknowledged(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A lazy-loaded member is sent the first time it is needed and left
+        out once the client has synced past the response that carried it."""
+        t0 = self._sync(use_state_after)["next_batch"]
+
+        self.helper.send(self.room_id, body="one", tok=self.bob_tok)
+        response = self._sync(use_state_after, t0)
+        self.assertEqual(self._members_in_state(response, use_state_after), [self.bob])
+        t1 = response["next_batch"]
+
+        self.helper.send(self.room_id, body="two", tok=self.bob_tok)
+        response = self._sync(use_state_after, t1)
+        self.assertEqual(self._members_in_state(response, use_state_after), [])
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_member_not_resent_on_resync_from_token_that_carried_it(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A client that resumes from an older token is only sent again the
+        members carried by the responses after that token.
+
+        A member sent in the response that ended at the resumed-from token was
+        processed by the client before it saved that token, so it must not be
+        sent again. matrix-js-sdk saves its sync store every few minutes and
+        resumes from the saved token on reload, so this is the common case.
+        """
+        t0 = self._sync(use_state_after)["next_batch"]
+
+        # bob's membership is carried by the response that ends at `t1`.
+        self.helper.send(self.room_id, body="one", tok=self.bob_tok)
+        response = self._sync(use_state_after, t0)
+        self.assertEqual(self._members_in_state(response, use_state_after), [self.bob])
+        t1 = response["next_batch"]
+
+        # The client processes further responses, then reloads from `t1`.
+        self.helper.send(self.room_id, body="two", tok=self.bob_tok)
+        self._sync(use_state_after, t1)
+        self.helper.send(self.room_id, body="three", tok=self.bob_tok)
+        response = self._sync(use_state_after, t1)
+        self.assertEqual(
+            self._members_in_state(response, use_state_after),
+            [],
+            f"bob's membership re-sent on resume from the token that carried "
+            f"it: {response}",
+        )
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_member_resent_on_retry_from_same_token(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A client that gives up on a slow request and retries it must get the
+        lazy-loaded members again. It never processed the first response."""
+        t0 = self._sync(use_state_after)["next_batch"]
+
+        self.helper.send(self.room_id, body="hello", tok=self.bob_tok)
+        for attempt in range(2):
+            response = self._sync(use_state_after, t0)
+            self.assertEqual(
+                self._members_in_state(response, use_state_after),
+                [self.bob],
+                f"bob's membership missing on attempt {attempt}: {response}",
+            )
+
+    def test_membership_change_resent_on_resync_from_older_token(self) -> None:
+        """A membership change must be in `state_after` every time the sync
+        window covers it, even if it has been sent before.
+
+        Clients do not persist every `since` token. matrix-js-sdk saves its
+        sync store every few minutes, so after a reload it resumes from a token
+        older than the one the change was first delivered on. A `state_after`
+        client never applies state from the timeline, so if the change is left
+        out of `state_after` it keeps the stale membership until it clears its
+        cache. A kicked user stays shown as joined.
+        """
+        t0 = self._sync(use_state_after=True)["next_batch"]
+
+        self.helper.send(self.room_id, body="hello", tok=self.bob_tok)
+        t1 = self._sync(use_state_after=True, since=t0)["next_batch"]
+
+        kick = self.helper.change_membership(
+            self.room_id, self.alice, self.bob, "leave", tok=self.alice_tok
+        )
+
+        # The live client sees the kick.
+        response = self._sync(use_state_after=True, since=t1)
+        self.assertIn(kick["event_id"], self._state_ids(response, use_state_after=True))
+
+        # The client reloads from the older persisted token.
+        response = self._sync(use_state_after=True, since=t0)
+        self.assertIn(kick["event_id"], self._timeline_ids(response))
+        self.assertIn(
+            kick["event_id"],
+            self._state_ids(response, use_state_after=True),
+            f"membership change missing from state_after on re-sync from an "
+            f"older token: {response}",
+        )
+
+    def test_gappy_membership_change_resent_on_resync_from_older_token(
+        self,
+    ) -> None:
+        """The same for `state`. A membership change that falls in the gap of
+        a limited timeline is only conveyed by `state`, so it must be there
+        every time the sync window covers it."""
+        t0 = self._sync(use_state_after=False, timeline_limit=1)["next_batch"]
+
+        self.helper.send(self.room_id, body="hello", tok=self.bob_tok)
+        t1 = self._sync(use_state_after=False, since=t0, timeline_limit=1)["next_batch"]
+
+        kick = self.helper.change_membership(
+            self.room_id, self.alice, self.bob, "leave", tok=self.alice_tok
+        )
+        # A later message, so that the kick falls into the gap of the
+        # one-event timeline.
+        self.helper.send(self.room_id, body="after", tok=self.alice_tok)
+
+        # The live client sees the kick in `state`.
+        response = self._sync(use_state_after=False, since=t1, timeline_limit=1)
+        self.assertTrue(self._room(response)["timeline"]["limited"])
+        self.assertNotIn(kick["event_id"], self._timeline_ids(response))
+        self.assertIn(
+            kick["event_id"], self._state_ids(response, use_state_after=False)
+        )
+
+        # The client reloads from the older persisted token.
+        response = self._sync(use_state_after=False, since=t0, timeline_limit=1)
+        self.assertNotIn(kick["event_id"], self._timeline_ids(response))
+        self.assertIn(
+            kick["event_id"],
+            self._state_ids(response, use_state_after=False),
+            f"membership change missing from state on re-sync from an older "
+            f"token: {response}",
+        )
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_member_not_resent_after_empty_long_poll_wakeup(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A long-poll that wakes up with nothing to send keeps waiting. The
+        response it eventually returns must still leave out the members the
+        client already has.
+
+        The notifier calls back into the sync handler on every wakeup within
+        one request. An empty result is not a response the client lost.
+        """
+        not_types = ["m.spurious"]
+        t0 = self._sync(use_state_after, timeline_not_types=not_types)["next_batch"]
+
+        self.helper.send(self.room_id, body="one", tok=self.bob_tok)
+        response = self._sync(use_state_after, t0, timeline_not_types=not_types)
+        self.assertEqual(self._members_in_state(response, use_state_after), [self.bob])
+        t1 = response["next_batch"]
+
+        channel = self._sync_request(
+            use_state_after,
+            t1,
+            timeline_not_types=not_types,
+            timeout_ms=30000,
+            await_result=False,
+        )
+
+        # Wakes the long-poll, but the filter drops the event, so the result is
+        # empty and the notifier waits again.
+        self.helper.send_event(
+            self.room_id, type="m.spurious", content={}, tok=self.bob_tok
+        )
+        self.assertFalse(channel.is_finished())
+
+        self.helper.send(self.room_id, body="two", tok=self.bob_tok)
+        channel.await_result()
+        self.assertEqual(channel.code, 200, channel.result)
+        response = channel.json_body
+        self.assertEqual(len(self._timeline_ids(response)), 1)
+        self.assertEqual(self._members_in_state(response, use_state_after), [])
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_membership_change_sent_when_cache_claims_it_was(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A membership change since `since` is sent even when the cache says
+        the client already has it.
+
+        The cache only decides whether to leave out the memberships fetched for
+        timeline senders. It can be wrong: a retry of a request can run while
+        the original is still being built, and the original then marks members
+        the retry has to send. A change must never depend on it.
+        """
+        t0 = self._sync(use_state_after, timeline_limit=1)["next_batch"]
+
+        kick = self.helper.change_membership(
+            self.room_id, self.alice, self.bob, "leave", tok=self.alice_tok
+        )
+        # A later message, so that the kick falls into the gap of the
+        # one-event timeline and only `state` can carry it.
+        self.helper.send(self.room_id, body="after the kick", tok=self.alice_tok)
+
+        # Claim the kick was already sent in the response that ended at `t0`.
+        # Syncing from `t0` does not forget this, as the client has acknowledged
+        # that response.
+        t0_token = self.get_success(
+            StreamToken.from_string(self.hs.get_datastores().main, t0)
+        )
+        cache = self.hs.get_sync_handler().get_lazy_loaded_members_cache(
+            (self.alice, self.alice_device)
+        )
+        cache.mark_sent(self.bob, kick["event_id"], t0_token)
+
+        response = self._sync(use_state_after, t0, timeline_limit=1)
+        self.assertNotIn(kick["event_id"], self._timeline_ids(response))
+        self.assertIn(kick["event_id"], self._state_ids(response, use_state_after))

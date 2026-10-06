@@ -65,6 +65,24 @@ class PostgresEngine(
         self.statement_timeout: int | None = database_config.get(
             "statement_timeout", Duration(minutes=10).as_millis()
         )
+
+        # Abort transactions that sit idle for too long.
+        #
+        # Idle transactions can block maintenance tasks server-side like
+        # vacuums, which can lead to bloat and performance issues.
+        #
+        # We should never hit this timeout in normal operation, as Synapse
+        # should always be actively using the connection when in a transaction
+        # and so it should only ever be briefly idle. If we do hit this timeout,
+        # it's likely that no progress is being made and so aborting the session
+        # is safe.
+        #
+        # In certain cases we have seen connections leak, particularly when
+        # using a connection pooler like pgcat, and this timeout will help with
+        # that.
+        self.idle_in_transaction_session_timeout: int | None = database_config.get(
+            "idle_in_transaction_session_timeout", Duration(minutes=30).as_millis()
+        )
         self._version: int | None = None  # unknown as yet
 
         self.isolation_level_map: Mapping[int, int] = {
@@ -186,6 +204,14 @@ class PostgresEngine(
         # Abort really long-running statements and turn them into errors.
         if self.statement_timeout is not None:
             cursor.execute("SET statement_timeout TO ?", (self.statement_timeout,))
+
+        # Abort transactions that sit idle for too long, as they hold locks
+        # and block vacuum.
+        if self.idle_in_transaction_session_timeout is not None:
+            cursor.execute(
+                "SET idle_in_transaction_session_timeout TO ?",
+                (self.idle_in_transaction_session_timeout,),
+            )
 
         cursor.close()
         db_conn.commit()

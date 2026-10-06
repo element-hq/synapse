@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import os.path
+import select
 import sqlite3
 import time
 import uuid
@@ -69,6 +70,7 @@ from twisted.internet.interfaces import (
     IPushProducer,
     IReactorPluggableNameResolver,
     IReactorTime,
+    IReadDescriptor,
     IResolverSimple,
     ITCPTransport,
     ITransport,
@@ -715,7 +717,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self,
         host: str,
         port: int,
-        factory: ClientFactory,
+        factory: "ClientFactory[Any]",
         timeout: float = 30,
         bindAddress: tuple[str, int] | None = None,
     ) -> IConnector:
@@ -756,6 +758,29 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
             # reactor.callFromThread to feed results back from the db functions to the
             # main thread.
             super().advance(0)
+
+        # Now poll anything registered with `addReader`. A real reactor does
+        # this in its poll loop, but `MemoryReactor` only stores the readers, so
+        # results from Rust futures (see `TwistedDispatch`) would never reach
+        # their deferreds. Firing those deferreds can in turn queue more
+        # callbacks hence the recursive `advance(0)`.
+        readable = self._poll_readers()
+        if readable:
+            for reader in readable:
+                reader.doRead()
+            self.advance(0)
+
+    def _poll_readers(self) -> list[IReadDescriptor]:
+        """The readers registered with `addReader` that have data waiting."""
+        readers = {reader.fileno(): reader for reader in self.getReaders()}
+        if not readers:
+            return []
+
+        # Now poll the readers to see if any have data waiting.
+        poller = select.poll()
+        for fileno in readers:
+            poller.register(fileno, select.POLLIN)
+        return [readers[fileno] for fileno, _event in poller.poll(0)]
 
 
 def cleanup_test_reactor_system_event_triggers(
@@ -864,9 +889,15 @@ def make_fake_db_pool(
 
     pool.runWithConnection = runWithConnection  # type: ignore[method-assign]
     pool.runInteraction = runInteraction  # type: ignore[assignment]
-    # Replace the thread pool with a threadless 'thread' pool
+
+    # First, stop the original thread pool.
+    pool.threadpool.stop()
+    # Then, replace it with a threadless 'thread' pool
     pool.threadpool = ThreadPool(reactor)
+
+    # Start it up.
     pool.running = True
+
     return pool
 
 
@@ -1146,6 +1177,7 @@ def connect_client(
     """
     factory = reactor.tcpClients.pop(client_id)[2]
     client = factory.buildProtocol(None)
+    assert client is not None
     server = AccumulatingProtocol()
     server.makeConnection(FakeTransport(client, reactor))
     client.makeConnection(FakeTransport(server, reactor))
@@ -1248,18 +1280,34 @@ def setup_test_homeserver(
         global PREPPED_SQLITE_DB_CONN
         if PREPPED_SQLITE_DB_CONN is None:
             temp_engine = create_engine(database_config)
-            PREPPED_SQLITE_DB_CONN = LoggingDatabaseConnection(
+            prepped_conn = LoggingDatabaseConnection(
                 conn=sqlite3.connect(":memory:"),
                 engine=temp_engine,
                 default_txn_name="PREPPED_CONN",
                 server_name=server_name,
             )
 
-            database = DatabaseConnectionConfig("master", database_config)
-            config.database.databases = [database]
             prepare_database(
-                PREPPED_SQLITE_DB_CONN, create_engine(database_config), config
+                prepped_conn,
+                create_engine(database_config),
+                # We pass `config=None` here so that the template database is prepared the
+                # same way regardless of which test happens to be the first one to run.
+                #
+                # Notably, `prepare_database` refuses to initialise an empty database
+                # when given a worker config, which would otherwise make any test using
+                # `homeserver_to_use=GenericWorkerServer` fail when run on its own.
+                #
+                # Each test still runs `prepare_database` with its own config against its own
+                # copy of this template (via `hs.setup()`), so anything config specific (like
+                # module schemas) is still applied per-test.
+                config=None,
             )
+
+            # Only publish the template once it's fully prepared. Previously, this was
+            # assigned before `prepare_database(...)` ran which meant that if
+            # `prepare_database(...)` failed, we ended up with an unitialized/partial
+            # database state and never tried to re-create it for subsequent tests.
+            PREPPED_SQLITE_DB_CONN = prepped_conn
 
         database_config["_TEST_PREPPED_CONN"] = PREPPED_SQLITE_DB_CONN
 

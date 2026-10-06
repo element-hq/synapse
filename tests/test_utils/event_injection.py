@@ -127,6 +127,53 @@ async def create_event(
     return event, context
 
 
+async def persist_message_and_state_event_in_one_batch(
+    hs: synapse.server.HomeServer,
+    room_id: str,
+    sender: str,
+) -> tuple[EventBase, EventBase]:
+    """Persist a message and a state event in a *single* persist batch (one
+    `_persist_events_and_state_updates` call), with the message first.
+
+    The message's stream ordering is then the batch minimum, so the state
+    event's `current_state_delta_stream` row (which is stamped with the batch
+    minimum, see `_update_current_state_txn`) sits *before* the state event's
+    own position. That is the shape behind
+    https://github.com/element-hq/synapse/issues/18793.
+
+    Both events are created off the same forward extremities, i.e. as
+    siblings, which is how two events sent concurrently end up in one batch.
+
+    Returns:
+        The persisted (message, state event) pair.
+    """
+    store = hs.get_datastores().main
+    persistence = hs.get_storage_controllers().persistence
+    assert persistence is not None
+    prev_event_ids = await store.get_prev_events_for_room(room_id)
+
+    message, message_ctx = await create_event(
+        hs,
+        room_id=room_id,
+        type=EventTypes.Message,
+        sender=sender,
+        content={"msgtype": "m.text", "body": "batched message"},
+        prev_event_ids=prev_event_ids,
+    )
+    state_event, state_ctx = await create_event(
+        hs,
+        room_id=room_id,
+        type="m.call.member",
+        state_key=sender,
+        sender=sender,
+        content={"memberships": [{"device_id": "BATCHED"}]},
+        prev_event_ids=prev_event_ids,
+    )
+
+    await persistence.persist_events([(message, message_ctx), (state_event, state_ctx)])
+    return message, state_event
+
+
 async def mark_event_as_partial_state(
     hs: synapse.server.HomeServer,
     event_id: str,

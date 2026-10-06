@@ -34,6 +34,7 @@ from synapse.crypto.context_factory import (
 )
 from synapse.types import JsonDict
 
+from tests.http import get_test_ca_cert_file
 from tests.unittest import TestCase
 
 
@@ -49,6 +50,13 @@ class TestConfig(RootConfig):
 
 
 class TLSConfigTests(TestCase):
+    def test_custom_ca_certificate(self) -> None:
+        """Custom CA files are loaded as PEM bytes for Twisted."""
+        config: JsonDict = {"federation_custom_ca_list": [get_test_ca_cert_file()]}
+        t = TestConfig()
+        t.tls.read_config(config, config_dir_path="", data_dir_path="")
+        self.assertIsNotNone(t.tls.federation_ca_trust_root)
+
     def test_tls_client_minimum_default(self) -> None:
         """
         The default client TLS version is 1.0.

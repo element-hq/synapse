@@ -162,8 +162,9 @@ necessary registration and event handling.
 - Update `synapse/_scripts/synapse_port_db.py` so it knows about your new `SEQUENCE`: [add a new `_setup_sequence(...)`](https://github.com/element-hq/synapse/blob/35b55e962aa0bed3b2da5a3c12e3783ddf7604ca/synapse/_scripts/synapse_port_db.py#L883C24-L888)
 - [create a stream class and stream row class](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/replication/tcp/streams/_base.py#L728)
   - will need an [ID generator](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L75)
-    - may need [writer configuration](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/config/workers.py#L177), if there isn't already an obvious source of configuration for which workers should be designated as writers to your new stream.
+    - may need [writer configuration](https://github.com/element-hq/synapse/blob/62a4bc46203880dd5034483b0e84156d03a3a8c6/synapse/config/workers.py#L184-L187), if there isn't already an obvious source of configuration for which workers should be designated as writers to your new stream.
       - if adding new writer configuration, add Docker-worker configuration, which lets us configure the writer worker in Complement tests: [[1]](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/docker/configure_workers_and_start.py#L331), [[2]](https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/docker/configure_workers_and_start.py#L440)
+    - Ensure that it's been correctly added to `synapse/replication/tcp/handler.py` and it's `streams_to_replicate` attribute to ensure that changes are actually replicated.
 - most of the time, you will likely introduce a new datastore class for the concept represented by the new stream, unless there is already an obvious datastore that covers it.
 - consider whether it may make sense to introduce a handler
 

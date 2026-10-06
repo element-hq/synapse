@@ -100,6 +100,61 @@ class DeviceListResyncTestCase(unittest.HomeserverTestCase):
         self.reactor.advance(30)
         self.assertEqual(self.resync_attempts, 2)
 
+    def test_non_compliant_user_id_update_dropped(self) -> None:
+        """Tests that device list updates from non-compliant (grandfathered
+        historical) user IDs are dropped, per
+        https://spec.matrix.org/v1.14/appendices/#historical-user-ids
+        """
+        remote_user_id = "@héllo:test_remote"
+        remote_origin = "test_remote"
+
+        # Track the number of attempts to resync the user's device list.
+        self.resync_attempts = 0
+
+        # When this function is called, increment the number of resync attempts (only if
+        # we're querying devices for the right user ID), then raise a
+        # NotRetryingDestination error to fail the resync gracefully.
+        def query_user_devices(
+            destination: str, user_id: str, timeout: int = 30000
+        ) -> JsonDict:
+            if user_id == remote_user_id:
+                self.resync_attempts += 1
+
+            raise NotRetryingDestination(0, 0, destination)
+
+        # Register the mock on the federation client.
+        federation_client = self.hs.get_federation_client()
+        federation_client.query_user_devices = Mock(side_effect=query_user_devices)  # type: ignore[method-assign]
+
+        # Share room with user.
+        self.store.get_rooms_for_user = AsyncMock(return_value=["!someroom:test"])
+
+        # Manually inject a fake device list update from the non-compliant user ID.
+        device_list_updater = self.hs.get_device_handler().device_list_updater
+        assert isinstance(device_list_updater, DeviceListUpdater)
+        self.get_success(
+            device_list_updater.incoming_device_list_update(
+                origin=remote_origin,
+                edu_content={
+                    "deleted": False,
+                    "device_display_name": "Mobile",
+                    "device_id": "QBUAZIFURK",
+                    "prev_id": [5],
+                    "stream_id": 6,
+                    "user_id": remote_user_id,
+                },
+            )
+        )
+
+        # The update should have been dropped without triggering a resync.
+        self.assertEqual(self.resync_attempts, 0)
+
+        # The user should not have been marked as needing a device list resync.
+        need_resync = self.get_success(
+            self.store.get_user_ids_requiring_device_list_resync()
+        )
+        self.assertNotIn(remote_user_id, need_resync)
+
     def test_cross_signing_keys_retry(self) -> None:
         """Tests that resyncing a device list correctly processes cross-signing keys from
         the remote server.

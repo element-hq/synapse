@@ -31,8 +31,10 @@ It returns a JSON body like the following:
 **Query parameters:**
 
 * `action_name`: string - Is optional. Returns only the scheduled tasks with the given action name.
+  May be given multiple times to return tasks matching any of the given action names.
 * `resource_id`: string - Is optional. Returns only the scheduled tasks with the given resource id.
-* `status`: string - Is optional. Returns only the scheduled tasks matching the given status, one of
+* `status`: string - Is optional. Returns only the scheduled tasks matching the given status.
+  May be given multiple times to return tasks matching any of the given statuses. The status must be one of
     - "scheduled" - Task is scheduled but not active
     - "active" - Task is active and probably running, and if not will be run on next scheduler loop run
     - "complete" - Task has completed successfully
