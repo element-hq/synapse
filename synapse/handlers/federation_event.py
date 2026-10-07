@@ -2325,6 +2325,13 @@ class FederationEventHandler:
                 # If this assumption is ever violated, `compute_state_after_events` will
                 # yell loudly about missing state groups.
                 #
+                # XXX: `_get_state_group_for_event` raises `RuntimeError` for unknown events, but
+                # the `@cachedList` wrapper swallows it and the caller just gets partial results.
+                # For the time-being, Callers MUST NOT rely on this to determine missing events,
+                # as cached responses return None for the state group instead of raising.
+                #
+                # TODO: audit every caller, as some of them may be relying on the current behaviour.
+                #
                 # In the context of partially stated rooms (faster remote room joins)
                 # this would be part of background step verifying the entire state DAG,
                 # so we know that we don't have the full state processed yet. To wait
