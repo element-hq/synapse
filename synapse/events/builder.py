@@ -307,6 +307,7 @@ class EventBuilder:
             # Auth events are removed entirely on state DAG rooms
             event_dict.pop("auth_events")
             assert prev_state_events is not None
+            assert len(prev_state_events) <= 20
             event_dict["prev_state_events"] = prev_state_events
         if self.room_id is not None:
             event_dict["room_id"] = self.room_id
