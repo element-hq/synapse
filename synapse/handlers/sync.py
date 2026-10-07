@@ -1695,13 +1695,23 @@ class SyncHandler:
             )
             # A delta with `event_id=None` means the key was removed from the
             # current state. Two things cause this:
-            #  - A state reset removed the key. State groups don't have it
-            #    either, and MSC4222 has no way to tell the client that a key
-            #    was removed, so there is nothing to send.
-            #  - The server left the room and we deleted every
-            #    `current_state_events` row for it. State groups still have
-            #    the real state at `end_token`, so we look the key up there
-            #    instead of skipping it.
+            #  - A state reset removed the key. MSC4222 can't tell the client a
+            #    key was removed, so there is nothing to send for it.
+            #  - The server left the room (its last local user left). It then
+            #    copies the room state from **before the batch** that contains the
+            #    leave into `current_state_delta_stream`, as deltas with
+            #    `event_id=None`. No delta refers to the events in that batch: the
+            #    leaving user's membership only gets an `event_id=None` delta, with
+            #    their membership before the leave as `prev_event_id`. So a key
+            #    that batch changed:
+            #     - only has the `event_id=None` delta if it already existed, and
+            #       any earlier delta for it is stale. That batch ends the
+            #       timeline, so we look up the keys in the timeline in state
+            #       groups, which still have the state at `end_token`.
+            #     - has no delta at all if it is new, so we also look up the keys
+            #       in the timeline that have no delta (see below).
+            #    Keys that only changed earlier keep their earlier delta, and
+            #    other keys need no update.
             own_membership_key = (EventTypes.Member, sync_config.user.to_string())
             cleared_state_keys: set[tuple[str, str]] = set()
             keys_with_deltas: set[StateKey] = set()
@@ -1709,15 +1719,10 @@ class SyncHandler:
                 key = (delta.event_type, delta.state_key)
                 keys_with_deltas.add(key)
                 if delta.event_id is None:
-                    # When the server leaves, every key of the room's state gets
-                    # such a delta, so looking them all up would return the whole
-                    # room state. We only need the keys that changed in the
-                    # persist batch that made the server leave (e.g. the leave
-                    # itself), as only those have no delta with an event ID. Keys
-                    # that changed earlier already have one. That batch ends the
-                    # timeline, so we look up the keys in `timeline_state`. We
-                    # also always look up the syncing user's own membership, as
-                    # the client's timeline filter may have removed their leave.
+                    # Look up the key if:
+                    #  - it is in the timeline (see above).
+                    #  - OR it is the user's own membership, in case a filter
+                    #    removed their leave from the timeline.
                     if key in timeline_state or key == own_membership_key:
                         cleared_state_keys.add(key)
                     continue
@@ -1743,11 +1748,15 @@ class SyncHandler:
                     room_id,
                     stream_position=end_token,
                     state_filter=StateFilter.from_types(cleared_state_keys),
-                    await_full_state=await_full_state,
+                    # Don't wait for the full state. Partial state has every state
+                    # event except remote memberships, and any remote membership
+                    # we look up here is from an event in the timeline, which we
+                    # have. Waiting could also block the whole sync on a known
+                    # issue where the resync never finishes.
+                    await_full_state=False,
                 )
-                # The latest delta for these keys was the removal, so the state
-                # at `end_token` replaces any earlier delta for the same key
-                # (e.g. a display name change before the leave).
+                # This replaces any earlier delta for the same key, e.g. a
+                # display name change before the leave.
                 delta_state_ids.update(state_at_end)
                 changed_keys.update(state_at_end)
 

@@ -888,6 +888,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         This is to make sure we play nicely with this behavior: When the server leaves a
         room, it will insert new rows with `event_id = null` into the
         `current_state_delta_stream` table for all current state.
+        The leave gets no row of its own, only an `event_id = null` row for the
+        leaving user's membership.
 
         Regression test for https://github.com/element-hq/synapse/issues/18793
         """
@@ -955,6 +957,13 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         """When the last local user changes their own membership event (e.g. their
         display name) and then leaves within the same incremental sync window, the
         leave event (not the earlier membership event) must appear in state_after.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        The user's membership then has a row for their display name change, followed
+        by an `event_id = null` row, and none for their leave, so the earlier row must
+        not be used.
         """
         if not self.use_state_after:
             self.skipTest("Only relevant for `state_after` (MSC4222)")
@@ -1016,6 +1025,12 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         """When the last local user leaves and their timeline filter excludes
         membership events, the leave event must still appear in state_after on an
         incremental sync.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        The leave has no row of its own, and the filter keeps it out of the timeline
+        too.
         """
         if not self.use_state_after:
             self.skipTest("Only relevant for `state_after` (MSC4222)")
@@ -1091,9 +1106,13 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         user's leave, both the leave and that state event must appear in state_after
         on an incremental sync, whether or not the room already had that state.
 
-        When the server leaves, it writes a delta without an event ID for each key
-        already in the room state, and no delta at all for a new key, so the two
-        cases are recovered differently.
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        Neither the leave nor the state event persisted with it gets a row of its own:
+        the leave only gets the `event_id = null` row of the leaving user's membership,
+        and the state event only gets one if the room already had that state, so the
+        two cases are recovered differently.
         """
         if not self.use_state_after:
             self.skipTest("Only relevant for `state_after` (MSC4222)")
