@@ -1697,20 +1697,25 @@ class SyncHandler:
             # current state. Two things cause this:
             #  - A state reset removed the key. MSC4222 can't tell the client a
             #    key was removed, so there is nothing to send for it.
-            #  - The server left the room (its last local user left). It writes
-            #    such a delta for every key of the room state, instead of deltas
-            #    for the events persisted together with the leave, including the
-            #    leave itself. State groups still have the state at `end_token`,
-            #    so we look those keys up there.
+            #  - The server left the room (its last local user left). It then
+            #    copies the room state from **before the batch** that contains the
+            #    leave into `current_state_delta_stream`, as deltas with
+            #    `event_id=None`, and writes no delta for the events in that
+            #    batch, including the leave itself. So a key that batch changed:
+            #     - only has the `event_id=None` delta if it already existed, and
+            #       any earlier delta for it is stale. That batch ends the
+            #       timeline, so we look up the keys in the timeline in state
+            #       groups, which still have the state at `end_token`.
+            #     - has no delta at all if it is new.
+            #       TODO: Recover it.
+            #    Keys that only changed earlier keep their earlier delta, and
+            #    other keys need no update.
             cleared_state_keys: set[tuple[str, str]] = set()
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
                 if delta.event_id is None:
                     # Look up the key if:
-                    #  - it is in the timeline. Only the events persisted together
-                    #    with the leave lack a delta with their event ID, and they
-                    #    end the timeline. State changed before them already has
-                    #    one, so we don't need to look up the whole room state.
+                    #  - it is in the timeline (see above).
                     #  - OR it is the user's own membership, in case a filter
                     #    removed their leave from the timeline.
                     if key in timeline_state or key == (
