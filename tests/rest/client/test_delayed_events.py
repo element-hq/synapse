@@ -1173,7 +1173,8 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         config["experimental_features"] = {"msc4354_enabled": True}
         return config
 
-    def test_delayed_sticky_event_is_sent_with_sticky_duration(self) -> None:
+    @parameterized.expand((False, True))
+    def test_delayed_sticky_event_is_sent_with_sticky_duration(self, param_in_body: bool) -> None:
         """Test that the sticky duration given when scheduling a delayed event
         is applied to the event once it is sent (MSC4354)."""
         sticky_duration = Duration(minutes=1)
@@ -1185,12 +1186,11 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
             delay=Duration(milliseconds=900),
             content={"body": "sticky"},
         )
-        channel = self.make_request(
-            "PUT",
-            f"{path}?{StickyEvent.QUERY_PARAM_NAME}={sticky_duration.as_millis()}",
-            body,
-            self.user1_access_token,
-        )
+        if not param_in_body:
+            path += f"?{StickyEvent.REQUEST_PARAM_NAME}={sticky_duration.as_millis()}"
+        else:
+            body[StickyEvent.REQUEST_PARAM_NAME] = sticky_duration.as_millis()
+        channel = self.make_request("PUT", path, body, self.user1_access_token)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
@@ -1209,6 +1209,19 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
             event,
         )
 
+    def test_delayed_sticky_event_prevents_conflicting_values(self) -> None:
+        path = self.helper.build_delayed_event_request_path(
+            room_id=self.room_id,
+            event_type=_EVENT_TYPE,
+        )
+        body = self.helper.build_delayed_event_request_body(
+            delay=Duration(milliseconds=900),
+            content={"body": "sticky"},
+        )
+        path += f"?{StickyEvent.REQUEST_PARAM_NAME}=10000"
+        body[StickyEvent.REQUEST_PARAM_NAME] = 20000
+        channel = self.make_request("PUT", path, body, self.user1_access_token)
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
 
 class DelayedEventsWorkerTestCase(
     BaseMultiWorkerStreamTestCase, DelayedEventsHelperMixin

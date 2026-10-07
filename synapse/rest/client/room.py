@@ -30,7 +30,8 @@ from urllib import parse as urlparse
 
 import attr
 from prometheus_client.core import Histogram
-from pydantic.types import PositiveInt, StrictStr
+from pydantic import Field, PositiveInt, StrictStr, model_validator
+from typing_extensions import Self
 
 from twisted.web.server import Request
 
@@ -444,7 +445,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
 
         sticky_duration_ms: int | None = None
         if self._msc4354_enabled:
-            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
+            sticky_duration_ms = parse_integer(request, StickyEvent.REQUEST_PARAM_NAME)
 
         # FIXME(MSC4140): remove by 2026-12-31, once RoomDelayedEventRestServlet has been stable for a suitable amount of time.
         delay = _parse_request_for_delayed_event_delay(request, self._msc4140_enabled)
@@ -556,6 +557,18 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
         content: JsonDict
         state_key: StrictStr | AbsentType = Absent
 
+    class StickyDelayedEventBodyModel(DelayedEventBodyModel):
+        # MSC4354 allows any integer value in the request, not just positives
+        sticky_duration_ms: int | AbsentType = Field(
+            Absent, alias=StickyEvent.REQUEST_PARAM_NAME
+        )
+
+        @model_validator(mode="after")
+        def validate_sticky(self) -> Self:
+            if self.state_key is not Absent and self.sticky_duration_ms is not Absent:
+                raise ValueError("Cannot specify both state_key and sticky_duration_ms")
+            return self
+
     async def _do(
         self,
         request: SynapseRequest,
@@ -566,24 +579,38 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
         if not self._msc4140_enabled:
             _raise_delayed_events_unsupported()
 
-        request_body = parse_and_validate_json_object_from_request(
-            request, self.DelayedEventBodyModel
+        if not self._msc4354_enabled:
+            # When the MSC is disabled, skip validating the sticky duration field
+            request_body = parse_and_validate_json_object_from_request(
+                request, self.DelayedEventBodyModel
+            )
+            sticky_duration_ms = None
+        else:
+            # Support the parameter in both the query & body until the MSC settles on which one to use
+            request_body = parse_and_validate_json_object_from_request(
+                request, self.StickyDelayedEventBodyModel
+            )
+            sticky_duration_ms = parse_integer(
+                request,
+                StickyEvent.REQUEST_PARAM_NAME,
+                negative=False,  # MSC4354 allows any integer value in the request, not just positives
+            )
+            if request_body.sticky_duration_ms is not Absent:
+                if sticky_duration_ms is None:
+                    sticky_duration_ms = request_body.sticky_duration_ms
+                elif request_body.sticky_duration_ms != sticky_duration_ms:
+                    raise SynapseError(
+                        400,
+                        f"Conflicting values given for {StickyEvent.REQUEST_PARAM_NAME}",
+                    )
+
+        state_key = (
+            request_body.state_key if request_body.state_key is not Absent else None
         )
 
         origin_server_ts = None
         if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
-
-        if request_body.state_key is Absent:
-            state_key = None
-            sticky_duration_ms = (
-                parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
-                if self._msc4354_enabled
-                else None
-            )
-        else:
-            state_key = request_body.state_key
-            sticky_duration_ms = None
 
         delay_id = await self.delayed_events_handler.add(
             requester,
