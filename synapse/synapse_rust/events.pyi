@@ -322,7 +322,7 @@ class Event:
         Spammy events (according to spam checkers and policy servers) are not eligible to be sticky
         so we return `None` for those.
 
-        See [`Self::locally_sticky_until_ts`] to get the effective stickiness expiry timestamp.
+        See `locally_sticky_until_ts` to get the effective stickiness expiry timestamp.
         """
 
     def locally_sticky_until_ts(self) -> int | None:
