@@ -372,6 +372,7 @@ class PersistEventsStore:
                 # `_update_outliers_txn()` will fix this discrepancy (always use the
                 # `stream_ordering` from the first time it was persisted).
                 event.internal_metadata.stream_ordering = stream
+                event.internal_metadata.received_ts = self._clock.time_msec()
                 event.internal_metadata.instance_name = self._instance_name
 
             sliding_sync_table_changes = None
@@ -3078,7 +3079,7 @@ class PersistEventsStore:
                     True,  # processed
                     event.internal_metadata.is_outlier(),
                     int(event.origin_server_ts),
-                    self._clock.time_msec(),
+                    event.internal_metadata.received_ts,
                     event.sender,
                     "url" in event.content and isinstance(event.content["url"], str),
                     event.get_state_key(),
