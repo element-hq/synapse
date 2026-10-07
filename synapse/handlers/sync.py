@@ -1700,8 +1700,10 @@ class SyncHandler:
             #  - The server left the room (its last local user left). It then
             #    copies the room state from **before the batch** that contains the
             #    leave into `current_state_delta_stream`, as deltas with
-            #    `event_id=None`, and writes no delta for the events in that
-            #    batch, including the leave itself. So a key that batch changed:
+            #    `event_id=None`. No delta refers to the events in that batch: the
+            #    leaving user's membership only gets an `event_id=None` delta, with
+            #    their membership before the leave as `prev_event_id`. So a key
+            #    that batch changed:
             #     - only has the `event_id=None` delta if it already existed, and
             #       any earlier delta for it is stale. That batch ends the
             #       timeline, so we look up the keys in the timeline in state
