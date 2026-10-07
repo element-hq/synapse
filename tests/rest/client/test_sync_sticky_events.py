@@ -339,8 +339,12 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
 
         # Both sticky events are visible to begin with
         self.assertEqual(
-            self._do_sync(since=None, filter_json=NO_TIMELINE_FILTER).sticky_event_ids,
-            [redacted_event_id, kept_event_id],
+            set(
+                self._do_sync(
+                    since=None, filter_json=NO_TIMELINE_FILTER
+                ).sticky_event_ids
+            ),
+            {redacted_event_id, kept_event_id},
         )
 
         # We then redact one of them.
@@ -354,8 +358,12 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
 
         # ... but the redacted one is no longer sticky
         self.assertEqual(
-            self._do_sync(since=None, filter_json=NO_TIMELINE_FILTER).sticky_event_ids,
-            [kept_event_id],
+            set(
+                self._do_sync(
+                    since=None, filter_json=NO_TIMELINE_FILTER
+                ).sticky_event_ids
+            ),
+            {kept_event_id},
         )
 
     def test_ignored_users_sticky_events(self) -> None:

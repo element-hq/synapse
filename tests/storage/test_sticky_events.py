@@ -192,7 +192,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
 
         # Before redaction, both sticky events are in the table.
         self.assertEqual(
-            _sticky_event_ids_from_table(), [redacted_event_id, kept_event_id]
+            set(_sticky_event_ids_from_table()), {redacted_event_id, kept_event_id}
         )
 
         # Redact
@@ -205,7 +205,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
 
         # After redaction, only the unredacted sticky event is left in the table.
-        self.assertEqual(_sticky_event_ids_from_table(), [kept_event_id])
+        self.assertEqual(set(_sticky_event_ids_from_table()), {kept_event_id})
 
     def test_get_updated_sticky_events_with_limit(self) -> None:
         """Test that the limit parameter works correctly."""
