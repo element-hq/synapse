@@ -1737,10 +1737,11 @@ class SyncHandler:
                     room_id,
                     stream_position=end_token,
                     state_filter=StateFilter.from_types(cleared_state_keys),
-                    # Don't wait for the full state: partial state already has
-                    # the user's own membership. Waiting for the full state
-                    # could trigger a known issue where the resync never
-                    # finishes.
+                    # Don't wait for the full state. Partial state has every state
+                    # event except remote memberships, and any remote membership
+                    # we look up here is from an event in the timeline, which we
+                    # have. Waiting could also block the whole sync on a known
+                    # issue where the resync never finishes.
                     await_full_state=False,
                 )
                 # This replaces any earlier delta for the same key, e.g. a
