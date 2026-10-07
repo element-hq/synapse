@@ -337,8 +337,8 @@ class SpamCheckerTestCase(HomeserverTestCase):
         state_key = "test.state.key"
         delay = Duration(seconds=10)
         channel = self.make_request(
-            "POST",
-            f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}",
+            "PUT",
+            f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}/mid",
             content={
                 "delay_ms": delay.as_millis(),
                 "state_key": state_key,
@@ -403,8 +403,8 @@ class SpamCheckerTestCase(HomeserverTestCase):
         state_key = "test.state.key"
         delay = Duration(seconds=10)
         channel = self.make_request(
-            "POST",
-            f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}",
+            "PUT",
+            f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}/mid",
             content={
                 "delay_ms": delay.as_millis(),
                 "state_key": state_key,
