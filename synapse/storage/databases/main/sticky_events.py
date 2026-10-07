@@ -440,11 +440,10 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         )
 
     def delete_sticky_events_txn(
-        self, txn: LoggingTransaction, room_id: str, event_ids: Collection[str]
+        self, txn: LoggingTransaction, event_ids: Collection[str]
     ) -> None:
         """
-        Given a room ID and a list of event IDs, deletes `sticky_events` entries for those
-        events.
+        Given a list of event IDs, deletes `sticky_events` entries for those events.
         This prevents us from retrieving those events as if they are still sticky
         in the future.
 
@@ -452,11 +451,24 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
         This is used when an event is redacted.
         """
-        self.db_pool.simple_delete_many_batch_txn(
-            txn,
-            table="sticky_events",
-            keys=("room_id", "event_id"),
-            values=[(room_id, event_id) for event_id in event_ids],
+        if not event_ids:
+            return
+
+        event_id_clause, event_id_args = make_in_list_sql_clause(
+            self.database_engine, "event_id", event_ids
+        )
+        txn.execute(
+            # The `sticky_events` table doesn't have an index on `event_id`,
+            # so use the `events` table to assist us, by getting the events'
+            # stream orderings, which _are_ indexed in the `sticky_events` table.
+            f"""
+            DELETE FROM sticky_events
+            WHERE event_stream_ordering IN (
+                SELECT stream_ordering FROM events
+                WHERE {event_id_clause}
+            )
+            """,
+            event_id_args,
         )
 
     async def compute_sticky_events_to_un_soft_fail(
