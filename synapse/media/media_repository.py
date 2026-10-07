@@ -345,21 +345,9 @@ class MediaRepository:
         if media_id is None:
             media_id = random_string(24)
 
-        file_info = FileInfo(server_name=None, file_id=media_id)
-        sha256reader = SHA256TransparentIOReader(content)
-        # This implements all of IO as it has a passthrough
-        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
-        sha256 = sha256reader.hexdigest()
-        should_quarantine = await self.store.get_is_hash_quarantined(sha256)
-
-        logger.info("Stored local media in file %r", fname)
-
-        if should_quarantine:
-            logger.warning(
-                "Media has been automatically quarantined as it matched existing quarantined media"
-            )
-
         # Check that the user has not exceeded any of the media upload limits.
+        # This is done before storing the file so that a rejected upload
+        # doesn't leave an orphaned file behind.
 
         # Use limits from module API if provided
         media_upload_limits = (
@@ -416,6 +404,20 @@ class MediaRepository:
                     info_uri=info_uri,
                     can_upgrade=limit.can_upgrade,
                 )
+
+        file_info = FileInfo(server_name=None, file_id=media_id)
+        sha256reader = SHA256TransparentIOReader(content)
+        # This implements all of IO as it has a passthrough
+        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
+        sha256 = sha256reader.hexdigest()
+        should_quarantine = await self.store.get_is_hash_quarantined(sha256)
+
+        logger.info("Stored local media in file %r", fname)
+
+        if should_quarantine:
+            logger.warning(
+                "Media has been automatically quarantined as it matched existing quarantined media"
+            )
 
         if is_new_media:
             await self.store.store_local_media(
