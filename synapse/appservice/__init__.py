@@ -266,7 +266,7 @@ class ApplicationService:
             raise ValueError("proxy_prefix and proxy_url must be non-empty strings")
 
         # Strip the trailing slash per TODO (because it makes regex building later easier)
-        path = proxy_prefix.rstrip("/") 
+        path = proxy_prefix.rstrip("/")
         url = proxy_url.rstrip("/")  # must not end with a slash
         for allowed_proxy_prefix in ApplicationService.ALLOWED_PROXY_PREFIXES:
             if allowed_proxy_prefix.path_prefix == path:
