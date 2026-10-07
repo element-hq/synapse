@@ -1,1 +1,1 @@
-Stop the documentation version picker from using a cached GitHub API response, so newly published versions appear in the dropdown without a hard refresh. Contributed by @itsoyou and @Famedly.
+Shows new released version in docs on a normal refresh (no hard refresh needed) and caches the list for 10 minutes to stay within GitHub's API rate limit. Contributed by @itsoyou and @Famedly.

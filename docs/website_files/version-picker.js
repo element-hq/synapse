@@ -43,6 +43,31 @@ function initializeVersionDropdown(dropdown, dropdownMenu) {
 };
 
 /**
+ * The version list comes from the GitHub API, which answers with
+ * `Cache-Control: public, max-age=60` and an ETag. We used to pass
+ * `cache: "force-cache"`, which makes the browser reuse a cached response no
+ * matter how old it is, so browsers kept the old list until a hard
+ * refresh. With the default cache mode every browser follows GitHub's headers
+ * instead: reuse the response for 60 seconds, then revalidate it with the ETag.
+ *
+ * That alone is not enough: unauthenticated requests are limited to 60 per hour
+ * per IP, and a 304 from revalidation still counts against the limit
+ * (only authenticated 304s are free). Someone clicking through chapters could use
+ * it up, and once rate limited the menu would be empty. So we keep the list
+ * in localStorage, skip the request if the last fetch was less than
+ * VERSIONS_REFRESH_INTERVAL_MS ago, and fall back to the stored list if the
+ * request fails.
+ *
+ * This only concerns the version list. The doc pages are served by GitHub
+ * Pages with `Cache-Control: max-age=600` and an ETag, so browsers already
+ * reuse cached pages and only revalidate them (a 304 with no body when
+ * unchanged). We can't set headers on GitHub Pages, and nothing here bypasses
+ * that cache.
+ */
+const VERSIONS_STORAGE_KEY = "synapse-docs-versions";
+const VERSIONS_REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
  * This function fetches the available versions from a GitHub repository
  * and inserts them into the version picker.
  * 
@@ -53,14 +78,35 @@ function initializeVersionDropdown(dropdown, dropdownMenu) {
 function fetchVersions(dropdown, dropdownMenu) {
     return new Promise((resolve, reject) => {
         window.addEventListener("load", () => {
+            const stored = readStoredVersions();
+            const storedAge = stored ? Date.now() - stored.fetchedAt : Infinity;
+            const storedIsRecent =
+                storedAge >= 0 && storedAge < VERSIONS_REFRESH_INTERVAL_MS;
 
-            fetch("https://api.github.com/repos/element-hq/synapse/git/trees/gh-pages").then(res =>
-                res.json()
-            ).then(resObject => {
-                const excluded = ['dev-docs', 'v1.91.0', 'v1.80.0', 'v1.69.0'];
-                const tree = resObject.tree.filter(item => item.type === "tree" && !excluded.includes(item.path));
-                const versions = tree.map(item => item.path).sort(sortVersions);
+            const versionsPromise = storedIsRecent
+                ? Promise.resolve(stored.versions)
+                : fetch("https://api.github.com/repos/element-hq/synapse/git/trees/gh-pages")
+                    .then((res) => {
+                        if (!res.ok) {
+                            throw new Error("GitHub API returned " + res.status);
+                        }
+                        return res.json();
+                    })
+                    .then((resObject) => {
+                        const excluded = ['dev-docs', 'v1.91.0', 'v1.80.0', 'v1.69.0'];
+                        const tree = resObject.tree.filter((item) => item.type === "tree" && !excluded.includes(item.path));
+                        const versions = tree.map((item) => item.path);
+                        storeVersions(versions);
+                        return versions;
+                    })
+                    .catch((ex) => {
+                        if (!stored) throw ex;
+                        console.warn("Failed to fetch version data, using the stored list", ex);
+                        return stored.versions;
+                    });
 
+            versionsPromise.then(storedOrFetched => {
+                const versions = storedOrFetched.slice().sort(sortVersions);
                 // Create a list of <li> items for versions
                 versions.forEach((version) => {
                     const li = document.createElement("li");
@@ -84,6 +130,27 @@ function fetchVersions(dropdown, dropdownMenu) {
             })
         });
     });
+}
+
+function readStoredVersions() {
+    try {
+        const stored = JSON.parse(localStorage.getItem(VERSIONS_STORAGE_KEY));
+        if (stored && Array.isArray(stored.versions) && typeof stored.fetchedAt === "number") {
+            return stored;
+        }
+    } catch (ex) {
+        // localStorage can be unavailable (e.g. storage blocked by the user)
+        // or hold invalid JSON. Then we simply fetch on every page load.
+    }
+    return null;
+}
+
+function storeVersions(versions) {
+    try {
+        localStorage.setItem(VERSIONS_STORAGE_KEY, JSON.stringify({ fetchedAt: Date.now(), versions: versions }));
+    } catch (ex) {
+        // Same as above: storage unavailable or full, nothing to do.
+    }
 }
 
 /**

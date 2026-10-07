@@ -20,6 +20,14 @@ Currently we use these files to make a few modifications:
   the `version-picker.js` and `version-picker.css` files, and is currently the only
   requirement for the custom `theme/`.
 
+* The version picker lists the version folders on the `gh-pages` branch via the GitHub
+  API. It used to fetch with `cache: "force-cache"`, which makes the browser reuse a
+  cached response however old it is, so browsers showed an outdated list until a hard
+  refresh. It now follows GitHub's `Cache-Control` and keeps the list in `localStorage`,
+  fetching again at most every 5 minutes because unauthenticated API requests
+  (including 304 revalidations) are limited to 60 per hour per IP. See the comment in
+  `version-picker.js` for details.
+
 More information can be found in mdbook's official documentation for
 [injecting page JS/CSS](https://rust-lang.github.io/mdBook/format/config.html)
 and
