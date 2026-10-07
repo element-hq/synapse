@@ -522,6 +522,11 @@ class RoomSendEventRestServlet(TransactionRestServlet):
 
 class RoomDelayedEventRestServlet(TransactionRestServlet):
     CATEGORY = "Delayed event management requests"
+    PATTERNS = client_patterns(
+        "/org.matrix.msc4140/rooms/(?P<room_id>[^/]*)/delayed_event/(?P<event_type>[^/]*)/(?P<txn_id>[^/]*)$",
+        releases=(),
+        unstable=True,
+    )
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
@@ -529,22 +534,6 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
         self.auth = hs.get_auth()
         self._msc4140_enabled = hs.config.server.msc4140_enabled
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
-
-    def register(self, http_server: HttpServer) -> None:
-        # /rooms/$roomid/delayed_event/$event_type[/$txn_id]
-        PATTERNS = "/rooms/(?P<room_id>[^/]*)/delayed_event/(?P<event_type>[^/]*)"
-        register_txn_path(
-            self, PATTERNS, http_server, unstable_path_segment="org.matrix.msc4140"
-        )
-
-    async def on_POST(
-        self,
-        request: SynapseRequest,
-        room_id: str,
-        event_type: str,
-    ) -> tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request, allow_guest=True)
-        return await self._do(request, requester, room_id, event_type)
 
     async def on_PUT(
         self, request: SynapseRequest, room_id: str, event_type: str, txn_id: str
@@ -1689,8 +1678,6 @@ def register_txn_path(
     servlet: RestServlet,
     regex_string: str,
     http_server: HttpServer,
-    *,
-    unstable_path_segment: str = "",
 ) -> None:
     """Registers a transaction-based path.
 
@@ -1707,26 +1694,15 @@ def register_txn_path(
     on_PUT = getattr(servlet, "on_PUT", None)
     if on_POST is None or on_PUT is None:
         raise RuntimeError("on_POST and on_PUT must exist when using register_txn_path")
-    if unstable_path_segment:
-        get_client_patterns = lambda path_regex: client_patterns(
-            f"/{re.escape(unstable_path_segment)}{path_regex}",
-            releases=(),
-            unstable=True,
-        )
-    else:
-        get_client_patterns = lambda path_regex: client_patterns(
-            path_regex,
-            v1=True,
-        )
     http_server.register_paths(
         "POST",
-        get_client_patterns(regex_string + "$"),
+        client_patterns(regex_string + "$", v1=True),
         on_POST,
         servlet.__class__.__name__,
     )
     http_server.register_paths(
         "PUT",
-        get_client_patterns(regex_string + "/(?P<txn_id>[^/]*)$"),
+        client_patterns(regex_string + "/(?P<txn_id>[^/]*)$", v1=True),
         on_PUT,
         servlet.__class__.__name__,
     )

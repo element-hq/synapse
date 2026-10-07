@@ -45,7 +45,6 @@ from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
-from synapse.util.stringutils import random_string_insecure_fast
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -53,8 +52,7 @@ from tests.server import FakeChannel, make_request
 from tests.unittest import HomeserverTestCase
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
-_UNSTABLE_PATH_PREFIX = "/_matrix/client/unstable/org.matrix.msc4140"
-_MANAGEMENT_PATH_PREFIX = _UNSTABLE_PATH_PREFIX + "/delayed_events"
+_MANAGEMENT_PATH_PREFIX = "/_matrix/client/unstable/org.matrix.msc4140/delayed_events"
 
 _EVENT_TYPE = "com.example.test"
 
@@ -95,22 +93,37 @@ class DelayedEventsHelperMixin(HomeserverTestCase):
         event_type: str,
         state_key: str | None = None,
         content: JsonDict,
-        method: Literal["PUT", "POST"] = "PUT",
         txn_id: str | None = None,
         access_token: str,
     ) -> FakeChannel:
-        """Build and send a request for scheduling a delayed event via the
-        dedicated endpoint. See `_build_delayed_event_request` for the arguments.
+        """
+        Build and send a request for scheduling a delayed event via the dedicated endpoint.
+
+        Args:
+            room_id: The room to send the event to.
+            delay: How long to wait before sending the event.
+            event_type: The type of the event to send.
+            state_key: The state key of the event, or None for a message event.
+            content: The content of the event.
+            txn_id: The transaction ID for a delayed message event request.
+                Ignored for a delayed state event request.
+                Otherwise, generated if not given.
+            access_token: The access token of the user to make the request for.
+
+        Returns:
+            The `FakeChannel` object which stores the result of the request.
         """
         return self.make_request(
-            *_build_delayed_event_request(
+            "PUT",
+            self.helper.build_delayed_event_request_path(
                 room_id=room_id,
-                delay=delay,
                 event_type=event_type,
+                txn_id=txn_id,
+            ),
+            self.helper.build_delayed_event_request_body(
+                delay=delay,
                 state_key=state_key,
                 content=content,
-                method=method,
-                txn_id=txn_id,
             ),
             access_token,
         )
@@ -271,7 +284,6 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             delay=delay,
             event_type=_EVENT_TYPE,
             content=content,
-            method="POST",
             access_token=self.user1_access_token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
@@ -650,7 +662,6 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
                 delay=Duration(milliseconds=100000),
                 event_type=_EVENT_TYPE,
                 content={},
-                method="POST",
                 access_token=self.user1_access_token,
             )
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
@@ -771,7 +782,6 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
                 delay=Duration(milliseconds=100000),
                 event_type=_EVENT_TYPE,
                 content={},
-                method="POST",
                 access_token=self.user1_access_token,
             )
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
@@ -868,7 +878,6 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
                 delay=Duration(milliseconds=100000),
                 event_type=_EVENT_TYPE,
                 content={},
-                method="POST",
                 access_token=self.user1_access_token,
             )
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
@@ -1045,7 +1054,6 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             delay=Duration(milliseconds=2000),
             event_type=_EVENT_TYPE,
             content={"key": "value"},
-            method="POST",
             access_token=self.user2_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
@@ -1136,7 +1144,6 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             delay=Duration(milliseconds=900),
             event_type=_EVENT_TYPE,
             content={},
-            method="POST",
             access_token=self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
@@ -1170,14 +1177,16 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         """Test that the sticky duration given when scheduling a delayed event
         is applied to the event once it is sent (MSC4354)."""
         sticky_duration = Duration(minutes=1)
-        method, path, body = _build_delayed_event_request(
+        path = self.helper.build_delayed_event_request_path(
             room_id=self.room_id,
-            delay=Duration(milliseconds=900),
             event_type=_EVENT_TYPE,
+        )
+        body = self.helper.build_delayed_event_request_body(
+            delay=Duration(milliseconds=900),
             content={"body": "sticky"},
         )
         channel = self.make_request(
-            method,
+            "PUT",
             f"{path}?{StickyEvent.QUERY_PARAM_NAME}={sticky_duration.as_millis()}",
             body,
             self.user1_access_token,
@@ -1232,13 +1241,16 @@ class DelayedEventsWorkerTestCase(
         channel = make_request(
             self.reactor,
             worker_site,
-            *_build_delayed_event_request(
+            "PUT",
+            self.helper.build_delayed_event_request_path(
                 room_id=self.room_id,
-                delay=Duration(milliseconds=900),
                 event_type=_EVENT_TYPE,
+            ),
+            self.helper.build_delayed_event_request_body(
+                delay=Duration(milliseconds=900),
                 content={"body": "from a worker"},
             ),
-            access_token=self.access_token,
+            self.access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         delay_id = channel.json_body.get("delay_id")
@@ -1258,7 +1270,6 @@ class DelayedEventsWorkerTestCase(
             delay=Duration(milliseconds=900),
             event_type=_EVENT_TYPE,
             content={},
-            method="POST",
             access_token=self.access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
@@ -1278,44 +1289,3 @@ class DelayedEventsWorkerTestCase(
             [], self.get_success(store.get_all_delayed_events_for_user("user"))
         )
         self.assertIsNone(handler._next_delayed_event_call)
-
-
-def _build_delayed_event_request(
-    *,
-    room_id: str,
-    delay: Duration,
-    event_type: str,
-    state_key: str | None = None,
-    content: JsonDict,
-    method: Literal["PUT", "POST"] = "PUT",
-    txn_id: str | None = None,
-) -> tuple[str, str, JsonDict]:
-    """Build a request for scheduling a delayed event via the dedicated endpoint.
-
-    Args:
-        room_id: The room to send the event to.
-        delays: How long to wait before sending the event.
-        event_type: The type of the event to send.
-        state_key: The state key of the event, or None for a non-state event.
-        content: The content of the event.
-        method: The HTTP method to use. `PUT` requires a transaction ID;
-            and `POST` does not place a transaction ID in the request path.
-        txn_id: The transaction ID for a `PUT` request. Generated if not given.
-
-    Returns:
-        The HTTP method, path and body of the request.
-    """
-    body = {
-        "delay_ms": delay.as_millis(),
-        "content": content,
-    }
-    path = f"{_UNSTABLE_PATH_PREFIX}/rooms/{room_id}/delayed_event/{event_type}"
-    if state_key is not None:
-        body["state_key"] = state_key
-    if method == "PUT":
-        if txn_id is None:
-            txn_id = random_string_insecure_fast(8)
-        path += f"/{txn_id}"
-    else:
-        assert txn_id is None, "A transaction ID may only be given for PUT requests"
-    return method, path, body
