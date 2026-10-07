@@ -15,6 +15,7 @@
 """Tests REST events for /delayed_events paths."""
 
 from http import HTTPStatus
+from unittest.mock import AsyncMock
 
 from parameterized import parameterized
 
@@ -773,6 +774,42 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         self._find_sent_delayed_event(self.user1_access_token, delay_id, False)
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
+    def test_new_state_processing_skipped_without_new_room_events(self) -> None:
+        """Ensure that we only process state deltas (and hit the database) when
+        new room events have been persisted, rather than on every replication
+        notification."""
+        state_key = "to_be_cancelled_by_other_user"
+
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(self.room_id, _EVENT_TYPE, state_key, 900),
+            {},
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(1, len(self._get_delayed_events()))
+
+        store = self.hs.get_datastores().main
+        store.get_count_of_delayed_events = AsyncMock(return_value=1)  # type: ignore[method-assign]
+
+        # Notifications for other streams (typing, receipts, to-device, etc)
+        # don't advance the room stream, so shouldn't cause any processing.
+        self.hs.get_notifier().notify_replication()
+        self.pump()
+        store.get_count_of_delayed_events.assert_not_called()
+
+        # A new state event from another user should still be processed, and
+        # cancel the pending delayed event.
+        self.helper.send_state(
+            self.room_id,
+            _EVENT_TYPE,
+            {},
+            self.user2_access_token,
+            state_key=state_key,
+        )
+        store.get_count_of_delayed_events.assert_called()
+        self.assertListEqual([], self._get_delayed_events())
 
     @parameterized.expand((("client_api", False), ("admin_api", True)))
     def test_delayed_events_are_cancelled_on_deactivation(

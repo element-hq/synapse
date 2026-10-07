@@ -118,7 +118,7 @@ class TlsConfig(Config):
 
                 # Parse the CA certificates
                 try:
-                    cert_base = Certificate.loadPEM(content)
+                    cert_base = Certificate.loadPEM(content.encode("ascii"))
                     certs.append(cert_base)
                 except Exception as e:
                     raise ConfigError(
