@@ -3046,10 +3046,11 @@ class PersistEventsStore:
         the event ID is NOT returned as we can't confirm it.
 
         See:
-            [`EventInternalMetadata::need_to_check_redaction`] for the concept of room v3+ rechecks.
+            `EventInternalMetadata::need_to_check_redaction` for the concept of room v3+ rechecks.
 
         Args:
             room_id: ID of the room that we are persisting events for
+                and that we might be redacting events within
             room_version: Version of the room that we are persisting events for
             events_and_contexts: The batch of events (with their persistence contexts) being persisted
 
