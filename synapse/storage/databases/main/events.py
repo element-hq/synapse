@@ -1184,14 +1184,16 @@ class PersistEventsStore:
             txn, room_id, room_version, events_and_contexts=events_and_contexts
         )
 
-        checked_redacted_event_ids = self._compute_newly_redacted_event_ids_txn(
-            txn, room_id, room_version, events_and_contexts=events_and_contexts
+        confirmed_redacted_already_persisted_event_ids = (
+            self._compute_newly_redacted_event_ids_txn(
+                txn, room_id, room_version, events_and_contexts=events_and_contexts
+            )
         )
-        if checked_redacted_event_ids:
-            # If any of the events being redacted are sticky,
+        if confirmed_redacted_already_persisted_event_ids:
+            # If any of our already-existing events being redacted are sticky,
             # we should remove the stickiness.
             self.store.delete_sticky_events_txn(
-                txn, room_id, checked_redacted_event_ids
+                txn, confirmed_redacted_already_persisted_event_ids
             )
 
         self._store_event_txn(txn, events_and_contexts=events_and_contexts)
