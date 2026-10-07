@@ -1213,7 +1213,9 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         return config
 
     @parameterized.expand((False, True))
-    def test_delayed_sticky_event_is_sent_with_sticky_duration(self, param_in_body: bool) -> None:
+    def test_delayed_sticky_event_is_sent_with_sticky_duration(
+        self, param_in_body: bool
+    ) -> None:
         """Test that the sticky duration given when scheduling a delayed event
         is applied to the event once it is sent (MSC4354)."""
         sticky_duration = Duration(minutes=1)
@@ -1261,6 +1263,7 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         body[StickyEvent.REQUEST_PARAM_NAME] = 20000
         channel = self.make_request("PUT", path, body, self.user1_access_token)
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+
 
 class DelayedEventsWorkerTestCase(
     BaseMultiWorkerStreamTestCase, DelayedEventsHelperMixin
