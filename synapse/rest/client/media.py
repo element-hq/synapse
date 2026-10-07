@@ -41,6 +41,7 @@ from synapse.http.servlet import (
     parse_boolean,
     parse_integer,
     parse_string,
+    parse_strings_from_args,
 )
 from synapse.http.site import SynapseRequest
 from synapse.media._base import (
@@ -91,6 +92,7 @@ class PreviewURLServlet(RestServlet):
         self.media_storage = media_storage
         self.url_previewer = self.media_repo.url_previewer
         self.can_respond_403 = hs.config.experimental.msc4452_enabled
+        self.site_logo_enabled = hs.config.experimental.msc4448_enabled
 
     async def on_GET(self, request: SynapseRequest) -> None:
         requester = await self.auth.get_user_by_req(request)
@@ -105,7 +107,18 @@ class PreviewURLServlet(RestServlet):
         if ts is None:
             ts = self.clock.time_msec()
 
-        og = await self.url_previewer.preview(url, requester.user, ts)
+        # MSC4448: only include the site logo if the client asks for it.
+        # twisted.web.server.Request.args is incorrectly defined as Any | None
+        args: dict[bytes, list[bytes]] = request.args  # type: ignore
+        include_site_logo = (
+            self.site_logo_enabled
+            and "msc4448:site_logo"
+            in parse_strings_from_args(args, "msc4448_include", default=[])
+        )
+
+        og = await self.url_previewer.preview(
+            url, requester.user, ts, include_site_logo
+        )
         respond_with_json_bytes(request, 200, og, send_cors=True)
 
 

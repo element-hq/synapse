@@ -52,7 +52,7 @@ from synapse.types import JsonDict, UserID
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
-from synapse.util.json import json_encoder
+from synapse.util.json import json_decoder, json_encoder
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -224,6 +224,8 @@ class UrlPreviewer:
 
         self.url_preview_url_blocklist = hs.config.media.url_preview_url_blocklist
         self.url_preview_accept_language = hs.config.media.url_preview_accept_language
+        # MSC4448: whether to collect the site logo along with the preview.
+        self._site_logo_enabled = hs.config.experimental.msc4448_enabled
 
         # memory cache mapping urls to an ObservableDeferred returning
         # JSON-encoded OG metadata
@@ -241,7 +243,23 @@ class UrlPreviewer:
                 self._start_expire_url_cache_data, Duration(seconds=10)
             )
 
-    async def preview(self, url: str, user: UserID, ts: int) -> bytes:
+    async def preview(
+        self, url: str, user: UserID, ts: int, include_site_logo: bool = False
+    ) -> bytes:
+        """
+        Generate (or fetch a cached) preview of a URL.
+
+        Args:
+            url: The URL to preview.
+            user: The user requesting the preview.
+            ts: The timestamp requested for the preview.
+            include_site_logo: Whether to include the MSC4448 site logo in the
+                response. The logo is cached along with the rest of the preview,
+                but only returned to clients which ask for it.
+
+        Returns:
+            json-encoded og data
+        """
         # the in-memory cache:
         # * ensures that only one request to a URL is active at a time
         # * takes load off the DB for the thundering herds
@@ -260,7 +278,8 @@ class UrlPreviewer:
         else:
             logger.info("Returning cached response")
 
-        return await make_deferred_yieldable(observable.observe())
+        jsonog = await make_deferred_yieldable(observable.observe())
+        return _filter_site_logo(jsonog, include_site_logo)
 
     async def _do_preview(self, url: str, user: UserID, ts: int) -> bytes:
         """Check the db, and download the URL and build a preview
@@ -714,19 +733,52 @@ class UrlPreviewer:
         self, user: UserID, media_info: MediaInfo, og: JsonDict
     ) -> None:
         """
-        Pre-cache the image (if one exists) for posterity
+        Pre-cache the image and MSC4448 site logo (if they exist) for posterity
 
         Args:
             user: The user requesting the preview.
             media_info: The media being previewed.
             og: The Open Graph dictionary. This is modified with image information.
         """
+        # The HTML parser leaves the raw favicon URL under the site logo key.
+        site_logo_url = og.pop("msc4448:site_logo", None)
+        if not self._site_logo_enabled:
+            site_logo_url = None
+        image_url = og.get("og:image")
+
+        await self._precache_image(user, media_info, og, "og:image")
+
+        if not site_logo_url:
+            return
+
+        if image_url == site_logo_url and "og:image" in og:
+            # The favicon is standing in for a missing preview image, so it has
+            # just been downloaded: reuse it rather than fetching it again.
+            og["msc4448:site_logo"] = og["og:image"]
+            og["msc4448:site_logo:size"] = og["matrix:image:size"]
+        else:
+            og["msc4448:site_logo"] = site_logo_url
+            await self._precache_image(user, media_info, og, "msc4448:site_logo")
+
+    async def _precache_image(
+        self, user: UserID, media_info: MediaInfo, og: JsonDict, key: str
+    ) -> None:
+        """
+        Download the image at `og[key]` and replace it with an mxc:// URI.
+
+        Args:
+            user: The user requesting the preview.
+            media_info: The media being previewed.
+            og: The Open Graph dictionary. This is modified with image information.
+            key: The Open Graph key holding the image URL: "og:image" or the
+                MSC4448 "msc4448:site_logo".
+        """
         # If there's no image or it is blank, there's nothing to do.
-        if "og:image" not in og:
+        if key not in og:
             return
 
         # Remove the raw image URL, this will be replaced with an MXC URL, if successful.
-        image_url = og.pop("og:image")
+        image_url = og.pop(key)
         if not image_url:
             return
 
@@ -750,21 +802,31 @@ class UrlPreviewer:
             )
             return
 
-        if _is_media(image_info.media_type):
-            # TODO: make sure we don't choke on white-on-transparent images
-            file_id = image_info.filesystem_id
-            dims = await self.media_repo._generate_thumbnails(
-                None, file_id, file_id, image_info.media_type, url_cache=True
-            )
-            if dims:
-                og["og:image:width"] = dims["width"]
-                og["og:image:height"] = dims["height"]
-            else:
-                logger.warning("Couldn't get dims for %s", image_url)
+        if not _is_media(image_info.media_type):
+            return
 
-            og["og:image"] = f"mxc://{self.server_name}/{image_info.filesystem_id}"
-            og["og:image:type"] = image_info.media_type
-            og["matrix:image:size"] = image_info.media_length
+        mxc = f"mxc://{self.server_name}/{image_info.filesystem_id}"
+
+        if key == "msc4448:site_logo":
+            # MSC4448 only defines the URI and the size of the logo.
+            og[key] = mxc
+            og["msc4448:site_logo:size"] = image_info.media_length
+            return
+
+        # TODO: make sure we don't choke on white-on-transparent images
+        file_id = image_info.filesystem_id
+        dims = await self.media_repo._generate_thumbnails(
+            None, file_id, file_id, image_info.media_type, url_cache=True
+        )
+        if dims:
+            og["og:image:width"] = dims["width"]
+            og["og:image:height"] = dims["height"]
+        else:
+            logger.warning("Couldn't get dims for %s", image_url)
+
+        og["og:image"] = mxc
+        og["og:image:type"] = image_info.media_type
+        og["matrix:image:size"] = image_info.media_length
 
     async def _handle_oembed_response(
         self, url: str, media_info: MediaInfo, expiration_ms: int
@@ -893,6 +955,37 @@ class UrlPreviewer:
             logger.debug("Deleted %d media from url preview cache", len(removed_media))
         else:
             logger.debug("No media removed from url preview cache")
+
+
+def _filter_site_logo(jsonog: bytes, include_site_logo: bool) -> bytes:
+    """
+    Apply the client's choice about the MSC4448 site logo to a cached preview.
+
+    The logo is cached with the preview so that the cache stays keyed by URL
+    alone, but it is only returned to clients which asked for it. For those, a
+    favicon which was only standing in for a missing `og:image` is returned as
+    the logo alone, not twice.
+
+    Args:
+        jsonog: The cached, JSON-encoded Open Graph data.
+        include_site_logo: Whether the client asked for the site logo.
+
+    Returns:
+        The JSON-encoded Open Graph data to respond with.
+    """
+    if b"msc4448:site_logo" not in jsonog:
+        return jsonog
+
+    og = json_decoder.decode(jsonog.decode("utf8"))
+    if not include_site_logo:
+        og = {k: v for k, v in og.items() if not k.startswith("msc4448:")}
+    elif og.get("og:image") and og.get("og:image") == og.get("msc4448:site_logo"):
+        og = {
+            k: v
+            for k, v in og.items()
+            if not k.startswith("og:image") and k != "matrix:image:size"
+        }
+    return json_encoder.encode(og).encode("utf8")
 
 
 def _is_media(content_type: str) -> bool:

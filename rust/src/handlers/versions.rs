@@ -264,6 +264,9 @@ pub struct UnstableFeatureMap {
     /// MSC4380: Invite blocking
     #[serde(rename = "org.matrix.msc4380.stable")]
     msc4380: bool,
+    /// MSC4448: Preview URL site logos
+    #[serde(rename = "org.matrix.msc4448")]
+    msc4448: bool,
     /// MSC4429: Profile updates for legacy /sync.
     #[serde(rename = "org.matrix.msc4429")]
     msc4429: bool,
@@ -330,6 +333,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
         msc4262: config.server.include_profile_updates_in_sync,
         msc4354: config.experimental.msc4354_enabled,
         msc4380: true,
+        msc4448: config.experimental.msc4448_enabled,
         msc4429: config.server.include_profile_updates_in_sync,
         msc4445_initial_sync_timeline_topological_ordering: true,
         msc4491_enabled: config.experimental.msc4491_enabled,
