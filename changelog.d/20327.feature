@@ -1,0 +1,1 @@
+Add support for [MSC4448](https://github.com/matrix-org/matrix-spec-proposals/pull/4448): return a site's logo in URL previews when asked for, behind the `msc4448_enabled` experimental flag. Contributed by @ZacksBot.
