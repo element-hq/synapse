@@ -259,16 +259,6 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         > out by the timeline filter, the sticky event MUST appear in sticky.events.
         > — https://github.com/matrix-org/matrix-spec-proposals/blob/4340903c15e9eab1bfb2f6a31cfa08fd535f7e7c/proposals/4354-sticky-events.md#sync-api-changes
         """
-        # A filter that excludes message events
-        filter_json = json.dumps(
-            {
-                "room": {
-                    # We only want these io.element.example events
-                    "timeline": {"types": ["io.element.example"]},
-                }
-            }
-        )
-
         # Send a sticky message event (will be filtered by our filter)
         sticky_event_id = self.helper.send_sticky_event(
             self.room_id,
@@ -289,7 +279,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         # Perform initial sync with our filter
         channel = self.make_request(
             "GET",
-            f"/sync?filter={quote(filter_json)}",
+            f"/sync?filter={quote(NO_TIMELINE_FILTER)}",
             access_token=self.token,
         )
         self.assertEqual(channel.code, 200, channel.result)
@@ -447,10 +437,6 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         > — https://github.com/matrix-org/matrix-spec-proposals/blob/d42301b17859d046953563dc7f046edd51789a12/proposals/4354-sticky-events.md#sync-api-changes
         """
         # A filter that excludes message events, so that the sticky events come down
-        # the sticky section rather than the timeline section.
-        filter_json = json.dumps(
-            {"room": {"timeline": {"types": ["io.element.example"]}}}
-        )
 
         sticky_event_id = self.helper.send_sticky_event(
             self.room_id,
@@ -466,7 +452,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         user2_token = self.login(user2_id, "pass")
         channel = self.make_request(
             "GET",
-            f"/sync?filter={quote(filter_json)}",
+            f"/sync?filter={quote(NO_TIMELINE_FILTER)}",
             access_token=user2_token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
@@ -478,7 +464,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         # The next (incremental) sync gives user2 the historical sticky event.
         channel = self.make_request(
             "GET",
-            f"/sync?filter={quote(filter_json)}&since={since}",
+            f"/sync?filter={quote(NO_TIMELINE_FILTER)}&since={since}",
             access_token=user2_token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
@@ -653,18 +639,6 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         In this test we patch it to 3 (as sending 100 events is not very efficient).
         """
 
-        # A filter that excludes message events
-        # This is needed so that the sticky events come down the sticky section
-        # and not the timeline section, which would hamper our test.
-        filter_json = json.dumps(
-            {
-                "room": {
-                    # We only want these io.element.example events
-                    "timeline": {"types": ["io.element.example"]},
-                }
-            }
-        )
-
         # Send 8 sticky events: enough for 2 full pages and then a partial page with 2.
         sent_sticky_event_ids = []
         for i in range(8):
@@ -679,17 +653,17 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
 
         # Perform initial sync, we should get the first 3 sticky events,
         # in order.
-        sync1 = self._do_sync(since=None, filter_json=filter_json)
+        sync1 = self._do_sync(since=None, filter_json=NO_TIMELINE_FILTER)
         self.assertEqual(sync1.sticky_event_ids, sent_sticky_event_ids[0:3])
 
         # Now do an incremental sync and expect the next page of 3
-        sync2 = self._do_sync(since=sync1.next_batch, filter_json=filter_json)
+        sync2 = self._do_sync(since=sync1.next_batch, filter_json=NO_TIMELINE_FILTER)
         self.assertEqual(sync2.sticky_event_ids, sent_sticky_event_ids[3:6])
 
         # Now do another incremental sync and expect the last 2
-        sync3 = self._do_sync(since=sync2.next_batch, filter_json=filter_json)
+        sync3 = self._do_sync(since=sync2.next_batch, filter_json=NO_TIMELINE_FILTER)
         self.assertEqual(sync3.sticky_event_ids, sent_sticky_event_ids[6:8])
 
         # Finally, expect an empty incremental sync at the end
-        sync4 = self._do_sync(since=sync3.next_batch, filter_json=filter_json)
+        sync4 = self._do_sync(since=sync3.next_batch, filter_json=NO_TIMELINE_FILTER)
         self.assertEqual(sync4.sticky_event_ids, [])
