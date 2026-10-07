@@ -955,6 +955,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         """When the last local user changes their own membership event (e.g. their
         display name) and then leaves within the same incremental sync window, the
         leave event (not the earlier membership event) must appear in state_after.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
         """
         if not self.use_state_after:
             self.skipTest("Only relevant for `state_after` (MSC4222)")
@@ -1016,6 +1020,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         """When the last local user leaves and their timeline filter excludes
         membership events, the leave event must still appear in state_after on an
         incremental sync.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
         """
         if not self.use_state_after:
             self.skipTest("Only relevant for `state_after` (MSC4222)")
@@ -1084,6 +1092,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         """When another state event is persisted in the same batch as the last local
         user's leave, both the leave and that state event must appear in state_after
         on an incremental sync.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
         """
         if not self.use_state_after:
             self.skipTest("Only relevant for `state_after` (MSC4222)")
