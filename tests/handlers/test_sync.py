@@ -888,6 +888,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         This is to make sure we play nicely with this behavior: When the server leaves a
         room, it will insert new rows with `event_id = null` into the
         `current_state_delta_stream` table for all current state.
+        The leave gets no row of its own, only an `event_id = null` row for the
+        leaving user's membership.
 
         Regression test for https://github.com/element-hq/synapse/issues/18793
         """
@@ -959,6 +961,9 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         This is to make sure we play nicely with this behavior: When the server leaves a
         room, it will insert new rows with `event_id = null` into the
         `current_state_delta_stream` table for all current state.
+        The user's membership then has a row for their display name change, followed
+        by an `event_id = null` row, and none for their leave, so the earlier row must
+        not be used.
         """
         if not self.use_state_after:
             self.skipTest("Only relevant for `state_after` (MSC4222)")
@@ -1024,6 +1029,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         This is to make sure we play nicely with this behavior: When the server leaves a
         room, it will insert new rows with `event_id = null` into the
         `current_state_delta_stream` table for all current state.
+        The leave has no row of its own, and the filter keeps it out of the timeline
+        too.
         """
         if not self.use_state_after:
             self.skipTest("Only relevant for `state_after` (MSC4222)")
@@ -1096,6 +1103,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         This is to make sure we play nicely with this behavior: When the server leaves a
         room, it will insert new rows with `event_id = null` into the
         `current_state_delta_stream` table for all current state.
+        Neither the leave nor the state event persisted with it gets a row of its own,
+        only the `event_id = null` rows of the state they replace.
         """
         if not self.use_state_after:
             self.skipTest("Only relevant for `state_after` (MSC4222)")
