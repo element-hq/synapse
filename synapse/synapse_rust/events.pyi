@@ -313,9 +313,26 @@ class Event:
         not affect the original."""
 
     def sticky_duration(self) -> Duration | None:
-        """If this event has the ``msc4354_sticky`` top-level field, returns a
-        ``SynapseDuration`` representing the sticky duration. Otherwise returns
-        ``None``."""
+        """
+        If this event has the `msc4354_sticky` top-level field and is eligible
+        to be sticky, returns a `SynapseDuration` representing the sticky duration.
+        Otherwise returns `None`.
+
+        The duration is capped at 1 hour according to MSC4354.
+        Spammy events (according to spam checkers and policy servers) are not eligible to be sticky
+        so we return `None` for those.
+
+        See `locally_sticky_until_ts` to get the effective stickiness expiry timestamp.
+        """
+
+    def locally_sticky_until_ts(self) -> int | None:
+        """
+        If this event has the `msc4354_sticky` top-level field and is eligible
+        to be sticky (isn't spammy), returns a timestamp (in milliseconds since the epoch) of
+        the expiry of the event's stickiness, as seen locally on this homeserver.
+
+        It is the caller's responsibility to check this time is not in the past.
+        """
 
 class ThreadAggregation:
     """The bundled thread summary for an event."""
