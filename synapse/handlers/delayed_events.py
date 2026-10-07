@@ -146,6 +146,16 @@ class DelayedEventsHandler:
         if self._event_processing:
             return
 
+        # This is called for updates on any stream (typing, receipts, to-device,
+        # etc), but only new room events can produce the state deltas we
+        # process. If the room stream hasn't advanced past what we've already
+        # handled, there's nothing to do, so skip the database round-trips.
+        if (
+            self._event_pos is not None
+            and self._event_pos >= self._store.get_room_max_stream_ordering()
+        ):
+            return
+
         self._event_processing = True
 
         async def process() -> None:

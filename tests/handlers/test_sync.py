@@ -33,7 +33,9 @@ from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sync import (
+    LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE,
     LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE,
+    LazyLoadedMembersCache,
     SyncConfig,
     SyncRequestKey,
     SyncResult,
@@ -48,6 +50,7 @@ from synapse.types import (
     MultiWriterStreamToken,
     RoomStreamToken,
     StreamKeyType,
+    StreamToken,
     UserID,
     create_requester,
 )
@@ -2947,7 +2950,7 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
 
         # Calculating the incrementals state will return the second state, and not the
         # first.
-        state = self.get_success(
+        state, _ = self.get_success(
             self.sync_handler._compute_state_delta_for_incremental_sync(
                 room_id=joined_room,
                 sync_config=generate_sync_config(user, use_state_after=True),
@@ -2979,7 +2982,7 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
         since_token = self.hs.get_event_sources().get_current_token()
         end_stream_token = self.hs.get_event_sources().get_current_token()
 
-        state = self.get_success(
+        state, _ = self.get_success(
             self.sync_handler._compute_state_delta_for_incremental_sync(
                 room_id=joined_room,
                 sync_config=generate_sync_config(user, use_state_after=True),
@@ -2995,3 +2998,76 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
         )
 
         self.assertEqual(state, {})
+
+
+class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
+    """Direct tests of the per-device cache of lazy-loaded members sent."""
+
+    @staticmethod
+    def _token(stream: int) -> StreamToken:
+        """A token whose room position is `stream`. Only the room position
+        matters to the cache."""
+        return StreamToken.START.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=stream)
+        )
+
+    def test_forgets_only_entries_after_since(self) -> None:
+        """A request from `since` forgets the entries recorded after it and
+        keeps the rest."""
+        cache = LazyLoadedMembersCache()
+        cache.mark_sent("@a:test", "$a", self._token(5))
+        cache.mark_sent("@b:test", "$b", self._token(7))
+
+        # The client synced past both responses.
+        cache.start_request(self._token(7))
+        self.assertTrue(cache.was_sent("@a:test", "$a"))
+        self.assertTrue(cache.was_sent("@b:test", "$b"))
+
+        # The client lost the response that ended at 7.
+        cache.start_request(self._token(6))
+        self.assertTrue(cache.was_sent("@a:test", "$a"))
+        self.assertFalse(cache.was_sent("@b:test", "$b"))
+
+        # A later request from an even older token forgets the rest.
+        cache.start_request(self._token(4))
+        self.assertFalse(cache.was_sent("@a:test", "$a"))
+
+    def test_initial_sync_forgets_everything(self) -> None:
+        """An initial sync has no `since`, and the client starts from nothing."""
+        cache = LazyLoadedMembersCache()
+        cache.mark_sent("@a:test", "$a", self._token(5))
+        cache.start_request(None)
+        self.assertFalse(cache.was_sent("@a:test", "$a"))
+
+    def test_different_event_is_not_sent(self) -> None:
+        """An entry only covers the membership event it was recorded with, so
+        a changed membership counts as not sent."""
+        cache = LazyLoadedMembersCache()
+        cache.mark_sent("@a:test", "$a1", self._token(5))
+        self.assertFalse(cache.was_sent("@a:test", "$a2"))
+
+    def test_out_of_order_marks_are_still_forgotten(self) -> None:
+        """A response that started earlier can record its entries after a
+        later one. Its entries must still be forgotten by a request from
+        before either response."""
+        cache = LazyLoadedMembersCache()
+        cache.mark_sent("@b:test", "$b", self._token(7))
+        cache.mark_sent("@a:test", "$a", self._token(5))
+
+        cache.start_request(self._token(6))
+        self.assertTrue(cache.was_sent("@a:test", "$a"))
+        self.assertFalse(cache.was_sent("@b:test", "$b"))
+
+    def test_evicts_least_recently_used(self) -> None:
+        """The cache holds `LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE` entries and
+        evicts the least recently used one. A hit counts as a use."""
+        cache = LazyLoadedMembersCache()
+        for i in range(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE):
+            cache.mark_sent(f"@u{i}:test", f"$u{i}", self._token(1))
+        # Touch the oldest entry so that it is no longer the eviction candidate.
+        self.assertTrue(cache.was_sent("@u0:test", "$u0"))
+
+        cache.mark_sent("@new:test", "$new", self._token(1))
+        self.assertTrue(cache.was_sent("@u0:test", "$u0"))
+        self.assertFalse(cache.was_sent("@u1:test", "$u1"))
+        self.assertTrue(cache.was_sent("@new:test", "$new"))
