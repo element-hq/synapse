@@ -433,7 +433,7 @@ class DelayedEventsHandler:
 
     async def cancel(self, requester: Requester, delay_id: str) -> None:
         """
-        Cancels the scheduled delivery of the matching delayed event owned by the requester.
+        Cancels the scheduled delivery of the matching delayed event.
 
         Raises:
             NotFoundError: if no matching delayed event could be found.
@@ -476,7 +476,7 @@ class DelayedEventsHandler:
 
     async def restart(self, requester: Requester, delay_id: str) -> None:
         """
-        Restarts the scheduled delivery of the matching delayed event owned by the requester.
+        Restarts the scheduled delivery of the matching delayed event.
 
         Raises:
             NotFoundError: if no matching delayed event could be found.
@@ -501,8 +501,7 @@ class DelayedEventsHandler:
 
     async def send(self, requester: Requester, delay_id: str) -> None:
         """
-        Immediately sends the matching delayed event owned by the requester,
-        instead of waiting for its scheduled delivery.
+        Immediately sends the matching delayed event, instead of waiting for its scheduled delivery.
 
         Raises:
             NotFoundError: if no matching delayed event could be found.
