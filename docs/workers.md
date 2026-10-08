@@ -224,6 +224,7 @@ information.
     ^/_matrix/federation/v1/user/devices/
     ^/_matrix/key/v2/query
     ^/_matrix/federation/v1/hierarchy/
+    ^/_matrix/federation/v1/openid/userinfo
 
     # Inbound federation transaction request
     ^/_matrix/federation/v1/send/
