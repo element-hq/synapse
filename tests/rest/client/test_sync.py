@@ -34,7 +34,6 @@ from synapse.api.constants import (
     RelationTypes,
 )
 from synapse.events import EventBase
-from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
@@ -775,6 +774,70 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
 
+# FIXME(unstable_state_after): Remove this whole test case after 2027-09-01
+# and we drop support for the unstable variant of `state_after`
+class SyncStateAfterTestCase(unittest.HomeserverTestCase):
+    """
+    Tests for the `use_state_after` opt-in on `/sync` (MSC4222, stable as of
+    Matrix v1.16): the variant of the `state_after` field in the response should
+    match the stable/unstable query parameter the client opted in with.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user_id = self.register_user("user", "password")
+        self.access_token = self.login(self.user_id, "password")
+        self.room_id = self.helper.create_room_as(self.user_id, tok=self.access_token)
+
+    def _sync_room_keys(self, query_string: str) -> set[str]:
+        """Perform a sync with the given query string and return the keys of
+        our room's response object."""
+        channel = self.make_request(
+            "GET",
+            f"/sync{query_string}",
+            access_token=self.access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        return set(channel.json_body["rooms"]["join"][self.room_id].keys())
+
+    def test_state_without_opt_in(self) -> None:
+        """By default, room state comes down under the `state` key."""
+        room_keys = self._sync_room_keys("")
+        self.assertIn("state", room_keys)
+        self.assertNotIn("state_after", room_keys)
+        self.assertNotIn("org.matrix.msc4222.state_after", room_keys)
+
+    def test_state_after_stable_name(self) -> None:
+        """Opting in with the stable query parameter gives the stable field name."""
+        room_keys = self._sync_room_keys("?use_state_after=true")
+        self.assertIn("state_after", room_keys)
+        self.assertNotIn("state", room_keys)
+        self.assertNotIn("org.matrix.msc4222.state_after", room_keys)
+
+    def test_state_after_unstable_name(self) -> None:
+        """Opting in with the unstable query parameter gives the unstable field
+        name, for the transition period."""
+        room_keys = self._sync_room_keys("?org.matrix.msc4222.use_state_after=true")
+        self.assertIn("org.matrix.msc4222.state_after", room_keys)
+        self.assertNotIn("state", room_keys)
+        self.assertNotIn("state_after", room_keys)
+
+    def test_state_after_both_names(self) -> None:
+        """If a client opts in with both query parameters, the stable field name wins."""
+        room_keys = self._sync_room_keys(
+            "?use_state_after=true&org.matrix.msc4222.use_state_after=true"
+        )
+        self.assertIn("state_after", room_keys)
+        self.assertNotIn("state", room_keys)
+        self.assertNotIn("org.matrix.msc4222.state_after", room_keys)
+
+
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
     """
     Tests regarding device list (`device_lists`) changes.
@@ -1322,12 +1385,6 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
         self.bob = self.register_user("bob", "password")
         self.bob_tok = self.login("bob", "password")
 
-        self.get_success(
-            self.store.set_features_for_user(
-                self.alice, {ExperimentalFeature.MSC4222: True}
-            )
-        )
-
         # Named room, so that hero calculation doesn't inject current
         # membership state into the response and confuse the assertions.
         self.room_id = self.helper.create_room_as(
@@ -1346,7 +1403,7 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
         sync_filter: JsonDict = {"room": {"timeline": {"limit": timeline_limit}}}
         if lazy_load_members:
             sync_filter["room"]["state"] = {"lazy_load_members": True}
-        return f"/sync?filter={json.dumps(sync_filter)}&org.matrix.msc4222.use_state_after=true"
+        return f"/sync?filter={json.dumps(sync_filter)}&use_state_after=true"
 
     def _sync(self, sync_url: str, since: str | None = None) -> JsonDict:
         url = sync_url if since is None else f"{sync_url}&since={since}"
@@ -1363,7 +1420,7 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
         return [e["event_id"] for e in room["timeline"]["events"]]
 
     def _state_after_ids(self, room: JsonDict) -> list[str]:
-        return [e["event_id"] for e in room["org.matrix.msc4222.state_after"]["events"]]
+        return [e["event_id"] for e in room["state_after"]["events"]]
 
     def _persist_batch(self) -> tuple[EventBase, EventBase]:
         return self.get_success(
@@ -1384,7 +1441,7 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
             self.store.get_partial_current_state_ids(self.room_id)
         )
         current_ids = set(current_state.values())
-        for event in room["org.matrix.msc4222.state_after"]["events"]:
+        for event in room["state_after"]["events"]:
             self.assertIn(
                 event["event_id"],
                 current_ids,
@@ -1583,9 +1640,6 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
         sync.register_servlets,
     ]
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.store = hs.get_datastores().main
-
     def test_archived_room_state_after_not_newer_than_leave(self) -> None:
         """`state_after` for a left room must be the state at the end of that
         room's timeline, i.e. at the user's leave point — never state from
@@ -1601,11 +1655,6 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
         alice_tok = self.login("alice", "password")
         bob = self.register_user("bob", "password")
         bob_tok = self.login("bob", "password")
-
-        # Opt Alice in to MSC4222.
-        self.get_success(
-            self.store.set_features_for_user(alice, {ExperimentalFeature.MSC4222: True})
-        )
 
         # Name the room to avoid heroes: those come from the *current*
         # summary — a separate leak path from the one under test.
@@ -1635,7 +1684,7 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
                 }
             }
         )
-        sync_url = f"/sync?filter={sync_filter}&org.matrix.msc4222.use_state_after=true"
+        sync_url = f"/sync?filter={sync_filter}&use_state_after=true"
 
         # Initial sync.
         channel = self.make_request("GET", sync_url, access_token=alice_tok)
@@ -1665,7 +1714,7 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
 
         left_room = channel.json_body["rooms"]["leave"][room_id]
-        state_after_events = left_room["org.matrix.msc4222.state_after"]["events"]
+        state_after_events = left_room["state_after"]["events"]
 
         # Post-leave state must not appear in `state_after`.
         self.assertNotIn(
@@ -1708,12 +1757,6 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         self.bob = self.register_user("bob", "password")
         self.bob_tok = self.login("bob", "password")
 
-        self.get_success(
-            hs.get_datastores().main.set_features_for_user(
-                self.alice, {ExperimentalFeature.MSC4222: True}
-            )
-        )
-
         # Named room, so that hero calculation doesn't inject current
         # membership state into the response and confuse the assertions.
         self.room_id = self.helper.create_room_as(
@@ -1748,7 +1791,7 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         }
         url = f"/sync?filter={json.dumps(sync_filter)}&timeout={timeout_ms}"
         if use_state_after:
-            url += "&org.matrix.msc4222.use_state_after=true"
+            url += "&use_state_after=true"
         if since is not None:
             url += f"&since={since}"
         return self.make_request(
@@ -1786,7 +1829,7 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         self, response: JsonDict, use_state_after: bool
     ) -> list[JsonDict]:
         """Extract the list of state events from the test room in a sync response."""
-        key = "org.matrix.msc4222.state_after" if use_state_after else "state"
+        key = "state_after" if use_state_after else "state"
         return self._room(response)[key]["events"]
 
     def _state_ids(self, response: JsonDict, use_state_after: bool) -> list[str]:
