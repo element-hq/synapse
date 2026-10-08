@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a6766168.js";
+            window.path_to_searchindex_js = "searchindex-a108eb2d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -457,7 +457,8 @@ information.</p>
 # User directory search requests
 ^/_matrix/client/(r0|v3|unstable)/user_directory/search$
 
-# Unstable MSC4140 support
+# Unstable MSC4140 support (delayed event scheduling &amp; management)
+^/_matrix/client/unstable/org.matrix.msc4140/rooms/.*/delayed_event/
 ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/[^/]+(/restart)?)?$
 
 # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
