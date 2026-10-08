@@ -636,6 +636,34 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertEqual(Membership.JOIN, content.get("membership"), content)
 
+    def test_delayed_self_join_fails_on_timeout_if_join_not_allowed(self) -> None:
+        """A delayed join is accepted from outside an invite-only room, and fails
+        when it comes to be sent because the sender was never invited."""
+        room_id = self.helper.create_room_as(
+            self.user2_user_id, is_public=False, tok=self.user2_access_token
+        )
+
+        channel = self._make_delayed_event_request(
+            room_id=room_id,
+            delay=Duration(milliseconds=900),
+            event_type=EventTypes.Member,
+            state_key=self.user1_user_id,
+            content={EventContentFields.MEMBERSHIP: Membership.JOIN},
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(1, len(self._get_delayed_events()))
+
+        self.reactor.advance(1)
+        self.assertListEqual([], self._get_delayed_events())
+        self.helper.get_state(
+            room_id,
+            EventTypes.Member,
+            self.user2_access_token,
+            state_key=self.user1_user_id,
+            expect_code=HTTPStatus.NOT_FOUND,
+        )
+
     def test_get_delayed_events_auth(self) -> None:
         channel = self.make_request("GET", _MANAGEMENT_PATH_PREFIX)
         self.assertEqual(HTTPStatus.UNAUTHORIZED, channel.code, channel.result)
