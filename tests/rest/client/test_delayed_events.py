@@ -241,8 +241,9 @@ class DelayedEventsTestCaseBase(DelayedEventsHelperMixin):
     def _assert_delayed_since_ts(self, event: JsonDict, requested_ts: int) -> None:
         """Assert that a delayed event was scheduled between `requested_ts` and now.
 
-        Scheduling reads from the database, which advances the test clock, so the
-        stored timestamp may be later than the time the request was made.
+        `FakeChannel.await_result` advances the test clock while the request waits
+        on the database, so the stored timestamp may be later than the time the
+        request was made.
         """
         self.assertGreaterEqual(event["delayed_since_ts"], requested_ts, event)
         self.assertLessEqual(
