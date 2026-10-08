@@ -573,7 +573,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             delay=Duration(milliseconds=900),
             event_type=EventTypes.Member,
             state_key=self.user2_user_id,
-            content={"membership": Membership.LEAVE},
+            content={EventContentFields.MEMBERSHIP: Membership.LEAVE},
             access_token=self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
@@ -621,7 +621,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             delay=Duration(milliseconds=900),
             event_type=EventTypes.Member,
             state_key=self.user1_user_id,
-            content={"membership": Membership.JOIN},
+            content={EventContentFields.MEMBERSHIP: Membership.JOIN},
             access_token=self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
@@ -634,7 +634,9 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             self.user2_access_token,
             state_key=self.user1_user_id,
         )
-        self.assertEqual(Membership.JOIN, content.get("membership"), content)
+        self.assertEqual(
+            Membership.JOIN, content.get(EventContentFields.MEMBERSHIP), content
+        )
 
     def test_delayed_self_join_fails_on_timeout_if_join_not_allowed(self) -> None:
         """A delayed join is accepted from outside an invite-only room, and fails
