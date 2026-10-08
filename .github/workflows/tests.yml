@@ -713,6 +713,64 @@ jobs:
       - linting-done
       - changes
 
+  ess:
+    if: "${{ !failure() && !cancelled() && needs.changes.outputs.integration == 'true' }}"
+    needs:
+      - linting-done
+      - changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Get current branch name
+        id: current-branch
+        run: echo "branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+
+      - name: Check if branch exists in element-hq/ess-helm
+        id: check-branch
+        env:
+          BRANCH_NAME: ${{ steps.current-branch.outputs.branch }}
+        run: |
+          API_URL="https://api.github.com/repos/element-hq/ess-helm/branches/$BRANCH_NAME"
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" $API_URL)
+          if [ "$RESPONSE" = "200" ]; then
+            echo "ref=$BRANCH_NAME" | tee -a $GITHUB_OUTPUT
+          else
+            echo "ref=main" | tee -a $GITHUB_OUTPUT
+          fi
+
+      - name: Install ESS test dependencies
+        uses: element-hq/setup-ess-cluster-action@release/v2
+        with:
+          ess-helm-ref: ${{ steps.check-branch.outputs.ref }}
+
+      - name: Build Synapse docker image to local registry
+        run: |
+          docker build -t localhost:5000/synapse:ci -f ./docker/Dockerfile .
+          docker push localhost:5000/synapse:ci
+
+      - name: Build Additional values file
+        run: >
+          yq eval -n '.synapse.image.registry = "localhost:5000" |
+          .synapse.image.repository = "synapse" |
+          .synapse.image.tag = "ci"' > ci-values.yml
+
+      - name: Run ESS tests
+        run: pytest-ess --test-suite "synapse" --additional-test-values-file ci-values.yml -- -vv
+
+      - name: Collect ESS logs
+        if: ${{ failure() }}
+        run: collect-ess-logs
+
+      - name: Upload logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: ess-helm-logs
+          path: ess-helm-logs
+          retention-days: 1
+
   cargo-test:
     # We need to explicitly specify `!cancelled() && !failure()` as otherwise
     # GitHub will implicitly add `success()`, which will be `false` when any job
