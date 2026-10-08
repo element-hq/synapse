@@ -27,6 +27,7 @@ import urllib.parse as urlparse
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
+    Any,
     Iterable,
     Literal,
     Mapping,
@@ -43,7 +44,7 @@ from twisted.web.server import Request
 from synapse.api.errors import Codes, SynapseError
 from synapse.http import redact_uri
 from synapse.http.server import HttpServer
-from synapse.types import JsonDict, RoomAlias, RoomID, StrCollection
+from synapse.types import JsonDict, JsonMapping, RoomAlias, RoomID, StrCollection
 from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
@@ -885,7 +886,7 @@ def parse_json_object_from_request(
 Model = TypeVar("Model", bound=BaseModel)
 
 
-def _format_pydantic_error(e: ValidationError) -> str:
+def _format_pydantic_error(e: ValidationError, content: JsonMapping) -> str:
     """Condense a pydantic ValidationError into a client-friendly message.
 
     Avoids leaking internal details (model class names, raw input values,
@@ -893,23 +894,62 @@ def _format_pydantic_error(e: ValidationError) -> str:
     See https://github.com/element-hq/synapse/issues/20309.
     """
     parts = []
-    for err in e.errors():
-        loc = ".".join(str(p) for p in err.get("loc", ()))
-        msg = err.get("msg", "invalid value")
-        err_type = err.get("type", "")
-        if err_type == "missing":
-            parts.append(
-                f"Missing required field '{loc}'" if loc else "Missing required field"
-            )
-        elif loc:
-            parts.append(f"'{loc}': {msg}")
-        else:
+    for err in e.errors(include_url=False):
+        # Build a path into the request body based on `loc` field, which is a
+        # list of segments pointing into the JSON body.
+        #
+        # We cannot just naively join the segments with dots, because some
+        # segments may be integers representing list indices. Also, for union
+        # types pydantic will append the type of the value as an additional
+        # segment at the end of `loc`.
+        #
+        # An example output path: `.foo[0].bar`
+        #
+        # To gracefully handle the above, we iterate over each segment in `loc`
+        # while following the path into the JSON content.
+        path = ""
+        current_value: Any = content
+        for seg in err["loc"]:
+            match (seg, current_value):
+                case int(), list():
+                    # We're indexing into a list
+                    path += f"[{seg}]"
+
+                    if seg < len(current_value):
+                        current_value = current_value[seg]
+                    else:
+                        current_value = None
+                case str(), dict():
+                    # We're indexing into a dictionary
+                    path += f".{seg}"
+                    current_value = current_value.get(seg)
+                case _:
+                    # Either there is a type mismatch or the current_value is
+                    # `None`, indicating we can't traverse further.
+                    #
+                    # This will be due to the error we're reporting, so `path`
+                    # now correctly points to the problem.
+                    break
+
+        match err["type"]:
+            case "missing":
+                msg = f"Missing required field '{path}'"
+            case "value_error":
+                # Raised by one of our own validators; use its text directly.
+                msg = str(err.get("ctx", {}).get("error", err["msg"]))
+            case "model_type":
+                # pydantic's text names the Python class here.
+                msg = f"'{path}' must be an object"
+            case _:
+                msg = f"'{path}': {err['msg']}"
+
+        if msg not in parts:
             parts.append(msg)
+
     if not parts:
         return "Invalid request body."
-    if len(parts) == 1:
-        return parts[0] + "."
-    return "; ".join(parts) + "."
+
+    return "; ".join(parts)
 
 
 def validate_json_object(content: JsonDict, model_type: type[Model]) -> Model:
@@ -937,7 +977,7 @@ def validate_json_object(content: JsonDict, model_type: type[Model]) -> Model:
                 errcode = Codes.INVALID_PARAM
 
         raise SynapseError(
-            HTTPStatus.BAD_REQUEST, _format_pydantic_error(e), errcode=errcode
+            HTTPStatus.BAD_REQUEST, _format_pydantic_error(e, content), errcode=errcode
         )
 
     return instance
