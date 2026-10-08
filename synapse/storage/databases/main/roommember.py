@@ -866,6 +866,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         Users sharing rooms get `True` returned, users who don't are omitted from the return.
         (This is for friendliness with `cachedList` on `_do_users_share_a_room`)
+        # TODO
         """
         state_key_clause, state_key_args = make_in_list_sql_clause(
             self.database_engine, "state_key", other_user_ids
@@ -925,6 +926,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         This returns `True` for users that share a room and `None` for users that don't.
         (This is because of the `cachedList` annotation.)
+        # TODO
         """
 
         to_return = {}

@@ -118,6 +118,11 @@ class ProfileHandler:
         self._set_profile_field_client = ReplicationProfileSetField.make_client(self.hs)
         self._profile_updates_writer_instance = self.hs.config.worker.writers.events[0]
 
+    async def get_profiles(
+        self, user_ids: set[str]
+    ) -> dict[str, dict[str, JsonValue | dict[str, JsonValue]]]:
+        return await self.store.get_profile_data_for_users(user_ids)
+
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
         Get a user's profile as a JSON dictionary.
@@ -1029,3 +1034,30 @@ class ProfileHandler:
                 # so we act as if we couldn't find the profile.
                 raise SynapseError(403, "Profile isn't available", Codes.FORBIDDEN)
             raise
+
+    async def check_profile_query_allowed_for_users(
+        self,
+        target_users: set[str],
+        requester: UserID,
+    ) -> set[str]:
+        """Checks whether a profile query is allowed for a list of users. If the
+        'limit_profile_requests_to_users_who_share_rooms' config flag is set to
+        True, the query is only allowed if the two users share a room.
+
+        Returns a list of users that this requester is allowed to query, dropping
+        any from the passed in list that cannot be queried.
+
+        Args:
+            target_users: The owners of the queried profiles.
+            requester: The user querying for the profile.
+        """
+        if not len(target_users):
+            return set()
+
+        if not self.hs.config.server.limit_profile_requests_to_users_who_share_rooms:
+            return target_users
+
+        return await self.store.do_users_share_a_room(
+            user_id=requester.to_string(),
+            other_user_ids=list(target_users),
+        )
