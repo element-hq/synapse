@@ -1,3 +1,118 @@
+# Synapse 1.163.0rc1 (2026-10-06)
+
+## Features
+
+- Advertise support for Matrix v1.14. Contributed by @famedly. ([\#20137](https://github.com/element-hq/synapse/issues/20137))
+- Advertise support for Matrix v1.15. ([\#20286](https://github.com/element-hq/synapse/issues/20286))
+- Catch up [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) to remote homeservers that have missed them. ([\#20165](https://github.com/element-hq/synapse/issues/20165))
+- Add push rules for [MSC4075](https://github.com/matrix-org/matrix-spec-proposals/pull/4075): MatrixRTC invites and notifications. ([\#20227](https://github.com/element-hq/synapse/issues/20227))
+- Make the task scheduler concurrency configurable via `task_scheduler.max_concurrent_tasks`, defaulting to 5. ([\#20230](https://github.com/element-hq/synapse/issues/20230))
+- Cancel a user's scheduled [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140) delayed events when their account is deactivated. ([\#20247](https://github.com/element-hq/synapse/issues/20247))
+
+## Bugfixes
+
+- Fix a bug where read receipts could be permanently skipped and never sent to application services if more than 100 read receipts arrived in a single stream update. ([\#20108](https://github.com/element-hq/synapse/issues/20108))
+- Use sharded tokens in [MSC4354: Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) sync and sliding sync, preventing events appearing in multiple sync responses. ([\#20186](https://github.com/element-hq/synapse/issues/20186))
+- Tell clients to remove local profile information for users after leaving the last room shared with them. ([\#20203](https://github.com/element-hq/synapse/issues/20203))
+- Do not include `og:image` in responses to `/preview_url` when the media was automatically quarantined by hash matching. ([\#20211](https://github.com/element-hq/synapse/issues/20211))
+- Requires `require_auth_for_profile_requests` to be enabled to enable `limit_profile_requests_to_users_who_share_rooms`. ([\#20231](https://github.com/element-hq/synapse/issues/20231))
+- Prevent [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) being sticky when they were redacted prior to persistence. ([\#20232](https://github.com/element-hq/synapse/issues/20232))
+- Send all of a room's [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) down legacy `/sync` when a user joins it. ([\#20233](https://github.com/element-hq/synapse/issues/20233))
+- Fix a bug where push badge counts could ignore notifications in one room based on another room's summarised counts. ([\#20237](https://github.com/element-hq/synapse/issues/20237))
+- Reject user creation via the Admin API when Synapse is delegating authentication to MAS. ([\#20241](https://github.com/element-hq/synapse/issues/20241))
+- Fix spurious `Closing scope ... which is not the currently-active one` errors being logged when writing large responses with tracing enabled. ([\#20246](https://github.com/element-hq/synapse/issues/20246))
+- Prevent `trial` tests from hanging when running with Twisted 26.4.0 against Postgres. ([\#20272](https://github.com/element-hq/synapse/issues/20272))
+- Fix a bug where sending a `null` or non-object `auth` to an endpoint requiring user-interactive authentication returned a 500 error. Contributed by @ankit373. ([\#20274](https://github.com/element-hq/synapse/issues/20274))
+- Fix bug where membership events would not be returned in `/sync` when using lazy-loaded members and using an old token for `since`. ([\#20289](https://github.com/element-hq/synapse/issues/20289))
+
+## Updates to the Docker image
+
+- Add worker support to the endpoint for retrieving a single [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140) delayed event. ([\#20262](https://github.com/element-hq/synapse/issues/20262))
+
+## Improved Documentation
+
+- Update ESS support link to point to the new customer portal domain. ([\#19070](https://github.com/element-hq/synapse/issues/19070))
+- Clarify the `--exists-ok` help text in `register_new_matrix_user`. ([\#20263](https://github.com/element-hq/synapse/issues/20263))
+
+## Deprecations and Removals
+
+- Remove the ability to send state events that are sticky, as this feature was removed from [MSC4354: Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354). ([\#20256](https://github.com/element-hq/synapse/issues/20256))
+
+## Internal Changes
+
+- Switch to `beautifulsoup4` from `lxml` for URL previews. Contributed by @clokep. ([\#19301](https://github.com/element-hq/synapse/issues/19301))
+- Add a `synapse_notifier_wait_for_stream_token_timeouts` metric, counting the times a request gave up waiting for a worker to catch up to a stream token, labelled by the lagging stream. ([\#20095](https://github.com/element-hq/synapse/issues/20095))
+- Avoid taking the GIL on Tokio worker threads when completing Rust futures. ([\#20252](https://github.com/element-hq/synapse/issues/20252))
+- Bump `cryptography` from `46.0.7` to `50.0.1` to resolve `CVE-2026-69248`, `CVE-2026-69249` and `CVE-2026-69247`, none of which affected Synapse. Also bump `pyOpenSSL` from `26.0.0` to `26.4.0` for compatibility with newer `cryptography` versions. ([\#20253](https://github.com/element-hq/synapse/issues/20253))
+- Switch dependabot version upgrades to monthly "big bang" upgrades in a single PR per ecosystem to reduce team maintenance burden. Security update PRs remain individual and active. ([\#20255](https://github.com/element-hq/synapse/issues/20255))
+- Add type annotations for `RestServlet.PATTERNS` to prevent misuse. ([\#20258](https://github.com/element-hq/synapse/issues/20258))
+- Bump `Twisted` in `poetry.lock` from `25.5.0` to `26.4.0`. ([\#20259](https://github.com/element-hq/synapse/issues/20259))
+- Stop taking the GIL on Tokio worker threads when calling into Python from Rust. ([\#20267](https://github.com/element-hq/synapse/issues/20267))
+- Keep in-repo Complement go dependencies up to date with dependabot. ([\#20270](https://github.com/element-hq/synapse/issues/20270))
+- Ignore suspended users failing to join new room when using the `new_room_user_id` option with the admin API to delete a room. ([\#20283](https://github.com/element-hq/synapse/issues/20283))
+- Prune `user_ips` less frequently (less stress on the database). ([\#20285](https://github.com/element-hq/synapse/issues/20285))
+- Fix the `sytest` job failing on the Twisted trunk workflow due to missing build backend dependencies. ([\#20293](https://github.com/element-hq/synapse/issues/20293))
+
+
+
+
+# Synapse 1.162.0 (2026-09-29)
+
+No significant changes since 1.162.0rc1.
+
+
+
+
+# Synapse 1.162.0rc1 (2026-09-22)
+
+## Features
+
+- Raise default room version to "12". Contributed by @jason-famedly @famedly. ([\#20130](https://github.com/element-hq/synapse/issues/20130))
+- Limit the number of end-to-end encryption one-time keys stored per device to 500 per algorithm, rejecting uploads which would exceed the limit with a `400 Bad Request`. ([\#20162](https://github.com/element-hq/synapse/issues/20162))
+- Add support for configuring a `username` for Redis connections, for Redis 6+ ACL authentication. ([\#20187](https://github.com/element-hq/synapse/issues/20187))
+- Add a rate limit on the client profile lookup endpoints, configurable via `rc_profile`. ([\#20218](https://github.com/element-hq/synapse/issues/20218))
+
+## Bugfixes
+
+- Fix flawed [MSC4311](https://github.com/matrix-org/matrix-spec-proposals/pull/4311) partial implementation introduced in Synapse v1.136.0 for invites/knocks: client-side API's like `/sync` use [stripped state events](https://spec.matrix.org/v1.18/client-server-api/#stripped-state) and we now send full PDUs on the federation-side. To allow some time for the ecosystem to adapt and support MSC4311, Synapse will only apply strict validation when receiving invites/knocks after 2027-06-01. ([\#19723](https://github.com/element-hq/synapse/issues/19723))
+- Allow the third party rules callback `check_event_allowed()` to work with [MSC4291](https://github.com/matrix-org/matrix-spec-proposals/pull/4291) rooms. Contributed by @famedly. ([\#19768](https://github.com/element-hq/synapse/issues/19768))
+- Improve server concurrency by opening local media thumbnails asynchronously. Contributed by @guillemo12. ([\#20100](https://github.com/element-hq/synapse/issues/20100))
+- Drop incoming federation device list updates from non-compliant (grandfathered historical) user IDs, so that such user IDs are not forwarded to clients outside the context of an event, as per [the spec](https://spec.matrix.org/v1.14/appendices/#historical-user-ids). ([\#20115](https://github.com/element-hq/synapse/issues/20115))
+- Stop treating unset display names and avatar URLs as profile fields with a `null` value. ([\#20145](https://github.com/element-hq/synapse/issues/20145))
+- Return `allowed_room_ids` in the client [`GET /_matrix/client/v1/rooms/{roomId}/hierarchy`](https://spec.matrix.org/v1.19/client-server-api/#get_matrixclientv1roomsroomidhierarchy) response, as required since Matrix 1.15. ([\#20154](https://github.com/element-hq/synapse/issues/20154))
+- Fix state events being omitted from the [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222) `state_after` sync response when the client's `since` token falls inside an event persistence batch, as could happen on worker deployments. ([\#20171](https://github.com/element-hq/synapse/issues/20171))
+- Return the stable `M_UNKNOWN_DEVICE` error code, added in Matrix 1.17, instead of its unstable [MSC4326](https://github.com/matrix-org/matrix-spec-proposals/pull/4326)-prefixed identifier. ([\#20181](https://github.com/element-hq/synapse/issues/20181))
+- Fix slow recursive `/relations` requests in large rooms by joining events inside the recursive query. ([\#20182](https://github.com/element-hq/synapse/issues/20182))
+- Fix a bug introduced in Synapse 1.135.0 where fetching an unset `displayname` or `avatar_url` via `GET /_matrix/client/v3/profile/{userId}/{field}` returned the field with a `null` value instead of an empty object. ([\#20200](https://github.com/element-hq/synapse/issues/20200))
+- Add support for un-soft-failing [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) when room state changes, making federation support more reliable. ([\#20204](https://github.com/element-hq/synapse/issues/20204))
+
+## Improved Documentation
+
+- Document the paths that can be handled on workers with stabilised delegated authentication. ([\#20209](https://github.com/element-hq/synapse/issues/20209))
+- Document the endpoint for getting a single delayed event is workerisable. ([\#20210](https://github.com/element-hq/synapse/issues/20210))
+- Fix small warnings in documentation building tooling output. ([\#20217](https://github.com/element-hq/synapse/issues/20217))
+- Replace the stale minimum `poetry` version in the contributing docs with a pointer to the minimum defined in `pyproject.toml`. ([\#20219](https://github.com/element-hq/synapse/issues/20219))
+- Added docs regarding firewall configuration. Contributed by @HarisDotParis. ([\#20225](https://github.com/element-hq/synapse/issues/20225))
+
+## Internal Changes
+
+- Port the logcontext machinery (`LoggingContext`, `ContextResourceUsage` and the current-context storage) to Rust. ([\#19979](https://github.com/element-hq/synapse/issues/19979))
+- Refactor the Rust code to have a single place to store per-homeserver state. ([\#20011](https://github.com/element-hq/synapse/issues/20011))
+- Add a `synapse_storage_stream_current_position` metric, reporting each stream's current position as each worker process sees it. ([\#20097](https://github.com/element-hq/synapse/issues/20097))
+- Add HTTP serving functions for future [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242) work. ([\#20133](https://github.com/element-hq/synapse/issues/20133))
+- Add a cache for looking up individual pieces of current room state. ([\#20160](https://github.com/element-hq/synapse/issues/20160))
+- Run the in-repo Complement test suite in CI, even when the standard Complement suite fails. ([\#20161](https://github.com/element-hq/synapse/issues/20161))
+- Refactor the federation transmission code to delineate transaction preparation and completion. ([\#20166](https://github.com/element-hq/synapse/issues/20166))
+- Add a cache to state resolution keyed off the conflicted events. ([\#20185](https://github.com/element-hq/synapse/issues/20185))
+- Improve the rendering of the set inequality errors produced by `assertEqual` in the tests. ([\#20193](https://github.com/element-hq/synapse/issues/20193))
+- Fix `/room_summary` returning stale `join_rules`. Contributed by @famedly. ([\#20205](https://github.com/element-hq/synapse/issues/20205))
+- Fix the `Schema Diff` CI check failing to post a comment on pull requests from forks. ([\#20207](https://github.com/element-hq/synapse/issues/20207))
+- Move documentation building python dependencies into `pyproject.toml` under a new `docs` dependency group. ([\#20216](https://github.com/element-hq/synapse/issues/20216))
+- Align comments in `.dockerignore` with what we have in the private Synapse Pro branch. ([\#20224](https://github.com/element-hq/synapse/issues/20224))
+
+
+
+
 # Synapse 1.161.0 (2026-09-15)
 
 No significant changes since 1.161.0rc1.

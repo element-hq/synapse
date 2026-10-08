@@ -576,7 +576,6 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
                 "kick": 50,
                 "redact": 50,
                 "state_default": 50,
-                "users": {self.user_id: 100},
                 "users_default": 0,
             },
             tok=self.tok,

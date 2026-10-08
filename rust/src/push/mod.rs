@@ -59,7 +59,7 @@
 //! kind, etc, etc.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Error};
 use log::warn;
@@ -84,7 +84,6 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<PushRules>()?;
     child_module.add_class::<FilteredPushRules>()?;
     child_module.add_class::<PushRuleEvaluator>()?;
-    child_module.add_function(wrap_pyfunction!(get_base_rule_ids, m)?)?;
 
     m.add_submodule(&child_module)?;
 
@@ -95,11 +94,6 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
         .set_item("synapse.synapse_rust.push", child_module)?;
 
     Ok(())
-}
-
-#[pyfunction]
-fn get_base_rule_ids() -> HashSet<&'static str> {
-    base_rules::BASE_RULES_BY_ID.keys().copied().collect()
 }
 
 /// A single push rule for a user.
@@ -557,6 +551,7 @@ pub struct FilteredPushRules {
     msc3381_polls_enabled: bool,
     msc3664_enabled: bool,
     msc4028_push_encrypted_events: bool,
+    msc4075_enabled: bool,
     msc4210_enabled: bool,
     msc4306_enabled: bool,
 }
@@ -572,6 +567,7 @@ impl FilteredPushRules {
         msc3381_polls_enabled: bool,
         msc3664_enabled: bool,
         msc4028_push_encrypted_events: bool,
+        msc4075_enabled: bool,
         msc4210_enabled: bool,
         msc4306_enabled: bool,
     ) -> Self {
@@ -582,6 +578,7 @@ impl FilteredPushRules {
             msc3381_polls_enabled,
             msc3664_enabled,
             msc4028_push_encrypted_events,
+            msc4075_enabled,
             msc4210_enabled,
             msc4306_enabled,
         }
@@ -622,6 +619,15 @@ impl FilteredPushRules {
 
                 if !self.msc4028_push_encrypted_events
                     && rule.rule_id == "global/override/.org.matrix.msc4028.encrypted_event"
+                {
+                    return false;
+                }
+
+                if !self.msc4075_enabled
+                    && (rule.rule_id
+                        == "global/override/.org.matrix.msc4075.rule.rtc.invite_for_me"
+                        || rule.rule_id
+                            == "global/override/.org.matrix.msc4075.rule.rtc.invite_for_room")
                 {
                     return false;
                 }

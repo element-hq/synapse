@@ -477,13 +477,16 @@ class StickyEventField(TypedDict):
 
 
 class StickyEvent:
-    QUERY_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
+    REQUEST_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
     """
-    Query parameter used by clients for setting the sticky duration of an event they are sending.
+    Parameter used by clients for setting the sticky duration of an event they are sending.
 
-    Applies to:
+    Used as a query parameter for:
         - /rooms/.../send/...
         - /rooms/.../state/...
+
+    Used as a request body field for:
+        - /rooms/.../delayed_event/...
     """
 
     EVENT_FIELD_NAME: Final = "msc4354_sticky"
@@ -502,6 +505,8 @@ class StickyEvent:
     Maximum number of sticky events to include in /sync.
 
     This is the default specified in the MSC. Chosen arbitrarily.
+
+    Does not apply when joining a new room, see https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r3021907998
     """
 
 

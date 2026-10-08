@@ -1,29 +1,37 @@
-use std::convert::Infallible;
+use std::{
+    convert::Infallible,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use lazy_static::lazy_static;
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyRuntimeError, prelude::*};
 use pyo3_log::ResetHandle;
 
 pub mod acl;
 pub mod canonical_json;
+pub mod clock;
 pub mod config;
 pub mod deferred;
 pub mod duration;
 pub mod errors;
 pub mod events;
 pub mod handlers;
+pub mod homeserver;
 pub mod http;
 pub mod http_client;
 pub mod identifier;
 pub mod json;
+pub mod logging;
 pub mod matrix_const;
 pub mod msc4388_rendezvous;
 pub mod push;
+pub mod reactor;
 pub mod rendezvous;
 pub mod room_versions;
+pub mod runtime;
 pub mod segmenter;
 pub mod storage;
-pub mod tokio_runtime;
+pub mod twisted_dispatch;
 pub mod types;
 
 lazy_static! {
@@ -64,18 +72,28 @@ fn reset_logging_config() {
 /// The entry point for defining the Python module.
 #[pymodule]
 fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // We expect that system clock is set for after the Unix epoch, 1970. We'll
+    // panic later if it is not, so we check here and fail early.
+    if SystemTime::now().duration_since(UNIX_EPOCH).is_err() {
+        return Err(PyRuntimeError::new_err(
+            "system clock was set before the Unix epoch, 1970",
+        ));
+    }
+
     m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     m.add_function(wrap_pyfunction!(get_rust_file_digest, m)?)?;
     m.add_function(wrap_pyfunction!(get_rustc_version, m)?)?;
     m.add_function(wrap_pyfunction!(reset_logging_config, m)?)?;
 
     acl::register_module(py, m)?;
+    logging::context::register_module(py, m)?;
     deferred::register_module(py, m)?;
     push::register_module(py, m)?;
     events::register_module(py, m)?;
     handlers::register_module(py, m)?;
     http_client::register_module(py, m)?;
     rendezvous::register_module(py, m)?;
+    runtime::register_module(py, m)?;
     msc4388_rendezvous::register_module(py, m)?;
     segmenter::register_module(py, m)?;
     room_versions::register_module(py, m)?;

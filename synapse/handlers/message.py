@@ -509,8 +509,6 @@ class EventCreationHandler:
         self._worker_lock_handler = hs.get_worker_locks_handler()
         self._policy_handler = hs.get_room_policy_handler()
 
-        self.room_prejoin_state_types = self.hs.config.api.room_prejoin_state
-
         self.send_events = ReplicationSendEventsRestServlet.make_client(hs)
 
         self.request_ratelimiter = hs.get_request_ratelimiter()
@@ -1805,7 +1803,7 @@ class EventCreationHandler:
                     if e.code == HTTPStatus.CONFLICT:
                         raise PartialStateConflictError()
                     raise
-                stream_id = result["stream_id"]
+
                 event_id = result["event_id"]
 
                 # If we batch persisted events we return the last persisted event, otherwise
@@ -1817,11 +1815,18 @@ class EventCreationHandler:
                     # been de-duplicated, so we replace the given event with the
                     # one already persisted.
                     event = await self.store.get_event(event_id)
+                elif "received_ts" not in result:
+                    # FIXME: COMPATIBILITY (remove after one release, introduced in Synapse v1.163.0):
+                    # We can hit this in a rolling upgrade where the event_persister worker
+                    # hasn't been upgraded yet and so we can't populate the `received_ts`.
+                    # Replace our copy of the event with one pulled from the database.
+                    event = await self.store.get_event(event_id)
                 else:
                     # If we newly persisted the event then we need to update its
-                    # stream_ordering entry manually (as it was persisted on
-                    # another worker).
-                    event.internal_metadata.stream_ordering = stream_id
+                    # stream_ordering and received_ts entries manually
+                    # (as it was persisted on another worker).
+                    event.internal_metadata.stream_ordering = result["stream_id"]
+                    event.internal_metadata.received_ts = result["received_ts"]
                     event.internal_metadata.instance_name = writer_instance
 
                 return event
@@ -2081,9 +2086,8 @@ class EventCreationHandler:
                         event.unsigned,
                         "invite_room_state",
                         await self.store.get_stripped_room_state_from_event_context(
+                            event,
                             context,
-                            self.room_prejoin_state_types,
-                            membership_user_id=event.sender,
                         ),
                     )
 
@@ -2094,7 +2098,7 @@ class EventCreationHandler:
                         # to get them to sign the event.
 
                         returned_invite = await federation_handler.send_invite(
-                            invitee.domain, event
+                            invitee.domain, event, context
                         )
 
                         # TODO: Make sure the signatures actually are correct.
@@ -2106,8 +2110,8 @@ class EventCreationHandler:
                         event.unsigned,
                         "knock_room_state",
                         await self.store.get_stripped_room_state_from_event_context(
+                            event,
                             context,
-                            self.room_prejoin_state_types,
                         ),
                     )
 
