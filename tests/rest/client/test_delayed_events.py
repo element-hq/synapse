@@ -1212,9 +1212,15 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         config["experimental_features"] = {"msc4354_enabled": True}
         return config
 
-    @parameterized.expand((False, True))
+    @parameterized.expand(
+        (
+            (False, True),
+            (True, False),
+            (True, True),
+        )
+    )
     def test_delayed_sticky_event_is_sent_with_sticky_duration(
-        self, param_in_body: bool
+        self, param_in_body: bool, param_in_query: bool
     ) -> None:
         """Test that the sticky duration given when scheduling a delayed event
         is applied to the event once it is sent (MSC4354)."""
@@ -1227,10 +1233,10 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
             delay=Duration(milliseconds=900),
             content={"body": "sticky"},
         )
-        if not param_in_body:
-            path += f"?{StickyEvent.REQUEST_PARAM_NAME}={sticky_duration.as_millis()}"
-        else:
+        if param_in_body:
             body[StickyEvent.REQUEST_PARAM_NAME] = sticky_duration.as_millis()
+        if param_in_query:
+            path += f"?{StickyEvent.REQUEST_PARAM_NAME}={sticky_duration.as_millis()}"
         channel = self.make_request("PUT", path, body, self.user1_access_token)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         delay_id = channel.json_body.get("delay_id")
