@@ -926,7 +926,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         """
         channel = self.make_request(
             "POST",
-            "/_matrix/client/unstable/org.matrix.msc4536/profiles/query",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
                 "users": [
                     "@alice:test",
