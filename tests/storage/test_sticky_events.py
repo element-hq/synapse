@@ -14,6 +14,7 @@ import sqlite3
 from http import HTTPStatus
 
 from immutabledict import immutabledict
+from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
@@ -421,7 +422,10 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         # ...nor shown to clients down sync.
         self.assertEqual(self._get_visible_sticky_event_ids(), set())
 
-    def test_redacted_in_same_batch_not_tracked(self) -> None:
+    @parameterized.expand([(True,), (False,)])
+    def test_redacted_in_same_batch_not_tracked(
+        self, flip_order_in_batch: bool
+    ) -> None:
         """
         Tests that a sticky event which is persisted in the same batch as a redaction of it
         is not sent down to clients over sync and is not added to the `sticky_events` table.
@@ -460,14 +464,18 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         )
 
         # Persist both events in a single batch.
-        self.get_success(
-            persist_controller.persist_events(
-                [
-                    (sticky_event, sticky_event_context),
-                    (redaction_event, redaction_event_context),
-                ]
-            )
-        )
+        # Test both orders of events to make sure it doesn't affect the outcome.
+        if flip_order_in_batch:
+            batch = [
+                (redaction_event, redaction_event_context),
+                (sticky_event, sticky_event_context),
+            ]
+        else:
+            batch = [
+                (sticky_event, sticky_event_context),
+                (redaction_event, redaction_event_context),
+            ]
+        self.get_success(persist_controller.persist_events(batch))
 
         # The event should have been persisted in its redacted form.
         event = self.get_success(self.store.get_event(sticky_event.event_id))
