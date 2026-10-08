@@ -68,6 +68,7 @@ class DelayedEventsHandler:
         self._auth = hs.get_auth()
         self._event_creation_handler = hs.get_event_creation_handler()
         self._room_member_handler = hs.get_room_member_handler()
+        self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
         self._request_ratelimiter = hs.get_request_ratelimiter()
 
@@ -144,6 +145,16 @@ class DelayedEventsHandler:
         which should cancel pending delayed events for the same state.
         """
         if self._event_processing:
+            return
+
+        # This is called for updates on any stream (typing, receipts, to-device,
+        # etc), but only new room events can produce the state deltas we
+        # process. If the room stream hasn't advanced past what we've already
+        # handled, there's nothing to do, so skip the database round-trips.
+        if (
+            self._event_pos is not None
+            and self._event_pos >= self._store.get_room_max_stream_ordering()
+        ):
             return
 
         self._event_processing = True
@@ -359,20 +370,13 @@ class DelayedEventsHandler:
 
         Raises:
             SynapseError: if the delayed event fails validation checks, or
-                if the requested delay is longer than allowed, or
-                if sending delayed events has been disallowed entirely.
+                if the requested delay is longer than allowed.
         """
         # Use standard request limiter for scheduling new delayed events.
         # TODO: Instead apply ratelimiting based on the scheduled send time.
         # See https://github.com/element-hq/synapse/issues/18021
         await self._request_ratelimiter.ratelimit(requester)
 
-        if not self._config.server.msc4140_enabled:
-            raise SynapseError(
-                HTTPStatus.FORBIDDEN,
-                "Sending delayed events has been disallowed",
-                Codes.FORBIDDEN,
-            )
         if delay > self._config.server.max_event_delay_duration:
             requested_delay = delay.as_millis()
             max_delay = self._config.server.max_event_delay_duration.as_millis()
@@ -615,6 +619,7 @@ class DelayedEventsHandler:
     ) -> None:
         user_id = UserID(event.user_localpart, self._config.server.server_name)
         user_id_str = user_id.to_string()
+        room_id_str = event.room_id.to_string()
         # Create a new requester from what data is currently available
         requester = create_requester(
             user_id,
@@ -623,13 +628,31 @@ class DelayedEventsHandler:
         )
 
         try:
+            if event.state_key is not None:
+                is_requester_admin = await self._auth.is_server_admin(requester)
+                if not is_requester_admin:
+                    spam_check = await self._spam_checker_module_callbacks.user_may_send_state_event(
+                        user_id=user_id_str,
+                        room_id=room_id_str,
+                        event_type=event.type,
+                        state_key=event.state_key,
+                        content=event.content,
+                    )
+                    if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                        raise SynapseError(
+                            403,
+                            "You are not permitted to send the state event",
+                            errcode=spam_check[0],
+                            additional_fields=spam_check[1],
+                        )
+
             if event.state_key is not None and event.type == EventTypes.Member:
                 membership = event.content.get("membership")
                 assert membership is not None
                 event_id, _ = await self._room_member_handler.update_membership(
                     requester,
                     target=UserID.from_string(event.state_key),
-                    room_id=event.room_id.to_string(),
+                    room_id=room_id_str,
                     action=membership,
                     content=event.content,
                     origin_server_ts=event.origin_server_ts,
@@ -639,7 +662,7 @@ class DelayedEventsHandler:
                 event_dict: JsonDict = {
                     "type": event.type,
                     "content": event.content,
-                    "room_id": event.room_id.to_string(),
+                    "room_id": room_id_str,
                     "sender": user_id_str,
                 }
 

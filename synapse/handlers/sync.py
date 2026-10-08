@@ -779,18 +779,24 @@ class SyncHandler:
         with Measure(
             self.clock, name="sticky_events_by_room", server_name=self.server_name
         ):
-            from_id = since_token.sticky_events_key if since_token else 0
+            from_token = (
+                since_token.sticky_events_key
+                if since_token
+                else StreamToken.START.sticky_events_key
+            )
 
             room_ids = sync_result_builder.joined_room_ids
 
-            to_id, sticky_by_room = await self.store.get_sticky_events_in_rooms(
+            to_token, sticky_by_room = await self.store.get_sticky_events_in_rooms(
                 room_ids,
-                from_id=from_id,
-                to_id=now_token.sticky_events_key,
+                from_token=from_token,
+                to_token=now_token.sticky_events_key,
                 now=now,
                 limit=StickyEvent.MAX_EVENTS_IN_SYNC,
             )
-            now_token = now_token.copy_and_replace(StreamKeyType.STICKY_EVENTS, to_id)
+            now_token = now_token.copy_and_replace(
+                StreamKeyType.STICKY_EVENTS, to_token
+            )
 
         return now_token, sticky_by_room
 
@@ -815,8 +821,8 @@ class SyncHandler:
             _, sticky_by_room = await self.store.get_sticky_events_in_rooms(
                 newly_joined_rooms,
                 # Since the start of time
-                from_id=0,
-                to_id=now_token.sticky_events_key,
+                from_token=StreamToken.START.sticky_events_key,
+                to_token=now_token.sticky_events_key,
                 now=now,
                 # Unfortunately, we're meant to return all sticky events in one go
                 # (we don't have a good alternative).
