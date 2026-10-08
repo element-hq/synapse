@@ -68,6 +68,45 @@ configuration file takes priority.
 
 Modules **must** register their web resources in their `__init__` method.
 
+## Making federation requests
+
+Modules can make authenticated HTTP requests to other homeservers with
+`ModuleApi.send_federation_http_request`. 
+
+For example, you can request a
+[public room list over federation](https://spec.matrix.org/v1.19/server-server-api/#post_matrixfederationv1publicrooms):
+
+```python
+from urllib.parse import quote
+
+from synapse.module_api import JsonDict, ModuleApi
+
+
+class MyModule:
+    def __init__(self, config: dict, api: ModuleApi):
+        self.api = api
+
+    async def get_public_room_list(
+        self, remote_server_name: str, search_term: str
+    ) -> JsonDict:
+        return await self.api.send_federation_http_request(
+            method="POST",
+            remote_server_name=remote_server_name,
+            path=f"/_matrix/federation/v1/publicRooms",
+            query_parameters={},
+            body={
+                "filter": {
+                    "generic_search_term": search_term
+                }
+            }
+        )
+```
+
+The method supports `GET`, `PUT`, `POST`, and `DELETE` requests. `PUT` and `POST`
+requests may include a JSON object using the `body` argument. Successful responses are
+returned as decoded JSON objects. Failures raise the federation HTTP exception types
+from `synapse.module_api.errors`.
+
 ## Registering a callback
 
 Modules can use Synapse's module API to register callbacks. Callbacks are functions that
