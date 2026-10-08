@@ -25,6 +25,7 @@ from parameterized import parameterized
 from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import EventContentFields
 from synapse.logging.context import make_deferred_yieldable
 from synapse.push import PusherConfig, PusherConfigException
 from synapse.rest import admin
@@ -422,10 +423,10 @@ class HTTPPusherTests(HomeserverTestCase):
         # check that this is low-priority
         self.assertEqual(self.push_attempts[1][2]["notification"]["prio"], "low")
 
-    def test_sends_high_priority_for_mention(self) -> None:
+    def test_sends_high_priority_for_user_mention(self) -> None:
         """
         The HTTP pusher will send pushes at high priority if they correspond
-        to a message containing the user's display name.
+        to a message that intentionally mentions the user via `m.mentions`.
         """
         # Register the user who gets notified
         user_id = self.register_user("user", "pass")
@@ -469,8 +470,18 @@ class HTTPPusherTests(HomeserverTestCase):
             )
         )
 
-        # Send a message
-        self.helper.send(room, body="Oh, user, hello!", tok=other_access_token)
+        # Send a message mentioning the user. As a client would, the body refers
+        # to the user as well, but it is `m.mentions` that makes it a mention.
+        self.helper.send_event(
+            room,
+            "m.room.message",
+            {
+                "msgtype": "m.text",
+                "body": "Oh, @user, hello!",
+                EventContentFields.MENTIONS: {"user_ids": [user_id]},
+            },
+            tok=other_access_token,
+        )
 
         # Advance time a bit, so the pusher will register something has happened
         self.pump()
@@ -547,10 +558,15 @@ class HTTPPusherTests(HomeserverTestCase):
             )
         )
 
-        # Send a message
-        self.helper.send(
+        # Send a message mentioning the room
+        self.helper.send_event(
             room,
-            body="@room eeek! There's a spider on the table!",
+            "m.room.message",
+            {
+                "msgtype": "m.text",
+                "body": "@room eeek! There's a spider on the table!",
+                EventContentFields.MENTIONS: {"room": True},
+            },
             tok=other_access_token,
         )
 
@@ -569,8 +585,15 @@ class HTTPPusherTests(HomeserverTestCase):
         self.assertEqual(self.push_attempts[0][2]["notification"]["prio"], "high")
 
         # Send another event, this time as someone without the power of @room
-        self.helper.send(
-            room, body="@room the spider is gone", tok=yet_another_access_token
+        self.helper.send_event(
+            room,
+            "m.room.message",
+            {
+                "msgtype": "m.text",
+                "body": "@room the spider is gone",
+                EventContentFields.MENTIONS: {"room": True},
+            },
+            tok=yet_another_access_token,
         )
 
         # Advance time a bit, so the pusher will register something has happened
