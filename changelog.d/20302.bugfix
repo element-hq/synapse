@@ -1,0 +1,1 @@
+Set up `un_partial_stated_room_stream_sequence` during SQLite -> PostgreSQL DB porting, preventing a PostgreSQL sequence inconsistency error on startup.
