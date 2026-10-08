@@ -1,0 +1,1 @@
+Fix `register_new_matrix_user` script failing when the homeserver is configured with a Unix socket listener instead of an HTTP listener.
