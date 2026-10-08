@@ -1234,6 +1234,130 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.get_success(self.handler.check_avatar_size_and_mime_type(remote_mxc))
         )
 
+    @parameterized.expand(
+        [
+            "m.status",
+            "m.call",
+            "org.matrix.msc4426.status",
+            "org.matrix.msc4426.call",
+        ]
+    )
+    def test_get_profile_filters_out_msc4426_fields_for_remote_users(
+        self, field_name: str
+    ) -> None:
+        # Set some fields for our local user
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value="value",
+            )
+        )
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="some_other_field",
+                new_value="value",
+            )
+        )
+
+        # Mock the remote user lookup
+        self.mock_federation.make_query.return_value = {
+            field_name: "value",
+            "some_other_field": "value",
+        }
+
+        # Test our local user
+        local_profile = self.get_success(
+            self.handler.get_profile(
+                user_id=self.frank.to_string(),
+            )
+        )
+        self.assertEqual(
+            local_profile,
+            {
+                "displayname": "1234abcd",
+                field_name: "value",
+                "some_other_field": "value",
+            },
+        )
+
+        # Test our remote user
+        remote_profile = self.get_success(
+            self.handler.get_profile(
+                user_id=self.alice.to_string(),
+            )
+        )
+        self.assertEqual(
+            remote_profile,
+            {
+                "some_other_field": "value",
+            },
+        )
+
+        # Mock the remote user lookup again to only return the filtered field
+        self.mock_federation.make_query.return_value = {
+            field_name: "value",
+        }
+
+        # Ensure empty dictionary
+        remote_profile = self.get_success(
+            self.handler.get_profile(
+                user_id=self.alice.to_string(),
+            )
+        )
+        self.assertEqual(
+            remote_profile,
+            {},
+        )
+
+    @parameterized.expand(
+        [
+            "m.status",
+            "m.call",
+            "org.matrix.msc4426.status",
+            "org.matrix.msc4426.call",
+        ]
+    )
+    def test_get_profile_field_filters_out_msc4426_fields_for_remote_users(
+        self, field_name: str
+    ) -> None:
+        # Set a field value for our local user
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value="value",
+            )
+        )
+
+        # No need to mock the remote user query since we shouldn't do one if
+        # the field is one that we want to ignore.
+
+        # Test our local user
+        field_value = self.get_success(
+            self.handler.get_profile_field(
+                target_user=self.frank,
+                field_name=field_name,
+            )
+        )
+        self.assertEqual(
+            field_value,
+            "value",
+        )
+
+        # Test our remote user
+        self.get_failure(
+            self.handler.get_profile_field(
+                target_user=self.alice,
+                field_name=field_name,
+            ),
+            SynapseError,
+        )
+
     def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 

@@ -159,6 +159,54 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             ],
         )
 
+    def test_redaction_removes_sticky_event(self) -> None:
+        """
+        Tests that redacting a sticky event causes it to be removed from the `sticky_events` table.
+        """
+
+        def _sticky_event_ids_from_table() -> list[str]:
+            """Return all event IDs in the `sticky_events` table, in sticky stream order."""
+            rows = self.get_success(
+                self.store.db_pool.simple_select_list(
+                    table="sticky_events",
+                    keyvalues=None,
+                    retcols=("stream_id", "event_id"),
+                )
+            )
+            return [event_id for _, event_id in sorted(rows)]
+
+        redacted_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "to be redacted", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+        kept_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "to be left alone", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+
+        # Before redaction, both sticky events are in the table.
+        self.assertEqual(
+            set(_sticky_event_ids_from_table()), {redacted_event_id, kept_event_id}
+        )
+
+        # Redact
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room_id}/redact/{redacted_event_id}/txn1",
+            {},
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # After redaction, only the unredacted sticky event is left in the table.
+        self.assertEqual(set(_sticky_event_ids_from_table()), {kept_event_id})
+
     def test_get_updated_sticky_events_with_limit(self) -> None:
         """Test that the limit parameter works correctly."""
         # Get the starting stream_id

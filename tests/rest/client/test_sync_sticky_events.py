@@ -31,6 +31,24 @@ from tests import unittest
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
+@dataclass
+class SyncHelperResponse:
+    sticky_event_ids: list[str]
+    """Event IDs of events returned from the sticky section, in-order."""
+
+    next_batch: str
+    """Sync token to pass to `?since=` in order to do an incremental sync."""
+
+
+NO_TIMELINE_FILTER = json.dumps(
+    {"room": {"timeline": {"types": ["io.element.example"]}}}
+)
+"""
+A filter that excludes message events, so that the sticky events come down
+the sticky section rather than the timeline section.
+"""
+
+
 class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
     """
     Tests for oldschool (v3) /sync with sticky events (MSC4354)
@@ -61,6 +79,32 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
 
         # Create a room
         self.room_id = self.helper.create_room_as(self.user_id, tok=self.token)
+
+    def _do_sync(self, *, since: str | None, filter_json: str) -> SyncHelperResponse:
+        """Small helper to do a sync and get the sticky events out."""
+        and_since_param = "" if since is None else f"&since={since}"
+        channel = self.make_request(
+            "GET",
+            f"/sync?filter={quote(filter_json)}{and_since_param}",
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Get sticky events from the sync response
+        sticky_events = []
+        # In this test, when no sticky events are in the response,
+        # we don't have a rooms section at all
+        if "rooms" in channel.json_body:
+            sticky_events = channel.json_body["rooms"]["join"][self.room_id][
+                "msc4354_sticky"
+            ]["events"]
+
+        return SyncHelperResponse(
+            sticky_event_ids=[
+                sticky_event["event_id"] for sticky_event in sticky_events
+            ],
+            next_batch=channel.json_body["next_batch"],
+        )
 
     def test_single_sticky_event_appears_in_initial_sync(self) -> None:
         """
@@ -215,16 +259,6 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         > out by the timeline filter, the sticky event MUST appear in sticky.events.
         > — https://github.com/matrix-org/matrix-spec-proposals/blob/4340903c15e9eab1bfb2f6a31cfa08fd535f7e7c/proposals/4354-sticky-events.md#sync-api-changes
         """
-        # A filter that excludes message events
-        filter_json = json.dumps(
-            {
-                "room": {
-                    # We only want these io.element.example events
-                    "timeline": {"types": ["io.element.example"]},
-                }
-            }
-        )
-
         # Send a sticky message event (will be filtered by our filter)
         sticky_event_id = self.helper.send_sticky_event(
             self.room_id,
@@ -245,7 +279,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         # Perform initial sync with our filter
         channel = self.make_request(
             "GET",
-            f"/sync?filter={quote(filter_json)}",
+            f"/sync?filter={quote(NO_TIMELINE_FILTER)}",
             access_token=self.token,
         )
         self.assertEqual(channel.code, 200, channel.result)
@@ -281,6 +315,55 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             received_sticky_event_ids,
             [sticky_event_id],
+        )
+
+    def test_redacted_sticky_event_not_in_sync(self) -> None:
+        """
+        Test that a sticky event which has since been redacted is not returned in the
+        sticky section of the sync response, since redaction strips its stickiness.
+        """
+        redacted_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "to be redacted", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+        kept_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "to be left alone", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+
+        # Both sticky events are visible to begin with
+        self.assertEqual(
+            set(
+                self._do_sync(
+                    since=None, filter_json=NO_TIMELINE_FILTER
+                ).sticky_event_ids
+            ),
+            {redacted_event_id, kept_event_id},
+        )
+
+        # We then redact one of them.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room_id}/redact/{redacted_event_id}/txn1",
+            {},
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # ... but the redacted one is no longer sticky
+        self.assertEqual(
+            set(
+                self._do_sync(
+                    since=None, filter_json=NO_TIMELINE_FILTER
+                ).sticky_event_ids
+            ),
+            {kept_event_id},
         )
 
     def test_ignored_users_sticky_events(self) -> None:
@@ -362,10 +445,6 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         > — https://github.com/matrix-org/matrix-spec-proposals/blob/d42301b17859d046953563dc7f046edd51789a12/proposals/4354-sticky-events.md#sync-api-changes
         """
         # A filter that excludes message events, so that the sticky events come down
-        # the sticky section rather than the timeline section.
-        filter_json = json.dumps(
-            {"room": {"timeline": {"types": ["io.element.example"]}}}
-        )
 
         sticky_event_id = self.helper.send_sticky_event(
             self.room_id,
@@ -381,7 +460,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         user2_token = self.login(user2_id, "pass")
         channel = self.make_request(
             "GET",
-            f"/sync?filter={quote(filter_json)}",
+            f"/sync?filter={quote(NO_TIMELINE_FILTER)}",
             access_token=user2_token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
@@ -393,7 +472,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         # The next (incremental) sync gives user2 the historical sticky event.
         channel = self.make_request(
             "GET",
-            f"/sync?filter={quote(filter_json)}&since={since}",
+            f"/sync?filter={quote(NO_TIMELINE_FILTER)}&since={since}",
             access_token=user2_token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
@@ -568,18 +647,6 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         In this test we patch it to 3 (as sending 100 events is not very efficient).
         """
 
-        # A filter that excludes message events
-        # This is needed so that the sticky events come down the sticky section
-        # and not the timeline section, which would hamper our test.
-        filter_json = json.dumps(
-            {
-                "room": {
-                    # We only want these io.element.example events
-                    "timeline": {"types": ["io.element.example"]},
-                }
-            }
-        )
-
         # Send 8 sticky events: enough for 2 full pages and then a partial page with 2.
         sent_sticky_event_ids = []
         for i in range(8):
@@ -592,53 +659,19 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
             )
             sent_sticky_event_ids.append(response["event_id"])
 
-        @dataclass
-        class SyncHelperResponse:
-            sticky_event_ids: list[str]
-            """Event IDs of events returned from the sticky section, in-order."""
-
-            next_batch: str
-            """Sync token to pass to `?since=` in order to do an incremental sync."""
-
-        def _do_sync(*, since: str | None) -> SyncHelperResponse:
-            """Small helper to do a sync and get the sticky events out."""
-            and_since_param = "" if since is None else f"&since={since}"
-            channel = self.make_request(
-                "GET",
-                f"/sync?filter={quote(filter_json)}{and_since_param}",
-                access_token=self.token,
-            )
-            self.assertEqual(channel.code, 200, channel.result)
-
-            # Get sticky events from the sync response
-            sticky_events = []
-            # In this test, when no sticky events are in the response,
-            # we don't have a rooms section at all
-            if "rooms" in channel.json_body:
-                sticky_events = channel.json_body["rooms"]["join"][self.room_id][
-                    "msc4354_sticky"
-                ]["events"]
-
-            return SyncHelperResponse(
-                sticky_event_ids=[
-                    sticky_event["event_id"] for sticky_event in sticky_events
-                ],
-                next_batch=channel.json_body["next_batch"],
-            )
-
         # Perform initial sync, we should get the first 3 sticky events,
         # in order.
-        sync1 = _do_sync(since=None)
+        sync1 = self._do_sync(since=None, filter_json=NO_TIMELINE_FILTER)
         self.assertEqual(sync1.sticky_event_ids, sent_sticky_event_ids[0:3])
 
         # Now do an incremental sync and expect the next page of 3
-        sync2 = _do_sync(since=sync1.next_batch)
+        sync2 = self._do_sync(since=sync1.next_batch, filter_json=NO_TIMELINE_FILTER)
         self.assertEqual(sync2.sticky_event_ids, sent_sticky_event_ids[3:6])
 
         # Now do another incremental sync and expect the last 2
-        sync3 = _do_sync(since=sync2.next_batch)
+        sync3 = self._do_sync(since=sync2.next_batch, filter_json=NO_TIMELINE_FILTER)
         self.assertEqual(sync3.sticky_event_ids, sent_sticky_event_ids[6:8])
 
         # Finally, expect an empty incremental sync at the end
-        sync4 = _do_sync(since=sync3.next_batch)
+        sync4 = self._do_sync(since=sync3.next_batch, filter_json=NO_TIMELINE_FILTER)
         self.assertEqual(sync4.sticky_event_ids, [])
