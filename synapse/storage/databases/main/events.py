@@ -81,6 +81,7 @@ from synapse.types import (
     StrCollection,
     UserID,
     get_domain_from_id,
+    unwrap,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -1183,6 +1184,18 @@ class PersistEventsStore:
         events_and_contexts = self._apply_existing_redaction_txn(
             txn, room_id, room_version, events_and_contexts=events_and_contexts
         )
+
+        confirmed_redacted_already_persisted_event_ids = (
+            self._compute_newly_redacted_event_ids_txn(
+                txn, room_id, room_version, events_and_contexts=events_and_contexts
+            )
+        )
+        if confirmed_redacted_already_persisted_event_ids:
+            # If any of our already-existing events being redacted are sticky,
+            # we should remove the stickiness.
+            self.store.delete_sticky_events_txn(
+                txn, confirmed_redacted_already_persisted_event_ids
+            )
 
         self._store_event_txn(txn, events_and_contexts=events_and_contexts)
 
@@ -3011,6 +3024,116 @@ class PersistEventsStore:
                 out.append((event, context))
 
         return out
+
+    def _compute_newly_redacted_event_ids_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        room_version: RoomVersion,
+        events_and_contexts: list[EventPersistencePair],
+    ) -> set[str]:
+        """
+        If we are persisting any redactions, computes the set of already-persisted event IDs
+        that we can confirm are now redacted.
+
+        Put another way: this function tells you about _known_ events that are getting
+        redacted by the persistence of this batch of events.
+        (It's useful for applying some effects to events as they become redacted, such as
+        removing their stickiness.)
+
+        For redactions requiring re-check, applies the re-check and only returns events satisfying
+        the re-check.
+        For redactions requiring re-check, if we don't have the target event that is being redacted,
+        the event ID is NOT returned as we can't confirm it.
+
+        See:
+            `EventInternalMetadata::need_to_check_redaction` for the concept of room v3+ rechecks.
+
+        Args:
+            room_id: ID of the room that we are persisting events for
+                and that we might be redacting events within
+            room_version: Version of the room that we are persisting events for
+            events_and_contexts: The batch of events (with their persistence contexts) being persisted
+
+        Returns:
+            Set of already-persisted event IDs that are newly-redacted.
+            The events have been verified to be in the same room.
+        """
+
+        redaction_events = [
+            event
+            for event, _context in events_and_contexts
+            if event.redacts is not None and event.rejected_reason is None
+        ]
+        if not redaction_events:
+            return set()
+
+        # Fetch the events getting redacted, for 3 reasons:
+        # - to check their event type (we don't apply redactions to `m.room.create` events)
+        # - to check they are in the same room
+        # - to get the domain of their sender (needed for confirming some redactions)
+        raw_rows = self.db_pool.simple_select_many_txn(
+            txn,
+            table="events",
+            column="event_id",
+            iterable=[
+                # seen to be non-None above
+                unwrap(e.redacts)
+                for e in redaction_events
+            ],
+            # This `room_id` match is critical to ensure redactions don't try to redact events
+            # from other rooms!
+            keyvalues={"room_id": room_id},
+            retcols=("event_id", "sender", "type"),
+        )
+
+        # {event_id: (sender_domain, event_type), ...}
+        redacted_event_rows_by_event_id: dict[str, tuple[str, str]] = {}
+        for event_id, sender, event_type in raw_rows:
+            redacted_event_rows_by_event_id[event_id] = (
+                get_domain_from_id(sender),
+                event_type,
+            )
+
+        confirmed_redaction_events: list[EventBase] = []
+        for redaction_event in redaction_events:
+            # unwrap: seen to be non-None above
+            redacted_event_row = redacted_event_rows_by_event_id.get(
+                unwrap(redaction_event.redacts)
+            )
+
+            if redacted_event_row is None:
+                # We don't have the event that this redaction is redacting,
+                # so we can't confirm the redaction.
+                continue
+
+            redacted_event_sender_domain, redacted_event_type = redacted_event_row
+
+            if redacted_event_type == EventTypes.Create:
+                # we choose to ignore redactions of m.room.create events,
+                # as in `_maybe_redact_event_row`
+                continue
+
+            # Some redactions in v3+ rooms need a recheck based on the event
+            # they are redacting.
+            if redaction_event.internal_metadata.need_to_check_redaction():
+                # This is the same logic as in `_maybe_redact_event_row`.
+                if (
+                    get_domain_from_id(redaction_event.sender)
+                    != redacted_event_sender_domain
+                ):
+                    # Sender servers don't match, so the event isn't actually redacted
+                    continue
+
+                # This redaction event is allowed. Mark as not needing a recheck.
+                redaction_event.internal_metadata.recheck_redaction = False
+
+            confirmed_redaction_events.append(redaction_event)
+
+        return {
+            unwrap(redaction_event.redacts)
+            for redaction_event in confirmed_redaction_events
+        }
 
     def _store_event_txn(
         self,
