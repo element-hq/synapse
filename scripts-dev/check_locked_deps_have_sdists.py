@@ -4,6 +4,7 @@
 #
 # Copyright 2022 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -25,6 +26,13 @@ from pathlib import Path
 import tomli
 
 
+# Check that the dependencies in `poetry.lock` have source distributions.
+#
+# These are required for building a package from scratch locally if a wheel isn't
+# already published for your python edition/ABI + platform + CPU architecture.
+#
+# Previous work where we were burned by a dependency without a source distribution:
+# https://github.com/matrix-org/synapse/pull/14718
 def main() -> None:
     lockfile_path = Path(__file__).parent.parent.joinpath("poetry.lock")
     with open(lockfile_path, "rb") as lockfile:
@@ -33,7 +41,16 @@ def main() -> None:
     # Poetry 1.3+ lockfile format:
     # There's a `files` inline table in each [[package]]
     packages_to_assets: dict[str, list[dict[str, str]]] = {
-        package["name"]: package["files"] for package in lockfile_content["package"]
+        package["name"]: package["files"]
+        for package in lockfile_content["package"]
+        # Skip Windows-only pywin32, whose maintainers purposefully do not publish sdists.
+        # https://github.com/mhammond/pywin32/issues/1857
+        #
+        # This package is not installed when installing Linux dependencies for Synapse
+        # anyhow, and is thus a false positive.
+        #
+        # pywin32 is brought in by our dependency on `pympler`.
+        if package["name"] != "pywin32"
     }
 
     success = True
