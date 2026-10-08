@@ -593,7 +593,7 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
             sticky_duration_ms = parse_integer(
                 request,
                 StickyEvent.REQUEST_PARAM_NAME,
-                negative=False,  # MSC4354 allows any integer value in the request, not just positives
+                negative=True,  # MSC4354 allows any integer value in the request, not just positives
             )
             if request_body.sticky_duration_ms is not Absent:
                 if sticky_duration_ms is None:
