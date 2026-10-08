@@ -1699,19 +1699,63 @@ class SyncHandler:
                     to_token=end_token.room_key,
                 )
             )
+            # A delta with `event_id=None` means the key was removed from the
+            # current state. Two things cause this:
+            #  - A state reset removed the key. With `/sync`, there is no way to tell the client a
+            #    key was removed, so there is nothing to send for it.
+            #  - The server left the room (its last local user left). It then
+            #    copies the room state from **before the batch** that contains the
+            #    leave into `current_state_delta_stream`, as deltas with
+            #    `event_id=None`. No delta refers to the events in that batch: the
+            #    leaving user's membership only gets an `event_id=None` delta, with
+            #    their membership before the leave as `prev_event_id`. So a key
+            #    that batch changed:
+            #     - only has the `event_id=None` delta if it already existed, and
+            #       any earlier delta for it is stale. That batch ends the
+            #       timeline, so we look up the keys in the timeline in state
+            #       groups, which still have the state at `end_token`.
+            #     - has no delta at all if it is new.
+            #       TODO: Recover it.
+            #    Keys that only changed earlier keep their earlier delta, and
+            #    other keys need no update.
+            cleared_state_keys: set[tuple[str, str]] = set()
             for delta in deltas:
+                key = (delta.event_type, delta.state_key)
                 if delta.event_id is None:
-                    # There was a state reset and this state entry is no longer
-                    # present, but we have no way of informing the client about
-                    # this, so we just skip it for now.
+                    # Look up the key if:
+                    #  - it is in the timeline (see above).
+                    #  - OR it is the user's own membership, in case a filter
+                    #    removed their leave from the timeline.
+                    if key in timeline_state or key == (
+                        EventTypes.Member,
+                        sync_config.user.to_string(),
+                    ):
+                        cleared_state_keys.add(key)
                     continue
 
                 # Note that deltas are in stream ordering, so if there are
                 # multiple deltas for a given type/state_key we'll always pick
                 # the latest one.
-                key = (delta.event_type, delta.state_key)
                 delta_state_ids[key] = delta.event_id
                 changed_keys.add(key)
+                cleared_state_keys.discard(key)
+
+            if cleared_state_keys:
+                state_at_end = await self._state_storage_controller.get_state_ids_at(
+                    room_id,
+                    stream_position=end_token,
+                    state_filter=StateFilter.from_types(cleared_state_keys),
+                    # Don't wait for the full state. Partial state has every state
+                    # event except remote memberships, and any remote membership
+                    # we look up here is from an event in the timeline, which we
+                    # have. Waiting could also block the whole sync on a known
+                    # issue where the resync never finishes.
+                    await_full_state=False,
+                )
+                # This replaces any earlier delta for the same key, e.g. a
+                # display name change before the leave.
+                delta_state_ids.update(state_at_end)
+                changed_keys.update(state_at_end)
 
             return delta_state_ids, changed_keys
 

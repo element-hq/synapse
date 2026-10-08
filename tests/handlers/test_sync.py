@@ -880,6 +880,314 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             # ... And the state should be empty
             self.assertEqual(sync_room_result.state, {})
 
+    def test_state_after_leave_last_local_user(self) -> None:
+        """When the leaving user is the last local user in the room (causing the
+        server to clear current_state_events), the leave event must still appear
+        in state_after on an incremental sync.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        The leave gets no row of its own, only an `event_id = null` row for the
+        leaving user's membership.
+
+        Regression test for https://github.com/element-hq/synapse/issues/18793
+        """
+        if not self.use_state_after:
+            self.skipTest("Only relevant for `state_after` (MSC4222)")
+
+        # Alice is the sole local user. She creates a room and joins.
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+
+        room_id = self.helper.create_room_as(alice, tok=alice_tok)
+
+        # Sync up to get a since_token.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+            )
+        )
+        # A state change before the leave, which has a delta of its own.
+        topic_event = self.helper.send_state(
+            room_id, "m.room.topic", {"topic": "before leaving"}, tok=alice_tok
+        )["event_id"]
+
+        # Alice leaves. She is the last local user, so the server clears
+        # current_state_events for this room.
+        leave_event = self.helper.leave(room_id, alice, tok=alice_tok)["event_id"]
+
+        # Incremental sync with include_leave so we see the archived room.
+        filter_dict: JsonDict = {"room": {"include_leave": True}}
+        sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(
+                    alice,
+                    filter_collection=FilterCollection(self.hs, filter_dict),
+                    use_state_after=True,
+                ),
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The room must appear in the archived section.
+        self.assertEqual(len(sync_result.archived), 1)
+        sync_room_result = sync_result.archived[0]
+        self.assertEqual(sync_room_result.room_id, room_id)
+
+        # state_after must include the leave membership event and the state
+        # change that happened just before the leave, and nothing else (i.e.
+        # not the entire cleared room state).
+        self.assertEqual(
+            {key: event.event_id for key, event in sync_room_result.state.items()},
+            {
+                ("m.room.member", alice): leave_event,
+                ("m.room.topic", ""): topic_event,
+            },
+        )
+
+    def test_state_after_leave_last_local_user_after_own_membership_change(
+        self,
+    ) -> None:
+        """When the last local user changes their own membership event (e.g. their
+        display name) and then leaves within the same incremental sync window, the
+        leave event (not the earlier membership event) must appear in state_after.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        The user's membership then has a row for their display name change, followed
+        by an `event_id = null` row, and none for their leave, so the earlier row must
+        not be used.
+        """
+        if not self.use_state_after:
+            self.skipTest("Only relevant for `state_after` (MSC4222)")
+
+        # Alice is the sole local user. She creates a room and joins.
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+
+        room_id = self.helper.create_room_as(alice, tok=alice_tok)
+
+        # Sync up to get a since_token.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+            )
+        )
+
+        # Alice changes her display name. This membership event has a delta of
+        # its own for her `m.room.member` state key.
+        self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            {"membership": "join", "displayname": "Alice"},
+            tok=alice_tok,
+            state_key=alice,
+        )
+
+        # Alice leaves. She is the last local user, so the server clears
+        # current_state_events for this room.
+        leave_event = self.helper.leave(room_id, alice, tok=alice_tok)["event_id"]
+
+        # Incremental sync. A newly left room is sent down in the archived section.
+        sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The room must appear in the archived section.
+        self.assertEqual(len(sync_result.archived), 1)
+        sync_room_result = sync_result.archived[0]
+        self.assertEqual(sync_room_result.room_id, room_id)
+
+        # state_after must have Alice's leave, not her display name change.
+        self.assertEqual(
+            {key: event.event_id for key, event in sync_room_result.state.items()},
+            {("m.room.member", alice): leave_event},
+        )
+
+    def test_state_after_leave_last_local_user_membership_filtered_from_timeline(
+        self,
+    ) -> None:
+        """When the last local user leaves and their timeline filter excludes
+        membership events, the leave event must still appear in state_after on an
+        incremental sync.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        The leave has no row of its own, and the filter keeps it out of the timeline
+        too.
+        """
+        if not self.use_state_after:
+            self.skipTest("Only relevant for `state_after` (MSC4222)")
+
+        # Alice is the sole local user. She creates a room and joins.
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+
+        room_id = self.helper.create_room_as(alice, tok=alice_tok)
+
+        # Sync up to get a since_token.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+            )
+        )
+
+        # A message before the leave, so the filtered timeline isn't empty (a room
+        # with nothing to send down is left out of the sync response).
+        message_event = self.helper.send(room_id, "hello", tok=alice_tok)["event_id"]
+
+        # Alice leaves. She is the last local user, so the server clears
+        # current_state_events for this room.
+        leave_event = self.helper.leave(room_id, alice, tok=alice_tok)["event_id"]
+
+        # Incremental sync with a timeline filter that excludes membership events,
+        # so the leave is not in the timeline.
+        filter_dict: JsonDict = {
+            "room": {"timeline": {"not_types": [EventTypes.Member]}}
+        }
+        sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(
+                    alice,
+                    filter_collection=FilterCollection(self.hs, filter_dict),
+                    use_state_after=True,
+                ),
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The room must appear in the archived section, with only the message in
+        # the timeline.
+        self.assertEqual(len(sync_result.archived), 1)
+        sync_room_result = sync_result.archived[0]
+        self.assertEqual(sync_room_result.room_id, room_id)
+        self.assertEqual(
+            [event.event.event_id for event in sync_room_result.timeline.events],
+            [message_event],
+        )
+
+        # state_after must still have Alice's leave.
+        self.assertEqual(
+            {key: event.event_id for key, event in sync_room_result.state.items()},
+            {("m.room.member", alice): leave_event},
+        )
+
+    def test_state_after_leave_last_local_user_with_state_change_persisted_together(
+        self,
+    ) -> None:
+        """When another state event is persisted in the same batch as the last local
+        user's leave, both the leave and that state event must appear in state_after
+        on an incremental sync.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        Neither the leave nor the state event persisted with it gets a row of its own,
+        only the `event_id = null` rows of the state they replace.
+        """
+        if not self.use_state_after:
+            self.skipTest("Only relevant for `state_after` (MSC4222)")
+
+        # Alice is the sole local user. She creates a room and joins.
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+
+        room_id = self.helper.create_room_as(alice, tok=alice_tok)
+        self.helper.send_state(
+            room_id, EventTypes.Topic, {"topic": "before leaving"}, tok=alice_tok
+        )
+
+        # Sync up to get a since_token.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+            )
+        )
+
+        # Alice changes the topic and leaves, with both events persisted in one
+        # batch. She is the last local user, so the server clears
+        # current_state_events for this room, and neither event gets a delta of its
+        # own.
+        self.get_success(
+            self.hs.get_event_creation_handler().create_and_send_new_client_events(
+                requester=alice_requester,
+                room_id=room_id,
+                prev_event_id=None,
+                event_dicts=[
+                    {
+                        "type": EventTypes.Topic,
+                        "state_key": "",
+                        "room_id": room_id,
+                        "sender": alice,
+                        "content": {"topic": "set when leaving"},
+                    },
+                    {
+                        "type": EventTypes.Member,
+                        "state_key": alice,
+                        "room_id": room_id,
+                        "sender": alice,
+                        "content": {"membership": "leave"},
+                    },
+                ],
+                ratelimit=False,
+            )
+        )
+
+        # Incremental sync. A newly left room is sent down in the archived section.
+        sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The room must appear in the archived section, with the topic change and
+        # the leave in the timeline.
+        self.assertEqual(len(sync_result.archived), 1)
+        sync_room_result = sync_result.archived[0]
+        self.assertEqual(sync_room_result.room_id, room_id)
+        timeline_events = [event.event for event in sync_room_result.timeline.events]
+        self.assertEqual(
+            [(event.type, event.state_key) for event in timeline_events],
+            [(EventTypes.Topic, ""), (EventTypes.Member, alice)],
+        )
+        topic_event, leave_event = (event.event_id for event in timeline_events)
+
+        # state_after must have both the topic change and Alice's leave.
+        self.assertEqual(
+            {key: event.event_id for key, event in sync_room_result.state.items()},
+            {
+                (EventTypes.Topic, ""): topic_event,
+                (EventTypes.Member, alice): leave_event,
+            },
+        )
+
     def _patch_get_latest_events(self, latest_events: list[str]) -> ContextManager:
         """Monkey-patch `get_prev_events_for_room`
 
