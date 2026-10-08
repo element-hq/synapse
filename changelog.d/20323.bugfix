@@ -1,0 +1,1 @@
+Remove the stickiness of [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) when they are redacted after persistence.
