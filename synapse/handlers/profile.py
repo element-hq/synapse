@@ -169,7 +169,7 @@ class ProfileHandler:
                 )
 
                 # Strip out MSC4426 User Status fields as we currently don't have support
-                # for federating these. Without doing this clients will cache stale data
+                # for federating these. Without this, clients will cache stale data
                 # of user status fields they may receive through a federated profile
                 # fetch. Until we start delivering profile fields for remote users in
                 # the sync stream, like we do for local users, we should strip these
@@ -177,8 +177,7 @@ class ProfileHandler:
                 # TODO: remove when profile fields are pushed over federation and the
                 # profile updates stream is adjusted to deliver remote profile fields.
                 for key in MSC4426_FIELDS:
-                    if key in result.keys():
-                        result.pop(key)
+                    result.pop(key, None)
                 return result
             except RequestSendFailed as e:
                 raise SynapseError(502, "Failed to fetch profile") from e
@@ -632,7 +631,7 @@ class ProfileHandler:
             return field_value
         else:
             # Strip out MSC4426 User Status fields as we currently don't have support
-            # for federating these. Without doing this clients will cache stale data
+            # for federating these. Without this, clients will cache stale data
             # of user status fields they may receive through a federated profile field
             # fetch. Until we start delivering profile fields for remote users in
             # the sync stream, like we do for local users, we should strip these
