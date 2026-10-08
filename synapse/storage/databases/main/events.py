@@ -2938,13 +2938,15 @@ class PersistEventsStore:
         Returns a copy of the `events_and_contexts` lists with redactions applied.
         """
 
+        assert all(ev.room_id == room_id for ev, _ in events_and_contexts)
+
         # Get all the event IDs, whilst also filtering out redaction events
         # which we don't want to redact immediately anyway
-        event_ids = [
+        event_ids = {
             ev.event_id
             for ev, _ in events_and_contexts
             if ev.type != EventTypes.Redaction
-        ]
+        }
 
         if not event_ids:
             # nothing to do here
