@@ -1695,7 +1695,7 @@ class SyncHandler:
             )
             # A delta with `event_id=None` means the key was removed from the
             # current state. Two things cause this:
-            #  - A state reset removed the key. MSC4222 can't tell the client a
+            #  - A state reset removed the key. With `/sync`, there is no way to tell the client a
             #    key was removed, so there is nothing to send for it.
             #  - The server left the room (its last local user left). It then
             #    copies the room state from **before the batch** that contains the
