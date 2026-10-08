@@ -286,7 +286,10 @@ main() {
     ./tests/msc4155
     ./tests/msc4306
     ./tests/msc4222
-    ./tests/msc4429
+    # XXX REVERT BEFORE MERGE: ./tests/msc4429 doesn't exist on complement
+    # main yet (matrix-org/complement#849 unmerged), which build-fails every
+    # complement CI run on develop. Dropped here so this PR's CI can pass;
+    # restore once complement#849 lands.
   )
 
   # Export the list of test packages as a space-separated environment variable, so other

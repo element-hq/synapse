@@ -13,20 +13,36 @@
 #
 
 import logging
+from typing import Protocol
 
 import attr
 
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main import DataStore
-from synapse.types import SlidingSyncStreamToken
+from synapse.types import Requester, SlidingSyncStreamToken, UserID
 from synapse.types.handlers.sliding_sync import (
     MutablePerConnectionState,
     PerConnectionState,
-    SlidingSyncConfig,
 )
 from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
+
+
+class SlidingSyncConnectionConfig(Protocol):
+    """The subset of a sync config the connection store needs: who the
+    connection belongs to and its client-chosen ID. Satisfied by both
+    `SlidingSyncConfig` and `MSC4525PaginatedSyncConfig` (MSC4525), which share the
+    per-connection room-tracking machinery."""
+
+    @property
+    def user(self) -> UserID: ...
+
+    @property
+    def requester(self) -> Requester: ...
+
+    @property
+    def conn_id(self) -> str | None: ...
 
 
 @attr.s(auto_attribs=True)
@@ -63,7 +79,7 @@ class SlidingSyncConnectionStore:
 
     async def get_and_clear_connection_positions(
         self,
-        sync_config: SlidingSyncConfig,
+        sync_config: SlidingSyncConnectionConfig,
         from_token: SlidingSyncStreamToken | None,
     ) -> PerConnectionState:
         """Fetch the per-connection state for the token.
@@ -90,7 +106,7 @@ class SlidingSyncConnectionStore:
     @trace
     async def record_new_state(
         self,
-        sync_config: SlidingSyncConfig,
+        sync_config: SlidingSyncConnectionConfig,
         from_token: SlidingSyncStreamToken | None,
         new_connection_state: MutablePerConnectionState,
     ) -> int:
