@@ -1223,8 +1223,7 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         self, param_in_body: bool, param_in_query: bool
     ) -> None:
         """Test that the sticky duration given when scheduling a delayed event
-        is applied to the event once it is sent (MSC4354)."""
-        sticky_duration = Duration(minutes=1)
+        is applied to the event once it is sent."""
         path = self.helper.build_delayed_event_request_path(
             room_id=self.room_id,
             event_type=_EVENT_TYPE,
@@ -1233,6 +1232,7 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
             delay=Duration(milliseconds=900),
             content={"body": "sticky"},
         )
+        sticky_duration = Duration(minutes=1)
         if param_in_body:
             body[StickyEvent.REQUEST_PARAM_NAME] = sticky_duration.as_millis()
         if param_in_query:
@@ -1249,7 +1249,6 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         event = self._check_for_delayed_event_in_sync(
             self.user1_access_token, delay_id, True
         )
-        assert event is not None
         self.assertGreater(
             event["unsigned"].get(EventUnsignedContentFields.STICKY_TTL, 0),
             0,
@@ -1310,7 +1309,9 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
-    def test_delayed_sticky_event_prevents_conflicting_values(self) -> None:
+    def test_delayed_sticky_event_with_conflicting_sticky_durations(self) -> None:
+        """Test that delayed event requests reject having a different sticky duration
+        in the query parameter & request body."""
         path = self.helper.build_delayed_event_request_path(
             room_id=self.room_id,
             event_type=_EVENT_TYPE,
