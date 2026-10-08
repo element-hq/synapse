@@ -585,6 +585,12 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         self.assertListEqual([], self._get_delayed_events())
 
     def test_delayed_event_fails_on_timeout_if_sender_left_room(self) -> None:
+        """A delayed event stays scheduled when its sender leaves the room, and
+        fails when it comes to be sent.
+
+        MSC4140 lets servers leave auth checks until send time instead of
+        re-evaluating scheduled events whenever the room's state changes.
+        """
         state_key = "sender_left_room"
         channel = self._make_delayed_event_request(
             room_id=self.room_id,
