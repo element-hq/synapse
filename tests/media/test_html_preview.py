@@ -440,11 +440,63 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
                     "og:title": None,
                     "og:description": None,
                     "og:image": f"https://example.com/{tags[0][1]}.png",
+                    # The favicon is always present, and is always the site logo.
+                    "msc4448:site_logo": "https://example.com/favicon.png",
                 },
             )
 
             # Remove the highest remaining priority item.
             tags.pop(0)
+
+    def test_site_logo(self) -> None:
+        """The favicon is returned as the MSC4448 site logo, separately from the image."""
+        html = b"""<html>
+            <link rel="apple-touch-icon" href="https://example.com/touch.png">
+            <link rel="shortcut icon" href="/favicon.ico">
+            <link rel="icon" href="https://example.com/other.png">
+            <img src="https://example.com/img.png">
+        </html>"""
+        tree = decode_body(html, "http://example.com/test.html")
+        assert tree is not None
+        og = parse_html_to_open_graph(tree)
+        self.assertEqual(
+            og,
+            {
+                "og:title": None,
+                "og:description": None,
+                "og:image": "https://example.com/img.png",
+                # The first standard icon wins; "shortcut icon" counts as one. The
+                # URL is left as-is, the URL previewer resolves relative ones.
+                "msc4448:site_logo": "/favicon.ico",
+            },
+        )
+
+    def test_site_logo_apple_touch_icon(self) -> None:
+        """An Apple touch icon is used as the site logo if there is no favicon."""
+        html = b"""<html>
+            <link rel="apple-touch-icon" sizes="180x180" href="/touch.png">
+            <link rel="stylesheet" href="/style.css">
+            <link rel="icon" href="">
+        </html>"""
+        tree = decode_body(html, "http://example.com/test.html")
+        assert tree is not None
+        og = parse_html_to_open_graph(tree)
+        self.assertEqual(
+            og,
+            {
+                "og:title": None,
+                "og:description": None,
+                "msc4448:site_logo": "/touch.png",
+            },
+        )
+
+    def test_no_site_logo(self) -> None:
+        """No site logo is returned if the page has no icon at all."""
+        html = b"""<html><link rel="stylesheet" href="/style.css"></html>"""
+        tree = decode_body(html, "http://example.com/test.html")
+        assert tree is not None
+        og = parse_html_to_open_graph(tree)
+        self.assertEqual(og, {"og:title": None, "og:description": None})
 
     def test_image_bad_height_width(self) -> None:
         """A bad height/width should be ignored."""

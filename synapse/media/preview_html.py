@@ -175,6 +175,30 @@ def _map_twitter_to_open_graph(key: str) -> str | None:
     return "og" + key[7:]
 
 
+def _find_favicon(soup: "BeautifulSoup") -> str | None:
+    """
+    Find the favicon of an HTML document, for use as the MSC4448 site logo.
+
+    A standard icon (``<link rel="icon">`` or the legacy ``rel="shortcut icon"``)
+    is preferred, falling back to an Apple touch icon.
+
+    Args:
+        soup: The parsed HTML document.
+
+    Returns:
+        The favicon URL, which may be relative to the document, or None if the
+        document does not declare one.
+    """
+    # BeautifulSoup treats rel as a multi-valued attribute, so rel="shortcut icon"
+    # is parsed as ["shortcut", "icon"] and still matches "icon".
+    favicon = soup.find("link", href=NON_BLANK, rel="icon")
+    if favicon is None:
+        favicon = soup.find("link", href=NON_BLANK, rel="apple-touch-icon")
+    if favicon is None:
+        return None
+    return get_attribute(favicon, "href")
+
+
 def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
     """
     Calculate metadata for an HTML document.
@@ -201,6 +225,10 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
     # "og:video:width"  : "1280"
     # "og:video:height" : "720",
     # "og:video:secure_url": "https://www.youtube.com/v/LXDBoHyjmtw?version=3",
+    #
+    # Synapse additionally returns the page's favicon (from <link rel="icon">) as
+    # "msc4448:site_logo", if it has one. See
+    # https://github.com/matrix-org/matrix-spec-proposals/pull/4448
 
     # TODO: grab article: meta tags too, e.g.:
     ogRoot = _get_meta_tags(soup, "property", "og")
@@ -277,6 +305,15 @@ def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
                 favicon = soup.find("link", href=NON_BLANK, rel="icon")
                 if favicon:
                     og["og:image"] = get_attribute(favicon, "href")
+
+    # MSC4448: expose the favicon as the site logo, separately from the preview
+    # image. It is far too small to be shown as one, but clients can show it next
+    # to the site name. The URL previewer converts it to an mxc:// URI, or drops it
+    # if the client did not ask for it.
+    if "msc4448:site_logo" not in og:
+        site_logo = _find_favicon(soup)
+        if site_logo:
+            og["msc4448:site_logo"] = site_logo
 
     if "og:description" not in og:
         # Check the first meta description tag for content.
