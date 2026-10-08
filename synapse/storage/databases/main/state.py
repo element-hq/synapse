@@ -702,6 +702,11 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     ) -> Mapping[str, int]:
         """Returns mapping event_id -> state_group.
 
+        XXX: the `@cachedList` wrapper swallows RuntimeError and the caller just gets partial results.
+        For the time-being, Callers MUST NOT rely on this to determine missing events,
+        as cached responses return None for the state group instead of raising.
+        TODO: audit every caller, as some of them may be relying on the current behaviour.
+
         Raises:
              RuntimeError if the state is unknown at any of the given events
         """
