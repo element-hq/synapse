@@ -29,7 +29,7 @@ from synapse.api.errors import Codes
 from synapse.rest.client import login, push_rule, room
 from synapse.types import JsonDict
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, override_config
 
 
 class PushRuleAttributesTestCase(HomeserverTestCase):
@@ -426,6 +426,99 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
         )
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+    def _assert_default_rule_absent(self, token: str, rule_path: str) -> None:
+        """Checks that a server-default rule is neither served nor modifiable."""
+        channel = self.make_request(
+            "GET", f"/pushrules/{rule_path}", access_token=token
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/enabled",
+            {"enabled": False},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/actions",
+            {"actions": ["notify"]},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        _, kind, rule_id = rule_path.split("/")
+        channel = self.make_request("GET", "/pushrules/", access_token=token)
+        self.assertEqual(channel.code, 200)
+        self.assertNotIn(
+            rule_id,
+            [rule["rule_id"] for rule in channel.json_body["global"].get(kind, [])],
+        )
+
+    def _assert_default_rule_modifiable(self, token: str, rule_path: str) -> None:
+        """Checks that a server-default rule is served and can be modified."""
+        channel = self.make_request(
+            "GET", f"/pushrules/{rule_path}", access_token=token
+        )
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/actions",
+            {"actions": ["notify"]},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/enabled",
+            {"enabled": False},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "GET", f"/pushrules/{rule_path}", access_token=token
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["actions"], ["notify"])
+        self.assertEqual(channel.json_body["enabled"], False)
+
+    # A server-default rule gated behind an experimental feature is only served,
+    # and thus only modifiable, while the feature is enabled. One such rule is
+    # enough to check this; the MSC3664 reply rule is used below. When MSC3664
+    # stabilises, swap in another gated rule, or drop these two tests if none
+    # remain.
+
+    def test_gated_default_rule_disabled(self) -> None:
+        """
+        Tests that a server-default rule gated behind an experimental feature
+        is neither served nor modifiable while the feature is disabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_absent(
+            token, "global/override/.im.nheko.msc3664.reply"
+        )
+
+    @override_config({"experimental_features": {"msc3664_enabled": True}})
+    def test_gated_default_rule_enabled(self) -> None:
+        """
+        Tests that a server-default rule gated behind an experimental feature
+        is served and modifiable once the feature is enabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_modifiable(
+            token, "global/override/.im.nheko.msc3664.reply"
+        )
 
     def test_contains_user_name(self) -> None:
         """
