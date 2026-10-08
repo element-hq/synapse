@@ -1250,6 +1250,27 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
             event,
         )
 
+    @parameterized.expand((False, True))
+    def test_delayed_sticky_state_event(self, param_in_body: bool) -> None:
+        """Test that delayed event requests forbid scheduling a sticky state event."""
+        path = self.helper.build_delayed_event_request_path(
+            room_id=self.room_id,
+            event_type="m.room.topic",
+        )
+        body = self.helper.build_delayed_event_request_body(
+            delay=Duration(milliseconds=900),
+            content={"topic": "This is a topic"},
+            state_key="",
+        )
+        sticky_duration = Duration(minutes=1)
+        if param_in_body:
+            body[StickyEvent.REQUEST_PARAM_NAME] = sticky_duration.as_millis()
+        else:
+            path += f"?{StickyEvent.REQUEST_PARAM_NAME}={sticky_duration.as_millis()}"
+        channel = self.make_request("PUT", path, body, self.user1_access_token)
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+
     @parameterized.expand(
         (
             (sticky_duration, param_in_body)

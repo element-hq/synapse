@@ -30,8 +30,7 @@ from urllib import parse as urlparse
 
 import attr
 from prometheus_client.core import Histogram
-from pydantic import Field, PositiveInt, StrictStr, model_validator
-from typing_extensions import Self
+from pydantic import Field, PositiveInt, StrictStr
 
 from twisted.web.server import Request
 
@@ -563,12 +562,6 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
             Absent, alias=StickyEvent.REQUEST_PARAM_NAME
         )
 
-        @model_validator(mode="after")
-        def validate_sticky(self) -> Self:
-            if self.state_key is not Absent and self.sticky_duration_ms is not Absent:
-                raise ValueError("Cannot specify both state_key and sticky_duration_ms")
-            return self
-
     async def _do(
         self,
         request: SynapseRequest,
@@ -604,9 +597,16 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
                         f"Conflicting values given for {StickyEvent.REQUEST_PARAM_NAME}",
                     )
 
-        state_key = (
-            request_body.state_key if request_body.state_key is not Absent else None
-        )
+        if request_body.state_key is not Absent:
+            if sticky_duration_ms is not None:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "Sticky state events are not allowed. Cannot specify both `state_key` and `sticky_duration_ms`",
+                    Codes.INVALID_PARAM,
+                )
+            state_key = request_body.state_key
+        else:
+            state_key = None
 
         origin_server_ts = None
         if requester.app_service_id:
