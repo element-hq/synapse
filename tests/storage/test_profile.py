@@ -112,6 +112,31 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(f.value.code, HTTPStatus.NOT_FOUND)
 
+    def test_set_profile_field_without_profile(self) -> None:
+        """
+        Setting a custom profile field for a user that has no row in the
+        `profiles` table at all should create the row and store the field.
+
+        Regression test (we previously would trigger an unhandled exception in
+        the profile size check, and then store the field under a wrong key on
+        SQLite). Can happen for users whose profile was erased upon
+        deactivation.
+        """
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.u_frank,
+                field_name="org.example.field",
+                new_value="test",
+            )
+        )
+
+        self.assertEqual(
+            "test",
+            self.get_success(
+                self.store.get_profile_field(self.u_frank, "org.example.field")
+            ),
+        )
+
     def test_profiles_bg_migration(self) -> None:
         """
         Test background job that copies entries from column user_id to full_user_id, adding

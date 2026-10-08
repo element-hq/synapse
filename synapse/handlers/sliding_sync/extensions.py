@@ -29,10 +29,10 @@ from synapse.api.constants import (
     AccountDataTypes,
     EduTypes,
     EventTypes,
-    ProfileFields,
     ProfileUpdateAction,
     StickyEvent,
 )
+from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.events.utils import FilteredEvent
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.logging.opentracing import trace
@@ -1036,13 +1036,57 @@ class SlidingSyncExtensionHandler:
         # If there is no `since` token specified, start from the beginning of the stream
         # to make sure the client receives all visible (unexpired) sticky events
         since_token = sticky_events_request.since or SlidingSyncStickyEventsToken.START
+
+        since_token_as_stream_token = await since_token.to_stream_token(self.store)
+
+        if not since_token_as_stream_token.is_before_or_eq(
+            self.event_sources.get_current_token().sticky_events_key
+        ):
+            # The `since_token` is *after* the current position as seen on this worker.
+            # This either means that this worker is lagging, or the client has a token
+            # from the future. The client having a future token could happen maliciously
+            # where someone intentionally messes with the token or innocently if a
+            # database was rolled back by restoring from backup.
+            #
+            # Get the max allocated token out of the database to see which case it is.
+            # (For efficiency, we only do this after the non-database common case check.)
+            max_token = await self.store.get_sticky_events_stream_id_generator().get_max_allocated_token()
+
+            # It may be tempting to wonder why we don't do anything about the 'worker lagging'
+            # case, such as waiting for streams to catch up.
+            # The case where this worker is lagging should not happen in practice because:
+            # assuming the client didn't mess with the `since` token, it must have been
+            # produced as a `to_token` in a previous request, where the response-wide `next_pos`
+            # is equal to or later than the token given by this extension.
+            #
+            # Then in this request, the client will present that `next_pos` as the `pos` for the
+            # entire request and `wait_for_stream_token` (which is called with the request-level pos tokens)
+            # will cause us to wait for worker lag on that token, including the sticky events stream.
+            #
+            # (It also doesn't actually matter since `get_sticky_events_in_rooms` will just return
+            # an empty result and is safe against rewinding the token.)
+
+            if max_token < since_token_as_stream_token.get_max_stream_pos():
+                # The client has a token from the future.
+                #
+                # We could wait until we reach the token but we might as well not waste
+                # our resources on an invalid state scenario. Reset the sliding sync
+                # connection.
+                raise SlidingSyncUnknownPosition(
+                    "The `org.matrix.msc4354.sticky_events` extension `since` token is considered "
+                    "invalid because it includes stream positions greater than the furthest "
+                    "persisted position across all of the workers. This indicates either a Synapse "
+                    "programming error (as we should never hand out invalid future tokens), database "
+                    "was rolled back, or a fabricated `from` token. If you've modified the token, "
+                    "you can try paginating from the beginning again.",
+                )
         (
-            sticky_events_to_id,
+            sticky_events_to_token,
             room_to_event_ids,
         ) = await self.store.get_sticky_events_in_rooms(
             all_interested_room_ids,
-            from_id=since_token.sticky_events_stream_id,
-            to_id=to_token.sticky_events_key,
+            from_token=since_token_as_stream_token,
+            to_token=to_token.sticky_events_key,
             now=now,
             limit=min(sticky_events_request.limit, StickyEvent.MAX_EVENTS_IN_SYNC),
         )
@@ -1079,8 +1123,8 @@ class SlidingSyncExtensionHandler:
 
         return SlidingSyncResult.Extensions.StickyEventsExtension(
             room_id_to_sticky_events=room_id_to_sticky_events,
-            next_batch=SlidingSyncStickyEventsToken(
-                sticky_events_stream_id=sticky_events_to_id
+            next_batch=await SlidingSyncStickyEventsToken.from_stream_token(
+                self.store, sticky_events_to_token
             ),
         )
 
@@ -1421,28 +1465,13 @@ class SlidingSyncExtensionHandler:
             per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
             per_user_removals: set[str] = set()
             for field_name in user_fields:
-                # For custom fields the lack of a field means it will be `Absent`,
-                # for displayname/avatar_url it will be `None`, due to way we store
-                # things differently.
-                # FIXME: I intend to simplify this by pushing the special-case logic
-                # for these 'original' profile fields into the storage layer instead.
-                absent_type = (
-                    Absent
-                    if field_name
-                    not in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
-                    else None
-                )
                 field_value: JsonValue | dict[str, JsonValue] | AbsentType = (
-                    profile_data.get(field_name, absent_type)
+                    profile_data.get(field_name, Absent)
                 )
                 if (
                     # If the field isn't found on the profile and it is present in
                     # `updated_fields`, that means an existing field has been removed.
-                    # We need the check against `updated_fields` as some profile fields
-                    # are `None` by default, for example each and every user created
-                    # by Synapse will have `avatar_url: None`, and we don't want to
-                    # constantly send that to the clients.
-                    field_value is absent_type and field_name in updated_fields
+                    field_value is Absent and field_name in updated_fields
                 ):
                     per_user_removals.add(field_name)
                 else:

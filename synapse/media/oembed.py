@@ -21,16 +21,21 @@
 import html
 import logging
 import urllib.parse
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import attr
 
-from synapse.media.preview_html import parse_html_description
+from synapse.media.preview_html import (
+    NON_BLANK,
+    decode_body,
+    get_attribute,
+    parse_html_description,
+)
 from synapse.types import JsonDict
 from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
-    from lxml import etree
+    from bs4 import BeautifulSoup
 
     from synapse.server import HomeServer
 
@@ -105,35 +110,25 @@ class OEmbedProvider:
         # No match.
         return None
 
-    def autodiscover_from_html(self, tree: "etree._Element") -> str | None:
+    def autodiscover_from_html(self, soup: "BeautifulSoup") -> str | None:
         """
         Search an HTML document for oEmbed autodiscovery information.
 
         Args:
-            tree: The parsed HTML body.
+            soup: The parsed HTML body.
 
         Returns:
             The URL to use for oEmbed information, or None if no URL was found.
         """
         # Search for link elements with the proper rel and type attributes.
-        # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-        for tag in cast(
-            list["etree._Element"],
-            tree.xpath("//link[@rel='alternate'][@type='application/json+oembed']"),
-        ):
-            if "href" in tag.attrib:
-                return cast(str, tag.attrib["href"])
-
-        # Some providers (e.g. Flickr) use alternative instead of alternate.
-        # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-        for tag in cast(
-            list["etree._Element"],
-            tree.xpath("//link[@rel='alternative'][@type='application/json+oembed']"),
-        ):
-            if "href" in tag.attrib:
-                return cast(str, tag.attrib["href"])
-
-        return None
+        # Some providers (e.g. Flickr) use `alternative` instead of `alternate`.
+        tag = soup.find(
+            "link",
+            rel=("alternate", "alternative"),
+            type="application/json+oembed",
+            href=NON_BLANK,
+        )
+        return get_attribute(tag, "href") if tag else None
 
     def parse_oembed_response(self, url: str, raw_body: bytes) -> OEmbedResult:
         """
@@ -196,7 +191,7 @@ class OEmbedProvider:
         if oembed_type == "rich":
             html_str = oembed.get("html")
             if isinstance(html_str, str):
-                calc_description_and_urls(open_graph_response, html_str)
+                calc_description_and_urls(open_graph_response, html_str, url)
 
         elif oembed_type == "photo":
             # If this is a photo, use the full image, not the thumbnail.
@@ -208,7 +203,7 @@ class OEmbedProvider:
             open_graph_response["og:type"] = "video.other"
             html_str = oembed.get("html")
             if html_str and isinstance(html_str, str):
-                calc_description_and_urls(open_graph_response, oembed["html"])
+                calc_description_and_urls(open_graph_response, oembed["html"], url)
             for size in ("width", "height"):
                 val = oembed.get(size)
                 if type(val) is int:  # noqa: E721
@@ -223,55 +218,45 @@ class OEmbedProvider:
         return OEmbedResult(open_graph_response, author_name, cache_age)
 
 
-def _fetch_urls(tree: "etree._Element", tag_name: str) -> list[str]:
-    results = []
-    # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-    for tag in cast(list["etree._Element"], tree.xpath("//*/" + tag_name)):
-        if "src" in tag.attrib:
-            results.append(cast(str, tag.attrib["src"]))
-    return results
+def _fetch_url(soup: "BeautifulSoup", tag_name: str) -> str | None:
+    tag = soup.find(tag_name, src=NON_BLANK)
+    return get_attribute(tag, "src") if tag else None
 
 
-def calc_description_and_urls(open_graph_response: JsonDict, html_body: str) -> None:
+def calc_description_and_urls(
+    open_graph_response: JsonDict, html_body: str, url: str
+) -> None:
     """
     Calculate description for an HTML document.
 
-    This uses lxml to convert the HTML document into plaintext. If errors
+    This uses BeautifulSoup to convert the HTML document into plaintext. If errors
     occur during processing of the document, an empty response is returned.
 
     Args:
         open_graph_response: The current Open Graph summary. This is updated with additional fields.
         html_body: The HTML document, as bytes.
-
-    Returns:
-        The summary
+        url: The URL which is being previewed (not the one which was requested).
     """
+    soup = decode_body(html_body, url)
+
     # If there's no body, nothing useful is going to be found.
-    if not html_body:
-        return
-
-    from lxml import etree
-
-    # Create an HTML parser. If this fails, log and return no metadata.
-    parser = etree.HTMLParser(recover=True, encoding="utf-8")
-
-    # Attempt to parse the body. If this fails, log and return no metadata.
-    tree = etree.fromstring(html_body, parser)
-
-    # The data was successfully parsed, but no tree was found.
-    if tree is None:
+    if not soup:
         return
 
     # Attempt to find interesting URLs (images, videos, embeds).
     if "og:image" not in open_graph_response:
-        image_urls = _fetch_urls(tree, "img")
-        if image_urls:
-            open_graph_response["og:image"] = image_urls[0]
+        image_url = _fetch_url(soup, "img")
+        if image_url:
+            open_graph_response["og:image"] = image_url
 
-    video_urls = _fetch_urls(tree, "video") + _fetch_urls(tree, "embed")
-    if video_urls:
-        open_graph_response["og:video"] = video_urls[0]
+    video_url = _fetch_url(soup, "video")
+    if video_url:
+        open_graph_response["og:video"] = video_url
+    else:
+        embed_url = _fetch_url(soup, "embed")
+        if embed_url:
+            open_graph_response["og:video"] = embed_url
 
-    description = parse_html_description(tree)
+    description = parse_html_description(soup)
     if description:
         open_graph_response["og:description"] = description

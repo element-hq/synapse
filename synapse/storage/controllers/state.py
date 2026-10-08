@@ -580,8 +580,8 @@ class StateStorageController:
         """Get the current state event ids for a room based on the
         current_state_events table.
 
-        If a state filter is given (that is not `StateFilter.all()`) the query
-        result is *not* cached.
+        If a wildcard state filter is given (that is not `StateFilter.all()`)
+        the query result is *not* cached.
 
         Args:
             room_id: The room to get the state IDs of. state_filter: The state

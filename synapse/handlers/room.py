@@ -1244,10 +1244,6 @@ class RoomCreationHandler:
         creation_content = config.get("creation_content", {})
         # override any attempt to set room versions via the creation_content
         creation_content["room_version"] = room_version.identifier
-        # We do not currently support federating state DAG rooms.
-        # See related restriction in /send_join requests in federation_client.py.
-        if room_version.msc4242_state_dags:
-            creation_content[EventContentFields.FEDERATE] = False
 
         # trusted private chats have the invited users marked as additional creators
         if (
@@ -2546,10 +2542,19 @@ class RoomShutdownHandler:
                 result["kicked_users"].append(user_id)
                 if update_result_fct:
                     await update_result_fct(result)
-            except Exception:
-                logger.exception(
-                    "Failed to leave old room and join new room for %r", user_id
-                )
+            except Exception as exc:
+                if (
+                    isinstance(exc, SynapseError)
+                    and exc.errcode == Codes.USER_ACCOUNT_SUSPENDED
+                ):
+                    logger.warning(
+                        "Failed to leave old room and join new room for suspended user (probably expected) %r",
+                        user_id,
+                    )
+                else:
+                    logger.exception(
+                        "Failed to leave old room and join new room for %r", user_id
+                    )
                 result["failed_to_kick_users"].append(user_id)
                 if update_result_fct:
                     await update_result_fct(result)

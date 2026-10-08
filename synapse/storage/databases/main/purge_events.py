@@ -23,7 +23,7 @@ import logging
 from typing import Any, cast
 
 from synapse.api.errors import SynapseError
-from synapse.storage.database import LoggingTransaction
+from synapse.storage.database import LoggingTransaction, user_is_local_like_pattern
 from synapse.storage.databases.main import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.engines import PostgresEngine
@@ -53,6 +53,7 @@ Tables which lack an index on `room_id` but have one on `event_id`
 purge_room_tables_with_room_id_column = (
     "current_state_events",
     "destination_rooms",
+    "destination_rooms_sticky_events_backlog",
     "event_backward_extremities",
     "event_forward_extremities",
     "event_push_actions",
@@ -75,6 +76,8 @@ purge_room_tables_with_room_id_column = (
     # so must be deleted first.
     "msc4242_state_dag_forward_extremities",
     "msc4242_state_dag_edges",
+    # Note: `sticky_events` has foreign key to `events` so must be deleted first.
+    "sticky_events",
     "events",
     "federation_inbound_events_staging",
     "receipts_graph",
@@ -213,7 +216,10 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
             should_delete_expr += " AND sender NOT LIKE ?"
 
             # We include the parameter twice since we use the expression twice
-            should_delete_params += ("%:" + self.hs.hostname, "%:" + self.hs.hostname)
+            should_delete_params += (
+                user_is_local_like_pattern(self.hs),
+                user_is_local_like_pattern(self.hs),
+            )
 
         should_delete_params += (room_id, token.topological)
 

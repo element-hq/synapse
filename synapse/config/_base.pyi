@@ -52,6 +52,7 @@ from synapse.config import (  # noqa: F401
     spam_checker,
     sso,
     stats,
+    task_scheduler,
     third_party_event_rules,
     tls,
     tracer,
@@ -122,6 +123,7 @@ class RootConfig:
     background_updates: background_updates.BackgroundUpdateConfig
     auto_accept_invites: auto_accept_invites.AutoAcceptInvitesConfig
     user_types: user_types.UserTypesConfig
+    task_scheduler: task_scheduler.TaskSchedulerConfig
     mas: mas.MasConfig
     matrix_rtc: matrixrtc.MatrixRtcConfig
 
