@@ -1297,6 +1297,22 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             },
         )
 
+        # Mock the remote user lookup again to only return the filtered field
+        self.mock_federation.make_query.return_value = {
+            field_name: "value",
+        }
+
+        # Ensure empty dictionary
+        remote_profile = self.get_success(
+            self.handler.get_profile(
+                user_id=self.alice.to_string(),
+            )
+        )
+        self.assertEqual(
+            remote_profile,
+            {},
+        )
+
     @parameterized.expand(
         [
             "m.status",
@@ -1334,13 +1350,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
         # Test our remote user
-        field_value = self.get_success(
+        self.get_failure(
             self.handler.get_profile_field(
                 target_user=self.alice,
                 field_name=field_name,
-            )
+            ),
+            SynapseError,
         )
-        self.assertIsNone(field_value)
 
     def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.

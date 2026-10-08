@@ -639,7 +639,7 @@ class ProfileHandler:
             # TODO: remove when profile fields are pushed over federation and the
             # profile updates stream is adjusted to deliver remote profile fields.
             if field_name in MSC4426_FIELDS:
-                return None
+                raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)
             try:
                 result = await self.federation.make_query(
                     destination=target_user.domain,
