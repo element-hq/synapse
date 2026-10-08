@@ -1317,6 +1317,7 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         body[StickyEvent.REQUEST_PARAM_NAME] = 20000
         channel = self.make_request("PUT", path, body, self.user1_access_token)
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
 
 class DelayedEventsWorkerTestCase(

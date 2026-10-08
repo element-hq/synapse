@@ -593,8 +593,9 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
                     sticky_duration_ms = request_body.sticky_duration_ms
                 elif request_body.sticky_duration_ms != sticky_duration_ms:
                     raise SynapseError(
-                        400,
+                        HTTPStatus.BAD_REQUEST,
                         f"Conflicting values given for {StickyEvent.REQUEST_PARAM_NAME}",
+                        Codes.INVALID_PARAM,
                     )
 
         if request_body.state_key is not Absent:
