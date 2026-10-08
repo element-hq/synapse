@@ -48,7 +48,7 @@ from unittest.mock import Mock, patch
 
 import attr
 from incremental import Version
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, override
 from zope.interface import implementer
 
 import twisted
@@ -101,6 +101,7 @@ from synapse.storage import DataStore
 from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
+from synapse.synapse_rust.runtime import set_virtual_time_msec
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
@@ -594,6 +595,9 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self.lookups: dict[str, str] = {}
         self._thread_callbacks: deque[Callable[..., R]] = deque()
 
+        # Pin the Rust clock to our virtual time. `advance()` keeps it in step.
+        set_virtual_time_msec(int(self.seconds() * 1000))
+
         lookups = self.lookups
 
         @implementer(IResolverSimple)
@@ -735,7 +739,12 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
 
         return conn
 
+    @override
     def advance(self, amount: float) -> None:
+        # Move the Rust clock before `super().advance()` fires any callbacks,
+        # since those may read it.
+        set_virtual_time_msec(int((self.seconds() + amount) * 1000))
+
         # first advance our reactor's time, and run any "callLater" callbacks that
         # makes ready
         super().advance(amount)
