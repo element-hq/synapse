@@ -97,20 +97,38 @@ def _load_rules(
         for rawrule in rawrules
     ]
 
-    push_rules = PushRules(ruleslist)
+    return filter_push_rules(PushRules(ruleslist), enabled_map, experimental_config)
 
-    filtered_rules = FilteredPushRules(
+
+def filter_push_rules(
+    push_rules: PushRules,
+    enabled_map: dict[str, bool],
+    experimental_config: ExperimentalConfig,
+) -> FilteredPushRules:
+    """Combine a user's rules with the server-default rules, keeping only the
+    server-default rules enabled by the server's configuration.
+
+    Args:
+        push_rules: The user's own rules.
+        enabled_map: A dictionary of rule ID to a boolean of whether the rule is
+            enabled. This might not include all rule IDs from push_rules.
+        experimental_config: The `experimental_features` section of the Synapse
+            config. (Used to check if various features are enabled.)
+
+    Returns:
+        A new FilteredPushRules object.
+    """
+    return FilteredPushRules(
         push_rules,
         enabled_map,
         msc1767_enabled=experimental_config.msc1767_enabled,
         msc3664_enabled=experimental_config.msc3664_enabled,
         msc3381_polls_enabled=experimental_config.msc3381_polls_enabled,
         msc4028_push_encrypted_events=experimental_config.msc4028_push_encrypted_events,
+        msc4075_enabled=experimental_config.msc4075_enabled,
         msc4210_enabled=experimental_config.msc4210_enabled,
         msc4306_enabled=experimental_config.msc4306_enabled,
     )
-
-    return filtered_rules
 
 
 def _push_rule_size_for_limits(*, conditions_json: str, actions_json: str) -> int:

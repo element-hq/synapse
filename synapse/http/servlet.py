@@ -27,8 +27,10 @@ import urllib.parse as urlparse
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
+    Iterable,
     Literal,
     Mapping,
+    Pattern,
     Sequence,
     TypeVar,
     overload,
@@ -944,9 +946,9 @@ class RestServlet:
     An implementing class can either provide its own custom 'register' method,
     or use the automatic pattern handling provided by the base class.
 
-    To use this latter, the implementing class instead provides a `PATTERN`
-    class attribute containing a pre-compiled regular expression. The automatic
-    register method will then use this method to register any of the following
+    To use this latter, the implementing class instead provides a `PATTERNS`
+    class attribute containing pre-compiled regular expressions. The automatic
+    register method will then use them to register any of the following
     instance methods associated with the corresponding HTTP method:
 
       on_GET
@@ -958,9 +960,11 @@ class RestServlet:
     into the appropriate HTTP response.
     """
 
+    PATTERNS: Iterable[Pattern[str]] | None = None
+
     def register(self, http_server: HttpServer) -> None:
         """Register this servlet with the given HTTP server."""
-        patterns = getattr(self, "PATTERNS", None)
+        patterns = self.PATTERNS
         if patterns:
             for method in ("GET", "PUT", "POST", "DELETE"):
                 if hasattr(self, "on_%s" % (method,)):

@@ -48,12 +48,11 @@ class FilteredPushRules:
         msc3381_polls_enabled: bool,
         msc3664_enabled: bool,
         msc4028_push_encrypted_events: bool,
+        msc4075_enabled: bool,
         msc4210_enabled: bool,
         msc4306_enabled: bool,
     ): ...
     def rules(self) -> Collection[tuple[PushRule, bool]]: ...
-
-def get_base_rule_ids() -> Collection[str]: ...
 
 class PushRuleEvaluator:
     def __init__(
