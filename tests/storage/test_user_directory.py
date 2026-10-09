@@ -27,6 +27,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, UserTypes
 from synapse.appservice import ApplicationService
+from synapse.federation.user_directory import UserDirectoryEntryModel
 from synapse.rest import admin
 from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
@@ -69,6 +70,16 @@ class GetUserDirectoryTables:
             ),
         )
         return set(r)
+
+    async def get_users_in_federated_search(self) -> set[tuple[str, str]]:
+        """Fetch the federated user directory visibility entries."""
+        rows = cast(
+            list[tuple[str, str]],
+            await self.store.db_pool.simple_select_list(
+                "users_in_federated_search", None, ("user_id", "homeserver")
+            ),
+        )
+        return set(rows)
 
     async def get_users_who_share_private_rooms(self) -> set[tuple[str, str, str]]:
         """Fetch the entire `users_who_share_private_rooms` table.
@@ -442,6 +453,193 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(self.store.update_profile_in_user_dir(BELA, "Bela", None))
         self.get_success(self.store.add_users_in_public_rooms("!room:id", (ALICE, BOB)))
 
+    def test_prune_federated_remote_users_removes_only_unlisted_imports(self) -> None:
+        helper = GetUserDirectoryTables(self.store)
+        self.get_success(
+            self.store.update_profile_in_user_dir("@local:test", "Local", None)
+        )
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "a",
+                [
+                    UserDirectoryEntryModel(
+                        user_id=BOBBY, display_name="bobby", avatar_url=None
+                    )
+                ],
+                start_token=None,
+                end_token=None,
+            )
+        )
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "b",
+                [
+                    UserDirectoryEntryModel(
+                        user_id=BOB, display_name="bob", avatar_url=None
+                    )
+                ],
+                start_token=None,
+                end_token=None,
+            )
+        )
+        expected_profiles = self.get_success(helper.get_profiles_in_user_directory())
+        del expected_profiles[BOBBY]
+
+        # Repeating cleanup must preserve the remaining imports and unrelated users.
+        for _ in range(2):
+            self.get_success(self.store.prune_federated_remote_users(["b"]))
+
+            self.assertEqual(
+                self.get_success(helper.get_users_in_federated_search()), {(BOB, "b")}
+            )
+            self.assertEqual(
+                self.get_success(helper.get_profiles_in_user_directory()),
+                expected_profiles,
+            )
+            indexed_users = self.get_success(
+                self.store.db_pool.simple_select_onecol(
+                    table="user_directory_search", keyvalues=None, retcol="user_id"
+                )
+            )
+            self.assertEqual(set(indexed_users), set(expected_profiles))
+            self.assertEqual(
+                self.get_success(helper.get_users_in_public_rooms()),
+                {(ALICE, "!room:id"), (BOB, "!room:id")},
+            )
+
+    def test_federated_cleanup_preserves_public_room_users(self) -> None:
+        helper = GetUserDirectoryTables(self.store)
+        for cleanup in ("prune", "reconcile"):
+            with self.subTest(cleanup=cleanup):
+                self.get_success(
+                    self.store.reconcile_federated_remote_users(
+                        "a",
+                        [
+                            UserDirectoryEntryModel(
+                                user_id=ALICE, display_name="alice", avatar_url=None
+                            )
+                        ],
+                        start_token=None,
+                        end_token=None,
+                    )
+                )
+
+                if cleanup == "prune":
+                    self.get_success(self.store.prune_federated_remote_users([]))
+                    # Cleanup also works when no federation imports remain.
+                    self.get_success(self.store.prune_federated_remote_users([]))
+                else:
+                    self.get_success(
+                        self.store.reconcile_federated_remote_users(
+                            "a", [], start_token=None, end_token=None
+                        )
+                    )
+
+                self.assertEqual(
+                    self.get_success(helper.get_users_in_federated_search()), set()
+                )
+                profiles = self.get_success(helper.get_profiles_in_user_directory())
+                self.assertEqual(
+                    profiles[ALICE], ProfileInfo(display_name="alice", avatar_url=None)
+                )
+                self.assertIn(
+                    (ALICE, "!room:id"),
+                    self.get_success(helper.get_users_in_public_rooms()),
+                )
+                results = self.get_success(self.store.search_user_dir(BOB, "alice", 10))
+                self.assertEqual(
+                    [user["user_id"] for user in results["results"]], [ALICE]
+                )
+
+    def test_get_local_users_in_user_dir_paginated(self) -> None:
+        """Pages return registered local profiles in order, after the start token."""
+        local_user = "@local:test"
+        no_profile_user = "@no_profile:test"
+        self.get_success(
+            self.store.register_user(
+                local_user, create_profile_with_displayname="Account profile"
+            )
+        )
+        self.get_success(self.store.register_user(no_profile_user))
+        self.get_success(
+            self.store.update_profile_in_user_dir(
+                local_user, "Directory profile", "mxc://test/avatar"
+            )
+        )
+        self.get_success(
+            self.store.update_profile_in_user_dir(no_profile_user, None, None)
+        )
+        # A local-looking ID without a registered account must also be excluded.
+        self.get_success(
+            self.store.update_profile_in_user_dir("@unregistered:test", None, None)
+        )
+
+        result = self.get_success(
+            self.store.get_local_users_in_user_dir_paginated(
+                start_token=None, page_size=1
+            )
+        )
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "user_id": local_user,
+                    "display_name": "Directory profile",
+                    "avatar_url": "mxc://test/avatar",
+                }
+            ],
+        )
+
+        next_page = self.get_success(
+            self.store.get_local_users_in_user_dir_paginated(
+                start_token=result[-1]["user_id"], page_size=1
+            )
+        )
+        self.assertEqual(
+            next_page,
+            [
+                {
+                    "user_id": no_profile_user,
+                    "display_name": None,
+                    "avatar_url": None,
+                },
+            ],
+        )
+        self.assertEqual(
+            self.get_success(
+                self.store.get_local_users_in_user_dir_paginated(
+                    start_token=next_page[-1]["user_id"], page_size=1
+                )
+            ),
+            [],
+        )
+
+    def test_get_local_users_in_user_dir_remote_only(self) -> None:
+        """A directory containing only remote users has no local results."""
+        # prepare() populates the directory exclusively with remote profiles.
+        self.assertEqual(
+            self.get_success(
+                self.store.get_local_users_in_user_dir_paginated(
+                    start_token=None, page_size=1000
+                )
+            ),
+            [],
+        )
+
+    def test_get_local_users_in_user_dir_unlisted_account(self) -> None:
+        """Local accounts without a directory entry are not returned."""
+        self.get_success(self.store.register_user("@unlisted:test"))
+
+        self.assertEqual(
+            self.get_success(
+                self.store.get_local_users_in_user_dir_paginated(
+                    start_token=None, page_size=1000
+                )
+            ),
+            [],
+        )
+
     def test_search_user_dir(self) -> None:
         # normally when alice searches the directory she should just find
         # bob because bobby doesn't share a room with her.
@@ -631,6 +829,254 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         # "e"-lookalikes to be the same.
 
     test_search_user_dir_accent_insensitivity.skip = "not supported yet"  # type: ignore
+
+
+class FederatedUserDirectoryStoreTestCase(HomeserverTestCase):
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config["experimental_features"] = {"bwi_federated_user_dir_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.user_dir_helper = GetUserDirectoryTables(self.store)
+
+    def _assert_directory_state(
+        self,
+        profiles: dict[str, ProfileInfo],
+        imports: set[tuple[str, str]],
+    ) -> None:
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
+            profiles,
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            imports,
+        )
+        indexed_users = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                table="user_directory_search", keyvalues=None, retcol="user_id"
+            )
+        )
+        self.assertCountEqual(indexed_users, profiles)
+
+    def _assert_search_results(self, term: str, expected: set[str]) -> None:
+        results = self.get_success(
+            self.store.search_user_dir("@searcher:test", term, 20)
+        )
+        self.assertFalse(results["limited"])
+        self.assertEqual({user["user_id"] for user in results["results"]}, expected)
+
+    def test_reconcile_range_only_removes_imports_in_range(self) -> None:
+        """Removal includes the upper boundary, but excludes unrelated profiles."""
+        users = [f"@{letter}:remote" for letter in "abcde"]
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote",
+                [
+                    UserDirectoryEntryModel(
+                        user_id=user, display_name="Rangeentry", avatar_url=None
+                    )
+                    for user in users
+                ],
+                start_token=None,
+                end_token=None,
+            )
+        )
+        other_server_user = "@c:other"
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "other",
+                [
+                    UserDirectoryEntryModel(
+                        user_id=other_server_user,
+                        display_name="Rangeentry",
+                        avatar_url=None,
+                    )
+                ],
+                start_token=None,
+                end_token=None,
+            )
+        )
+        local_user = "@c:test"
+        self.get_success(self.store.register_user(local_user))
+        unimported_user = "@c0:remote"
+        for user in (local_user, unimported_user):
+            self.get_success(
+                self.store.update_profile_in_user_dir(user, "Unrelatedprofile", None)
+            )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        imports = {(user, "remote") for user in users} | {(other_server_user, "other")}
+        self._assert_directory_state(profiles, imports)
+        self._assert_search_results("Rangeentry", set(users) | {other_server_user})
+
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote", [], start_token=users[1], end_token=users[3]
+            )
+        )
+
+        for user in users[2:4]:
+            del profiles[user]
+            imports.remove((user, "remote"))
+        self._assert_directory_state(profiles, imports)
+        self._assert_search_results(
+            "Rangeentry", {users[0], users[1], users[4], other_server_user}
+        )
+
+    def test_reconcile_pages_out_of_order_and_repeated(self) -> None:
+        """Disjoint pages may commit out of order and be replayed after a restart."""
+        users = [f"@user{number:02}:remote" for number in range(1, 7)]
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote",
+                [
+                    UserDirectoryEntryModel(
+                        user_id=user,
+                        display_name="Beforepage",
+                        avatar_url="mxc://remote/before",
+                    )
+                    for user in users
+                ],
+                start_token=None,
+                end_token=None,
+            )
+        )
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        imports = {(user, "remote") for user in users}
+        pages: list[tuple[str | None, str | None, list[UserDirectoryEntryModel]]] = [
+            (
+                None,
+                users[1],
+                [
+                    UserDirectoryEntryModel(
+                        user_id=users[0],
+                        display_name="Freshpage",
+                        avatar_url="mxc://remote/after",
+                    ),
+                    UserDirectoryEntryModel(
+                        user_id=users[1], display_name=None, avatar_url=None
+                    ),
+                ],
+            ),
+            (
+                users[1],
+                users[3],
+                [
+                    UserDirectoryEntryModel(
+                        user_id=users[3], display_name="Freshpage", avatar_url=None
+                    )
+                ],
+            ),
+            (
+                users[3],
+                None,
+                [
+                    UserDirectoryEntryModel(
+                        user_id=users[5], display_name="Freshpage", avatar_url=None
+                    )
+                ],
+            ),
+        ]
+        removed_by_page = [set(), {users[2]}, {users[4]}]
+        old_search_results = set(users)
+        new_search_results: set[str] = set()
+
+        for page_number in (2, 0, 1, 0, 1, 2):
+            with self.subTest(page=page_number + 1):
+                start_token, end_token, entries = pages[page_number]
+                self.get_success(
+                    self.store.reconcile_federated_remote_users(
+                        "remote", entries, start_token=start_token, end_token=end_token
+                    )
+                )
+
+                for user in removed_by_page[page_number]:
+                    profiles.pop(user, None)
+                    imports.discard((user, "remote"))
+                    old_search_results.discard(user)
+                for entry in entries:
+                    profiles[entry.user_id] = ProfileInfo(
+                        display_name=entry.display_name, avatar_url=entry.avatar_url
+                    )
+                    old_search_results.discard(entry.user_id)
+                    if entry.display_name is not None:
+                        new_search_results.add(entry.user_id)
+
+                self._assert_directory_state(profiles, imports)
+                self._assert_search_results("Beforepage", old_search_results)
+                self._assert_search_results("Freshpage", new_search_results)
+
+    def test_reconcile_empty_tail_then_user_returns(self) -> None:
+        """An empty final page removes stale users, which can be imported again."""
+        entries = [
+            UserDirectoryEntryModel(
+                user_id="@a:remote", display_name="Keptprofile", avatar_url=None
+            ),
+            UserDirectoryEntryModel(
+                user_id="@b:remote", display_name="Keptprofile", avatar_url=None
+            ),
+            UserDirectoryEntryModel(
+                user_id="@c:remote",
+                display_name="Tailprofile",
+                avatar_url="mxc://remote/old",
+            ),
+        ]
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote", entries, start_token=None, end_token=None
+            )
+        )
+        self._assert_search_results("Tailprofile", {"@c:remote"})
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote", entries[:2], start_token=None, end_token="@b:remote"
+            )
+        )
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote", [], start_token="@b:remote", end_token=None
+            )
+        )
+
+        profiles = {
+            entry.user_id: ProfileInfo(
+                display_name=entry.display_name, avatar_url=entry.avatar_url
+            )
+            for entry in entries[:2]
+        }
+        imports = {(user, "remote") for user in profiles}
+        self._assert_directory_state(profiles, imports)
+        self._assert_search_results("Keptprofile", {"@a:remote", "@b:remote"})
+        self._assert_search_results("Tailprofile", set())
+
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote",
+                [
+                    UserDirectoryEntryModel(
+                        user_id="@c:remote",
+                        display_name="Returnedprofile",
+                        avatar_url="mxc://remote/new",
+                    )
+                ],
+                start_token="@b:remote",
+                end_token=None,
+            )
+        )
+        profiles["@c:remote"] = ProfileInfo(
+            display_name="Returnedprofile", avatar_url="mxc://remote/new"
+        )
+        imports.add(("@c:remote", "remote"))
+        self._assert_directory_state(profiles, imports)
+        self._assert_search_results("Tailprofile", set())
+        self._assert_search_results("Returnedprofile", {"@c:remote"})
 
 
 class UserDirectoryICUTestCase(HomeserverTestCase):

@@ -68,6 +68,7 @@ from synapse.federation.federation_base import (
     parse_events_from_pdu_json,
 )
 from synapse.federation.transport.client import SendJoinResponse
+from synapse.federation.user_directory import RemoteUserDirectoryResponseModel
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
@@ -2069,6 +2070,36 @@ class FederationClient(FederationBase):
         filtered_failures = list(filter(filter_user_id, failures))
 
         return filtered_statuses, filtered_failures
+
+    async def user_directory_fetch(
+        self,
+        destination: str,
+        start_token: str | None,
+        timeout: int,
+    ) -> RemoteUserDirectoryResponseModel:
+        """Fetch and validate a page of the user directory on a remote server.
+
+        Args:
+            destination: The server to query.
+            start_token: Last user ID from the previous page. None for the first page.
+            timeout: Timeout in milliseconds for the request.
+
+        Returns:
+            The validated directory page.
+
+        Raises:
+            HttpResponseException: The remote server returned an HTTP error.
+            RequestSendFailed: The request to the remote server failed.
+            ValidationError: The response is malformed or violates the page boundaries.
+        """
+        response = await self.transport_layer.user_directory_fetch(
+            destination, start_token, timeout
+        )
+
+        return RemoteUserDirectoryResponseModel.model_validate(
+            response,
+            context={"destination": destination, "start_token": start_token},
+        )
 
     async def federation_download_media(
         self,

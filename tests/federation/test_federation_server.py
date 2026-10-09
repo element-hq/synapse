@@ -21,7 +21,8 @@
 import logging
 from http import HTTPStatus
 from unittest import skip as skip_test
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock, patch
+from urllib.parse import urlencode
 
 from parameterized import parameterized
 
@@ -56,6 +57,19 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         room.register_servlets,
         login.register_servlets,
     ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["user_directory"] = {
+            "enabled": True,
+            "search_all_users": True,
+        }
+        # The federation user directory fetch responder is only registered when
+        # the experimental feature is enabled.
+        config["experimental_features"] = {
+            "bwi_federated_user_dir_enabled": True,
+        }
+        return config
 
     @parameterized.expand([(b"",), (b"foo",), (b'{"limit": Infinity}',)])
     def test_bad_request(self, query_content: bytes) -> None:
@@ -94,6 +108,180 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
         )
         self.assertEqual(500, channel.code, channel.result)
+
+    @parameterized.expand(
+        [
+            ({},),
+            ({"display_name": "Local user"},),
+            ({"avatar_url": "mxc://test/avatar"},),
+            ({"display_name": "Local user", "avatar_url": "mxc://test/avatar"},),
+            ({"display_name": "", "avatar_url": ""},),
+        ]
+    )
+    def test_federation_user_directory_fetch_servlet(self, profile: JsonDict) -> None:
+        """Only local entries are exposed, with unset profile fields omitted."""
+        user_id = self.register_user("userlambda", "password")
+        store = self.hs.get_datastores().main
+        self.get_success(
+            store.update_profile_in_user_dir(
+                user_id, profile.get("display_name"), profile.get("avatar_url")
+            )
+        )
+        self.get_success(
+            store.update_profile_in_user_dir("@remote:elsewhere", "Remote user", None)
+        )
+
+        # Make a request to the servlet
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/fetch",
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.json_body, {"results": [{"user_id": user_id, **profile}]}
+        )
+
+    @parameterized.expand([(False,), (True,)])
+    def test_federation_user_directory_fetch_servlet_no_results(
+        self, include_remote: bool
+    ) -> None:
+        """An empty local directory yields no results."""
+        if include_remote:
+            self.get_success(
+                self.hs.get_datastores().main.update_profile_in_user_dir(
+                    "@remote:elsewhere", "Remote user", None
+                )
+            )
+
+        # Make a request to the servlet
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/fetch",
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertNotIn("limited", channel.json_body)
+        results = channel.json_body.get("results", [])
+        self.assertEqual(len(results), 0)
+
+    def test_federation_user_directory_fetch_servlet_internal_error(self) -> None:
+        """A server failure is returned as an error, not an empty directory."""
+        with patch.object(
+            self.hs.get_datastores().main,
+            "get_local_users_in_user_dir_paginated",
+            new=AsyncMock(side_effect=RuntimeError("database unavailable")),
+        ):
+            channel = self.make_signed_federation_request(
+                "GET",
+                "/_matrix/federation/unstable/de.bwi.federated_user_dir/"
+                "user_directory/fetch",
+            )
+
+        self.assertEqual(channel.code, HTTPStatus.INTERNAL_SERVER_ERROR)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN")
+
+    @parameterized.expand(
+        [
+            ("empty", 0, [0]),
+            ("partial", 999, [999]),
+            ("full", 1_000, [1_000, 0]),
+            ("full_and_partial", 1_001, [1_000, 1]),
+            ("two_full", 2_000, [1_000, 1_000, 0]),
+        ]
+    )
+    def test_federation_user_directory_fetch_pagination(
+        self, name: str, user_count: int, expected_page_sizes: list[int]
+    ) -> None:
+        """Signed requests use 1,000-entry pages, including an empty final page."""
+        store = self.hs.get_datastores().main
+        user_ids = [
+            f"@page{i:04}:{self.hs.hostname}" for i in reversed(range(user_count))
+        ]
+        self.get_success(
+            store.db_pool.simple_insert_many(
+                table="users",
+                keys=("name", "creation_ts"),
+                values=[(user_id, 0) for user_id in user_ids],
+                desc="populate_pagination_users",
+            )
+        )
+        self.get_success(
+            store.db_pool.simple_insert_many(
+                table="user_directory",
+                keys=("user_id", "display_name", "avatar_url"),
+                values=[(user_id, None, None) for user_id in user_ids],
+                desc="populate_pagination_directory",
+            )
+        )
+        user_ids.sort()
+
+        self.get_success(
+            store.update_profile_in_user_dir("@remote:elsewhere", "Remote user", None)
+        )
+        endpoint = (
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/"
+            "user_directory/fetch"
+        )
+        start_token = None
+        received_ids: list[str] = []
+        for page_number, expected_size in enumerate(expected_page_sizes):
+            path = endpoint
+            if start_token is not None:
+                path += "?" + urlencode({"start_token": start_token})
+            channel = self.make_signed_federation_request("GET", path)
+            self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+            results = channel.json_body["results"]
+            self.assertEqual(len(results), expected_size)
+            self.assertEqual(
+                results,
+                [
+                    {"user_id": user_id}
+                    for user_id in user_ids[
+                        len(received_ids) : len(received_ids) + expected_size
+                    ]
+                ],
+            )
+            received_ids.extend(entry["user_id"] for entry in results)
+            if page_number < len(expected_page_sizes) - 1:
+                self.assertEqual(channel.json_body["next_token"], received_ids[-1])
+                start_token = channel.json_body["next_token"]
+            else:
+                self.assertNotIn("next_token", channel.json_body)
+
+        self.assertEqual(received_ids, user_ids)
+
+    @parameterized.expand(
+        [("empty", ""), ("malformed", "not-a-user-id"), ("foreign", "@user:elsewhere")]
+    )
+    def test_federation_user_directory_fetch_rejects_invalid_start_token(
+        self, name: str, start_token: str
+    ) -> None:
+        """Invalid request cursors return an error instead of an empty directory."""
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/"
+            "user_directory/fetch?" + urlencode({"start_token": start_token}),
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
+
+
+class FederationUserDirectoryDisabledTests(unittest.FederatingHomeserverTestCase):
+    def test_federation_user_directory_fetch_servlet_disabled(self) -> None:
+        """A disabled endpoint is exposed as an unrecognized endpoint."""
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/"
+            "user_directory/fetch",
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
+        self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
 
 
 class GetMissingEventsRoomCheckTests(unittest.FederatingHomeserverTestCase):

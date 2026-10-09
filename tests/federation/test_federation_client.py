@@ -20,15 +20,22 @@
 #
 import urllib
 from unittest import mock
+from unittest.mock import AsyncMock
+
+from parameterized import parameterized
+from pydantic import ValidationError
 
 import twisted.web.client
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import HttpResponseException, RequestSendFailed
 from synapse.events import EventBase
+from synapse.federation.user_directory import RemoteUserDirectoryResponseModel
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests.test_utils import FakeResponse, event_injection
@@ -59,6 +66,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
 
         self.creator = f"@creator:{self.OTHER_SERVER_NAME}"
         self.room_version = self.hs.config.server.default_room_version
+        self.federation_client = homeserver.get_federation_client()
+        self.transport_layer = self.federation_client.transport_layer
 
     def test_get_room_state(self) -> None:
         # mock up some events to use in the response.
@@ -336,3 +345,221 @@ class FederationClientTest(FederatingHomeserverTestCase):
         # This is 2 because it failed once from `self.OTHER_SERVER_NAME` and the
         # other from "yet.another.server"
         self.assertEqual(backfill_num_attempts, 2)
+
+    @parameterized.expand(
+        [
+            ("first_final", None, None),
+            ("first_continued", None, "@user:other.example.com"),
+            ("later_final", "@before:other.example.com", None),
+            (
+                "later_continued",
+                "@before:other.example.com",
+                "@user:other.example.com",
+            ),
+        ]
+    )
+    def test_user_directory_fetch(
+        self, name: str, start_token: str | None, next_token: str | None
+    ) -> None:
+        """A successful fetch returns a validated directory page."""
+        mock_results: JsonDict = {
+            "results": [
+                {
+                    "user_id": "@user:other.example.com",
+                    "display_name": "Test User",
+                    "avatar_url": "mxc://example.com/avatar",
+                }
+            ],
+        }
+        if next_token is not None:
+            mock_results["next_token"] = next_token
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value=mock_results
+        )
+
+        result = self.get_success(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", start_token=start_token, timeout=2000
+            )
+        )
+
+        self.assertIsInstance(result, RemoteUserDirectoryResponseModel)
+        self.assertEqual(result.model_dump(exclude_none=True), mock_results)
+        self.assertEqual(result.next_token, next_token)
+
+        self.transport_layer.user_directory_fetch.assert_awaited_once_with(
+            "other.example.com", start_token, 2000
+        )
+
+    @parameterized.expand([(None,), ("@last:other.example.com",)])
+    def test_user_directory_fetch_empty_final_page(
+        self, start_token: str | None
+    ) -> None:
+        """An empty directory or tail is a valid final page."""
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value={"results": []}
+        )
+
+        result = self.get_success(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", start_token=start_token, timeout=2000
+            )
+        )
+
+        self.assertEqual(result.results, [])
+        self.assertIsNone(result.next_token)
+        self.transport_layer.user_directory_fetch.assert_awaited_once_with(
+            "other.example.com", start_token, 2000
+        )
+
+    @parameterized.expand(
+        [
+            ("duplicate", ["alice", "alice"], None),
+            ("unsorted", ["bob", "alice"], None),
+            ("at_start", ["alice", "bob"], "alice"),
+            ("before_start", ["alice", "charlie"], "bob"),
+        ]
+    )
+    def test_user_directory_fetch_rejects_invalid_order(
+        self, name: str, localparts: list[str], start_localpart: str | None
+    ) -> None:
+        """Every returned ID must advance strictly beyond the preceding cursor."""
+        start_token = (
+            f"@{start_localpart}:other.example.com" if start_localpart else None
+        )
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value={
+                "results": [
+                    {"user_id": f"@{localpart}:other.example.com"}
+                    for localpart in localparts
+                ]
+            }
+        )
+
+        self.get_failure(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", start_token=start_token, timeout=2000
+            ),
+            ValidationError,
+        )
+
+    @parameterized.expand(
+        [
+            ("mismatched_last_id", None, "@charlie:other.example.com"),
+            ("repeated", "@alice:other.example.com", "@alice:other.example.com"),
+            ("backwards", "@alice:other.example.com", "@aaron:other.example.com"),
+            ("malformed", None, "not-a-user-id"),
+            ("empty", None, ""),
+            ("foreign_server", None, "@bob:elsewhere.example.com"),
+            ("local_server", None, "@bob:test"),
+        ]
+    )
+    def test_user_directory_fetch_rejects_invalid_next_token(
+        self, name: str, start_token: str | None, next_token: str
+    ) -> None:
+        """A continuation cursor must belong to the destination and end this page."""
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value={
+                "results": [{"user_id": "@bob:other.example.com"}],
+                "next_token": next_token,
+            }
+        )
+
+        self.get_failure(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", start_token=start_token, timeout=2000
+            ),
+            ValidationError,
+        )
+
+    def test_user_directory_fetch_rejects_empty_continued_page(self) -> None:
+        """An empty page cannot provide a continuation cursor."""
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value={"results": [], "next_token": "@bob:other.example.com"}
+        )
+
+        self.get_failure(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", start_token=None, timeout=2000
+            ),
+            ValidationError,
+        )
+
+    def test_user_directory_fetch_rejects_local_users(self) -> None:
+        """The client rejects local users claimed by a remote directory."""
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value={
+                "results": [
+                    {
+                        "user_id": "@localuser:test",
+                        "display_name": "Local User",
+                        "avatar_url": None,
+                    }
+                ]
+            }
+        )
+
+        self.get_failure(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", start_token=None, timeout=2000
+            ),
+            ValidationError,
+        )
+
+    def test_user_directory_fetch_rejects_foreign_or_malformed_users(self) -> None:
+        """A bad entry rejects the whole page, including otherwise valid users."""
+        for user_id in ("@mallory:third-party.example.com", "not-a-valid-user-id"):
+            with self.subTest(user_id=user_id):
+                self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+                    return_value={
+                        "results": [
+                            {
+                                "user_id": "@alice:other.example.com",
+                                "display_name": "Alice Remote",
+                                "avatar_url": None,
+                            },
+                            {"user_id": user_id},
+                        ]
+                    }
+                )
+
+                self.get_failure(
+                    self.federation_client.user_directory_fetch(
+                        "other.example.com", start_token=None, timeout=2000
+                    ),
+                    ValidationError,
+                )
+
+    def test_user_directory_fetch_endpoint_not_found(self) -> None:
+        """The federation client propagates HTTP errors to its caller."""
+        error = HttpResponseException(
+            404, "Not Found", b'{"errcode": "M_UNRECOGNIZED"}'
+        )
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=error
+        )
+
+        failure = self.get_failure(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", start_token=None, timeout=10
+            ),
+            HttpResponseException,
+        )
+
+        self.assertIs(failure.value, error)
+
+    def test_user_directory_fetch_request_failure(self) -> None:
+        """The federation client propagates transport errors to its caller."""
+        error = RequestSendFailed(RuntimeError("connection failed"), can_retry=True)
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=error
+        )
+
+        failure = self.get_failure(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", start_token=None, timeout=10
+            ),
+            RequestSendFailed,
+        )
+
+        self.assertIs(failure.value, error)
