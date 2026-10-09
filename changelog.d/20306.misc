@@ -1,0 +1,1 @@
+Speed up sending large responses on busy workers by writing them to the transport in one go, and raising Twisted's per-tick TCP send limit.
