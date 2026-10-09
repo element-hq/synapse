@@ -32,6 +32,7 @@ from synapse.types import (
     StreamKeyType,
     UserID,
     get_domain_from_id,
+    is_compliant_user_id,
 )
 
 if TYPE_CHECKING:
@@ -111,6 +112,14 @@ class ReceiptsHandler:
                     if get_domain_from_id(user_id) != origin:
                         logger.info(
                             "Received receipt for user %r from server %s, ignoring",
+                            user_id,
+                            origin,
+                        )
+                        continue
+
+                    if not is_compliant_user_id(user_id):
+                        logger.info(
+                            "Received receipt for non-compliant user ID %r from server %s, ignoring",
                             user_id,
                             origin,
                         )

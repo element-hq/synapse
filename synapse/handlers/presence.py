@@ -119,6 +119,7 @@ from synapse.types import (
     StreamKeyType,
     UserID,
     get_domain_from_id,
+    is_compliant_user_id,
 )
 from synapse.util.async_helpers import Linearizer
 from synapse.util.duration import Duration
@@ -1506,6 +1507,14 @@ class PresenceHandler(BasePresenceHandler):
             if get_domain_from_id(user_id) != origin:
                 logger.info(
                     "Got presence update from %r with bad 'user_id': %r",
+                    origin,
+                    user_id,
+                )
+                continue
+
+            if not is_compliant_user_id(user_id):
+                logger.info(
+                    "Dropping presence update from %r for non-compliant user ID %r",
                     origin,
                     user_id,
                 )

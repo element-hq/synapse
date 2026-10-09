@@ -591,6 +591,35 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             # Assert the user is now unavailable.
             self.assertEqual(state.state, PresenceState.UNAVAILABLE)
 
+    def test_non_compliant_user_id_federation_presence_dropped(self) -> None:
+        """A remote server pushes presence for a compliant and a non-compliant
+        (grandfathered historical) user ID. Only the compliant one is applied.
+        """
+        compliant_user_id = UserID.from_string("@john:remote")
+        non_compliant_user_id = UserID.from_string("@héllo:remote")
+
+        presence_handler = self.hs.get_presence_handler()
+        assert isinstance(presence_handler, PresenceHandler)
+        self.get_success(
+            presence_handler.incoming_presence(
+                "remote",
+                {
+                    "push": [
+                        {
+                            "user_id": user_id.to_string(),
+                            "presence": PresenceState.ONLINE,
+                        }
+                        for user_id in (compliant_user_id, non_compliant_user_id)
+                    ]
+                },
+            )
+        )
+
+        state = self.get_success(presence_handler.get_state(compliant_user_id))
+        self.assertEqual(state.state, PresenceState.ONLINE)
+        state = self.get_success(presence_handler.get_state(non_compliant_user_id))
+        self.assertEqual(state.state, PresenceState.OFFLINE)
+
 
 class PresenceTimeoutTestCase(unittest.TestCase):
     """Tests different timers and that the timer does not change `status_msg` of user."""

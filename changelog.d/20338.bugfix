@@ -1,0 +1,1 @@
+Stop forwarding non-compliant (grandfathered historical) remote user IDs to clients outside the context of an event, by dropping their incoming presence, typing, read receipt, to-device and signing key updates, and by leaving them out of `/sync` device list changes and newly joined users' presence, as per [the spec](https://spec.matrix.org/v1.19/appendices/#historical-user-ids).
