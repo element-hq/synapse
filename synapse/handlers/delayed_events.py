@@ -22,7 +22,6 @@ from synapse.api.constants import EventTypes, StickyEvent, StickyEventField
 from synapse.api.errors import Codes, ShadowBanError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
-from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
@@ -432,7 +431,7 @@ class DelayedEventsHandler:
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at(next_send_ts)
 
-    async def cancel(self, request: SynapseRequest, delay_id: str) -> None:
+    async def cancel(self, requester: Requester, delay_id: str) -> None:
         """
         Cancels the scheduled delivery of the matching delayed event.
 
@@ -440,10 +439,13 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._mgmt_ratelimit(request)
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
         await make_deferred_yieldable(self._initialized_from_db)
 
-        next_send_ts = await self._store.cancel_delayed_event(delay_id)
+        next_send_ts = await self._store.cancel_delayed_event(
+            delay_id=delay_id,
+            user_localpart=requester.user.localpart,
+        )
 
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
@@ -472,14 +474,14 @@ class DelayedEventsHandler:
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
 
-    async def restart(self, request: SynapseRequest, delay_id: str) -> None:
+    async def restart(self, requester: Requester, delay_id: str) -> None:
         """
         Restarts the scheduled delivery of the matching delayed event.
 
         Raises:
             NotFoundError: if no matching delayed event could be found.
         """
-        await self._mgmt_ratelimit(request)
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
 
         # Note: We don't need to wait on `self._initialized_from_db` here as the
         # events that deals with are already marked as processed.
@@ -487,7 +489,9 @@ class DelayedEventsHandler:
         # `restart_delayed_events` will skip over such events entirely.
 
         next_send_ts = await self._store.restart_delayed_event(
-            delay_id, self._get_current_ts()
+            delay_id=delay_id,
+            user_localpart=requester.user.localpart,
+            current_ts=self._get_current_ts(),
         )
 
         # Only the main process handles sending delayed events.
@@ -495,7 +499,7 @@ class DelayedEventsHandler:
             if self._next_send_ts_changed(next_send_ts):
                 self._schedule_next_at(next_send_ts)
 
-    async def send(self, request: SynapseRequest, delay_id: str) -> None:
+    async def send(self, requester: Requester, delay_id: str) -> None:
         """
         Immediately sends the matching delayed event, instead of waiting for its scheduled delivery.
 
@@ -503,28 +507,18 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._mgmt_ratelimit(request)
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
         await make_deferred_yieldable(self._initialized_from_db)
 
-        event, next_send_ts = await self._store.process_target_delayed_event(delay_id)
+        event, next_send_ts = await self._store.process_target_delayed_event(
+            delay_id=delay_id,
+            user_localpart=requester.user.localpart,
+        )
 
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
 
         await self._send_event(event)
-
-    async def _mgmt_ratelimit(self, request: SynapseRequest) -> None:
-        """
-        Ratelimit requests with the `_delayed_event_mgmt_ratelimiter` keyed on the
-        user making the request, or the request's IP address if unauthed.
-        """
-        if self._auth.has_access_token(request):
-            requester = await self._auth.get_user_by_req(request)
-            key = None
-        else:
-            requester = None
-            key = request.getClientAddress().host
-        await self._delayed_event_mgmt_ratelimiter.ratelimit(requester, key)
 
     async def _send_on_timeout(self) -> None:
         self._next_delayed_event_call = None
