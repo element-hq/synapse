@@ -8,6 +8,7 @@ use pyo3::{exceptions::PyRuntimeError, prelude::*};
 use pyo3_log::ResetHandle;
 
 pub mod acl;
+pub mod caches;
 pub mod canonical_json;
 pub mod clock;
 pub mod config;
