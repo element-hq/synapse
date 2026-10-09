@@ -23,7 +23,7 @@
 import itertools
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Collection, Iterable
+from typing import TYPE_CHECKING, Any, Collection, Iterable, Protocol
 
 from synapse.api.constants import EventTypes
 from synapse.config._base import Config
@@ -44,12 +44,27 @@ from synapse.storage.database import (
 )
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.util.caches.descriptors import CachedFunction
 from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+
+
+class InvalidatableCache(Protocol):
+    """What the `_invalidate_*_and_stream` helpers need from a cache.
+
+    Synapse invalidates caches by name: the row on the caches stream carries
+    `__name__`, and the receiving worker does `getattr(store, name).invalidate(keys)`.
+    Both a `@cached` function and a `RustCache` fit, so this is deliberately
+    the whole of what those helpers look at.
+    """
+
+    __name__: str
+
+    def invalidate(self, keys: tuple[Any, ...]) -> None: ...
+    def invalidate_all(self) -> None: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -642,7 +657,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
     def _invalidate_cache_and_stream(
         self,
         txn: LoggingTransaction,
-        cache_func: CachedFunction,
+        cache_func: InvalidatableCache,
         keys: tuple[Any, ...],
     ) -> None:
         """Invalidates the cache and adds it to the cache stream so other workers
@@ -658,7 +673,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
     def _invalidate_cache_and_stream_bulk(
         self,
         txn: LoggingTransaction,
-        cache_func: CachedFunction,
+        cache_func: InvalidatableCache,
         key_tuples: Collection[tuple[Any, ...]],
     ) -> None:
         """A bulk version of _invalidate_cache_and_stream.
@@ -680,7 +695,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         )
 
     def _invalidate_all_cache_and_stream(
-        self, txn: LoggingTransaction, cache_func: CachedFunction
+        self, txn: LoggingTransaction, cache_func: InvalidatableCache
     ) -> None:
         """Invalidates the entire cache and adds it to the cache stream so other workers
         will know to invalidate their caches.
