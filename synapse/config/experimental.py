@@ -156,6 +156,12 @@ class ExperimentalConfig(Config):
             "msc3381_polls_enabled", False
         )
 
+        # MSC4505: default push rules for live location sharing — notify on
+        # beacon_info start events (the MSC3672 state event), suppress beacon
+        # updates. Unstable rule ids: .org.matrix.msc4505.rule.beacon_info
+        # (_one_to_one) / .org.matrix.msc4505.rule.beacon.
+        self.msc4505_enabled: bool = experimental.get("msc4505_enabled", False)
+
         # MSC3912: Relation-based redactions.
         self.msc3912_enabled: bool = experimental.get("msc3912_enabled", False)
 
