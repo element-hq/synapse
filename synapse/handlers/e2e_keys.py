@@ -1842,7 +1842,6 @@ class SigningKeyEduUpdater:
                 user_id,
                 origin,
             )
-            await self.store.mark_remote_user_device_list_as_unsubscribed(user_id)
             return
 
         room_ids = await self.store.get_rooms_for_user(user_id)
