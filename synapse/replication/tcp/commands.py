@@ -271,16 +271,26 @@ class UserSyncCommand(Command):
     This is used by the process handling presence (typically the master) to
     calculate who is online and who is not.
 
-    Includes a timestamp of when the last user sync was.
+    Includes the presence state the sync requested and a timestamp of when the
+    last user sync was.
 
     Format::
 
-        USER_SYNC <instance_id> <user_id> <state> <last_sync_ms>
+        USER_SYNC <instance_id> <user_id> <device_id> <state> <presence_state> <last_sync_ms>
 
-    Where <state> is either "start" or "end"
+    Where <state> is either "start" or "end", and <presence_state> is the
+    presence state the sync requested (e.g. "online" or "unavailable"). The
+    presence state is only meaningful when <state> is "start".
     """
 
-    __slots__ = ["instance_id", "user_id", "device_id", "is_syncing", "last_sync_ms"]
+    __slots__ = [
+        "instance_id",
+        "user_id",
+        "device_id",
+        "is_syncing",
+        "presence_state",
+        "last_sync_ms",
+    ]
 
     NAME = "USER_SYNC"
 
@@ -290,18 +300,22 @@ class UserSyncCommand(Command):
         user_id: str,
         device_id: str | None,
         is_syncing: bool,
+        presence_state: str,
         last_sync_ms: int,
     ):
         self.instance_id = instance_id
         self.user_id = user_id
         self.device_id = device_id
         self.is_syncing = is_syncing
+        self.presence_state = presence_state
         self.last_sync_ms = last_sync_ms
 
     @classmethod
     def from_line(cls: type["UserSyncCommand"], line: str) -> "UserSyncCommand":
         device_id: str | None
-        instance_id, user_id, device_id, state, last_sync_ms = line.split(" ", 4)
+        instance_id, user_id, device_id, state, presence_state, last_sync_ms = (
+            line.split(" ", 5)
+        )
 
         if device_id == "None":
             device_id = None
@@ -309,7 +323,14 @@ class UserSyncCommand(Command):
         if state not in ("start", "end"):
             raise Exception("Invalid USER_SYNC state %r" % (state,))
 
-        return cls(instance_id, user_id, device_id, state == "start", int(last_sync_ms))
+        return cls(
+            instance_id,
+            user_id,
+            device_id,
+            state == "start",
+            presence_state,
+            int(last_sync_ms),
+        )
 
     def to_line(self) -> str:
         return " ".join(
@@ -318,6 +339,7 @@ class UserSyncCommand(Command):
                 self.user_id,
                 str(self.device_id),
                 "start" if self.is_syncing else "end",
+                self.presence_state,
                 str(self.last_sync_ms),
             )
         )
@@ -345,6 +367,37 @@ class ClearUserSyncsCommand(Command):
     def from_line(
         cls: type["ClearUserSyncsCommand"], line: str
     ) -> "ClearUserSyncsCommand":
+        return cls(line)
+
+    def to_line(self) -> str:
+        return self.instance_id
+
+
+class UserSyncKeepaliveCommand(Command):
+    """Sent periodically by a worker to let the presence writer know that its
+    set of syncing users is still live, even when no user has started or
+    stopped syncing recently.
+
+    Without this the presence writer would expire the process (see
+    ``EXTERNAL_PROCESS_EXPIRY``) after a period of quiet and mark all of its
+    syncing users as offline.
+
+    Format::
+
+        USER_SYNC_KEEPALIVE <instance_id>
+    """
+
+    __slots__ = ["instance_id"]
+
+    NAME = "USER_SYNC_KEEPALIVE"
+
+    def __init__(self, instance_id: str):
+        self.instance_id = instance_id
+
+    @classmethod
+    def from_line(
+        cls: type["UserSyncKeepaliveCommand"], line: str
+    ) -> "UserSyncKeepaliveCommand":
         return cls(line)
 
     def to_line(self) -> str:
@@ -530,6 +583,7 @@ _COMMANDS: tuple[type[Command], ...] = (
     UserIpCommand,
     RemoteServerUpCommand,
     ClearUserSyncsCommand,
+    UserSyncKeepaliveCommand,
     LockReleasedCommand,
     NewActiveTaskCommand,
     CancelTaskCommand,
@@ -556,6 +610,7 @@ VALID_CLIENT_COMMANDS = (
     PingCommand.NAME,
     UserSyncCommand.NAME,
     ClearUserSyncsCommand.NAME,
+    UserSyncKeepaliveCommand.NAME,
     FederationAckCommand.NAME,
     UserIpCommand.NAME,
     ErrorCommand.NAME,
