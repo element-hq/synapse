@@ -90,7 +90,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         self,
         response_body: JsonDict,
         expected_events_by_room: dict[str, list[str]] | None,
-    ) -> str | None:
+    ) -> None:
         """Assert the sliding sync response was successful and has the expected
         sticky events.
 
@@ -109,10 +109,9 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         # If there are no expected events, we shouldn't get anything in the response
         if expected_events_by_room is None:
             self.assertIsNone(sticky_events)
-            return None
+            return
 
         self.assertIsNotNone(sticky_events)
-        self.assertIsInstance(sticky_events["next_batch"], str)
 
         actual_rooms = sticky_events["rooms"]
         # Check that we have the expected rooms
@@ -130,9 +129,6 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
                 self.assertIn("unsigned", actual_event)
                 ttl = actual_event["unsigned"][EventUnsignedContentFields.STICKY_TTL]
                 self.assertIsInstance(ttl, int)
-
-        self.assertIn("next_batch", sticky_events)
-        return sticky_events["next_batch"]
 
     def test_empty_sync(self) -> None:
         """Test that enabling sticky events extension works on initial and incremental sync,
@@ -192,23 +188,17 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
-        # Assert the response and then get the next_batch for the next sliding sync request
-        next_batch = self._assert_sticky_events_response(
-            response_body, {room_id: [sticky_event_id]}
-        )
-        assert next_batch is not None
+        # Assert the response
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
 
         # Do an incremental sync immediately again
         sync_body = {
             "lists": DUMMY_LISTS,
-            "extensions": {
-                "org.matrix.msc4354.sticky_events": {
-                    "enabled": True,
-                    "since": next_batch,
-                }
-            },
+            "extensions": {"org.matrix.msc4354.sticky_events": {"enabled": True}},
         }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        response_body, _ = self.do_sync(
+            sync_body, since=response_body["pos"], tok=user1_tok
+        )
 
         # Check we don't get that event again
         self._assert_sticky_events_response(response_body, None)
@@ -223,7 +213,9 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         )["event_id"]
 
         # Now the incremental sync should give us that event
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        response_body, _ = self.do_sync(
+            sync_body, since=response_body["pos"], tok=user1_tok
+        )
         self._assert_sticky_events_response(
             response_body, {room_id: [sticky_event_id2]}
         )
@@ -570,7 +562,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
 
         # We expect to see the first 2 sticky events by stream order
         # and they should be in that stream order
-        next_batch = self._assert_sticky_events_response(
+        self._assert_sticky_events_response(
             response_body, {room_id: sticky_event_ids[0:2]}
         )
 
@@ -580,13 +572,13 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
             "extensions": {
                 "org.matrix.msc4354.sticky_events": {
                     "enabled": True,
-                    # This makes it incremental
-                    "since": next_batch,
                     "limit": 3,
                 }
             },
         }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        response_body, _ = self.do_sync(
+            sync_body, since=response_body["pos"], tok=user1_tok
+        )
 
         # Should get remaining events, in stream order again
         self._assert_sticky_events_response(
@@ -634,7 +626,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # We expect to see the first sticky event
-        next_batch = self._assert_sticky_events_response(
+        self._assert_sticky_events_response(
             response_body, {room_id: sticky_event_ids[0:1]}
         )
 
@@ -644,16 +636,16 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
             "extensions": {
                 "org.matrix.msc4354.sticky_events": {
                     "enabled": True,
-                    # This makes it incremental
-                    "since": next_batch,
                     "limit": 0,
                 }
             },
         }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        response_body, _ = self.do_sync(
+            sync_body, since=response_body["pos"], tok=user1_tok
+        )
         # You could imagine a buggy system returns a `next_batch` here with no events,
         # but Synapse just omits the response extension altogether.
-        next_batch = self._assert_sticky_events_response(response_body, None)
+        self._assert_sticky_events_response(response_body, None)
 
     def test_deduplication_with_timeline(self) -> None:
         """

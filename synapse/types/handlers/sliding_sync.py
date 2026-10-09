@@ -48,7 +48,7 @@ from synapse.types import (
     ThreadSubscriptionsToken,
     UserID,
 )
-from synapse.types.rest.client import SlidingSyncBody, SlidingSyncStickyEventsToken
+from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -437,7 +437,6 @@ class SlidingSyncResult:
             """
 
             room_id_to_sticky_events: Mapping[str, list[FilteredEvent]]
-            next_batch: SlidingSyncStickyEventsToken
 
             def __bool__(self) -> bool:
                 return bool(self.room_id_to_sticky_events)

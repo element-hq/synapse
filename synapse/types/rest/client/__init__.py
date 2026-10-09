@@ -522,12 +522,10 @@ class SlidingSyncBody(RequestBodyModel):
             Attributes:
                 enabled
                 limit: maximum number of sticky events to return in the extension (default 100)
-                since: either a string with the Sticky Events since token or absent
             """
 
             enabled: StrictBool = False
             limit: NonNegativeStrictInt = 100
-            since: SlidingSyncStickyEventsToken | AbsentType = Absent
 
         class ProfilesExtension(RequestBodyModel):
             """The Profile Updates extension (MSC4262)
