@@ -371,6 +371,8 @@ class DelayedEventsHandler:
         Raises:
             SynapseError: if the delayed event fails validation checks, or
                 if the requested delay is longer than allowed.
+            AuthError: if the requester is not joined to the room, unless the
+                event is a change to their own membership.
         """
         # Use standard request limiter for scheduling new delayed events.
         # TODO: Instead apply ratelimiting based on the scheduled send time.
@@ -398,6 +400,12 @@ class DelayedEventsHandler:
                 },
             )
         )
+
+        # MSC4140: don't store delayed events for rooms the sender is not in. A
+        # change to their own membership (e.g. a delayed join) is left to the auth
+        # rules, which are applied in full when the event is sent.
+        if not (event_type == EventTypes.Member and state_key == str(requester.user)):
+            await self._auth.check_user_in_room(room_id, requester)
 
         creation_ts = self._get_current_ts()
 
