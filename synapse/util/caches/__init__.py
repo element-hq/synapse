@@ -167,6 +167,11 @@ class CacheMetric:
 
     def collect(self) -> None:
         try:
+            # First, so that a cache which keeps its own counters (see
+            # `register_cache`) has copied them onto us before we read them.
+            if self._collect_callback:
+                self._collect_callback()
+
             labels_base = {
                 "name": self._cache_name,
                 SERVER_NAME_LABEL: self._server_name,
@@ -195,8 +200,6 @@ class CacheMetric:
                     # self.memory_usage can be None if nothing has been inserted
                     # into the cache yet.
                     cache_memory_usage.labels(**labels_base).set(self.memory_usage or 0)
-            if self._collect_callback:
-                self._collect_callback()
         except Exception as e:
             logger.warning("Error calculating metrics for %s: %s", self._cache_name, e)
             raise
