@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, Mock
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import EduTypes
 from synapse.handlers.device import DeviceListUpdater
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -154,6 +155,44 @@ class DeviceListResyncTestCase(unittest.HomeserverTestCase):
             self.store.get_user_ids_requiring_device_list_resync()
         )
         self.assertNotIn(remote_user_id, need_resync)
+
+    def test_non_compliant_user_id_signing_key_update_dropped(self) -> None:
+        """Tests that signing key updates from non-compliant (grandfathered
+        historical) user IDs are dropped, while those from compliant user IDs
+        sharing the same room are stored.
+        """
+        compliant_user_id = "@john:test_remote"
+        non_compliant_user_id = "@héllo:test_remote"
+        remote_origin = "test_remote"
+        remote_master_key = "85T7JXPFBAySB/jwby4S3lBPTqY3+Zg53nYuGmu1ggY"
+
+        # Share room with both users.
+        self.store.get_rooms_for_user = AsyncMock(return_value=["!someroom:test"])
+
+        federation_registry = self.hs.get_federation_registry()
+        for user_id in (compliant_user_id, non_compliant_user_id):
+            self.get_success(
+                federation_registry.on_edu(
+                    EduTypes.SIGNING_KEY_UPDATE,
+                    remote_origin,
+                    {
+                        "user_id": user_id,
+                        "master_key": {
+                            "user_id": user_id,
+                            "usage": ["master"],
+                            "keys": {"ed25519:" + remote_master_key: remote_master_key},
+                        },
+                    },
+                )
+            )
+
+        keys = self.get_success(
+            self.store.get_e2e_cross_signing_keys_bulk(
+                user_ids=[compliant_user_id, non_compliant_user_id]
+            ),
+        )
+        self.assertIsNotNone(keys[compliant_user_id])
+        self.assertIsNone(keys[non_compliant_user_id])
 
     def test_cross_signing_keys_retry(self) -> None:
         """Tests that resyncing a device list correctly processes cross-signing keys from
