@@ -1,1 +1,0 @@
-Only run delayed event background jobs when a new room event is processed.
