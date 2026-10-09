@@ -42,7 +42,14 @@ from synapse.logging.opentracing import (
     log_kv,
     set_tag,
 )
-from synapse.types import JsonDict, Requester, StreamKeyType, UserID, get_domain_from_id
+from synapse.types import (
+    JsonDict,
+    Requester,
+    StreamKeyType,
+    UserID,
+    get_domain_from_id,
+    is_compliant_user_id,
+)
 from synapse.util import split_dict_to_fit_to_size
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import random_string_insecure_fast
@@ -118,6 +125,14 @@ class DeviceMessageHandler:
         if origin != get_domain_from_id(sender_user_id):
             logger.warning(
                 "Dropping device message from %r with spoofed sender %r",
+                origin,
+                sender_user_id,
+            )
+            return
+
+        if not is_compliant_user_id(sender_user_id):
+            logger.warning(
+                "Dropping device message from %r with non-compliant sender %r",
                 origin,
                 sender_user_id,
             )
