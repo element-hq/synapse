@@ -23,7 +23,7 @@ import abc
 import logging
 import os
 import shutil
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from synapse.config._base import Config
 from synapse.logging.context import defer_to_thread, run_in_background
@@ -65,6 +65,15 @@ class StorageProvider(metaclass=abc.ABCMeta):
         Returns:
             Returns a Responder if the provider has the file, otherwise returns None.
         """
+
+    async def delete(self, path: str, file_info: FileInfo) -> None:
+        """Delete the file described by file_info.
+
+        Args:
+            path: Relative path of file in local cache
+            file_info: The metadata of the file.
+        """
+        return None
 
 
 class StorageProviderWrapper(StorageProvider):
@@ -133,6 +142,14 @@ class StorageProviderWrapper(StorageProvider):
         # against improper implementations.
         return await maybe_awaitable(self.backend.fetch(path, file_info))
 
+    @trace_with_opname("StorageProviderWrapper.delete")
+    async def delete(self, path: str, file_info: FileInfo) -> None:
+        # see: fetch
+        if file_info.url_cache or getattr(self.backend, "delete", None) is None:
+            return None
+
+        return await maybe_awaitable(self.backend.delete(path, file_info))
+
 
 class FileStorageProviderBackend(StorageProvider):
     """A storage provider that stores files in a directory on a filesystem.
@@ -162,11 +179,10 @@ class FileStorageProviderBackend(StorageProvider):
         os.makedirs(dirname, exist_ok=True)
 
         # mypy needs help inferring the type of the second parameter, which is generic
-        shutil_copyfile: Callable[[str, str], str] = shutil.copyfile
         with start_active_span("shutil_copyfile"):
             await defer_to_thread(
                 self.reactor,
-                shutil_copyfile,
+                shutil.copyfile,
                 primary_fname,
                 backup_fname,
             )
@@ -195,3 +211,14 @@ class FileStorageProviderBackend(StorageProvider):
         just pull that out.
         """
         return Config.ensure_directory(config["directory"])
+
+    @trace_with_opname("FileStorageProviderBackend.delete")
+    async def delete(self, path: str, file_info: FileInfo) -> None:
+        # Convert to an absolute path.
+        fn = os.path.join(self.base_directory, path)
+        if os.path.isfile(fn):
+            await defer_to_thread(
+                self.reactor,
+                os.remove,
+                fn,
+            )
