@@ -593,6 +593,24 @@ def is_compliant_user_id_localpart(localpart: str) -> bool:
     return all(0x21 <= ord(c) <= 0x7E for c in localpart)
 
 
+def is_compliant_user_id(user_id: str) -> bool:
+    """
+    Validates that the localpart of the given user ID is within the "compliant"
+    range. See `is_compliant_user_id_localpart`.
+
+    Unlike parsing the user ID with `UserID.from_string`, this never raises on a
+    malformed user ID.
+
+    Args:
+        user_id: the user ID to be checked
+
+    Returns:
+        True if the localpart of the user ID is compliant, False otherwise
+    """
+    localpart, _, _ = user_id[1:].partition(":")
+    return is_compliant_user_id_localpart(localpart)
+
+
 UPPER_CASE_PATTERN = re.compile(b"[A-Z_]")
 
 # the following is a pattern which matches '=', and bytes which are not allowed in a mxid
