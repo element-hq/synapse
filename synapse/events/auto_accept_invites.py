@@ -26,8 +26,13 @@ from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.config.auto_accept_invites import AutoAcceptInvitesConfig
 from synapse.module_api import EventBase, ModuleApi, run_as_background_process
+from synapse.types import create_requester
 
 logger = logging.getLogger(__name__)
+
+# MSC4509: to-device message designating one of a user's devices as the eager
+# downloader of an MSC4268 room key bundle after a server-initiated join.
+UNSTABLE_KEY_BUNDLE_CLAIM_TYPE = "org.matrix.msc4509.key_bundle_claim"
 
 
 class InviteAutoAccepter:
@@ -36,8 +41,12 @@ class InviteAutoAccepter:
         self._api = api
         self.server_name = api.server_name
         self._config = config
+        # This is bundled with Synapse (rather than a true module), so reach
+        # for the datastore directly: the module API doesn't expose event
+        # fetching.
+        self._store = api._store
 
-        if not self._config.enabled:
+        if not self._config.enabled and not self._config.enabled_for_accepted_knocks:
             return
 
         should_run_on_this_worker = config.worker_to_run_on == self._api.worker_name
@@ -75,21 +84,34 @@ class InviteAutoAccepter:
         ):
             return
 
-        # Only accept invites for direct messages if the configuration mandates it.
-        is_direct_message = event.content.get("is_direct", False)
-        if (
-            self._config.accept_invites_only_for_direct_messages
-            and is_direct_message is False
-        ):
+        # An invite following a knock from the user (the knock being accepted)
+        # is auto-joined regardless of the general auto-accept settings: the
+        # user already asked to join the room by knocking.
+        # See https://github.com/element-hq/synapse/issues/16307.
+        is_accepted_knock = await self._is_accepted_knock(event)
+        if is_accepted_knock:
+            if not self._config.enabled_for_accepted_knocks:
+                return
+        elif not self._config.enabled:
             return
 
-        # Only accept invites from remote users if the configuration mandates it.
-        is_from_local_user = self._api.is_mine(event.sender)
-        if (
-            self._config.accept_invites_only_from_local_users
-            and is_from_local_user is False
-        ):
-            return
+        is_direct_message = event.content.get("is_direct", False)
+
+        if not is_accepted_knock:
+            # Only accept invites for direct messages if the configuration mandates it.
+            if (
+                self._config.accept_invites_only_for_direct_messages
+                and is_direct_message is False
+            ):
+                return
+
+            # Only accept invites from remote users if the configuration mandates it.
+            is_from_local_user = self._api.is_mine(event.sender)
+            if (
+                self._config.accept_invites_only_from_local_users
+                and is_from_local_user is False
+            ):
+                return
 
         # Check the user is activated.
         recipient = await self._api.get_userinfo_by_id(event.state_key)
@@ -126,6 +148,26 @@ class InviteAutoAccepter:
             await self._mark_room_as_direct_message(
                 event.state_key, event.sender, event.room_id
             )
+
+    async def _is_accepted_knock(self, invite_event: EventBase) -> bool:
+        """Whether the invite is the acceptance of a knock by the invited
+        user: i.e. the invited user's own knock membership event is among the
+        invite's auth events.
+
+        This works for over-federation invites too: the knocking server holds
+        the knock event (it created it), and the resident server necessarily
+        cited it as the invitee's prior membership when authing the invite.
+        """
+        for auth_event_id in invite_event.auth_event_ids():
+            auth_event = await self._store.get_event(auth_event_id, allow_none=True)
+            if (
+                auth_event is not None
+                and auth_event.type == EventTypes.Member
+                and auth_event.state_key == invite_event.state_key
+                and auth_event.membership == Membership.KNOCK
+            ):
+                return True
+        return False
 
     async def _mark_room_as_direct_message(
         self, user_id: str, dm_user_id: str, room_id: str
@@ -214,3 +256,54 @@ class InviteAutoAccepter:
 
             if join_event is not None:
                 break
+
+        if join_event is not None:
+            # The join was made by the server, so it lands on all of the
+            # user's devices in the same sync instant. Designate one device to
+            # eagerly download any MSC4268 room key bundle for the room, lest
+            # every device does (MSC4509). Best effort: the hint is advisory,
+            # and without it clients fall back to claiming the bundle lazily.
+            try:
+                await self._send_key_bundle_claim_hint(target, room_id)
+            except Exception as e:
+                logger.warning(
+                    "Failed to send key bundle claim hint to %s for %s: %s",
+                    target,
+                    room_id,
+                    e,
+                )
+
+    async def _send_key_bundle_claim_hint(self, user_id: str, room_id: str) -> None:
+        """Send an `org.matrix.msc4509.key_bundle_claim` to-device message to
+        the user's most recently active device, designating it as the one
+        device which should eagerly download an MSC4268 room key bundle for
+        the room the user was just joined to.
+
+        Args:
+            user_id: the (local) user who was joined to the room
+            room_id: the room they were joined to
+        """
+        # This is bundled with Synapse (rather than a true module), so reach
+        # into the homeserver for the device machinery: the module API doesn't
+        # expose device listing or to-device sending.
+        hs = self._api._hs
+        devices = await hs.get_device_handler().get_devices_by_user(user_id)
+        if not devices:
+            return
+
+        # Pick the device the user is most likely to be actively using. The
+        # worst a stale pick costs is the bundle being claimed lazily instead.
+        device = max(devices, key=lambda d: d.get("last_seen_ts") or 0)
+        device_id = device["device_id"]
+
+        logger.info(
+            "Designating device %s of %s to claim any key bundle for %s",
+            device_id,
+            user_id,
+            room_id,
+        )
+        await hs.get_device_message_handler().send_device_message(
+            create_requester(user_id),
+            UNSTABLE_KEY_BUNDLE_CLAIM_TYPE,
+            {user_id: {device_id: {"room_id": room_id}}},
+        )
