@@ -323,7 +323,7 @@ class SlidingSyncHandler:
             with start_active_span("sliding_sync.generate_room_entries"):
                 await concurrently_execute(handle_room, relevant_rooms_to_send_map, 20)
 
-        extensions = await self.extensions.get_extensions_response(
+        extensions_result = await self.extensions.get_extensions_response(
             sync_config=sync_config,
             actual_lists=lists,
             previous_connection_state=previous_connection_state,
@@ -397,11 +397,31 @@ class SlidingSyncHandler:
             # Initial sync without a `from_token` starts at `0`
             connection_position = 0
 
+        next_stream_token = StreamToken(
+            # Most streams just advance directly to `to_token`
+            room_key=to_token.room_key,
+            presence_key=to_token.presence_key,
+            typing_key=to_token.typing_key,
+            receipt_key=to_token.receipt_key,
+            account_data_key=to_token.account_data_key,
+            push_rules_key=to_token.push_rules_key,
+            to_device_key=to_token.to_device_key,
+            device_list_key=to_token.device_list_key,
+            groups_key=to_token.groups_key,
+            un_partial_stated_rooms_key=to_token.un_partial_stated_rooms_key,
+            thread_subscriptions_key=to_token.thread_subscriptions_key,
+            quarantined_media_key=to_token.quarantined_media_key,
+            profile_updates_key=to_token.profile_updates_key,
+            # But the sticky events extension may not have reached `to_token` and is in
+            # control of its own next position
+            sticky_events_key=extensions_result.next_sticky_events_key,
+        )
+
         sliding_sync_result = SlidingSyncResult(
-            next_pos=SlidingSyncStreamToken(to_token, connection_position),
+            next_pos=SlidingSyncStreamToken(next_stream_token, connection_position),
             lists=lists,
             rooms=rooms,
-            extensions=extensions,
+            extensions=extensions_result.extensions,
         )
 
         # Make it easy to find traces for syncs that aren't empty
