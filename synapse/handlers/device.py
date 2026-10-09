@@ -70,6 +70,7 @@ from synapse.types import (
     UserID,
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
+    is_compliant_user_id,
     is_compliant_user_id_localpart,
 )
 from synapse.util import stringutils
@@ -796,7 +797,20 @@ class DeviceHandler:
             if any(rid in joined_room_ids for rid in entries):
                 newly_left_users.discard(user_id)
 
-        return DeviceListUpdates(changed=users_that_have_changed, left=newly_left_users)
+        return DeviceListUpdates(
+            changed={
+                changed_user_id
+                for changed_user_id in users_that_have_changed
+                if self.hs.is_mine_id(changed_user_id)
+                or is_compliant_user_id(changed_user_id)
+            },
+            left={
+                left_user_id
+                for left_user_id in newly_left_users
+                if self.hs.is_mine_id(left_user_id)
+                or is_compliant_user_id(left_user_id)
+            },
+        )
 
     async def on_federation_query_user_devices(self, user_id: str) -> JsonDict:
         if not self.hs.is_mine(UserID.from_string(user_id)):

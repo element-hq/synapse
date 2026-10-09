@@ -30,6 +30,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     JoinRules,
+    Membership,
     ReceiptTypes,
     RelationTypes,
 )
@@ -47,6 +48,7 @@ from tests.rest.client.test_rooms import make_request_with_cancellation_test
 from tests.server import FakeChannel, TimedOutException
 from tests.test_utils.event_injection import (
     inject_event,
+    inject_member_event,
     persist_message_and_state_event_in_one_batch,
 )
 
@@ -1022,6 +1024,41 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         self.assertIn(
             alice_user_id, device_list_changes, incremental_sync_channel.json_body
         )
+
+    def test_non_compliant_remote_user_not_in_device_list_changes(self) -> None:
+        """A compliant and a non-compliant (grandfathered historical) remote user
+        join, then leave, a room alice is in. Alice's incremental syncs only list
+        the compliant one in `device_lists.changed` and `device_lists.left`.
+        """
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(alice_user_id, "correcthorse")
+        room_id = self.helper.create_room_as(alice_user_id, tok=alice_access_token)
+
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        next_batch = channel.json_body["next_batch"]
+
+        compliant_user_id = "@john:remote"
+        non_compliant_user_id = "@héllo:remote"
+
+        for membership, device_lists_field in (
+            (Membership.JOIN, "changed"),
+            (Membership.LEAVE, "left"),
+        ):
+            for user_id in (compliant_user_id, non_compliant_user_id):
+                self.get_success(
+                    inject_member_event(self.hs, room_id, user_id, membership)
+                )
+
+            channel = self.make_request(
+                "GET", f"/sync?since={next_batch}", access_token=alice_access_token
+            )
+            self.assertEqual(channel.code, 200, channel.json_body)
+            next_batch = channel.json_body["next_batch"]
+
+            device_lists = channel.json_body["device_lists"][device_lists_field]
+            self.assertIn(compliant_user_id, device_lists)
+            self.assertNotIn(non_compliant_user_id, device_lists)
 
 
 class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
