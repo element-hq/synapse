@@ -39,6 +39,7 @@ from synapse.types import (
     StrCollection,
     StreamKeyType,
     UserID,
+    is_compliant_user_id,
 )
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.duration import Duration
@@ -419,6 +420,14 @@ class TypingWriterHandler(FollowerTypingHandler):
         if user.domain != origin:
             logger.info(
                 "Got typing update from %r with bad 'user_id': %r", origin, user_id
+            )
+            return
+
+        if not is_compliant_user_id(user_id):
+            logger.info(
+                "Dropping typing update from %r for non-compliant user ID %r",
+                origin,
+                user_id,
             )
             return
 
