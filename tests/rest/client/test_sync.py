@@ -840,6 +840,49 @@ class SyncStateAfterTestCase(unittest.HomeserverTestCase):
         self.assertNotIn("org.matrix.msc4222.state_after", room_keys)
 
 
+class PresenceSyncTestCase(unittest.HomeserverTestCase):
+    """
+    Tests regarding the `presence` section of sync.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def test_non_compliant_remote_user_joining_not_in_presence(self) -> None:
+        """A compliant and a non-compliant (grandfathered historical) remote user
+        join a room alice is in. Alice's incremental sync only includes the
+        presence of the compliant one.
+        """
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(alice_user_id, "correcthorse")
+        room_id = self.helper.create_room_as(alice_user_id, tok=alice_access_token)
+
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        next_batch = channel.json_body["next_batch"]
+
+        compliant_user_id = "@john:remote"
+        non_compliant_user_id = "@héllo:remote"
+        for user_id in (compliant_user_id, non_compliant_user_id):
+            self.get_success(
+                inject_member_event(self.hs, room_id, user_id, Membership.JOIN)
+            )
+
+        channel = self.make_request(
+            "GET", f"/sync?since={next_batch}", access_token=alice_access_token
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        presence_senders = [
+            event["sender"] for event in channel.json_body["presence"]["events"]
+        ]
+        self.assertIn(compliant_user_id, presence_senders)
+        self.assertNotIn(non_compliant_user_id, presence_senders)
+
+
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
     """
     Tests regarding device list (`device_lists`) changes.
