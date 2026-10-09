@@ -1,0 +1,1 @@
+Fix a bug introduced in Synapse v1.130.0 where Sliding Sync would consider a displayname or avatar change in a room to mean that room was newly-joined.
