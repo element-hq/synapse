@@ -40,7 +40,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -1117,6 +1117,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
 
         # create the room
         creator_user_id = self.register_user("kermit", "test")
+        self._creator_user_id = creator_user_id
         tok = self.login("kermit", "test")
         self._room_id = self.helper.create_room_as(
             room_creator=creator_user_id, tok=tok
@@ -1324,6 +1325,89 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         self.assertIncludes(
             set(event["prev_state_events"]), set(extremities), exact=True
         )
+
+    def _signed_join_event(self, joining_user: str) -> JsonDict:
+        """make_join for `joining_user`, signed as the other server would."""
+        join_event_dict = self._make_join(joining_user)["event"]
+        self.add_hashes_and_signatures_from_other_server(
+            join_event_dict, KNOWN_ROOM_VERSIONS[DEFAULT_ROOM_VERSION]
+        )
+        return join_event_dict
+
+    def _send_join(self, join_event_dict: JsonDict) -> None:
+        channel = self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v2/send_join/{self._room_id}/x",
+            content=join_event_dict,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+    def _assert_reachable_from_the_dag_tip(self, event_id: str) -> None:
+        """The joining server learns about `event_id`: one forward extremity, a dummy
+        event whose prev_events reference it, which the joining server backfills from."""
+        extremities = self.get_success(
+            self.hs.get_datastores().main.get_latest_event_ids_in_room(self._room_id)
+        )
+        self.assertEqual(len(extremities), 1, extremities)
+        tip = self.get_success(
+            self.hs.get_datastores().main.get_event(next(iter(extremities)))
+        )
+        self.assertEqual(tip.type, EventTypes.Dummy)
+        self.assertIn(event_id, tip.prev_event_ids())
+
+    def test_event_sent_between_make_join_and_send_join_is_discoverable(self) -> None:
+        """An event sent and persisted during the join handshake is tied to the join
+        by a dummy event (https://github.com/element-hq/synapse/pull/19390)."""
+        join_event_dict = self._signed_join_event(
+            "@misspiggy:" + self.OTHER_SERVER_NAME
+        )
+        event_id = self.helper.send(
+            self._room_id,
+            "sent during the join handshake",
+            tok=self.login("kermit", "test"),
+        )["event_id"]
+        self._send_join(join_event_dict)
+        self._assert_reachable_from_the_dag_tip(event_id)
+
+    def test_event_created_before_a_remote_join_and_persisted_after_it_is_discoverable(
+        self,
+    ) -> None:
+        """An event whose prev_events were chosen before a remote join was persisted,
+        but which is itself persisted after the join, is a sibling of the join. The
+        send_join check above runs before it is persisted and sees one forward
+        extremity; the event's own destinations come from the state before it, where
+        the joining server is not in the room. Without a dummy event tying them
+        together, the joining server never learns about it."""
+        join_event_dict = self._signed_join_event(
+            "@misspiggy:" + self.OTHER_SERVER_NAME
+        )
+
+        # A client sends a message: the event is created (prev_events chosen) ...
+        handler = self.hs.get_event_creation_handler()
+        requester = create_requester(self._creator_user_id)
+        event, unpersisted_context = self.get_success(
+            handler.create_event(
+                requester,
+                {
+                    "type": EventTypes.Message,
+                    "content": {"msgtype": "m.text", "body": "racing the join"},
+                    "room_id": self._room_id,
+                    "sender": self._creator_user_id,
+                },
+            )
+        )
+        context = self.get_success(unpersisted_context.persist(event))
+
+        # ... the remote join completes ...
+        self._send_join(join_event_dict)
+
+        # ... and only then is the message persisted.
+        self.get_success(
+            handler.handle_new_client_event(
+                requester, events_and_context=[(event, context)]
+            )
+        )
+        self._assert_reachable_from_the_dag_tip(event.event_id)
 
     def test_send_join_partial_state(self) -> None:
         """/send_join should return partial state, if requested"""
