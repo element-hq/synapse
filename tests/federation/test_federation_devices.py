@@ -21,6 +21,8 @@
 import logging
 from unittest.mock import AsyncMock, Mock
 
+from parameterized import parameterized
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes
@@ -193,6 +195,50 @@ class DeviceListResyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertIsNotNone(keys[compliant_user_id])
         self.assertIsNone(keys[non_compliant_user_id])
+
+    @parameterized.expand(
+        [
+            (
+                EduTypes.DEVICE_LIST_UPDATE,
+                {"device_id": "QBUAZIFURK", "prev_id": [5], "stream_id": 6},
+            ),
+            (EduTypes.SIGNING_KEY_UPDATE, {}),
+        ]
+    )
+    def test_non_compliant_user_id_update_forgets_cached_device_list(
+        self, edu_type: str, edu_content: JsonDict
+    ) -> None:
+        """A remote server sends an update for a non-compliant (grandfathered
+        historical) user ID whose device list we had cached. The update is
+        dropped and the cached device list is forgotten, so that it is fetched
+        again rather than served stale.
+        """
+        remote_user_id = "@héllo:test_remote"
+
+        self.get_success(
+            self.store.update_remote_device_list_cache(
+                remote_user_id, [{"device_id": "QBUAZIFURK", "keys": {}}], 5
+            )
+        )
+        self.assertEqual(
+            self.get_success(
+                self.store.get_users_whose_devices_are_cached([remote_user_id])
+            ),
+            {remote_user_id},
+        )
+
+        self.get_success(
+            self.hs.get_federation_registry().on_edu(
+                edu_type, "test_remote", {"user_id": remote_user_id, **edu_content}
+            )
+        )
+
+        self.assertEqual(
+            self.get_success(
+                self.store.get_users_whose_devices_are_cached([remote_user_id])
+            ),
+            set(),
+        )
 
     def test_cross_signing_keys_retry(self) -> None:
         """Tests that resyncing a device list correctly processes cross-signing keys from

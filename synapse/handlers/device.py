@@ -1559,6 +1559,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                     "device_id": device_id,
                 }
             )
+            await self.store.mark_remote_user_device_list_as_unsubscribed(user_id)
             return
 
         # Check if we are partially joining any rooms. If so we need to store
