@@ -188,11 +188,13 @@ class BulkPushRuleEvaluator:
 
             local_users = await self.store.get_local_users_in_room(event.room_id)
 
-        # Filter out appservice users.
+        # Filter out the sender, as we never notify a user about their own
+        # actions (see `_action_for_event_by_user`), and appservice users.
         local_users = [
             u
             for u in local_users
-            if not self.store.get_if_app_services_interested_in_user(u)
+            if u != event.sender
+            and not self.store.get_if_app_services_interested_in_user(u)
         ]
 
         # if this event is an invite event, we may need to run rules for the user
@@ -388,6 +390,11 @@ class BulkPushRuleEvaluator:
             count_as_unread = _should_count_as_unread(event, context)
 
         rules_by_user = await self._get_rules_for_event(event)
+        if not rules_by_user:
+            # There are no local users (other than the sender) who could be
+            # notified about this event, so there is nothing to calculate.
+            return
+
         actions_by_user: dict[str, Collection[Mapping | str]] = {}
 
         # Gather a bunch of info in parallel.
@@ -485,9 +492,6 @@ class BulkPushRuleEvaluator:
             )
 
         for uid, rules in rules_by_user.items():
-            if event.sender == uid:
-                continue
-
             display_name = None
             profile = profiles.get(uid)
             if profile:

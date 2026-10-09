@@ -29,6 +29,8 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
 from synapse.api.room_versions import RoomVersions
+from synapse.events import EventBase
+from synapse.events.snapshot import EventContext
 from synapse.push.bulk_push_rule_evaluator import BulkPushRuleEvaluator
 from synapse.rest import admin
 from synapse.rest.client import login, push_rule, register, room
@@ -207,6 +209,74 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         # Ensure no actions are generated!
         self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
         bulk_evaluator._action_for_event_by_user.assert_not_called()
+
+    def _create_message_from_alice(self) -> tuple[EventBase, EventContext]:
+        """Create (but do not persist) a message event sent by Alice."""
+        event, unpersisted_context = self.get_success(
+            self.event_creation_handler.create_event(
+                self.requester,
+                {
+                    "type": "m.room.message",
+                    "room_id": self.room_id,
+                    "content": {"msgtype": "m.text", "body": "helo"},
+                    "sender": self.alice,
+                },
+            )
+        )
+        context = self.get_success(unpersisted_context.persist(event))
+        return event, context
+
+    def _get_users_with_staged_push_actions(self, event_id: str) -> list[str]:
+        return self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_onecol(
+                table="event_push_actions_staging",
+                keyvalues={"event_id": event_id},
+                retcol="user_id",
+                desc="get_users_with_staged_push_actions",
+            )
+        )
+
+    def test_action_for_event_by_user_skipped_when_sender_is_only_local_user(
+        self,
+    ) -> None:
+        """Ensure that we don't evaluate push rules when the only local user in the
+        room is the sender, as users are never notified about their own events."""
+        event, context = self._create_message_from_alice()
+
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+
+        # The sender should never be considered for notifications.
+        rules_by_user = self.get_success(bulk_evaluator._get_rules_for_event(event))
+        self.assertEqual(rules_by_user, {})
+
+        # Mock one of the methods called when evaluating push rules -- we do this
+        # instead of only checking the results in the database because we want to
+        # ensure that code isn't even running.
+        bulk_evaluator._get_power_levels_and_sender_level = AsyncMock()  # type: ignore[method-assign]
+
+        self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
+        bulk_evaluator._get_power_levels_and_sender_level.assert_not_called()
+        self.assertEqual(self._get_users_with_staged_push_actions(event.event_id), [])
+
+    def test_action_for_event_by_user_with_other_local_user(self) -> None:
+        """Ensure that push rules are still evaluated for local users other than the
+        sender."""
+        bob = self.register_user("bob", "pass")
+        bob_token = self.login(bob, "pass")
+        self.helper.join(self.room_id, bob, tok=bob_token)
+
+        event, context = self._create_message_from_alice()
+
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+
+        # Only Bob should be considered for notifications.
+        rules_by_user = self.get_success(bulk_evaluator._get_rules_for_event(event))
+        self.assertEqual(set(rules_by_user), {bob})
+
+        self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
+        self.assertEqual(
+            self._get_users_with_staged_push_actions(event.event_id), [bob]
+        )
 
     def _create_and_process(
         self,

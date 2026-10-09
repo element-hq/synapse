@@ -1,0 +1,1 @@
+Speed up push rule evaluation by not checking rules for the sender.
