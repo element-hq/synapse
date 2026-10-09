@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fc471f21.js";
+            window.path_to_searchindex_js = "searchindex-8efa9959.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -2139,6 +2139,15 @@ any profile lookup.</p>
 <code>limit_profile_requests_to_users_who_share_rooms: true</code> in your configuration,
 either also set <code>require_auth_for_profile_requests: true</code>, or remove the option to
 keep the behaviour you have today.</p>
+<h2 id="privacy-preserving-requesttoken-responses-are-now-enabled-by-default"><a class="header" href="#privacy-preserving-requesttoken-responses-are-now-enabled-by-default">Privacy-preserving <code>/requestToken</code> responses are now enabled by default</a></h2>
+<p>The default value of <code>request_token_inhibit_3pid_errors</code> has changed from <code>false</code>
+to <code>true</code>. Synapse will now conceal whether an email address is associated with an
+account when responding to <code>/requestToken</code> requests, unless the setting is
+explicitly configured as <code>false</code>.</p>
+<p>Administrators who rely on the previous responses can retain them by adding the
+following to their configuration:</p>
+<pre><code class="language-yaml">request_token_inhibit_3pid_errors: false
+</code></pre>
 <h1 id="upgrading-to-v11610"><a class="header" href="#upgrading-to-v11610">Upgrading to v1.161.0</a></h1>
 <h2 id="deprecation-of-matrix_rtclivekit_service_url"><a class="header" href="#deprecation-of-matrix_rtclivekit_service_url">Deprecation of <code>matrix_rtc.livekit_service_url</code></a></h2>
 <p>When configuring the MatrixRTC LiveKit transport, the <code>livekit_service_url</code> is now
@@ -5265,7 +5274,7 @@ For more details, see the <a href="#using-a-forward-proxy-with-synapse">forward 
 </code></pre>
 <hr>
 <h3 id="request_token_inhibit_3pid_errors"><a class="header" href="#request_token_inhibit_3pid_errors"><code>request_token_inhibit_3pid_errors</code></a></h3>
-<p><em>(boolean)</em> Inhibits the <code>/requestToken</code> endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (<code>sid</code>) to clients. Defaults to <code>false</code>.</p>
+<p><em>(boolean)</em> Inhibits the <code>/requestToken</code> endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (<code>sid</code>) to clients. Defaults to <code>true</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">request_token_inhibit_3pid_errors: true
 </code></pre>

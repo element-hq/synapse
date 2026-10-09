@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-fc471f21.js";
+            window.path_to_searchindex_js = "../../searchindex-8efa9959.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-64310643.js"></script>
@@ -1123,7 +1123,7 @@ For more details, see the <a href="../../setup/forward_proxy.html">forward proxy
 </code></pre>
 <hr>
 <h3 id="request_token_inhibit_3pid_errors"><a class="header" href="#request_token_inhibit_3pid_errors"><code>request_token_inhibit_3pid_errors</code></a></h3>
-<p><em>(boolean)</em> Inhibits the <code>/requestToken</code> endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (<code>sid</code>) to clients. Defaults to <code>false</code>.</p>
+<p><em>(boolean)</em> Inhibits the <code>/requestToken</code> endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (<code>sid</code>) to clients. Defaults to <code>true</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">request_token_inhibit_3pid_errors: true
 </code></pre>
