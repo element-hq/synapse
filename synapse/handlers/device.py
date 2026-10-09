@@ -1557,7 +1557,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
             # We SHOULD NOT forward non-compliant (grandfathered historical)
             # user IDs to clients outside the context of an event, and the spec
             # gives dropping their device list updates as the example. See
-            # https://spec.matrix.org/v1.14/appendices/#historical-user-ids
+            # https://spec.matrix.org/v1.19/appendices/#historical-user-ids
             logger.warning(
                 "Dropping device list update edu for non-compliant user ID %r from %r",
                 user_id,

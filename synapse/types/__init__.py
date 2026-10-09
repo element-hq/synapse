@@ -436,7 +436,7 @@ class UserID(DomainSpecificString):
     def is_valid_strict(cls, s: str) -> bool:
         """
         Parses the input string and attempts to ensure it is a valid and compliant user
-        ID according to https://spec.matrix.org/v1.17/appendices/#historical-user-ids.
+        ID according to https://spec.matrix.org/v1.19/appendices/#historical-user-ids.
 
         This should be used with care: there are existing non-compliant user IDs in the
         wild with empty or non-ASCII localparts, which will be rejected by this method.
@@ -575,7 +575,7 @@ def is_compliant_user_id_localpart(localpart: str) -> bool:
     """
     Validates that the given user ID localpart is within the "compliant" range,
     i.e. not empty and all characters are between U+0021 and U+007E inclusive.
-    See https://spec.matrix.org/v1.17/appendices/#historical-user-ids
+    See https://spec.matrix.org/v1.19/appendices/#historical-user-ids
 
     To check if a localpart is non-historical, use contains_invalid_mxid_characters instead.
 

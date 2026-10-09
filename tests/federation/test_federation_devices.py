@@ -106,7 +106,7 @@ class DeviceListResyncTestCase(unittest.HomeserverTestCase):
     def test_non_compliant_user_id_update_dropped(self) -> None:
         """Tests that device list updates from non-compliant (grandfathered
         historical) user IDs are dropped, per
-        https://spec.matrix.org/v1.14/appendices/#historical-user-ids
+        https://spec.matrix.org/v1.19/appendices/#historical-user-ids
         """
         remote_user_id = "@héllo:test_remote"
         remote_origin = "test_remote"
