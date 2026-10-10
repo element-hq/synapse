@@ -1,0 +1,1 @@
+Shows new released version in docs on a normal refresh (no hard refresh needed) and caches the list for 10 minutes to stay within GitHub's API rate limit. Contributed by @itsoyou and @Famedly.
