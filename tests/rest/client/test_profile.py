@@ -1019,6 +1019,30 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body.get("errcode"), Codes.INVALID_PARAM)
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_malformed_users(
+        self,
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should reject a
+        `users` value that is not a list of strings with a 400.
+        """
+        for users in (
+            "@owner:test",
+            {"@owner:test": 1},
+            [1],
+            [{"a": 1}],
+            ["@owner:test", None],
+        ):
+            with self.subTest(users=users):
+                channel = self.make_request(
+                    "POST",
+                    "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+                    content={"users": users},
+                    access_token=self.owner_tok,
+                )
+                self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+                self.assertEqual(channel.json_body.get("errcode"), Codes.INVALID_PARAM)
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_respects_limit(self) -> None:
         """With MSC4536 enabled, the profiles query endpoint should
         be enabled, and should limit to 100 results.

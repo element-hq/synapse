@@ -358,13 +358,18 @@ class ProfileQueryRestServlet(RestServlet):
             )
 
         content = parse_json_object_from_request(request)
-        target_users = set(content.get("users", []))
-        if not len(target_users):
+        users = content.get("users")
+        if (
+            not isinstance(users, list)
+            or not users
+            or not all(isinstance(user_id, str) for user_id in users)
+        ):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
-                "Must give one or more users to query profiles for.",
+                "`users` must be a non-empty list of user ID strings.",
                 Codes.INVALID_PARAM,
             )
+        target_users = set(users)
 
         # Limit the amount of users pulled in one go
         target_users = set(list(target_users)[:PROFILE_QUERY_MAX_TARGET_USERS])
