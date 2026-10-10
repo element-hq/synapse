@@ -352,9 +352,9 @@ class ProfileQueryRestServlet(RestServlet):
         requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
         if not requester:
             raise SynapseError(
-                HTTPStatus.FORBIDDEN,
+                HTTPStatus.UNAUTHORIZED,
                 "You must be authenticated to query profiles.",
-                Codes.FORBIDDEN,
+                Codes.MISSING_TOKEN,
             )
 
         content = parse_json_object_from_request(request)

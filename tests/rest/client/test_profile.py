@@ -969,8 +969,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 ],
             },
         )
-        self.assertEqual(channel.code, HTTPStatus.FORBIDDEN, channel.result)
-        self.assertEqual(channel.json_body.get("errcode"), Codes.FORBIDDEN)
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.MISSING_TOKEN)
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_invalid_user_id(self) -> None:
