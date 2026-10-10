@@ -1,0 +1,1 @@
+Add experimental support for [MSC4233](https://github.com/matrix-org/matrix-spec-proposals/pull/4233): remember which server a user knocked through, so that knocks can be rescinded and denied over federation.
