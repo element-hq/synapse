@@ -125,9 +125,9 @@ class ProfileHandler:
         self._profile_updates_writer_instance = self.hs.config.worker.writers.events[0]
 
     async def get_profiles(
-        self, user_ids: set[str]
+        self, user_ids: set[str], field_names: set[str] | None = None
     ) -> dict[str, dict[str, JsonValue | dict[str, JsonValue]]]:
-        return await self.store.get_profile_data_for_users(user_ids)
+        return await self.store.get_profile_data_for_users(user_ids, field_names)
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """

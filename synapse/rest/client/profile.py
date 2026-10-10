@@ -370,6 +370,19 @@ class ProfileQueryRestServlet(RestServlet):
                 Codes.INVALID_PARAM,
             )
         target_users = set(users)
+        field_names = content.get("fields")
+        if field_names is not None and (
+            not isinstance(field_names, list)
+            or not field_names
+            or not all(isinstance(field_name, str) for field_name in field_names)
+        ):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "`fields`, if given, must be a non-empty list of strings.",
+                Codes.INVALID_PARAM,
+            )
+        if field_names is not None:
+            field_names = set(field_names)
 
         # Limit the amount of users pulled in one go
         target_users = set(list(target_users)[:PROFILE_QUERY_MAX_TARGET_USERS])
@@ -389,7 +402,9 @@ class ProfileQueryRestServlet(RestServlet):
             )
         )
 
-        ret = await self.profile_handler.get_profiles(filtered_profiles)
+        ret = await self.profile_handler.get_profiles(
+            filtered_profiles, field_names=field_names
+        )
 
         return 200, ret
 
