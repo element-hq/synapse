@@ -42,6 +42,11 @@ from synapse.util.stringutils import is_namedspaced_grammar
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
+PROFILE_QUERY_MAX_TARGET_USERS = 100
+"""Maximum amount of target user profiles to allow querying via the profile
+query endpoint. Defined in MSC4536.
+"""
+
 
 def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
     # This will always be set by the time Twisted calls us.
@@ -316,10 +321,100 @@ class UnstableProfileFieldRestServlet(ProfileFieldRestServlet):
     )
 
 
+class ProfileQueryRestServlet(RestServlet):
+    PATTERNS = client_patterns(
+        "/org.matrix.msc4536/profile/query$",
+        unstable=True,
+        releases=(),
+    )
+    CATEGORY = "Event sending requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.profile_handler = hs.get_profile_handler()
+        self.auth = hs.get_auth()
+
+    async def on_POST(
+        self,
+        request: SynapseRequest,
+    ) -> tuple[int, JsonDict]:
+        """Profiles query endpoint (MSC4536)
+
+        Allows querying multiple profiles in one go as an authenticated user. Hard
+        limited to an arbitrary number of profiles in one request.
+
+        Note, currently does not return information about remote profiles, ie this
+        won't cause a remote lookup like when using the `/profile/<user>` or
+        `/profile/<user_id>/<field>` endpoints. This is subject to change
+        with MSC4259 bringing support for federated profile information.
+        """
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
+        if not requester:
+            raise SynapseError(
+                HTTPStatus.UNAUTHORIZED,
+                "You must be authenticated to query profiles.",
+                Codes.MISSING_TOKEN,
+            )
+
+        content = parse_json_object_from_request(request)
+        users = content.get("users")
+        if (
+            not isinstance(users, list)
+            or not users
+            or not all(isinstance(user_id, str) for user_id in users)
+        ):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "`users` must be a non-empty list of user ID strings.",
+                Codes.INVALID_PARAM,
+            )
+        target_users = set(users)
+        field_names = content.get("fields")
+        if field_names is not None and (
+            not isinstance(field_names, list)
+            or not field_names
+            or not all(isinstance(field_name, str) for field_name in field_names)
+        ):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "`fields`, if given, must be a non-empty list of strings.",
+                Codes.INVALID_PARAM,
+            )
+        if field_names is not None:
+            field_names = set(field_names)
+
+        # Limit the amount of users pulled in one go
+        target_users = set(list(target_users)[:PROFILE_QUERY_MAX_TARGET_USERS])
+
+        for user_id in target_users:
+            if not UserID.is_valid(user_id):
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"Invalid user id {user_id}",
+                    Codes.INVALID_PARAM,
+                )
+
+        filtered_profiles = (
+            await self.profile_handler.check_profile_query_allowed_for_users(
+                target_users=target_users,
+                requester=requester.user,
+            )
+        )
+
+        ret = await self.profile_handler.get_profiles(
+            filtered_profiles, field_names=field_names
+        )
+
+        return 200, ret
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ProfileFieldRestServlet(hs).register(http_server)
 
     if hs.config.experimental.msc4133_enabled:
         UnstableProfileFieldRestServlet(hs).register(http_server)
+    if hs.config.experimental.msc4536_enabled:
+        ProfileQueryRestServlet(hs).register(http_server)
 
     ProfileRestServlet(hs).register(http_server)
