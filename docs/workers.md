@@ -246,6 +246,7 @@ information.
     ^/_matrix/client/(r0|v3)/delete_devices$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)
     ^/_matrix/client/versions$
+    ^/_matrix/client/(v1|unstable/org.matrix.msc2965)/auth_metadata$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/voip/turnServer$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/rooms/.*/event/
     ^/_matrix/client/(api/v1|r0|v3|unstable)/joined_rooms$
