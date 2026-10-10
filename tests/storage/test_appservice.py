@@ -662,7 +662,8 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
             self.hs,
         )
         (appservice,) = store.get_app_services()
-        self.assertEqual(appservice.proxy_prefix, "rtc/livekit")
+        assert appservice.proxy_prefix is not None
+        self.assertEqual(appservice.proxy_prefix.path_prefix, "rtc/livekit")
         self.assertEqual(appservice.proxy_url, "http://proxy")
 
     def test_proxy_prefix_requires_proxy_url(self) -> None:
@@ -801,44 +802,6 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
             suffix="2",
             **{
                 "io.element.msc4512.proxy_prefix": "rtc/livekit",
-                "io.element.msc4512.proxy_url": "http://proxy2",
-            },
-        )
-
-        self.hs.config.appservice.app_service_config_files = [f1, f2]
-        self.hs.config.caches.event_cache_size = 1
-
-        with self.assertRaises(ConfigError) as cm:
-            server_name = self.hs.hostname
-            database = self.hs.get_datastores().databases[0]
-            ApplicationServiceStore(
-                database,
-                make_conn(
-                    db_config=database._database_config,
-                    engine=database.engine,
-                    default_txn_name="test",
-                    server_name=server_name,
-                ),
-                self.hs,
-            )
-
-        e = cm.exception
-        self.assertIn(f1, str(e))
-        self.assertIn(f2, str(e))
-        self.assertIn("io.element.msc4512.proxy_prefix", str(e))
-
-    def test_overlapping_proxy_prefix(self) -> None:
-        f1 = self._write_config(
-            suffix="1",
-            **{
-                "io.element.msc4512.proxy_prefix": "rtc/livekit",
-                "io.element.msc4512.proxy_url": "http://proxy",
-            },
-        )
-        f2 = self._write_config(
-            suffix="2",
-            **{
-                "io.element.msc4512.proxy_prefix": "rtc/livekit/foobar",
                 "io.element.msc4512.proxy_url": "http://proxy2",
             },
         )

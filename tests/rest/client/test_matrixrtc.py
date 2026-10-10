@@ -27,6 +27,7 @@ from synapse.config.matrixrtc import TransportConfigModel
 from synapse.rest import admin
 from synapse.rest.client import login, matrixrtc, register, room, versions
 from synapse.server import HomeServer
+from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -60,6 +61,11 @@ class MatrixRtcTestCase(HomeserverTestCase):
         matrixrtc.register_servlets,
     ]
 
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["allow_guest_access"] = True
+        return config
+
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:
@@ -79,6 +85,25 @@ class MatrixRtcTestCase(HomeserverTestCase):
     def test_matrixrtc_endpoint_requires_authentication(self) -> None:
         channel = self.make_request("GET", f"{PATH_PREFIX}/rtc/transports")
         self.assertEqual(401, channel.code, channel.json_body)
+
+    @override_config(
+        {
+            "experimental_features": {"msc4143_enabled": True},
+            "matrix_rtc": {"transports": [RTC_ENDPOINT]},
+        }
+    )
+    def test_matrixrtc_endpoint_allows_guest_access(self) -> None:
+        channel = self.make_request(
+            "POST", "/_matrix/client/v3/register?kind=guest", b"{}"
+        )
+        self.assertEqual(200, channel.code, channel.json_body)
+        guest_tok = channel.json_body["access_token"]
+
+        channel = self.make_request(
+            "GET", f"{PATH_PREFIX}/rtc/transports", access_token=guest_tok
+        )
+        self.assertEqual(200, channel.code, channel.json_body)
+        self.assert_dict({"rtc_transports": [RTC_ENDPOINT]}, channel.json_body)
 
     @override_config(
         {
