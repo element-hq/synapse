@@ -25,7 +25,7 @@ from unittest.mock import Mock
 
 # The reactor the trial runner spins up; real, so threads and callFromThread work.
 from twisted.internet import reactor as _reactor
-from twisted.internet.defer import gatherResults, inlineCallbacks
+from twisted.internet.defer import gatherResults
 from twisted.trial import unittest as trial_unittest
 
 from synapse.config.database import DatabaseConnectionConfig
@@ -71,8 +71,7 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         self.pool.start()
         self.addCleanup(self.pool.close)
 
-    @inlineCallbacks
-    def test_runs_function_against_a_live_connection(self) -> Any:
+    async def test_runs_function_against_a_live_connection(self) -> None:
         # The function gets a usable connection: it can open a cursor, run a
         # query, commit, and its return value comes back through the Deferred.
         def txn(conn: Any) -> Any:
@@ -82,19 +81,17 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             conn.commit()
             return row
 
-        result = yield self.pool.runWithConnection(txn)
+        result = await self.pool.runWithConnection(txn)
         self.assertEqual(result, (42,))
 
-    @inlineCallbacks
-    def test_forwards_args_and_kwargs(self) -> Any:
+    async def test_forwards_args_and_kwargs(self) -> None:
         def txn(conn: Any, a: int, b: int, c: int = 0) -> int:
             return a + b + c
 
-        result = yield self.pool.runWithConnection(txn, 1, 2, c=3)
+        result = await self.pool.runWithConnection(txn, 1, 2, c=3)
         self.assertEqual(result, 6)
 
-    @inlineCallbacks
-    def test_exception_propagates_as_errback(self) -> Any:
+    async def test_exception_propagates_as_errback(self) -> None:
         class MarkerError(Exception):
             pass
 
@@ -102,13 +99,11 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             raise MarkerError("boom")
 
         # The failure crosses the thread boundary and surfaces as an errback.
-        failure = yield self.assertFailure(
-            self.pool.runWithConnection(txn), MarkerError
-        )
-        self.assertEqual(str(failure), "boom")
+        with self.assertRaises(MarkerError) as ctx:
+            await self.pool.runWithConnection(txn)
+        self.assertEqual(str(ctx.exception), "boom")
 
-    @inlineCallbacks
-    def test_connection_is_reusable_across_calls(self) -> Any:
+    async def test_connection_is_reusable_across_calls(self) -> None:
         # Connections are returned to the pool after each call, so a second call
         # (which may reuse the same underlying connection) works and sees a
         # clean session rather than a leftover transaction.
@@ -119,11 +114,10 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             conn.commit()
             return row
 
-        self.assertEqual((yield self.pool.runWithConnection(one)), (1,))
-        self.assertEqual((yield self.pool.runWithConnection(one)), (1,))
+        self.assertEqual((await self.pool.runWithConnection(one)), (1,))
+        self.assertEqual((await self.pool.runWithConnection(one)), (1,))
 
-    @inlineCallbacks
-    def test_commits_work_left_open_on_success(self) -> Any:
+    async def test_commits_work_left_open_on_success(self) -> None:
         # Like adbapi, the pool commits any transaction the function leaves
         # open. One-shot background-update runners rely on this: they execute
         # DDL/DML and return without committing.
@@ -143,11 +137,10 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
 
         self.addCleanup(lambda: self.pool.runWithConnection(drop))
 
-        yield self.pool.runWithConnection(create_and_insert)
-        self.assertEqual((yield self.pool.runWithConnection(count)), (1,))
+        await self.pool.runWithConnection(create_and_insert)
+        self.assertEqual((await self.pool.runWithConnection(count)), (1,))
 
-    @inlineCallbacks
-    def test_rolls_back_and_reuses_connection_on_exception(self) -> Any:
+    async def test_rolls_back_and_reuses_connection_on_exception(self) -> None:
         # Like adbapi, an exception rolls the open transaction back before the
         # connection is returned, so the pool reuses the (now clean) connection
         # rather than discarding it as mid-transaction — otherwise every
@@ -191,15 +184,15 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
 
         self.addCleanup(lambda: pool.runWithConnection(drop))
 
-        yield pool.runWithConnection(create)
-        yield self.assertFailure(pool.runWithConnection(insert_and_raise), MarkerError)
+        await pool.runWithConnection(create)
+        with self.assertRaises(MarkerError):
+            await pool.runWithConnection(insert_and_raise)
         # The insert was rolled back...
-        self.assertEqual((yield pool.runWithConnection(check)), (0,))
+        self.assertEqual((await pool.runWithConnection(check)), (0,))
         # ...and the single pooled connection survived the failed call.
         self.assertEqual(pids[0], pids[1])
 
-    @inlineCallbacks
-    def test_concurrent_calls_are_serviced(self) -> Any:
+    async def test_concurrent_calls_are_serviced(self) -> None:
         # Fire more calls than we have threads/connections at once; the pool and
         # thread pool should service them all and return the right answers.
         def txn(conn: Any, n: int) -> Any:
@@ -209,13 +202,12 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             conn.commit()
             return row
 
-        results = yield gatherResults(
+        results = await gatherResults(
             [self.pool.runWithConnection(txn, n) for n in range(10)]
         )
         self.assertEqual(results, [(n,) for n in range(10)])
 
-    @inlineCallbacks
-    def test_drives_a_transaction_as_db_pool(self) -> Any:
+    async def test_drives_a_transaction_as_db_pool(self) -> None:
         # Mirror what DatabasePool.runWithConnection's inner_func does: the pool
         # hands a DBAPI2 connection the engine can inspect, wrapped in a
         # LoggingDatabaseConnection whose cursor is a real LoggingTransaction.
@@ -237,11 +229,10 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             db_conn.commit()
             return row
 
-        result = yield self.pool.runWithConnection(interaction)
+        result = await self.pool.runWithConnection(interaction)
         self.assertEqual(result, (5,))
 
-    @inlineCallbacks
-    def test_make_pool_builds_a_running_rust_pool(self) -> Any:
+    async def test_make_pool_builds_a_running_rust_pool(self) -> None:
         # `make_pool` returns a started RustConnectionPool for a use_rust_driver
         # config, ready to serve as `_db_pool`.
         args: dict = {"dbname": POSTGRES_BASE_DB}
@@ -279,7 +270,34 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             conn.commit()
             return row
 
-        self.assertEqual((yield pool.runWithConnection(txn)), (1,))
+        self.assertEqual((await pool.runWithConnection(txn)), (1,))
+
+    async def test_txn_limit_replaces_the_connection(self) -> None:
+        # With a one-connection pool and `txn_limit=2`, the first two calls share
+        # a server session and the third gets a fresh one.
+        pool = RustConnectionPool(
+            reactor,
+            _test_runtime(),
+            _build_dsn(),
+            name="test-rust-db-txn-limit",
+            server_name="test",
+            threads=1,
+            txn_limit=2,
+        )
+        pool.start()
+        self.addCleanup(pool.close)
+
+        def backend_pid(conn: Any) -> int:
+            cursor = conn.cursor()
+            cursor.execute("SELECT pg_backend_pid()")
+            (pid,) = cursor.fetchone()
+            return pid
+
+        first = await pool.runWithConnection(backend_pid)
+        second = await pool.runWithConnection(backend_pid)
+        third = await pool.runWithConnection(backend_pid)
+        self.assertEqual(first, second)
+        self.assertNotEqual(second, third)
 
     def test_status_reports_pool_occupancy(self) -> None:
         # Nothing checked out yet: at most the configured number of
