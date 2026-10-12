@@ -449,6 +449,7 @@ jobs:
           SYNAPSE_POSTGRES_HOST: /var/run/postgresql
           SYNAPSE_POSTGRES_USER: postgres
           SYNAPSE_POSTGRES_PASSWORD: postgres
+          SYNAPSE_TEST_RUST_DRIVER: ${{ matrix.job.driver == 'rust' || '' }}
       - name: Dump logs
         # Logs are most useful when the command fails, always include them.
         if: ${{ always() }}
@@ -725,6 +726,21 @@ jobs:
       - linting-done
       - changes
 
+    # The native Postgres driver's tests run against a live server and are
+    # skipped without one.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -735,6 +751,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - run: cargo test
+        env:
+          SYNAPSE_TEST_POSTGRES_DSN: host=localhost user=postgres password=postgres dbname=postgres
 
   # We want to ensure that the cargo benchmarks still compile, which requires a
   # nightly compiler.

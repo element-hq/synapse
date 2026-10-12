@@ -358,6 +358,12 @@ main() {
     export PASS_SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR=true
   fi
 
+  if [[ -n "$RUST_DRIVER" ]]; then
+    # Talk to Postgres through the native Rust driver (`use_rust_driver`)
+    # instead of psycopg2. Only meaningful with POSTGRES=1.
+    export PASS_SYNAPSE_USE_RUST_DRIVER=true
+  fi
+
   if [[ -n "$UNIX_SOCKETS" ]]; then
     # Enable full on Unix socket mode for Synapse, Redis and Postgresql
     export PASS_SYNAPSE_USE_UNIX_SOCKET=1

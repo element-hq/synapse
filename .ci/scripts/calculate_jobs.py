@@ -81,6 +81,14 @@ trial_postgres_tests = [
         "postgres-version": "17",
         "extras": "all",
     },
+    # Postgres through the native Rust driver rather than psycopg2.
+    {
+        "python-version": "3.14",
+        "database": "postgres",
+        "postgres-version": "17",
+        "extras": "all",
+        "driver": "rust",
+    },
 ]
 
 # Ensure that Synapse passes unit tests even with no extra dependencies installed.

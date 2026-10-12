@@ -37,6 +37,10 @@ jobs:
           - arrangement: workers
             database: Postgres
 
+          - arrangement: monolith
+            database: Postgres
+            driver: rust
+
     steps:
       - name: Checkout synapse codebase
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,6 +118,7 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          RUST_DRIVER: ${{ (matrix.driver == 'rust') && 1 || '' }}
 
       - name: Formatted sanity check Complement test logs
         # Always run this step if we attempted to run the Complement tests.
@@ -146,6 +151,7 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          RUST_DRIVER: ${{ (matrix.driver == 'rust') && 1 || '' }}
           TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
           TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
 
@@ -183,6 +189,7 @@ jobs:
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          RUST_DRIVER: ${{ (matrix.driver == 'rust') && 1 || '' }}
           TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
           TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
 
