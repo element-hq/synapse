@@ -511,7 +511,7 @@ impl Cursor {
         &self,
         py: Python<'_>,
         query: &str,
-        params: Vec<PgValue>,
+        params: &[PgValue],
         refresh: bool,
     ) -> PyResult<()> {
         // Drop any previous result set before starting the new query.
@@ -527,7 +527,7 @@ impl Cursor {
                 .block_on_pg_result(py, handle)?;
 
             let stream = client
-                .query_raw(&statement, params)
+                .query_raw(&statement, params.iter())
                 .block_on_pg_result(py, handle)?;
 
             // The column names back the (future) PEP-249 `Cursor.description`;
@@ -591,7 +591,7 @@ impl Cursor {
     fn execute(&self, py: Python<'_>, query: &str, params: Option<Vec<PgValue>>) -> PyResult<()> {
         let params = params.unwrap_or_default();
 
-        match self.execute_once(py, query, params.clone(), false) {
+        match self.execute_once(py, query, &params, false) {
             Err(err) if is_stale_plan_err(py, &err) => {
                 if self.connection.lock()?.in_txn {
                     // The transaction is aborted, so nothing (not even a fresh
@@ -606,7 +606,7 @@ impl Cursor {
                 } else {
                     // Autocommit: nothing is aborted, so re-prepare fresh and
                     // retry once.
-                    self.execute_once(py, query, params, true)
+                    self.execute_once(py, query, &params, true)
                 }
             }
             other => other,
