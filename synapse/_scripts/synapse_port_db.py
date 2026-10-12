@@ -664,6 +664,7 @@ class Porter:
             engine=engine,
             default_txn_name="portdb",
             server_name=server_name,
+            runtime=self.hs.get_rust_runtime(),
         ) as db_conn:
             engine.check_database(
                 db_conn, allow_outdated_version=allow_outdated_version
