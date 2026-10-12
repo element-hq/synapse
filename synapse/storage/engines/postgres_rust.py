@@ -33,7 +33,9 @@ Per-connection session setup (isolation level, ``synchronous_commit``,
 
 """
 
+import itertools
 import logging
+import re
 from typing import TYPE_CHECKING, Any, Mapping
 
 from synapse.storage.engines._base import (
@@ -105,18 +107,10 @@ class RustPostgresEngine(PostgresEngine[Connection, Cursor]):
 
     def convert_param_style(self, sql: str) -> str:
         # The shim binds positional `$1, $2, ...` placeholders (like libpq),
-        # not psycopg2's `%s`. Rewrite `?` left-to-right, matching the Rust-side
-        # `convert_placeholders`; callers must parameterise rather than embed a
-        # literal `?`.
-        out = []
-        n = 0
-        for ch in sql:
-            if ch == "?":
-                n += 1
-                out.append(f"${n}")
-            else:
-                out.append(ch)
-        return "".join(out)
+        # not psycopg2's `%s`. Rewrite `?` left-to-right; callers must
+        # parameterise rather than embed a literal `?`.
+        counter = itertools.count(1)
+        return re.sub(r"\?", lambda _: f"${next(counter)}", sql)
 
     def on_new_connection(self, db_conn: "LoggingDatabaseConnection") -> None:
         # No-op: per-connection session setup happens in the Rust connection
