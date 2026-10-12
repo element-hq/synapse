@@ -71,7 +71,6 @@ from synapse.types import (
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
     is_compliant_user_id,
-    is_compliant_user_id_localpart,
 )
 from synapse.util import stringutils
 from synapse.util.async_helpers import Linearizer
@@ -1553,7 +1552,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
             )
             return
 
-        if not is_compliant_user_id_localpart(UserID.from_string(user_id).localpart):
+        if not is_compliant_user_id(user_id):
             # We SHOULD NOT forward non-compliant (grandfathered historical)
             # user IDs to clients outside the context of an event, and the spec
             # gives dropping their device list updates as the example. See

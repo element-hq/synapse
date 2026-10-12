@@ -607,6 +607,8 @@ def is_compliant_user_id(user_id: str) -> bool:
     Returns:
         True if the localpart of the user ID is compliant, False otherwise
     """
+    if not user_id.startswith(UserID.SIGIL):
+        return False
     localpart, _, _ = user_id[1:].partition(":")
     return is_compliant_user_id_localpart(localpart)
 
