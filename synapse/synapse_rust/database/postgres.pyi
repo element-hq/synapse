@@ -32,6 +32,7 @@ class ConnectionPool:
         statement_timeout_ms: int | None = None,
         idle_in_transaction_session_timeout_ms: int | None = None,
         checkout_timeout_ms: int | None = None,
+        max_uses: int | None = None,
         sslmode: str | None = None,
         sslrootcert: str | None = None,
         sslcert: str | None = None,
@@ -48,7 +49,9 @@ class ConnectionPool:
         ``statement_timeout`` and ``idle_in_transaction_session_timeout``
         (both in milliseconds) if configured.
         ``checkout_timeout_ms`` bounds how long ``connect`` may wait for a
-        connection; ``None`` or ``0`` waits indefinitely.
+        connection; ``None`` or ``0`` waits indefinitely. ``max_uses`` closes
+        and replaces a connection after that many checkouts; ``None`` or ``0``
+        keeps connections for as long as they stay healthy.
 
         The ``ssl*`` keyword arguments are the libpq TLS settings; see
         ``rust/src/database/postgres/tls.rs``.

@@ -109,6 +109,9 @@ pub struct ConnectionManager {
     session: SessionConfig,
     /// How to (or whether to) negotiate TLS for each connection.
     tls: TlsConnector,
+    /// If set, a connection is closed rather than reused once it has been
+    /// checked out this many times. See [`PoolConfig::max_uses`].
+    max_uses: Option<usize>,
 }
 
 impl ConnectionManager {
@@ -132,6 +135,7 @@ impl ConnectionManager {
             handle,
             session,
             tls: connector,
+            max_uses: None,
         })
     }
 }
@@ -246,13 +250,26 @@ impl Manager for ConnectionManager {
         })
     }
 
-    async fn recycle(&self, client: &mut PooledClient, _: &Metrics) -> RecycleResult<Self::Error> {
+    async fn recycle(
+        &self,
+        client: &mut PooledClient,
+        metrics: &Metrics,
+    ) -> RecycleResult<Self::Error> {
         // Cheap liveness check before handing a pooled connection back out: if
         // the connection task has ended (server closed the socket, fatal error,
         // …) the client reports closed, so tell deadpool to drop it and create
         // a fresh one rather than returning a dead connection.
         if client.is_closed() {
             return Err(RecycleError::message("connection closed"));
+        }
+        // Retire a connection that has served its share of checkouts (the
+        // `txn_limit` config), bounding the server-side state a session
+        // accumulates. `recycle_count` is the number of checkouts after the
+        // first, so this runs when the `max_uses`th checkout would reuse it.
+        if let Some(max_uses) = self.max_uses {
+            if metrics.recycle_count + 1 >= max_uses {
+                return Err(RecycleError::message("connection reached its use limit"));
+            }
         }
         Ok(())
     }
@@ -282,6 +299,12 @@ pub struct PoolConfig {
     /// phase, so a checkout can never hang forever (e.g. against an
     /// unreachable server).
     pub checkout_timeout: Option<Duration>,
+    /// If set, a connection is closed and replaced once it has been checked
+    /// out this many times, rather than reused forever. This is the pool-side
+    /// form of Synapse's `txn_limit`, which bounds the server-side state
+    /// (prepared statements, cached plans, memory) a long-lived session
+    /// accumulates.
+    pub max_uses: Option<usize>,
 }
 
 impl Default for PoolConfig {
@@ -291,6 +314,7 @@ impl Default for PoolConfig {
             session: SessionConfig::default(),
             tls: TlsParams::default(),
             checkout_timeout: None,
+            max_uses: None,
         }
     }
 }
@@ -302,7 +326,8 @@ pub fn create_pool(
     handle: Handle,
     config: PoolConfig,
 ) -> Result<ConnectionPool, anyhow::Error> {
-    let manager = ConnectionManager::from_dsn(dsn, handle, config.session, &config.tls)?;
+    let mut manager = ConnectionManager::from_dsn(dsn, handle, config.session, &config.tls)?;
+    manager.max_uses = config.max_uses;
     let mut builder = Pool::builder(manager).max_size(config.max_size);
     if let Some(timeout) = config.checkout_timeout {
         // deadpool enforces timeouts by sleeping on a runtime (we drive `get()`
@@ -341,7 +366,7 @@ impl PyConnectionPool {
     /// `statement_timeout` and `idle_in_transaction_session_timeout` if
     /// configured here.
     #[new]
-    #[pyo3(signature = (runtime, dsn, max_size = 10, *, synchronous_commit = true, statement_timeout_ms = None, idle_in_transaction_session_timeout_ms = None, checkout_timeout_ms = None, sslmode = None, sslrootcert = None, sslcert = None, sslkey = None, sslpassword = None))]
+    #[pyo3(signature = (runtime, dsn, max_size = 10, *, synchronous_commit = true, statement_timeout_ms = None, idle_in_transaction_session_timeout_ms = None, checkout_timeout_ms = None, max_uses = None, sslmode = None, sslrootcert = None, sslcert = None, sslkey = None, sslpassword = None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         runtime: &RustRuntime,
@@ -351,6 +376,7 @@ impl PyConnectionPool {
         statement_timeout_ms: Option<i32>,
         idle_in_transaction_session_timeout_ms: Option<i32>,
         checkout_timeout_ms: Option<u64>,
+        max_uses: Option<usize>,
         sslmode: Option<String>,
         sslrootcert: Option<String>,
         sslcert: Option<String>,
@@ -377,6 +403,8 @@ impl PyConnectionPool {
             checkout_timeout: checkout_timeout_ms
                 .filter(|&ms| ms > 0)
                 .map(Duration::from_millis),
+            // `0` means no limit, like `txn_limit`.
+            max_uses: max_uses.filter(|&n| n > 0),
         };
         let pool = create_pool(dsn, handle.clone(), config).map_err(|e| {
             PyRuntimeError::new_err(format!("failed to build connection pool: {e}"))
@@ -599,6 +627,45 @@ mod tests {
             assert_eq!(show("synchronous_commit").await, "off");
             assert_eq!(show("statement_timeout").await, "1234ms");
             assert_eq!(show("idle_in_transaction_session_timeout").await, "5678ms");
+        });
+    }
+
+    #[test]
+    fn connection_is_replaced_after_max_uses() {
+        let Some(dsn) = test_dsn() else {
+            eprintln!("skipping: set SYNAPSE_TEST_POSTGRES_DSN to run");
+            return;
+        };
+
+        let rt = test_runtime();
+        let pool = create_pool(
+            &dsn,
+            rt.handle().clone(),
+            PoolConfig {
+                max_size: 1,
+                max_uses: Some(2),
+                ..PoolConfig::default()
+            },
+        )
+        .unwrap();
+
+        async fn pid(pool: &ConnectionPool) -> i32 {
+            let client = pool.get().await.unwrap();
+            client
+                .query_one("SELECT pg_backend_pid()", &[])
+                .await
+                .unwrap()
+                .get::<_, i32>(0)
+        }
+
+        rt.block_on(async {
+            // The first two checkouts share a server session; the third gets a
+            // fresh one because the second checkout used the connection up.
+            let first = pid(&pool).await;
+            let second = pid(&pool).await;
+            let third = pid(&pool).await;
+            assert_eq!(first, second);
+            assert_ne!(second, third);
         });
     }
 

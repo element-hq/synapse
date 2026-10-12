@@ -84,6 +84,12 @@ rust_pool_checkout_wait_seconds = Histogram(
 class RustConnectionPool:
     """Runs blocking database functions against pooled Rust connections.
 
+    `txn_limit` is enforced here, by the native pool retiring a connection
+    after that many checkouts, rather than by `DatabasePool` counting
+    transactions per thread: connections are not pinned to threads, so a
+    per-thread count would recycle whichever connection the thread happened to
+    hold. `DatabasePool` reads `handles_txn_limit` and skips its own counting.
+
     Each :meth:`runWithConnection` call runs its function on a worker thread
     with a (DBAPI2-adapter) connection checked out of the native Rust pool, and
     returns a *raw* ``Deferred`` that fires on the reactor thread with the
@@ -92,6 +98,9 @@ class RustConnectionPool:
     caller's job (``DatabasePool.runWithConnection`` supplies the single
     ``make_deferred_yieldable``; see :meth:`runWithConnection`).
     """
+
+    # See the class docstring: `DatabasePool` leaves `txn_limit` to this pool.
+    handles_txn_limit = True
 
     def __init__(
         self,
@@ -106,6 +115,7 @@ class RustConnectionPool:
         statement_timeout_ms: int | None = None,
         idle_in_transaction_session_timeout_ms: int | None = None,
         checkout_timeout_ms: int | None = None,
+        txn_limit: int = 0,
         ssl_params: "dict[str, Any] | None" = None,
     ) -> None:
         """
@@ -129,6 +139,9 @@ class RustConnectionPool:
             checkout_timeout_ms: how long a connection checkout may block before
                 failing with an operational error rather than waiting for the
                 pool indefinitely. ``None`` or ``0`` disables the timeout.
+            txn_limit: close and replace a connection after this many
+                checkouts (each ``runWithConnection`` is one); ``0`` keeps
+                connections for as long as they stay healthy.
             ssl_params: the libpq ``ssl*`` keys (see
                 :func:`synapse.storage.rust_dbapi.split_ssl_params`), passed to
                 each pooled connection's TLS setup.
@@ -147,6 +160,7 @@ class RustConnectionPool:
             idle_in_transaction_session_timeout_ms
         )
         self._checkout_timeout_ms = checkout_timeout_ms
+        self._txn_limit = txn_limit
         self._ssl_params = dict(ssl_params or {})
         self._threads = threads
         self._pool: Any = self._open_pool()
@@ -192,6 +206,7 @@ class RustConnectionPool:
             statement_timeout_ms=self._statement_timeout_ms,
             idle_in_transaction_session_timeout_ms=self._idle_in_transaction_session_timeout_ms,
             checkout_timeout_ms=self._checkout_timeout_ms,
+            max_uses=self._txn_limit,
             **self._ssl_params,
         )
 

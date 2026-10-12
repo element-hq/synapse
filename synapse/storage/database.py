@@ -241,6 +241,7 @@ def _make_rust_pool(
         statement_timeout_ms=engine.statement_timeout,
         idle_in_transaction_session_timeout_ms=engine.idle_in_transaction_session_timeout,
         checkout_timeout_ms=engine.pool_checkout_timeout_ms,
+        txn_limit=db_config.config.get("txn_limit", 0),
         ssl_params=ssl_params,
     )
     pool.start()
@@ -748,6 +749,11 @@ class DatabasePool:
             server_name=self.server_name,
             runtime=hs.get_rust_runtime(),
         )
+        if getattr(self._db_pool, "handles_txn_limit", False):
+            # The pool retires connections itself (see RustConnectionPool), so
+            # the per-thread transaction counting below would only recycle a
+            # random connection on top of that.
+            self._txn_limit = 0
 
         self.updates = BackgroundUpdater(hs, self)
 
