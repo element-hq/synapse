@@ -299,7 +299,7 @@ class Store(
             table,
             ", ".join(k for k in headers),
             "OVERRIDING SYSTEM VALUE" if override_system_value else "",
-            ", ".join("%s" for _ in headers),
+            ", ".join("?" for _ in headers),
         )
 
         try:
@@ -382,7 +382,7 @@ class Porter:
 
             def delete_all(txn: LoggingTransaction) -> None:
                 txn.execute(
-                    "DELETE FROM port_from_sqlite3 WHERE table_name = %s", (table,)
+                    "DELETE FROM port_from_sqlite3 WHERE table_name = ?", (table,)
                 )
                 txn.execute("TRUNCATE %s CASCADE" % (table,))
 
