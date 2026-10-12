@@ -238,6 +238,7 @@ def _make_rust_pool(
         threads=threads,
         synchronous_commit=engine.synchronous_commit,
         statement_timeout_ms=engine.statement_timeout,
+        idle_in_transaction_session_timeout_ms=engine.idle_in_transaction_session_timeout,
         checkout_timeout_ms=engine.pool_checkout_timeout_ms,
         ssl_params=ssl_params,
     )
@@ -297,6 +298,7 @@ def make_conn(
             rust_dbapi.build_dsn(dsn_args),
             synchronous_commit=engine.synchronous_commit,
             statement_timeout_ms=engine.statement_timeout,
+            idle_in_transaction_session_timeout_ms=engine.idle_in_transaction_session_timeout,
             checkout_timeout_ms=engine.pool_checkout_timeout_ms,
             ssl_params=ssl_params,
         )

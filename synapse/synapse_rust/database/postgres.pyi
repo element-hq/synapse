@@ -30,6 +30,7 @@ class ConnectionPool:
         *,
         synchronous_commit: bool = True,
         statement_timeout_ms: int | None = None,
+        idle_in_transaction_session_timeout_ms: int | None = None,
         checkout_timeout_ms: int | None = None,
         sslmode: str | None = None,
         sslrootcert: str | None = None,
@@ -43,8 +44,9 @@ class ConnectionPool:
         setup and in tests.
 
         Each connection gets the same session setup when opened: the default
-        (REPEATABLE READ) isolation level, plus ``synchronous_commit`` off and
-        ``statement_timeout`` (milliseconds) if configured.
+        (REPEATABLE READ) isolation level, plus ``synchronous_commit`` off,
+        ``statement_timeout`` and ``idle_in_transaction_session_timeout``
+        (both in milliseconds) if configured.
         ``checkout_timeout_ms`` bounds how long ``connect`` may wait for a
         connection; ``None`` or ``0`` waits indefinitely.
 

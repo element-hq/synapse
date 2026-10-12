@@ -249,6 +249,7 @@ def connect(
     *,
     synchronous_commit: bool = True,
     statement_timeout_ms: int | None = None,
+    idle_in_transaction_session_timeout_ms: int | None = None,
     checkout_timeout_ms: int | None = None,
     ssl_params: Mapping[str, Any] | None = None,
 ) -> "Connection":
@@ -270,6 +271,7 @@ def connect(
         1,
         synchronous_commit=synchronous_commit,
         statement_timeout_ms=statement_timeout_ms,
+        idle_in_transaction_session_timeout_ms=idle_in_transaction_session_timeout_ms,
         checkout_timeout_ms=checkout_timeout_ms,
         **(ssl_params or {}),
     )

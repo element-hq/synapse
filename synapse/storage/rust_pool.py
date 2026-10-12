@@ -75,6 +75,7 @@ class RustConnectionPool:
         threads: int = 10,
         synchronous_commit: bool = True,
         statement_timeout_ms: int | None = None,
+        idle_in_transaction_session_timeout_ms: int | None = None,
         checkout_timeout_ms: int | None = None,
         ssl_params: "dict[str, Any] | None" = None,
     ) -> None:
@@ -92,6 +93,9 @@ class RustConnectionPool:
             synchronous_commit: passed to each pooled connection's session setup.
             statement_timeout_ms: passed to each pooled connection's session
                 setup (statements running longer are aborted).
+            idle_in_transaction_session_timeout_ms: passed to each pooled
+                connection's session setup (a session idle inside a transaction
+                for longer is terminated).
             checkout_timeout_ms: how long a connection checkout may block before
                 failing with an operational error rather than waiting for the
                 pool indefinitely. ``None`` or ``0`` disables the timeout.
@@ -109,6 +113,9 @@ class RustConnectionPool:
         self._dsn = dsn
         self._synchronous_commit = synchronous_commit
         self._statement_timeout_ms = statement_timeout_ms
+        self._idle_in_transaction_session_timeout_ms = (
+            idle_in_transaction_session_timeout_ms
+        )
         self._checkout_timeout_ms = checkout_timeout_ms
         self._ssl_params = dict(ssl_params or {})
         self._threads = threads
@@ -131,6 +138,7 @@ class RustConnectionPool:
             self._threads,
             synchronous_commit=self._synchronous_commit,
             statement_timeout_ms=self._statement_timeout_ms,
+            idle_in_transaction_session_timeout_ms=self._idle_in_transaction_session_timeout_ms,
             checkout_timeout_ms=self._checkout_timeout_ms,
             **self._ssl_params,
         )

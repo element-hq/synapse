@@ -51,15 +51,20 @@ pub struct SessionConfig {
     /// If set, `statement_timeout` (in milliseconds) — statements running longer
     /// are aborted and turned into errors.
     pub statement_timeout_ms: Option<i32>,
+    /// If set, `idle_in_transaction_session_timeout` (in milliseconds): a
+    /// session left idle inside a transaction for longer is terminated, so a
+    /// leaked connection cannot hold locks or block vacuum indefinitely.
+    pub idle_in_transaction_session_timeout_ms: Option<i32>,
 }
 
 impl Default for SessionConfig {
     fn default() -> Self {
-        // Match the engine's defaults: synchronous commit on, no statement
-        // timeout unless configured.
+        // Match the engine's defaults: synchronous commit on, no timeouts
+        // unless configured.
         Self {
             synchronous_commit: true,
             statement_timeout_ms: None,
+            idle_in_transaction_session_timeout_ms: None,
         }
     }
 }
@@ -79,6 +84,11 @@ impl SessionConfig {
         if let Some(ms) = self.statement_timeout_ms {
             // `ms` is an integer we control (from config), so inlining is safe.
             sql.push_str(&format!(" SET statement_timeout TO {ms};"));
+        }
+        if let Some(ms) = self.idle_in_transaction_session_timeout_ms {
+            sql.push_str(&format!(
+                " SET idle_in_transaction_session_timeout TO {ms};"
+            ));
         }
         sql
     }
@@ -327,10 +337,11 @@ impl PyConnectionPool {
     /// This only parses the DSN; connections are opened lazily on the first
     /// (and each subsequent) [`connect`](Self::connect) that needs a new one.
     /// Each connection gets the same per-connection session setup: the default
-    /// (REPEATABLE READ) isolation level, plus `synchronous_commit` /
-    /// `statement_timeout` if configured here.
+    /// (REPEATABLE READ) isolation level, plus `synchronous_commit`,
+    /// `statement_timeout` and `idle_in_transaction_session_timeout` if
+    /// configured here.
     #[new]
-    #[pyo3(signature = (runtime, dsn, max_size = 10, *, synchronous_commit = true, statement_timeout_ms = None, checkout_timeout_ms = None, sslmode = None, sslrootcert = None, sslcert = None, sslkey = None, sslpassword = None))]
+    #[pyo3(signature = (runtime, dsn, max_size = 10, *, synchronous_commit = true, statement_timeout_ms = None, idle_in_transaction_session_timeout_ms = None, checkout_timeout_ms = None, sslmode = None, sslrootcert = None, sslcert = None, sslkey = None, sslpassword = None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         runtime: &RustRuntime,
@@ -338,6 +349,7 @@ impl PyConnectionPool {
         max_size: usize,
         synchronous_commit: bool,
         statement_timeout_ms: Option<i32>,
+        idle_in_transaction_session_timeout_ms: Option<i32>,
         checkout_timeout_ms: Option<u64>,
         sslmode: Option<String>,
         sslrootcert: Option<String>,
@@ -351,6 +363,7 @@ impl PyConnectionPool {
             session: SessionConfig {
                 synchronous_commit,
                 statement_timeout_ms,
+                idle_in_transaction_session_timeout_ms,
             },
             tls: TlsParams {
                 sslmode,
@@ -536,6 +549,7 @@ mod tests {
         let session = SessionConfig {
             synchronous_commit: false,
             statement_timeout_ms: Some(1234),
+            idle_in_transaction_session_timeout_ms: Some(5678),
         };
         let rt = test_runtime();
         let pool = create_pool(
@@ -570,6 +584,7 @@ mod tests {
             );
             assert_eq!(show("synchronous_commit").await, "off");
             assert_eq!(show("statement_timeout").await, "1234ms");
+            assert_eq!(show("idle_in_transaction_session_timeout").await, "5678ms");
         });
     }
 
