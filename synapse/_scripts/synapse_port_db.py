@@ -1179,7 +1179,13 @@ class Porter:
         def r(txn: LoggingTransaction) -> None:
             assert curr_id is not None
             next_id = curr_id + 1
-            txn.execute("ALTER SEQUENCE state_group_id_seq RESTART WITH %s", (next_id,))
+            # `ALTER SEQUENCE` cannot take a bound parameter (psycopg2 only
+            # made it look like it could, by interpolating client-side), so the
+            # value is formatted into the statement; it is an integer we
+            # computed, never user input.
+            txn.execute(
+                "ALTER SEQUENCE state_group_id_seq RESTART WITH %d" % (next_id,)
+            )
 
         await self.postgres_store.db_pool.runInteraction("setup_state_group_id_seq", r)
 
@@ -1190,7 +1196,7 @@ class Porter:
 
         def r(txn: LoggingTransaction) -> None:
             next_id = curr_id + 1
-            txn.execute("ALTER SEQUENCE user_id_seq RESTART WITH %s", (next_id,))
+            txn.execute("ALTER SEQUENCE user_id_seq RESTART WITH %d" % (next_id,))
 
         await self.postgres_store.db_pool.runInteraction("setup_user_id_seq", r)
 
@@ -1213,14 +1219,14 @@ class Porter:
         def _setup_events_stream_seqs_set_pos(txn: LoggingTransaction) -> None:
             if curr_forward_id:
                 txn.execute(
-                    "ALTER SEQUENCE events_stream_seq RESTART WITH %s",
-                    (curr_forward_id + 1,),
+                    "ALTER SEQUENCE events_stream_seq RESTART WITH %d"
+                    % (curr_forward_id + 1,)
                 )
 
             if curr_backward_id:
                 txn.execute(
-                    "ALTER SEQUENCE events_backfill_stream_seq RESTART WITH %s",
-                    (curr_backward_id + 1,),
+                    "ALTER SEQUENCE events_backfill_stream_seq RESTART WITH %d"
+                    % (curr_backward_id + 1,)
                 )
 
         await self.postgres_store.db_pool.runInteraction(
@@ -1250,8 +1256,7 @@ class Porter:
         next_id = max(current_stream_ids) + 1
 
         def r(txn: LoggingTransaction) -> None:
-            sql = "ALTER SEQUENCE %s RESTART WITH" % (sequence_name,)
-            txn.execute(sql + " %s", (next_id,))
+            txn.execute("ALTER SEQUENCE %s RESTART WITH %d" % (sequence_name, next_id))
 
         await self.postgres_store.db_pool.runInteraction(
             "_setup_%s" % (sequence_name,), r
@@ -1281,8 +1286,7 @@ class Porter:
             return
 
         def r(txn: LoggingTransaction) -> None:
-            sql = "ALTER SEQUENCE %s RESTART WITH" % (seq_name,)
-            txn.execute(sql + " %s", (seq_value + 1,))
+            txn.execute("ALTER SEQUENCE %s RESTART WITH %d" % (seq_name, seq_value + 1))
 
         await self.postgres_store.db_pool.runInteraction("_setup_%s" % (seq_name,), r)
 
@@ -1314,8 +1318,8 @@ class Porter:
             # Presumably there is at least one row in event_auth_chains.
             assert curr_chain_id is not None
             txn.execute(
-                "ALTER SEQUENCE event_auth_chain_id RESTART WITH %s",
-                (curr_chain_id + 1,),
+                "ALTER SEQUENCE event_auth_chain_id RESTART WITH %d"
+                % (curr_chain_id + 1,)
             )
 
         if curr_chain_id is not None:
