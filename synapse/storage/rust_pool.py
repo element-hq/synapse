@@ -31,6 +31,7 @@ configured with ``use_rust_driver``.
 
 import logging
 import threading
+import weakref
 from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 from prometheus_client import Gauge, Histogram
@@ -74,6 +75,14 @@ rust_pool_waiting_checkouts = Gauge(
     "Number of checkouts waiting for a connection from the native Rust database pool",
     labelnames=["name", SERVER_NAME_LABEL],
 )
+# The occupancy gauges and the index of their value in `ConnectionPool.status()`.
+_POOL_GAUGES = (
+    (rust_pool_max_connections, 0),
+    (rust_pool_connections, 1),
+    (rust_pool_idle_connections, 2),
+    (rust_pool_waiting_checkouts, 3),
+)
+
 rust_pool_checkout_wait_seconds = Histogram(
     "synapse_rust_db_pool_checkout_wait_seconds",
     "Time spent checking a connection out of the native Rust database pool",
@@ -174,18 +183,26 @@ class RustConnectionPool:
         # outage; called as `connectionFactory(self)`.
         self.connectionFactory = self._default_connection_factory
 
-        # Pool occupancy, read from the native pool on each scrape.
         self._metric_labels = {"name": name, SERVER_NAME_LABEL: server_name}
+        self._register_gauges()
+
+    def _register_gauges(self) -> None:
+        """Point the occupancy gauges at this pool.
+
+        The gauges are process-wide, so they must not keep this pool (and
+        through it the homeserver's RustRuntime) alive: they hold it weakly
+        and report nothing once it is gone.
+        """
+        weak_self = weakref.ref(self)
 
         def status_field(index: int) -> Callable[[], int]:
-            return lambda: self.status()[index]
+            def read() -> int:
+                pool = weak_self()
+                return pool.status()[index] if pool is not None else 0
 
-        for gauge, index in (
-            (rust_pool_max_connections, 0),
-            (rust_pool_connections, 1),
-            (rust_pool_idle_connections, 2),
-            (rust_pool_waiting_checkouts, 3),
-        ):
+            return read
+
+        for gauge, index in _POOL_GAUGES:
             gauge.labels(**self._metric_labels).set_function(status_field(index))
 
     def status(self) -> tuple[int, int, int, int]:
@@ -236,6 +253,7 @@ class RustConnectionPool:
             return
         if self._pool is None:
             self._pool = self._open_pool()
+            self._register_gauges()
         self.threadpool.start()
         self.running = True
 
@@ -259,6 +277,12 @@ class RustConnectionPool:
         if self._pool is not None:
             self._pool.close()
             self._pool = None
+        for gauge, _ in _POOL_GAUGES:
+            # Stop reporting a closed pool; `start()` registers afresh.
+            try:
+                gauge.remove(*self._metric_labels.values())
+            except KeyError:
+                pass
 
     def runWithConnection(  # noqa: N802 (implements adbapi's interface)
         self,
