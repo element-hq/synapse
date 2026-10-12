@@ -235,6 +235,7 @@ def _make_rust_pool(
         runtime,
         dsn,
         name=f"database-{db_config.name}",
+        server_name=server_name,
         threads=threads,
         synchronous_commit=engine.synchronous_commit,
         statement_timeout_ms=engine.statement_timeout,

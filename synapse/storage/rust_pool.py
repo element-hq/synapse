@@ -33,11 +33,13 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
+from prometheus_client import Gauge, Histogram
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import threads
 from twisted.python.threadpool import ThreadPool
 
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.rust_dbapi import Connection as DBAPI2Connection
 from synapse.synapse_rust.database import postgres
 
@@ -51,6 +53,32 @@ logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+rust_pool_max_connections = Gauge(
+    "synapse_rust_db_pool_max_connections",
+    "Maximum number of connections the native Rust database pool will open",
+    labelnames=["name", SERVER_NAME_LABEL],
+)
+rust_pool_connections = Gauge(
+    "synapse_rust_db_pool_connections",
+    "Number of connections the native Rust database pool holds open",
+    labelnames=["name", SERVER_NAME_LABEL],
+)
+rust_pool_idle_connections = Gauge(
+    "synapse_rust_db_pool_idle_connections",
+    "Number of open connections idle in the native Rust database pool",
+    labelnames=["name", SERVER_NAME_LABEL],
+)
+rust_pool_waiting_checkouts = Gauge(
+    "synapse_rust_db_pool_waiting_checkouts",
+    "Number of checkouts waiting for a connection from the native Rust database pool",
+    labelnames=["name", SERVER_NAME_LABEL],
+)
+rust_pool_checkout_wait_seconds = Histogram(
+    "synapse_rust_db_pool_checkout_wait_seconds",
+    "Time spent checking a connection out of the native Rust database pool",
+    labelnames=["name", SERVER_NAME_LABEL],
+)
 
 
 class RustConnectionPool:
@@ -72,6 +100,7 @@ class RustConnectionPool:
         dsn: str,
         *,
         name: str,
+        server_name: str,
         threads: int = 10,
         synchronous_commit: bool = True,
         statement_timeout_ms: int | None = None,
@@ -86,6 +115,7 @@ class RustConnectionPool:
                 drives the native connection pool.
             dsn: a libpq-style connection string for the Rust pool.
             name: a label for the thread pool (used in logs / metrics).
+            server_name: the homeserver name, a label on the pool's metrics.
             threads: the maximum number of worker threads. The Rust connection
                 pool is sized to match, since each worker holds at most one
                 connection at a time — a 1:1 cap avoids both starvation and
@@ -130,6 +160,28 @@ class RustConnectionPool:
         # outage; called as `connectionFactory(self)`.
         self.connectionFactory = self._default_connection_factory
 
+        # Pool occupancy, read from the native pool on each scrape.
+        self._metric_labels = {"name": name, SERVER_NAME_LABEL: server_name}
+
+        def status_field(index: int) -> Callable[[], int]:
+            return lambda: self.status()[index]
+
+        for gauge, index in (
+            (rust_pool_max_connections, 0),
+            (rust_pool_connections, 1),
+            (rust_pool_idle_connections, 2),
+            (rust_pool_waiting_checkouts, 3),
+        ):
+            gauge.labels(**self._metric_labels).set_function(status_field(index))
+
+    def status(self) -> tuple[int, int, int, int]:
+        """The native pool's occupancy: ``(max_size, size, available, waiting)``,
+        all zero once the pool is closed."""
+        pool = self._pool
+        if pool is None:
+            return (0, 0, 0, 0)
+        return pool.status()
+
     def _open_pool(self) -> Any:
         """Open a fresh native Rust connection pool from the stored config."""
         return postgres.ConnectionPool(
@@ -154,7 +206,9 @@ class RustConnectionPool:
             # `close()` dropped the native pool and no `start()` has reopened
             # it; a clear error beats an AttributeError on None.
             raise RuntimeError("connection pool has been closed")
-        return DBAPI2Connection(pool.connect(), pool=pool)
+        with rust_pool_checkout_wait_seconds.labels(**self._metric_labels).time():
+            conn = pool.connect()
+        return DBAPI2Connection(conn, pool=pool)
 
     def start(self) -> None:
         """Start the thread pool. Idempotent.

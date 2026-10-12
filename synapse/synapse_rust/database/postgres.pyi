@@ -62,6 +62,13 @@ class ConnectionPool:
         """
 
     def close(self) -> None: ...
+    def status(self) -> tuple[int, int, int, int]:
+        """The pool's occupancy: ``(max_size, size, available, waiting)``.
+
+        ``size`` is the number of open connections, ``available`` how many of
+        those are idle in the pool, and ``waiting`` how many checkouts are
+        blocked waiting for one.
+        """
 
 class Connection:
     """A connection checked out of a :class:`ConnectionPool`."""

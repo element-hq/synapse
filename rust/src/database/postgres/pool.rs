@@ -408,6 +408,20 @@ impl PyConnectionPool {
     fn close(&self) {
         self.pool.close();
     }
+
+    /// The pool's occupancy, for metrics: `(max_size, size, available,
+    /// waiting)`. `size` is the number of open connections, `available` how
+    /// many of those are idle in the pool, and `waiting` how many checkouts
+    /// are blocked waiting for one.
+    fn status(&self) -> (usize, usize, usize, usize) {
+        let status = self.pool.status();
+        (
+            status.max_size,
+            status.size,
+            status.available,
+            status.waiting,
+        )
+    }
 }
 
 /// Map a `deadpool` checkout failure onto the DBAPI2 exception hierarchy.

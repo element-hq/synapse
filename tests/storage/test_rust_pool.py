@@ -61,7 +61,12 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
 
     def setUp(self) -> None:
         self.pool = RustConnectionPool(
-            reactor, _test_runtime(), _build_dsn(), name="test-rust-db", threads=4
+            reactor,
+            _test_runtime(),
+            _build_dsn(),
+            name="test-rust-db",
+            server_name="test",
+            threads=4,
         )
         self.pool.start()
         self.addCleanup(self.pool.close)
@@ -153,6 +158,7 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             _test_runtime(),
             _build_dsn(),
             name="test-rust-db-single",
+            server_name="test",
             threads=1,
         )
         pool.start()
@@ -274,6 +280,24 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             return row
 
         self.assertEqual((yield pool.runWithConnection(txn)), (1,))
+
+    def test_status_reports_pool_occupancy(self) -> None:
+        # Nothing checked out yet: at most the configured number of
+        # connections, none of them in use.
+        max_size, size, available, waiting = self.pool.status()
+        self.assertEqual(max_size, 4)
+        self.assertEqual(size, available)
+        self.assertEqual(waiting, 0)
+
+        # Holding a connection shows up as one fewer available.
+        held = self.pool.connect()
+        self.addCleanup(held.close)
+        max_size, size, available, waiting = self.pool.status()
+        self.assertEqual(size - available, 1)
+
+        # A closed pool reports nothing rather than failing the scrape.
+        self.pool.close()
+        self.assertEqual(self.pool.status(), (0, 0, 0, 0))
 
     def test_run_when_not_running_raises(self) -> None:
         self.pool.close()
