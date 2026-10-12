@@ -737,7 +737,7 @@ class SlidingSyncStore(SQLBaseStore):
             sql = """
                 INSERT INTO sliding_sync_connection_lazy_members
                 (connection_key, connection_position, room_id, user_id, last_seen_ts)
-                VALUES {value_placeholder}
+                VALUES ?
                 ON CONFLICT (connection_key, room_id, user_id)
                 DO UPDATE SET last_seen_ts = EXCLUDED.last_seen_ts
                 WHERE sliding_sync_connection_lazy_members.connection_position IS NULL
@@ -749,16 +749,7 @@ class SlidingSyncStore(SQLBaseStore):
                 for room_id, user_id in to_update
             ]
 
-            if (
-                isinstance(self.database_engine, PostgresEngine)
-                and self.database_engine.uses_psycopg2_extras
-            ):
-                sql = sql.format(value_placeholder="?")
-                txn.execute_values(sql, args, fetch=False)
-            else:
-                # The Rust backend and SQLite go through executemany.
-                sql = sql.format(value_placeholder="(?, ?, ?, ?, ?)")
-                txn.execute_batch(sql, args)
+            txn.execute_batch_values(sql, args, 5)
 
         # Remove any invalidated entries.
         to_remove: list[tuple[str, str]] = []

@@ -175,7 +175,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
             )
         else:
             self.mock_txn.executemany.assert_called_once_with(
-                "INSERT INTO tablename (col1, col2) VALUES(?, ?)",
+                "INSERT INTO tablename (col1, col2) VALUES (?, ?)",
                 [("val1", "val2"), ("val3", "val4")],
             )
 

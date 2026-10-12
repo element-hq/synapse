@@ -582,6 +582,29 @@ class LoggingTransaction:
             # suggests that the inner collection should be a sequence or dict.
             self.executemany(sql, args)
 
+    def execute_batch_values(
+        self, sql: str, args: Iterable[Iterable[Any]], num_columns: int
+    ) -> None:
+        """Run a statement with a multi-row ``VALUES`` list, one row per entry
+        of ``args``.
+
+        ``sql`` must contain the token ``VALUES ?``. On psycopg2 the rows are
+        merged into a single multi-row statement with ``execute_values``, which
+        is a lot faster than ``executemany``. On the other backends ``?``
+        becomes a row of ``num_columns`` placeholders and the rows go through
+        ``execute_batch``.
+
+        Like ``execute_batch``, ``rowcount`` is not meaningful afterwards.
+        """
+        if (
+            isinstance(self.database_engine, PostgresEngine)
+            and self.database_engine.uses_psycopg2_extras
+        ):
+            self.execute_values(sql, args, fetch=False)
+        else:
+            row = "(%s)" % (", ".join("?" for _ in range(num_columns)),)
+            self.execute_batch(sql.replace("VALUES ?", "VALUES " + row), args)
+
     def execute_values(
         self,
         sql: str,
@@ -1419,27 +1442,11 @@ class DatabasePool:
         if not values:
             return
 
-        if (
-            isinstance(txn.database_engine, PostgresEngine)
-            and txn.database_engine.uses_psycopg2_extras
-        ):
-            # On psycopg2 a single multi-row INSERT via `execute_values` is a lot
-            # faster than `execute_batch`.
-            sql = "INSERT INTO %s (%s) VALUES ?" % (
-                table,
-                ", ".join(k for k in keys),
-            )
-
-            txn.execute_values(sql, values, fetch=False)
-        else:
-            # The Rust backend and SQLite go through `executemany` (execute_batch).
-            sql = "INSERT INTO %s (%s) VALUES(%s)" % (
-                table,
-                ", ".join(k for k in keys),
-                ", ".join("?" for _ in keys),
-            )
-
-            txn.execute_batch(sql, values)
+        sql = "INSERT INTO %s (%s) VALUES ?" % (
+            table,
+            ", ".join(k for k in keys),
+        )
+        txn.execute_batch_values(sql, values, len(keys))
 
     async def simple_upsert(
         self,
@@ -1893,32 +1900,13 @@ class DatabasePool:
         for x, y in zip(key_values, value_values):
             args.append(tuple(x) + tuple(y))
 
-        if (
-            isinstance(txn.database_engine, PostgresEngine)
-            and txn.database_engine.uses_psycopg2_extras
-        ):
-            # On psycopg2 a single multi-row INSERT via `execute_values` is a lot
-            # faster than `execute_batch`.
-            sql = "INSERT INTO %s (%s) VALUES ? ON CONFLICT (%s) DO %s" % (
-                table,
-                ", ".join(k for k in allnames),
-                ", ".join(key_names),
-                latter,
-            )
-
-            txn.execute_values(sql, args, fetch=False)
-
-        else:
-            # The Rust backend and SQLite go through `executemany` (execute_batch).
-            sql = "INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (%s) DO %s" % (
-                table,
-                ", ".join(k for k in allnames),
-                ", ".join("?" for _ in allnames),
-                ", ".join(key_names),
-                latter,
-            )
-
-            txn.execute_batch(sql, args)
+        sql = "INSERT INTO %s (%s) VALUES ? ON CONFLICT (%s) DO %s" % (
+            table,
+            ", ".join(k for k in allnames),
+            ", ".join(key_names),
+            latter,
+        )
+        txn.execute_batch_values(sql, args, len(allnames))
 
     @overload
     async def simple_select_one(

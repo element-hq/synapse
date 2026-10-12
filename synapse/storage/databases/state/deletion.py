@@ -373,7 +373,7 @@ class StateDeletionDataStore:
     ) -> None:
         sql = """
         INSERT INTO state_groups_pending_deletion (state_group, insertion_ts)
-        VALUES %s
+        VALUES ?
         ON CONFLICT (state_group)
         DO NOTHING
         """
@@ -386,14 +386,7 @@ class StateDeletionDataStore:
             )
             for state_group in state_groups
         ]
-        if (
-            isinstance(txn.database_engine, PostgresEngine)
-            and txn.database_engine.uses_psycopg2_extras
-        ):
-            txn.execute_values(sql % ("?",), rows, fetch=False)
-        else:
-            # The Rust backend and SQLite go through executemany.
-            txn.execute_batch(sql % ("(?, ?)",), rows)
+        txn.execute_batch_values(sql, rows, 2)
 
     async def mark_state_groups_as_used(self, state_groups: Collection[int]) -> None:
         """Mark the given state groups as now being referenced"""

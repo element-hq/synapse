@@ -134,18 +134,11 @@ class RelationsWorkerStore(SQLBaseStore):
             # assume it is from a newer event.
             sql = """
             INSERT INTO threads (room_id, thread_id, topological_ordering, stream_ordering, latest_event_id)
-            VALUES %s
+            VALUES ?
             ON CONFLICT (room_id, thread_id)
             DO NOTHING
             """
-            if (
-                isinstance(txn.database_engine, PostgresEngine)
-                and txn.database_engine.uses_psycopg2_extras
-            ):
-                txn.execute_values(sql % ("?",), rows, fetch=False)
-            else:
-                # The Rust backend and SQLite go through executemany.
-                txn.execute_batch(sql % ("(?, ?, ?, ?, ?)",), rows)
+            txn.execute_batch_values(sql, rows, 5)
 
             # Mark the progress.
             self.db_pool.updates._background_update_progress_txn(
