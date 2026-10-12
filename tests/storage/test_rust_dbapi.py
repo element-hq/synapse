@@ -320,7 +320,7 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
             conn.commit()
             return pid
 
-        pool = postgres.ConnectionPool(_build_dsn(), 1)
+        pool = _make_pool(_build_dsn(), 1)
         self.addCleanup(pool.close)
         conn = rust_dbapi.Connection(pool.connect(), pool=pool)
         self.addCleanup(conn.close)
