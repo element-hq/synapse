@@ -153,6 +153,92 @@ pub(crate) fn accepts_column_type(ty: &Type) -> bool {
     )
 }
 
+/// Decode a `numeric` wire value into its decimal text form, e.g. `-12.50`.
+///
+/// The binary format is a header of four big-endian `i16`s (digit count,
+/// weight of the first digit in base 10000, sign, display scale) followed by
+/// the base-10000 digits. The text is what [`PythonPgFromSql`] hands to
+/// Python's `decimal.Decimal`, so results such as `SUM(bigint)`, `AVG(...)`
+/// and the `::NUMERIC[]` cast in the room statistics query decode as psycopg2
+/// decodes them, as `Decimal`.
+fn numeric_from_sql(raw: &[u8]) -> Result<String, Box<dyn Error + Sync + Send>> {
+    const SIGN_POS: u16 = 0x0000;
+    const SIGN_NEG: u16 = 0x4000;
+    const SIGN_NAN: u16 = 0xC000;
+    const SIGN_PINF: u16 = 0xD000;
+    const SIGN_NINF: u16 = 0xF000;
+
+    if raw.len() < 8 {
+        return Err(format!(
+            "numeric wire value must be at least 8 bytes, got {}",
+            raw.len()
+        )
+        .into());
+    }
+    let ndigits = u16::from_be_bytes([raw[0], raw[1]]) as usize;
+    let weight = i16::from_be_bytes([raw[2], raw[3]]) as i32;
+    let sign = u16::from_be_bytes([raw[4], raw[5]]);
+    let dscale = u16::from_be_bytes([raw[6], raw[7]]) as usize;
+    match sign {
+        SIGN_NAN => return Ok("NaN".to_owned()),
+        SIGN_PINF => return Ok("Infinity".to_owned()),
+        SIGN_NINF => return Ok("-Infinity".to_owned()),
+        SIGN_POS | SIGN_NEG => {}
+        other => return Err(format!("unknown numeric sign {other:#06x}").into()),
+    }
+    if raw.len() != 8 + 2 * ndigits {
+        return Err(format!(
+            "numeric wire value has {} digit bytes, expected {}",
+            raw.len() - 8,
+            2 * ndigits
+        )
+        .into());
+    }
+    let digits: Vec<u16> = raw[8..]
+        .chunks_exact(2)
+        .map(|c| u16::from_be_bytes([c[0], c[1]]))
+        .collect();
+
+    // Integer part: the digits with a non-negative weight, each a group of
+    // four decimal digits (the first unpadded). Missing groups are zero.
+    let mut out = String::new();
+    if sign == SIGN_NEG {
+        out.push('-');
+    }
+    if weight < 0 {
+        out.push('0');
+    } else {
+        for i in 0..=weight {
+            let d = digits.get(i as usize).copied().unwrap_or(0);
+            if i == 0 {
+                out.push_str(&d.to_string());
+            } else {
+                out.push_str(&format!("{d:04}"));
+            }
+        }
+    }
+
+    // Fractional part: `dscale` decimal digits, taken from the groups after
+    // the weight (padding with zeros past the end of the digits).
+    if dscale > 0 {
+        out.push('.');
+        let mut frac = String::new();
+        let mut i = weight + 1;
+        while frac.len() < dscale {
+            let d = if i < 0 {
+                0
+            } else {
+                digits.get(i as usize).copied().unwrap_or(0)
+            };
+            frac.push_str(&format!("{d:04}"));
+            i += 1;
+        }
+        frac.truncate(dscale);
+        out.push_str(&frac);
+    }
+    Ok(out)
+}
+
 /// Decode a `tid` (`ctid`) wire value into Postgres' textual `(block,offset)`
 /// form.
 ///
@@ -384,8 +470,8 @@ impl<'a> tokio_postgres::types::FromSql<'a> for PythonPgFromSql {
         // below stays scalar-only — the Rust-native query helpers don't read
         // json or array columns.
         accepts_column_type(ty)
-            || matches!(*ty, Type::JSON | Type::JSONB)
-            || matches!(ty.kind(), Kind::Array(element) if accepts_column_type(element))
+            || matches!(*ty, Type::JSON | Type::JSONB | Type::NUMERIC)
+            || matches!(ty.kind(), Kind::Array(element) if accepts_column_type(element) || *element == Type::NUMERIC)
     }
 }
 
@@ -475,6 +561,14 @@ impl PythonPgFromSql {
             }
             Type::BYTEA => PyBytes::new(py, raw).into_any().unbind(),
             Type::TID => PyString::new(py, &tid_from_sql(raw)?).into_any().unbind(),
+            Type::NUMERIC => {
+                // `Decimal(str)`, as psycopg2 returns numeric columns.
+                let text = numeric_from_sql(raw)?;
+                py.import("decimal")?
+                    .getattr("Decimal")?
+                    .call1((text,))?
+                    .unbind()
+            }
             Type::JSON | Type::JSONB => json_from_sql(py, ty, raw)?,
             _ => {
                 // This should never happen, unless the `accepts` method is out
@@ -561,6 +655,45 @@ mod tests {
                 other => panic!("expected Bytea, got {other:?}"),
             }
         });
+    }
+
+    #[test]
+    fn numeric_decodes_to_decimal_text() {
+        // Hand-built wire values: ndigits, weight, sign, dscale, then base-10000 digits.
+        fn wire(weight: i16, sign: u16, dscale: u16, digits: &[u16]) -> Vec<u8> {
+            let mut v = Vec::new();
+            v.extend_from_slice(&(digits.len() as u16).to_be_bytes());
+            v.extend_from_slice(&weight.to_be_bytes());
+            v.extend_from_slice(&sign.to_be_bytes());
+            v.extend_from_slice(&dscale.to_be_bytes());
+            for d in digits {
+                v.extend_from_slice(&d.to_be_bytes());
+            }
+            v
+        }
+        // 0
+        assert_eq!(numeric_from_sql(&wire(0, 0, 0, &[])).unwrap(), "0");
+        // 12345678 = [1234, 5678], weight 1
+        assert_eq!(
+            numeric_from_sql(&wire(1, 0, 0, &[1234, 5678])).unwrap(),
+            "12345678"
+        );
+        // -12.50 = [12, 5000], weight 0, dscale 2
+        assert_eq!(
+            numeric_from_sql(&wire(0, 0x4000, 2, &[12, 5000])).unwrap(),
+            "-12.50"
+        );
+        // 0.0001 = [1], weight -1, dscale 4
+        assert_eq!(numeric_from_sql(&wire(-1, 0, 4, &[1])).unwrap(), "0.0001");
+        // 100000 = [10], weight 1 (trailing zero group omitted)
+        assert_eq!(numeric_from_sql(&wire(1, 0, 0, &[10])).unwrap(), "100000");
+        // 0.123456 with dscale 3 is "0.123" (the server has already rounded)
+        assert_eq!(
+            numeric_from_sql(&wire(-1, 0, 3, &[1234, 5600])).unwrap(),
+            "0.123"
+        );
+        assert_eq!(numeric_from_sql(&wire(0, 0xC000, 0, &[])).unwrap(), "NaN");
+        assert!(numeric_from_sql(&[0, 1, 0, 0]).is_err());
     }
 
     #[test]
