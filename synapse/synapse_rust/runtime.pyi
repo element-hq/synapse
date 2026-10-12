@@ -22,6 +22,14 @@ class RustRuntime:
         clock, `clock_gettime(CLOCK_REALTIME)` on Linux.
         """
 
+    def expire_caches(self, expiry_secs: float) -> int:
+        """Evict entries not read for `expiry_secs` from every Rust cache of
+        this homeserver, and return how many were evicted.
+
+        Called from `synapse.util.caches.lrucache._expire_old_entries`, so that
+        Rust and Python caches expire off one tick and one set of config
+        options."""
+
 def set_virtual_time_msec(millis: int) -> None:
     """Pin the Rust clock to the given time. Only for tests, which run
     against a virtual reactor clock."""

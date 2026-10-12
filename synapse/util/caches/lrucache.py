@@ -130,6 +130,18 @@ def _expire_old_entries(
             target_cache_memory_usage = autotune_config["target_cache_memory_usage"]
             min_cache_ttl = autotune_config["min_cache_ttl"] / 1000
 
+        # Caches that live in Rust keep their own entries and expire them
+        # themselves, but off this same tick and the same config, so that
+        # `expire_caches` and `cache_entry_ttl` mean one thing rather than two.
+        #
+        # `expiry_seconds` is infinite when only `cache_autotuning` is
+        # configured, i.e. when age-based expiry is switched off and we are only
+        # here to evict on memory pressure, which Rust doesn't do yet.
+        if math.isfinite(expiry_seconds):
+            dropped = hs.get_rust_runtime().expire_caches(expiry_seconds)
+            if dropped:
+                logger.info("Dropped %d items from Rust caches", dropped)
+
         now = int(clock.time())
         node = GLOBAL_ROOT.prev_node
         assert node is not None

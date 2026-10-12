@@ -43,6 +43,9 @@
 //! key that needs to hold a `Py<PyAny>` should extract what it hashes on
 //! instead.
 
+pub mod python;
+pub mod registry;
+
 use std::{
     collections::HashMap,
     fmt,

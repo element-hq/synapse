@@ -29,9 +29,13 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use anyhow::Context;
-use pyo3::{exceptions::PyRuntimeError, prelude::*};
+use pyo3::{
+    exceptions::{PyRuntimeError, PyValueError},
+    prelude::*,
+};
 use tokio::runtime::{Handle, Runtime};
 
+use crate::caches::registry::CacheRegistry;
 use crate::clock::{set_virtual_time_msec, Clock};
 use crate::homeserver::HomeServer;
 use crate::reactor::Reactor;
@@ -62,6 +66,8 @@ pub struct RustRuntimeInner {
     tokio: Mutex<TokioState>,
     worker_threads: usize,
     clock: Clock,
+    /// This homeserver's Rust caches. See [`crate::caches`].
+    caches: CacheRegistry,
 
     /// Runs closures on the Twisted reactor thread without taking the GIL on
     /// the calling thread. See [`crate::twisted_dispatch`].
@@ -75,6 +81,12 @@ impl RustRuntimeInner {
     /// This homeserver's clock. See [`crate::clock`].
     pub fn clock(&self) -> &Clock {
         &self.clock
+    }
+
+    /// This homeserver's Rust caches, for building one or expiring them all.
+    /// See [`crate::caches`].
+    pub fn caches(&self) -> &CacheRegistry {
+        &self.caches
     }
 
     /// Queue `f` to run on the Twisted reactor thread with the GIL held, and
@@ -210,6 +222,7 @@ impl RustRuntime {
             tokio: Mutex::new(TokioState::NotStarted),
             worker_threads,
             clock: Clock::new(),
+            caches: CacheRegistry::new(),
             dispatcher,
             dispatch_reader,
         });
@@ -232,6 +245,19 @@ impl RustRuntime {
     /// The current time, in milliseconds since the Unix epoch.
     fn time_msec(&self) -> u64 {
         self.inner.clock.now_millis()
+    }
+
+    /// Evict entries not read for `expiry_secs` from every Rust cache of this
+    /// homeserver. Returns how many went. See [`crate::caches::registry`].
+    fn expire_caches(&self, expiry_secs: f64) -> PyResult<usize> {
+        let max_age = Duration::try_from_secs_f64(expiry_secs).map_err(|err| {
+            PyValueError::new_err(format!("bad cache expiry {expiry_secs}: {err}"))
+        })?;
+
+        Ok(self
+            .inner
+            .caches
+            .expire_caches(self.inner.clock.now(), max_age))
     }
 }
 

@@ -24,7 +24,7 @@ import logging
 from collections import Counter
 from enum import Enum, auto
 from sys import intern
-from typing import Any, Callable, Sized, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Sized, TypeVar
 
 import attr
 from prometheus_client import REGISTRY
@@ -33,6 +33,9 @@ from prometheus_client.core import Gauge
 from synapse.config.cache import add_resizable_cache
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.metrics import DynamicCollectorRegistry
+
+if TYPE_CHECKING:
+    from synapse.synapse_rust.caches import RustCache
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +251,39 @@ def register_cache(
     )
     metric_name = "cache_%s_%s_%s" % (cache_type, cache_name, server_name)
     CACHE_METRIC_REGISTRY.register_hook(server_name, metric_name, metric.collect)
+    return metric
+
+
+def register_rust_cache(cache: "RustCache", server_name: str) -> CacheMetric:
+    """Register a cache that lives in Rust for metric collection and resizing.
+
+    Rust keeps the hit, miss and eviction counters itself. They are copied onto
+    the metric at each scrape, and the size and max size are read live from the
+    cache, as for any other cache.
+
+    Args:
+        cache: the cache, already bound onto its datastore under the name it is
+            invalidated by.
+        server_name: The homeserver name that this cache is associated with
+            (used to label the metric) (`hs.hostname`).
+    """
+
+    def collect() -> None:
+        metric.hits = cache.hits
+        metric.misses = cache.misses
+        metric.eviction_size_by_reason[EvictionReason.size] = cache.evicted_size
+        metric.eviction_size_by_reason[EvictionReason.time] = cache.evicted_time
+        metric.eviction_size_by_reason[EvictionReason.invalidation] = (
+            cache.evicted_invalidation
+        )
+
+    metric = register_cache(
+        cache_type="cache",
+        cache_name=cache.__name__,
+        cache=cache,
+        server_name=server_name,
+        collect_callback=collect,
+    )
     return metric
 
 
