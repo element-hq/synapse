@@ -83,51 +83,10 @@ enum Verification {
     Full,
 }
 
-/// Fill unset [`TlsParams`] fields from libpq's `PGSSL*` environment
-/// variables, as libpq does for keywords the connection string omits.
-///
-/// Called at pool/connection construction (see `ConnectionManager::from_dsn`,
-/// next to the other `PG*` env handling in `fixup_config_defaults`) rather
-/// than inside [`build`], which stays a pure function of its params.
-///
-/// Deliberately more conservative than libpq where a stray variable could
-/// break a working setup:
-///  - a set-but-empty variable is treated as unset, as libpq does;
-///  - `PGSSLCERT`/`PGSSLKEY` are imported only as a complete pair, and only
-///    when neither is configured explicitly. libpq resolves a lone sslcert's
-///    key lazily (`~/.postgresql/postgresql.key`) and only fails if the
-///    server actually requests a client certificate; we build the TLS config
-///    eagerly, so a leftover `PGSSLCERT` from some other tool must not abort
-///    every connection.
-pub(crate) fn with_env_defaults(params: &TlsParams) -> TlsParams {
-    fn env_nonempty(var: &str) -> Option<String> {
-        std::env::var(var).ok().filter(|value| !value.is_empty())
-    }
-    fn fallback(value: &Option<String>, var: &str) -> Option<String> {
-        value.clone().or_else(|| env_nonempty(var))
-    }
-
-    let (sslcert, sslkey) = match (&params.sslcert, &params.sslkey) {
-        (None, None) => match (env_nonempty("PGSSLCERT"), env_nonempty("PGSSLKEY")) {
-            (Some(cert), Some(key)) => (Some(cert), Some(key)),
-            _ => (None, None),
-        },
-        (cert, key) => (cert.clone(), key.clone()),
-    };
-
-    TlsParams {
-        sslmode: fallback(&params.sslmode, "PGSSLMODE"),
-        sslrootcert: fallback(&params.sslrootcert, "PGSSLROOTCERT"),
-        sslcert,
-        sslkey,
-        sslpassword: fallback(&params.sslpassword, "PGSSLPASSWORD"),
-    }
-}
-
 /// Resolve [`TlsParams`] into the `tokio-postgres` [`SslMode`] to set on the
 /// connection config and the [`TlsConnector`] to connect with. A pure
 /// function of its params: the `PGSSL*` env fallbacks are applied by the
-/// caller (see [`with_env_defaults`]).
+/// caller (see [`super::resolve_connection_defaults`]).
 pub fn build(params: &TlsParams) -> anyhow::Result<(SslMode, TlsConnector)> {
     let mode = params.sslmode.as_deref().unwrap_or("prefer");
     let (ssl_mode, verification) = match mode {

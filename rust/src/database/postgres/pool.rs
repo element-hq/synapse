@@ -32,8 +32,8 @@ use tokio_postgres::{Client, Config, Connection as PgConnection, NoTls, Socket, 
 
 use crate::database::postgres::connection::Connection;
 use crate::database::postgres::errors::{pg_err_to_py, OperationalError};
-use crate::database::postgres::fixup_config_defaults;
 use crate::database::postgres::helpers::BlockingPostgres;
+use crate::database::postgres::resolve_connection_defaults;
 use crate::database::postgres::tls::{self, TlsConnector, TlsParams};
 use crate::runtime::RustRuntime;
 
@@ -123,11 +123,7 @@ impl ConnectionManager {
         session: SessionConfig,
         tls_params: &TlsParams,
     ) -> Result<Self, anyhow::Error> {
-        let mut config = fixup_config_defaults(dsn)?;
-        // Resolve the `PGSSL*` env fallbacks here, next to the other `PG*`
-        // env handling in `fixup_config_defaults`, keeping `tls::build` (and
-        // its unit tests) a pure function of its params.
-        let tls_params = tls::with_env_defaults(tls_params);
+        let (mut config, tls_params) = resolve_connection_defaults(dsn, tls_params)?;
         let (ssl_mode, connector) = tls::build(&tls_params)?;
         config.ssl_mode(ssl_mode);
         Ok(Self {

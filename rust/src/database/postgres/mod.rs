@@ -11,6 +11,8 @@ use anyhow::{Context, Error};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
+use crate::database::postgres::tls::TlsParams;
+
 mod connection;
 mod cursor_state;
 mod errors;
@@ -105,6 +107,55 @@ pub(crate) fn fixup_config_defaults(dsn: &str) -> Result<tokio_postgres::Config,
 /// Read an environment variable, treating a set-but-empty value as unset —
 /// libpq's behaviour, and what a blanked-out `PGPORT=` line in a compose file
 /// or systemd unit means.
+/// Resolve everything libpq would take from the environment: the DSN's
+/// missing fields (see [`fixup_config_defaults`]) and the `PGSSL*` TLS
+/// fallbacks. The one place connection defaults come from, so the TLS and
+/// DSN handling cannot drift apart.
+pub(crate) fn resolve_connection_defaults(
+    dsn: &str,
+    tls_params: &TlsParams,
+) -> Result<(tokio_postgres::Config, TlsParams), Error> {
+    Ok((fixup_config_defaults(dsn)?, tls_env_defaults(tls_params)))
+}
+
+/// Fill unset [`TlsParams`] fields from libpq's `PGSSL*` environment
+/// variables, as libpq does for keywords the connection string omits.
+///
+/// Called at pool/connection construction (see `ConnectionManager::from_dsn`,
+/// next to the other `PG*` env handling in `fixup_config_defaults`) rather
+/// than inside [`build`], which stays a pure function of its params.
+///
+/// Deliberately more conservative than libpq where a stray variable could
+/// break a working setup:
+///  - a set-but-empty variable is treated as unset, as libpq does;
+///  - `PGSSLCERT`/`PGSSLKEY` are imported only as a complete pair, and only
+///    when neither is configured explicitly. libpq resolves a lone sslcert's
+///    key lazily (`~/.postgresql/postgresql.key`) and only fails if the
+///    server actually requests a client certificate; we build the TLS config
+///    eagerly, so a leftover `PGSSLCERT` from some other tool must not abort
+///    every connection.
+fn tls_env_defaults(params: &TlsParams) -> TlsParams {
+    fn fallback(value: &Option<String>, var: &str) -> Option<String> {
+        value.clone().or_else(|| env_nonempty(var))
+    }
+
+    let (sslcert, sslkey) = match (&params.sslcert, &params.sslkey) {
+        (None, None) => match (env_nonempty("PGSSLCERT"), env_nonempty("PGSSLKEY")) {
+            (Some(cert), Some(key)) => (Some(cert), Some(key)),
+            _ => (None, None),
+        },
+        (cert, key) => (cert.clone(), key.clone()),
+    };
+
+    TlsParams {
+        sslmode: fallback(&params.sslmode, "PGSSLMODE"),
+        sslrootcert: fallback(&params.sslrootcert, "PGSSLROOTCERT"),
+        sslcert,
+        sslkey,
+        sslpassword: fallback(&params.sslpassword, "PGSSLPASSWORD"),
+    }
+}
+
 fn env_nonempty(var: &str) -> Option<String> {
     std::env::var(var).ok().filter(|value| !value.is_empty())
 }
