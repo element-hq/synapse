@@ -38,8 +38,10 @@ class ApplicationServiceFederationProxyTestCase(unittest.FederatingHomeserverTes
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        _, path = tempfile.mkstemp(prefix="as_fed_proxy_config")
-        with open(path, "w") as f:
+        with tempfile.NamedTemporaryFile(
+            "w", prefix="as_proxy_config", delete=False
+        ) as f:
+            path = f.name
             yaml.dump(
                 {
                     "id": "proxy_as",

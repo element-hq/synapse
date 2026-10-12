@@ -177,6 +177,7 @@ from synapse.streams.events import EventSources
 from synapse.synapse_rust.handlers import RustHandlers
 from synapse.synapse_rust.msc4388_rendezvous import MSC4388RendezvousHandler
 from synapse.synapse_rust.rendezvous import RendezvousHandler
+from synapse.synapse_rust.runtime import RustRuntime
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches import CACHE_METRIC_REGISTRY
@@ -723,6 +724,14 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
     @cache_in_self
+    def get_profile_lookup_ratelimiter(self) -> Ratelimiter:
+        return Ratelimiter(
+            store=self.get_datastores().main,
+            clock=self.get_clock(),
+            cfg=self.config.ratelimiting.rc_profile,
+        )
+
+    @cache_in_self
     def get_federation_client(self) -> FederationClient:
         return FederationClient(self)
 
@@ -963,6 +972,18 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_rust_handlers(self) -> RustHandlers:
         return RustHandlers(self)
+
+    @cache_in_self
+    def get_rust_runtime(self) -> RustRuntime:
+        """The per-homeserver state for the Rust side of Synapse: the tokio
+        thread pool, plus anything else Rust code keeps for the lifetime of the
+        homeserver.
+
+        The tokio runtime is started lazily on first use, and shut down when
+        this homeserver is shut down.
+        """
+        # TODO: make the number of worker threads configurable
+        return RustRuntime(hs=self, worker_threads=4)
 
     @cache_in_self
     def get_event_sources(self) -> EventSources:
@@ -1216,6 +1237,7 @@ class HomeServer(metaclass=abc.ABCMeta):
                 host=self.config.redis.redis_host,
                 port=self.config.redis.redis_port,
                 dbid=self.config.redis.redis_dbid,
+                username=self.config.redis.redis_username,
                 password=self.config.redis.redis_password,
                 reconnect=True,
             )
@@ -1229,6 +1251,7 @@ class HomeServer(metaclass=abc.ABCMeta):
                 hs=self,
                 path=self.config.redis.redis_path,
                 dbid=self.config.redis.redis_dbid,
+                username=self.config.redis.redis_username,
                 password=self.config.redis.redis_password,
                 reconnect=True,
             )

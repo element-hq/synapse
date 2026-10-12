@@ -1,0 +1,1 @@
+Stop queueing events and ephemeral data for application services registered with `url: null` (such as bridges' double-puppeting registrations), which wasted work on every matching event and, when no other application service was registered, made Synapse read through its whole event history.

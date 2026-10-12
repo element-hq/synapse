@@ -27,8 +27,11 @@ import urllib.parse as urlparse
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
+    Any,
+    Iterable,
     Literal,
     Mapping,
+    Pattern,
     Sequence,
     TypeVar,
     overload,
@@ -41,7 +44,7 @@ from twisted.web.server import Request
 from synapse.api.errors import Codes, SynapseError
 from synapse.http import redact_uri
 from synapse.http.server import HttpServer
-from synapse.types import JsonDict, RoomAlias, RoomID, StrCollection
+from synapse.types import JsonDict, JsonMapping, RoomAlias, RoomID, StrCollection
 from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
@@ -883,6 +886,72 @@ def parse_json_object_from_request(
 Model = TypeVar("Model", bound=BaseModel)
 
 
+def _format_pydantic_error(e: ValidationError, content: JsonMapping) -> str:
+    """Condense a pydantic ValidationError into a client-friendly message.
+
+    Avoids leaking internal details (model class names, raw input values,
+    pydantic documentation URLs) that clients cannot act upon.
+    See https://github.com/element-hq/synapse/issues/20309.
+    """
+    parts = []
+    for err in e.errors(include_url=False):
+        # Build a path into the request body based on `loc` field, which is a
+        # list of segments pointing into the JSON body.
+        #
+        # We cannot just naively join the segments with dots, because some
+        # segments may be integers representing list indices. Also, for union
+        # types pydantic will append the type of the value as an additional
+        # segment at the end of `loc`.
+        #
+        # An example output path: `.foo[0].bar`
+        #
+        # To gracefully handle the above, we iterate over each segment in `loc`
+        # while following the path into the JSON content.
+        path = ""
+        current_value: Any = content
+        for seg in err["loc"]:
+            match (seg, current_value):
+                case int(), list():
+                    # We're indexing into a list
+                    path += f"[{seg}]"
+
+                    if seg < len(current_value):
+                        current_value = current_value[seg]
+                    else:
+                        current_value = None
+                case str(), dict():
+                    # We're indexing into a dictionary
+                    path += f".{seg}"
+                    current_value = current_value.get(seg)
+                case _:
+                    # Either there is a type mismatch or the current_value is
+                    # `None`, indicating we can't traverse further.
+                    #
+                    # This will be due to the error we're reporting, so `path`
+                    # now correctly points to the problem.
+                    break
+
+        match err["type"]:
+            case "missing":
+                msg = f"Missing required field '{path}'"
+            case "value_error":
+                # Raised by one of our own validators; use its text directly.
+                msg = str(err.get("ctx", {}).get("error", err["msg"]))
+            case "model_type":
+                # pydantic's text names the Python class here.
+                msg = f"'{path}' must be an object"
+            case _:
+                msg = f"'{path}': {err['msg']}"
+
+        if msg not in parts:
+            parts.append(msg)
+
+    if not parts:
+        return "Invalid request body."
+
+    return "; ".join(parts)
+
+
 def validate_json_object(content: JsonDict, model_type: type[Model]) -> Model:
     """Validate a deserialized JSON object using the given pydantic model.
 
@@ -907,7 +976,9 @@ def validate_json_object(content: JsonDict, model_type: type[Model]) -> Model:
             elif err_type == "value_error":
                 errcode = Codes.INVALID_PARAM
 
-        raise SynapseError(HTTPStatus.BAD_REQUEST, str(e), errcode=errcode)
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST, _format_pydantic_error(e, content), errcode=errcode
+        )
 
     return instance
 
@@ -944,9 +1015,9 @@ class RestServlet:
     An implementing class can either provide its own custom 'register' method,
     or use the automatic pattern handling provided by the base class.
 
-    To use this latter, the implementing class instead provides a `PATTERN`
-    class attribute containing a pre-compiled regular expression. The automatic
-    register method will then use this method to register any of the following
+    To use this latter, the implementing class instead provides a `PATTERNS`
+    class attribute containing pre-compiled regular expressions. The automatic
+    register method will then use them to register any of the following
     instance methods associated with the corresponding HTTP method:
 
       on_GET
@@ -958,9 +1029,11 @@ class RestServlet:
     into the appropriate HTTP response.
     """
 
+    PATTERNS: Iterable[Pattern[str]] | None = None
+
     def register(self, http_server: HttpServer) -> None:
         """Register this servlet with the given HTTP server."""
-        patterns = getattr(self, "PATTERNS", None)
+        patterns = self.PATTERNS
         if patterns:
             for method in ("GET", "PUT", "POST", "DELETE"):
                 if hasattr(self, "on_%s" % (method,)):

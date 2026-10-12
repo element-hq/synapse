@@ -36,7 +36,7 @@ from twisted.internet.endpoints import (
 from twisted.internet.interfaces import IProtocol, IProtocolFactory
 from twisted.internet.protocol import Factory, Protocol
 from twisted.protocols.tls import TLSMemoryBIOProtocol
-from twisted.web.http import HTTPChannel
+from twisted.web.http import HTTPChannel, Request
 
 from synapse.config.server import ProxyConfig, parse_proxy_config
 from synapse.http.client import BlocklistingReactorWrapper
@@ -995,14 +995,12 @@ def _get_test_protocol_factory() -> IProtocolFactory:
     Returns:
         interfaces.IProtocolFactory
     """
-    server_factory = Factory.forProtocol(HTTPChannel)
-
-    # Request.finish expects the factory to have a 'log' method.
-    server_factory.log = _log_request
-
-    return server_factory
+    return _HTTPFactory()
 
 
-def _log_request(request: str) -> None:
-    """Implements Factory.log, which is expected by Request.finish"""
-    logger.info("Completed request %s", request)
+class _HTTPFactory(Factory):
+    protocol = HTTPChannel
+
+    def log(self, request: Request) -> None:
+        """Request.finish expects the factory to have a 'log' method."""
+        logger.info("Completed request %s", request)

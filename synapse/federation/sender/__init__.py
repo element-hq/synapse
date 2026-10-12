@@ -149,6 +149,7 @@ import synapse.metrics
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.presence import UserPresenceState
 from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.federation.sender.per_destination_queue import (
     CATCHUP_RETRY_INTERVAL,
     PerDestinationQueue,
@@ -660,7 +661,10 @@ class FederationSender(AbstractFederationSender):
                             # banned then it won't receive the event because it won't
                             # be in the room after the ban.
                             destinations = await self.state.get_hosts_in_room_at_events(
-                                event.room_id, event_ids=event.prev_event_ids()
+                                event.room_id,
+                                event_ids=event.prev_state_events
+                                if supports_msc4242_state_dag(event)
+                                else event.prev_event_ids(),
                             )
                         except Exception:
                             logger.exception(
