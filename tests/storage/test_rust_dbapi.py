@@ -18,9 +18,9 @@ from synapse.config.database import DatabaseConnectionConfig
 from synapse.storage import rust_dbapi
 from synapse.storage.database import LoggingDatabaseConnection, make_conn
 from synapse.storage.engines.postgres_rust import RustPostgresEngine
-from synapse.synapse_rust.database import postgres
 
 from tests import unittest
+from tests.synapse_rust.test_database_postgres import _make_pool
 from tests.unittest import skip_unless
 from tests.utils import (
     POSTGRES_BASE_DB,
@@ -124,7 +124,7 @@ class BuildDsnTestCase(unittest.TestCase):
             value = samples.get(key, "1" if key.startswith("keepalives") else "x")
             if key in ("port", "tcp_user_timeout"):
                 value = "5432"
-            pool = postgres.ConnectionPool(f"host=h {key}={value}")
+            pool = _make_pool(f"host=h {key}={value}")
             pool.close()
 
 
@@ -177,7 +177,7 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
     """The adapter presents the DBAPI2 shape over the shim."""
 
     def setUp(self) -> None:
-        self._pool = postgres.ConnectionPool(_build_dsn())
+        self._pool = _make_pool(_build_dsn())
         self.conn = rust_dbapi.Connection(self._pool.connect())
 
     def tearDown(self) -> None:

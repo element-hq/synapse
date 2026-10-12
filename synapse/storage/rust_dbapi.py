@@ -36,6 +36,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Iterator, Mapping, Sequence
 
 from synapse.synapse_rust.database import postgres
+from synapse.synapse_rust.runtime import RustRuntime
 
 if TYPE_CHECKING:
     from synapse.storage.types import SQLQueryParameters
@@ -164,7 +165,50 @@ def build_dsn(params: Mapping[str, Any]) -> str:
     return " ".join(parts)
 
 
+class _StandaloneReactor:
+    """What ``RustRuntime`` asks of the reactor: somewhere to register its
+    Twisted-dispatch reader. A standalone runtime only ever drives blocking
+    database calls, which never dispatch back to Twisted, so the reader is
+    never serviced and nothing is registered on the real reactor (which, under
+    trial, would otherwise fail the dirty-reactor check)."""
+
+    def addReader(self, reader: Any) -> None:  # noqa: N802
+        pass
+
+    def removeReader(self, reader: Any) -> None:  # noqa: N802
+        pass
+
+
+class _StandaloneHomeserver:
+    """The two things ``RustRuntime`` needs from a homeserver, for callers
+    that have none (maintenance scripts, and tests that drive the backend
+    directly). The shutdown hook is dropped, so the runtime lives for the
+    process."""
+
+    def get_reactor(self) -> Any:
+        return _StandaloneReactor()
+
+    def register_sync_shutdown_handler(self, **kwargs: Any) -> None:
+        pass
+
+
+_standalone_runtime: RustRuntime | None = None
+
+
+def standalone_runtime() -> RustRuntime:
+    """A process-wide ``RustRuntime`` for code with no homeserver to take one
+    from. Prefer ``hs.get_rust_runtime()`` wherever a homeserver exists."""
+    global _standalone_runtime
+    if _standalone_runtime is None:
+        _standalone_runtime = RustRuntime(
+            hs=_StandaloneHomeserver(),  # type: ignore[arg-type]
+            worker_threads=2,
+        )
+    return _standalone_runtime
+
+
 def connect(
+    runtime: RustRuntime,
     dsn: str,
     *,
     synchronous_commit: bool = True,
@@ -176,8 +220,12 @@ def connect(
     returned :class:`Connection` keeps that pool alive for its lifetime. Used by
     ``make_conn`` for the startup connection that runs schema preparation before
     the real pool exists.
+
+    ``runtime`` is the ``RustRuntime`` whose tokio runtime drives the
+    connection; it is started on first use, so this works during startup.
     """
     pool = postgres.ConnectionPool(
+        runtime,
         dsn,
         1,
         synchronous_commit=synchronous_commit,

@@ -88,6 +88,7 @@ class Databases(Generic[DataStoreT]):
                 engine=engine,
                 default_txn_name="startup",
                 server_name=server_name,
+                runtime=hs.get_rust_runtime(),
             ) as db_conn:
                 logger.info("[database config %r]: Checking database server", db_name)
                 engine.check_database(db_conn)

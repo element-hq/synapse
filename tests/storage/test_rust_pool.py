@@ -34,7 +34,14 @@ from synapse.storage.rust_pool import RustConnectionPool
 
 from tests.synapse_rust.test_database_postgres import _build_dsn, _test_runtime
 from tests.unittest import skip_unless
-from tests.utils import USE_POSTGRES_FOR_TESTS
+from tests.utils import (
+    POSTGRES_BASE_DB,
+    POSTGRES_HOST,
+    POSTGRES_PASSWORD,
+    POSTGRES_PORT,
+    POSTGRES_USER,
+    USE_POSTGRES_FOR_TESTS,
+)
 
 if TYPE_CHECKING:
     from synapse.types import ISynapseReactor
@@ -141,7 +148,11 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         # NotFoundError/StoreError raised inside a transaction would destroy a
         # TCP/TLS session.
         pool = RustConnectionPool(
-            reactor, _build_dsn(), name="test-rust-db-single", threads=1
+            reactor,
+            _test_runtime(),
+            _build_dsn(),
+            name="test-rust-db-single",
+            threads=1,
         )
         pool.start()
         self.addCleanup(pool.close)
@@ -247,6 +258,7 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             db_config=db_config,
             engine=engine,
             server_name="test",
+            runtime=_test_runtime(),
         )
         self.addCleanup(pool.close)
 

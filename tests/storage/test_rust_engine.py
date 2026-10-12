@@ -19,6 +19,7 @@ from synapse.storage.engines.postgres_rust import RustPostgresEngine
 from synapse.synapse_rust.database import postgres
 
 from tests import unittest
+from tests.synapse_rust.test_database_postgres import _make_pool
 from tests.unittest import skip_unless
 from tests.utils import (
     POSTGRES_BASE_DB,
@@ -105,7 +106,7 @@ class RustPostgresEngineConnectionTestCase(unittest.TestCase):
 
     def setUp(self) -> None:
         self.engine = RustPostgresEngine({})
-        self.pool = postgres.ConnectionPool(_build_dsn())
+        self.pool = _make_pool(_build_dsn())
         self.conn = self.pool.connect()
 
     def tearDown(self) -> None:

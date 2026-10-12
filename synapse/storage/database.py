@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
     from synapse.storage.engines.postgres_rust import RustPostgresEngine
     from synapse.storage.rust_pool import RustConnectionPool
+    from synapse.synapse_rust.runtime import RustRuntime
     from synapse.types import ISynapseReactor
     from synapse.util.clock import Clock
 
@@ -142,17 +143,27 @@ def make_pool(
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
     server_name: str,
+    runtime: "RustRuntime | None" = None,
 ) -> adbapi.ConnectionPool:
-    """Get the connection pool for the database."""
+    """Get the connection pool for the database.
+
+    Args:
+        runtime: The homeserver's `RustRuntime`, whose tokio runtime drives the
+            native connection pool. Required for the Rust backend, unused by
+            the others.
+    """
 
     from synapse.storage.engines.postgres_rust import RustPostgresEngine
 
     if isinstance(engine, RustPostgresEngine):
+        if runtime is None:
+            raise ValueError("the Rust Postgres backend needs a RustRuntime")
         # RustConnectionPool isn't an adbapi.ConnectionPool, but it provides the
         # subset of the interface DatabasePool uses of `_db_pool`
         # (runWithConnection / threadID / running / threadpool).
         return _make_rust_pool(  # type: ignore[return-value]
             reactor=reactor,
+            runtime=runtime,
             clock=clock,
             db_config=db_config,
             engine=engine,
@@ -196,6 +207,7 @@ def make_pool(
 def _make_rust_pool(
     *,
     reactor: "ISynapseReactor",
+    runtime: "RustRuntime",
     clock: "Clock",
     db_config: DatabaseConnectionConfig,
     engine: "RustPostgresEngine",
@@ -219,6 +231,7 @@ def _make_rust_pool(
 
     pool = RustConnectionPool(
         reactor,
+        runtime,
         dsn,
         name=f"database-{db_config.name}",
         threads=threads,
@@ -243,8 +256,15 @@ def make_conn(
     engine: BaseDatabaseEngine,
     default_txn_name: str,
     server_name: str,
+    runtime: "RustRuntime | None" = None,
 ) -> "LoggingDatabaseConnection":
     """Make a new connection to the database and return it.
+
+    Args:
+        runtime: The `RustRuntime` whose tokio runtime drives the connection.
+            Only used by the Rust backend; defaults to a standalone runtime on
+            the global reactor, for the scripts and tests that have no
+            homeserver to take it from.
 
     Returns:
         Connection
@@ -264,7 +284,11 @@ def make_conn(
         # connection from the same libpq args, with the engine's session settings.
         from synapse.storage import rust_dbapi
 
+        if runtime is None:
+            runtime = rust_dbapi.standalone_runtime()
+
         native_db_conn = rust_dbapi.connect(
+            runtime,
             rust_dbapi.build_dsn(db_params),
             synchronous_commit=engine.synchronous_commit,
             statement_timeout_ms=engine.statement_timeout,
@@ -696,6 +720,7 @@ class DatabasePool:
             db_config=database_config,
             engine=engine,
             server_name=self.server_name,
+            runtime=hs.get_rust_runtime(),
         )
 
         self.updates = BackgroundUpdater(hs, self)

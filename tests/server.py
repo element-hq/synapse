@@ -101,7 +101,7 @@ from synapse.storage import DataStore
 from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
-from synapse.synapse_rust.runtime import set_virtual_time_msec
+from synapse.synapse_rust.runtime import RustRuntime, set_virtual_time_msec
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
@@ -860,6 +860,7 @@ def make_fake_db_pool(
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
     server_name: str,
+    runtime: "RustRuntime | None" = None,
 ) -> adbapi.ConnectionPool:
     """Wrapper for `make_pool` which builds a pool which runs db queries synchronously.
 
@@ -874,6 +875,7 @@ def make_fake_db_pool(
         db_config=db_config,
         engine=engine,
         server_name=server_name,
+        runtime=runtime,
     )
 
     def runWithConnection(
