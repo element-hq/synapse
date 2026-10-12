@@ -100,6 +100,73 @@ database:
     keepalives_count: 3
 ```
 
+## Native Rust driver
+
+Synapse can talk to Postgres through its own driver, written in Rust on top of
+`tokio-postgres`, instead of psycopg2. It is experimental. Enable it by adding
+`use_rust_driver: true` to the `database` section; the engine `name` stays
+`psycopg2`:
+
+```yaml
+database:
+  name: psycopg2
+  use_rust_driver: true
+  args:
+    user: <user>
+    password: <pass>
+    dbname: <db>
+    host: <host>
+    cp_max: 10
+```
+
+The native driver prepares statements, pipelines batched writes, and keeps a
+pool of connections sized to `cp_max` (`cp_min` is ignored). A transaction waits
+at most `pool_checkout_timeout` milliseconds for a free connection before
+failing with an error that Synapse retries. The pool's occupancy is exported as
+the `synapse_rust_db_pool_*` metrics.
+
+### Connection arguments
+
+The `args` are still libpq keywords, but the native driver accepts only the
+subset that `tokio-postgres` knows: `host`, `hostaddr`, `port`, `user`,
+`password`, `dbname` (or psycopg2's `database`), `application_name`,
+`connect_timeout`, `options`, `channel_binding`, `load_balance_hosts`,
+`target_session_attrs`, `sslnegotiation`, `tcp_user_timeout` and the
+`keepalives*` keys. `client_encoding` and `sslcompression` are ignored with a
+warning. Any other key, such as `service` or `passfile`, is an error at startup
+rather than being silently dropped, since dropping it could change which
+database Synapse connects to.
+
+Values missing from `args` fall back to the `PGHOST`, `PGPORT`, `PGUSER`,
+`PGPASSWORD` and `PGDATABASE` environment variables and to libpq's compiled-in
+default host, as they do with psycopg2.
+
+### TLS
+
+The `sslmode`, `sslrootcert`, `sslcert`, `sslkey` and `sslpassword` keys are
+honoured, with the `PGSSL*` environment variables as fallbacks. `sslmode`
+defaults to `prefer`. `allow` is treated as `prefer`, and `verify-ca` and
+`verify-full` verify against `sslrootcert` or the system's CA store.
+Password-protected client keys are not supported.
+
+### Differences from psycopg2
+
+* Parameters are bound by the type Postgres infers for the placeholder rather
+  than interpolated as text, so a value of the wrong Python type for a column
+  is an error instead of being coerced.
+* `numeric` columns are returned as `Decimal`, as with psycopg2; `json` and
+  `jsonb` columns are decoded to Python values.
+* Schema upgrades run as one transaction, so a failed upgrade rolls back
+  cleanly rather than leaving earlier delta files applied.
+* `txn_limit` is enforced by the pool, which replaces a connection after that
+  many transactions, rather than per worker thread.
+* Committing, rolling back or closing a connection discards any rows not yet
+  fetched from it.
+
+To run Synapse's unit tests against the native driver, set
+`SYNAPSE_TEST_RUST_DRIVER=1` alongside `SYNAPSE_POSTGRES=1`; for Complement,
+pass `RUST_DRIVER=1` to `scripts-dev/complement.sh`.
+
 ## Postgresql major version upgrades
 
 Postgres uses separate directories for database locations between major versions (typically `/var/lib/postgresql/<version>/main`).

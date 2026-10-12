@@ -980,6 +980,18 @@ class ServerConfig(Config):
         else:
             self.delete_stale_devices_after = None
 
+        # How many threads the Rust runtime (`hs.get_rust_runtime()`) runs on.
+        self.rust_worker_threads: int = config.get("rust_worker_threads", 4)
+        if (
+            not isinstance(self.rust_worker_threads, int)
+            or isinstance(self.rust_worker_threads, bool)
+            or self.rust_worker_threads < 1
+        ):
+            raise ConfigError(
+                "'rust_worker_threads' must be a positive integer",
+                ("rust_worker_threads",),
+            )
+
         # The maximum allowed delay duration for delayed events (MSC4140).
         max_event_delay_duration = config.get("max_event_delay_duration")
         if max_event_delay_duration is not None:

@@ -1044,6 +1044,17 @@ properties:
             [%(app)s] %(person)s has invited you to chat on %(app)s...
           password_reset: "[%(server_name)s] Password reset"
           email_validation: "[%(server_name)s] Validate your email"
+  rust_worker_threads:
+    type: integer
+    description: >-
+      The number of threads in the thread pool that runs the Rust parts of
+      Synapse (the native Postgres driver's connections, outbound HTTP, and
+      other asynchronous Rust work). Most deployments need not change this;
+      raise it for a large deployment on the native Rust Postgres driver with a
+      large connection pool.
+    default: 4
+    examples:
+      - 8
   max_event_delay_duration:
     oneOf:
       - $ref: "#/$defs/duration"
@@ -6177,6 +6188,25 @@ $defs:
           Gives the maximum number of transactions to run per connection before
           reconnecting. 0 means no limit.
         default: 0
+      use_rust_driver:
+        type: boolean
+        description: >-
+          This option is specific to Postgres. Talk to the database through
+          Synapse's native Rust Postgres driver instead of psycopg2. The
+          engine name stays `psycopg2`; see [the Postgres
+          documentation](../../postgres.md#native-rust-driver) for what the
+          native driver accepts in `args` and how it differs. This driver is
+          experimental.
+        default: false
+      pool_checkout_timeout:
+        type: integer
+        description: >-
+          This option is specific to the native Rust Postgres driver
+          (`use_rust_driver`). How long, in milliseconds, a database
+          transaction may wait for a free connection from the pool before
+          failing with an operational error (which Synapse retries). 0 waits
+          indefinitely.
+        default: 30000
       allow_unsafe_locale:
         type: boolean
         description: >-

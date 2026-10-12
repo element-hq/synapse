@@ -843,6 +843,15 @@ email:
     email_validation: '[%(server_name)s] Validate your email'
 ```
 ---
+### `rust_worker_threads`
+
+*(integer)* The number of threads in the thread pool that runs the Rust parts of Synapse (the native Postgres driver's connections, outbound HTTP, and other asynchronous Rust work). Most deployments need not change this; raise it for a large deployment on the native Rust Postgres driver with a large connection pool. Defaults to `4`.
+
+Example configuration:
+```yaml
+rust_worker_threads: 8
+```
+---
 ### `max_event_delay_duration`
 
 The maximum allowed duration by which sent events can be delayed, as per [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140). Must be a positive value if set.
@@ -1527,6 +1536,10 @@ This setting has the following sub-options:
 * `name` (string): This option specifies the database engine to use: either `sqlite3` (for SQLite) or `psycopg2` (for PostgreSQL). If no name is specified Synapse will default to SQLite. Defaults to `"sqlite3"`.
 
 * `txn_limit` (integer): Gives the maximum number of transactions to run per connection before reconnecting. 0 means no limit. Defaults to `0`.
+
+* `use_rust_driver` (boolean): This option is specific to Postgres. Talk to the database through Synapse's native Rust Postgres driver instead of psycopg2. The engine name stays `psycopg2`; see [the Postgres documentation](../../postgres.md#native-rust-driver) for what the native driver accepts in `args` and how it differs. This driver is experimental. Defaults to `false`.
+
+* `pool_checkout_timeout` (integer): This option is specific to the native Rust Postgres driver (`use_rust_driver`). How long, in milliseconds, a database transaction may wait for a free connection from the pool before failing with an operational error (which Synapse retries). 0 waits indefinitely. Defaults to `30000`.
 
 * `allow_unsafe_locale` (boolean): This option is specific to Postgres. Under the default behavior, Synapse will refuse to start if the postgres db is set to a non-C locale. You can override this behavior (which is *not* recommended) by setting `allow_unsafe_locale` to true. Note that doing so may corrupt your database. You can find more information [here](../../postgres.md#fixing-incorrect-collate-or-ctype) and [here](https://wiki.postgresql.org/wiki/Locale_data_changes). Defaults to `false`.
 

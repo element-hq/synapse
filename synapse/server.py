@@ -982,8 +982,9 @@ class HomeServer(metaclass=abc.ABCMeta):
         The tokio runtime is started lazily on first use, and shut down when
         this homeserver is shut down.
         """
-        # TODO: make the number of worker threads configurable
-        return RustRuntime(hs=self, worker_threads=4)
+        return RustRuntime(
+            hs=self, worker_threads=self.config.server.rust_worker_threads
+        )
 
     @cache_in_self
     def get_event_sources(self) -> EventSources:
