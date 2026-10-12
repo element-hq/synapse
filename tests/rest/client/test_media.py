@@ -1622,12 +1622,6 @@ class URLPreviewDisabledTests(unittest.HomeserverTestCase):
     @override_config(
         {
             "url_preview_enabled": False,
-            "experimental_features": {"msc4452_enabled": False},
-        }
-    )
-    @override_config(
-        {
-            "url_preview_enabled": False,
         }
     )
     def test_disabled_previews(self) -> None:
