@@ -98,7 +98,11 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
 from synapse.server import HomeServer
 from synapse.server_notices.consent_server_notices import ConfigError
 from synapse.storage import DataStore
-from synapse.storage.database import LoggingDatabaseConnection, make_pool
+from synapse.storage.database import (
+    DatabaseConnectionPool,
+    LoggingDatabaseConnection,
+    make_pool,
+)
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.synapse_rust.runtime import RustRuntime, set_virtual_time_msec
@@ -862,7 +866,7 @@ def make_fake_db_pool(
     engine: BaseDatabaseEngine,
     server_name: str,
     runtime: "RustRuntime | None" = None,
-) -> adbapi.ConnectionPool:
+) -> DatabaseConnectionPool:
     """Wrapper for `make_pool` which builds a pool which runs db queries synchronously.
 
     For more deterministic testing, we don't use a regular db connection pool: instead
@@ -877,13 +881,18 @@ def make_fake_db_pool(
             reactor, clock, db_config, engine, server_name, runtime
         )
 
-    pool = make_pool(
-        reactor=reactor,
-        clock=clock,
-        db_config=db_config,
-        engine=engine,
-        server_name=server_name,
-        runtime=runtime,
+    # Not the Rust backend, so this is a real adbapi pool whose internals the
+    # fake below reaches into.
+    pool = cast(
+        adbapi.ConnectionPool,
+        make_pool(
+            reactor=reactor,
+            clock=clock,
+            db_config=db_config,
+            engine=engine,
+            server_name=server_name,
+            runtime=runtime,
+        ),
     )
 
     def runWithConnection(
@@ -932,7 +941,7 @@ def _make_fake_rust_db_pool(
     engine: BaseDatabaseEngine,
     server_name: str,
     runtime: "RustRuntime | None",
-) -> Any:
+) -> DatabaseConnectionPool:
     """`make_fake_db_pool` for the native Rust backend.
 
     Builds a real `RustConnectionPool`, then swaps its worker thread pool for the
@@ -952,7 +961,7 @@ def _make_fake_rust_db_pool(
     # `make_pool` started a real worker thread pool; stop it and swap in the
     # threadless one so nothing actually runs on background threads.
     pool.threadpool.stop()
-    pool.threadpool = ThreadPool(reactor)
+    pool.threadpool = ThreadPool(reactor)  # type: ignore[assignment]
     return pool
 
 

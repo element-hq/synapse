@@ -35,6 +35,7 @@ from typing import (
     Iterator,
     Literal,
     Mapping,
+    Protocol,
     Sequence,
     TypeVar,
     cast,
@@ -46,6 +47,7 @@ from prometheus_client import Counter, Histogram
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.enterprise import adbapi
+from twisted.python.threadpool import ThreadPool
 
 from synapse.api.errors import StoreError
 from synapse.config.database import DatabaseConnectionConfig
@@ -65,6 +67,8 @@ from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
+    from twisted.internet.defer import Deferred
+
     from synapse.server import HomeServer
     from synapse.storage.engines.postgres_rust import RustPostgresEngine
     from synapse.storage.rust_pool import RustConnectionPool
@@ -144,7 +148,7 @@ def make_pool(
     engine: BaseDatabaseEngine,
     server_name: str,
     runtime: "RustRuntime | None" = None,
-) -> adbapi.ConnectionPool:
+) -> "DatabaseConnectionPool":
     """Get the connection pool for the database.
 
     Args:
@@ -158,10 +162,7 @@ def make_pool(
     if isinstance(engine, RustPostgresEngine):
         if runtime is None:
             raise ValueError("the Rust Postgres backend needs a RustRuntime")
-        # RustConnectionPool isn't an adbapi.ConnectionPool, but it provides the
-        # subset of the interface DatabasePool uses of `_db_pool`
-        # (runWithConnection / threadID / running / threadpool).
-        return _make_rust_pool(  # type: ignore[return-value]
+        return _make_rust_pool(
             reactor=reactor,
             runtime=runtime,
             clock=clock,
@@ -386,6 +387,36 @@ _AsyncCallbackListEntry = tuple[
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+
+class DatabaseConnectionPool(Protocol):
+    """What `DatabasePool` needs of its connection pool.
+
+    The slice of `twisted.enterprise.adbapi.ConnectionPool` that both it and
+    the Rust backend's `RustConnectionPool` provide.
+    """
+
+    running: bool
+    threadpool: ThreadPool
+
+    def runWithConnection(  # noqa: N802
+        self,
+        func: Callable[Concatenate[Any, P], R],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> "Deferred[R]": ...
+
+    def threadID(self) -> int: ...  # noqa: N802
+
+    def close(self) -> None: ...
+
+    def runQuery(  # noqa: N802
+        self, *args: Any, **kwargs: Any
+    ) -> "Deferred[list[Any]]": ...
+
+    def runOperation(  # noqa: N802
+        self, *args: Any, **kwargs: Any
+    ) -> "Deferred[None]": ...
 
 
 class LoggingTransaction:
