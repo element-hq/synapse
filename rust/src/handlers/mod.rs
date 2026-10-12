@@ -24,8 +24,6 @@ use pyo3::{
 
 use crate::homeserver::HomeServer;
 use crate::state::StateResolutionHandler;
-use crate::storage::db::python_db_pool::PythonDatabasePoolWrapper;
-use crate::storage::store::Store;
 
 pub mod versions;
 
@@ -47,13 +45,9 @@ impl RustHandlers {
         // and the Twisted reactor.
         let runtime = homeserver.get_rust_runtime(py)?;
 
-        let main_db_pool = homeserver.main_database_pool(py)?;
-        let db_pool = PythonDatabasePoolWrapper::new(&main_db_pool, runtime.clone())?;
-
-        // Store is shared across all of the handlers so let's use an `Arc`
-        let store = Arc::new(Store {
-            db_pool: Box::new(db_pool),
-        });
+        // The main datastore builds the store and keeps it; we share it. See
+        // `crate::storage::python`.
+        let store = homeserver.get_rust_store(py)?;
 
         let global_unstable_feature_map = Arc::new(
             versions::synapse_config_to_global_unstable_feature_map(&config),
@@ -70,7 +64,9 @@ impl RustHandlers {
 
         // The Rust state resolution reads the database through the native
         // driver's pool, so it needs the main database to use that driver.
-        let connection_pool = main_db_pool.getattr(intern!(py, "_db_pool"))?;
+        let connection_pool = homeserver
+            .main_database_pool(py)?
+            .getattr(intern!(py, "_db_pool"))?;
         let rust_connection_pool_class = py
             .import("synapse.storage.rust_pool")?
             .getattr("RustConnectionPool")?;

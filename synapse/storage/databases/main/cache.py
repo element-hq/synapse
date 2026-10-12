@@ -670,21 +670,6 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         txn.call_after(cache_func.invalidate, keys)
         self._send_invalidation_to_replication(txn, cache_func.__name__, keys)
 
-    def _invalidate_rust_cache_and_stream(
-        self, txn: LoggingTransaction, cache_name: str, keys: tuple[Any, ...]
-    ) -> None:
-        """`_invalidate_cache_and_stream` for a cache that lives in Rust.
-
-        Rust caches are addressed by name through the runtime rather than held
-        as attributes of the store, and a worker only has one once its Rust
-        `Store` has been built. The row goes on the stream either way, for the
-        workers that do have the cache.
-        """
-        cache = self.hs.get_rust_runtime().get_cache(cache_name)
-        if cache is not None:
-            txn.call_after(cache.invalidate, keys)
-        self._send_invalidation_to_replication(txn, cache_name, keys)
-
     def _invalidate_cache_and_stream_bulk(
         self,
         txn: LoggingTransaction,

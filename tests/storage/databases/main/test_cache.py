@@ -22,6 +22,7 @@ from unittest.mock import Mock, call
 
 from signedjson.key import generate_signing_key, get_verify_key
 
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.keys import FetchKeyResult
 
@@ -173,3 +174,47 @@ class CacheInvalidationOverReplicationTestCase(BaseMultiWorkerStreamTestCase):
         expected_key = (("server1", key_id),)
         master_invalidate.assert_called_once_with(expected_key)
         worker_invalidate.assert_called_once_with(expected_key)
+
+    def test_rust_cache_invalidation_replicates(self) -> None:
+        """A write on one worker empties the Rust cache on another.
+
+        The Rust cache is bound on the datastore under its name, like a
+        `@cached` function, so a row on the caches stream naming it reaches it
+        through `getattr(store, name).invalidate(keys)`. The keys it sees are
+        strings, because the stream's column is `keys text[]`.
+        """
+        worker = self.make_worker_hs("synapse.app.generic_worker")
+        worker_store = worker.get_datastores().main
+
+        user_id = self.get_success(
+            self.hs.get_registration_handler().register_user(localpart="user")
+        )
+
+        # Read through the worker's cache, so that it holds this user.
+        self.assertFalse(
+            self.get_success(
+                worker_store.is_feature_enabled_for_user(user_id, "msc3881")
+            )
+        )
+        self.assertEqual(len(worker_store.is_feature_enabled_for_user), 1)
+
+        assert self.store._cache_id_gen is not None
+        self.get_success(
+            self.store.set_features_for_user(
+                user_id, {ExperimentalFeature.MSC3881: True}
+            )
+        )
+        token = self.store._cache_id_gen.get_current_token()
+
+        self.get_success(
+            worker.get_replication_data_handler().wait_for_stream_position(
+                "master", "caches", token
+            )
+        )
+
+        self.assertEqual(len(worker_store.is_feature_enabled_for_user), 0)
+        self.assertTrue(
+            self.get_success(
+                worker_store.is_feature_enabled_for_user(user_id, "msc3881")
+            )
+        )

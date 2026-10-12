@@ -18,6 +18,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, versions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
+from synapse.util.caches.lrucache import setup_expire_lru_cache_entries
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -145,6 +146,70 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
         self.assertTrue(channel.json_body["unstable_features"]["io.element.msc4502"])
 
+    def test_per_user_feature_can_be_disabled_again(self) -> None:
+        """The Rust cache must be invalidated when a feature is turned back off.
+
+        Enabling is the easier direction, because the value being replaced is
+        the "no row for this user" one. Turning a feature back off only works
+        if invalidation reaches an entry that was populated from a real row.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        self._enable_experimental_feature_for_user(
+            target_user_id=user1_id, features={"msc3881": True}
+        )
+        self.assertTrue(self._unstable_feature(user1_tok, "org.matrix.msc3881"))
+
+        self._enable_experimental_feature_for_user(
+            target_user_id=user1_id, features={"msc3881": False}
+        )
+        self.assertFalse(self._unstable_feature(user1_tok, "org.matrix.msc3881"))
+
+    # `msc3575_enabled` defaults to True, in which case the per-user lookup is
+    # skipped altogether. Turn it off so that this feature actually reaches
+    # the cache.
+    @unittest.override_config({"experimental_features": {"msc3575_enabled": False}})
+    def test_per_user_msc3575(self) -> None:
+        """The other feature `/versions` looks up per user, which is otherwise
+        only covered when it is globally enabled."""
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        feature = "org.matrix.simplified_msc3575"
+        self.assertFalse(self._unstable_feature(user1_tok, feature))
+
+        self._enable_experimental_feature_for_user(
+            target_user_id=user1_id, features={"msc3575": True}
+        )
+        self.assertTrue(self._unstable_feature(user1_tok, feature))
+
+        self._enable_experimental_feature_for_user(
+            target_user_id=user1_id, features={"msc3575": False}
+        )
+        self.assertFalse(self._unstable_feature(user1_tok, feature))
+
+    @unittest.override_config({"caches": {"expiry_time": "30m"}})
+    def test_cache_entries_expire_when_unread(self) -> None:
+        """The Rust cache must take part in Synapse's age-based cache expiry,
+        off the same looping call and the same config as the Python ones."""
+        setup_expire_lru_cache_entries(self.hs)
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        cache = self.hs.get_datastores().main.is_feature_enabled_for_user
+        self._unstable_feature(user1_tok, "org.matrix.msc3881")
+        self.assertEqual(len(cache), 1)
+
+        # Not stale yet.
+        self.reactor.advance(20 * 60)
+        self.assertEqual(len(cache), 1)
+
+        # Now it has gone 30 minutes unread.
+        self.reactor.advance(20 * 60)
+        self.assertEqual(len(cache), 0)
+
     def _sanity_check_versions_response(self, versions_response: JsonDict) -> None:
         """
         Make sure this looks like a `/_matrix/client/versions` response
@@ -175,3 +240,13 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             access_token=self.admin_user_tok,
         )
         self.assertEqual(channel.code, 200)
+
+    def _unstable_feature(self, access_token: str, feature: str) -> bool:
+        """Ask `/versions` whether `feature` is on for whoever holds this token."""
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/versions",
+            access_token=access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        return channel.json_body["unstable_features"][feature]

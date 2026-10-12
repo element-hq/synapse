@@ -178,6 +178,7 @@ from synapse.synapse_rust.handlers import RustHandlers
 from synapse.synapse_rust.msc4388_rendezvous import MSC4388RendezvousHandler
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.synapse_rust.runtime import RustRuntime
+from synapse.synapse_rust.storage import RustStore
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches import CACHE_METRIC_REGISTRY
@@ -972,6 +973,11 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_rust_handlers(self) -> RustHandlers:
         return RustHandlers(self)
+
+    def get_rust_store(self) -> RustStore:
+        """The Rust side of the main datastore, which builds and owns it. The
+        Rust handlers read the database through this."""
+        return self.get_datastores().main.rust_store
 
     @cache_in_self
     def get_rust_runtime(self) -> RustRuntime:

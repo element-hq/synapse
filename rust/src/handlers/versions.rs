@@ -22,7 +22,7 @@ use serde::Serialize;
 use crate::config::{types::RoomCreationPreset, SynapseHomeServerConfig};
 use crate::deferred::create_deferred;
 use crate::runtime::RustRuntime;
-use crate::storage::store::{PerUserExperimentalFeature, Store};
+use crate::storage::store::{IsFeatureEnabledKey, PerUserExperimentalFeature, Store};
 
 /// `GET /_matrix/client/versions` response
 #[derive(Serialize, Clone, Debug)]
@@ -95,7 +95,10 @@ async fn build_versions_response(
             } else {
                 // Look up whether it's explicitly enabled/disabled for this user
                 store
-                    .is_feature_enabled_for_user(user_id, PerUserExperimentalFeature::MSC3881)
+                    .is_feature_enabled_for_user(IsFeatureEnabledKey::new(
+                        user_id,
+                        PerUserExperimentalFeature::MSC3881,
+                    ))
                     .await?
                     // Default to false if there is no entry for this user
                     .unwrap_or(false)
@@ -112,7 +115,10 @@ async fn build_versions_response(
             } else {
                 // Look up whether it's explicitly enabled/disabled for this user
                 store
-                    .is_feature_enabled_for_user(user_id, PerUserExperimentalFeature::MSC3575)
+                    .is_feature_enabled_for_user(IsFeatureEnabledKey::new(
+                        user_id,
+                        PerUserExperimentalFeature::MSC3575,
+                    ))
                     .await?
                     // Default to false if there is no entry for this user
                     .unwrap_or(false)

@@ -27,6 +27,8 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.databases.main import CacheInvalidationWorkerStore
+from synapse.synapse_rust.storage import RustStore
+from synapse.util.caches import register_rust_cache
 from synapse.util.caches.descriptors import cached
 
 if TYPE_CHECKING:
@@ -42,6 +44,17 @@ class ExperimentalFeaturesStore(CacheInvalidationWorkerStore):
         hs: "HomeServer",
     ) -> None:
         super().__init__(database, db_conn, hs)
+
+        # The Rust side of this store, over the same database pool. The Rust
+        # handlers share it, via `hs.get_rust_store()`.
+        self.rust_store = RustStore(hs.get_rust_runtime(), self.db_pool)
+
+        # `is_feature_enabled_for_user` is a cache that lives in Rust, and the
+        # function that reads through it. It is bound here under its own name,
+        # which is how Synapse's invalidation machinery finds a cache, and
+        # registered for metrics and cache factors like any other.
+        self.is_feature_enabled_for_user = self.rust_store.is_feature_enabled_for_user
+        register_rust_cache(self.is_feature_enabled_for_user, server_name=hs.hostname)
 
     @cached()
     async def list_enabled_features(self, user_id: str) -> frozenset[str]:
@@ -89,7 +102,7 @@ class ExperimentalFeaturesStore(CacheInvalidationWorkerStore):
                 )
 
                 self._invalidate_cache_and_stream(
-                    txn, self.is_feature_enabled, (user, feature)
+                    txn, self.is_feature_enabled_for_user, (user, feature)
                 )
 
             self._invalidate_cache_and_stream(txn, self.list_enabled_features, (user,))
@@ -98,7 +111,6 @@ class ExperimentalFeaturesStore(CacheInvalidationWorkerStore):
             "set_features_for_user", set_features_for_user_txn
         )
 
-    @cached()
     async def is_feature_enabled(
         self, user_id: str, feature: "ExperimentalFeature"
     ) -> bool:
@@ -115,16 +127,7 @@ class ExperimentalFeaturesStore(CacheInvalidationWorkerStore):
         if feature.is_globally_enabled(self.hs.config):
             return True
 
-        # if it's not enabled globally, check if it is enabled per-user
-        res = await self.db_pool.simple_select_one_onecol(
-            table="per_user_experimental_features",
-            keyvalues={"user_id": user_id, "feature": feature},
-            retcol="enabled",
-            allow_none=True,
-            desc="get_feature_enabled",
-        )
-
-        # None and false are treated the same
-        db_enabled = bool(res)
-
-        return db_enabled
+        # If it's not enabled globally, check if it is enabled per-user. That
+        # lookup, and its cache, live in Rust, shared with the Rust `/versions`
+        # handler.
+        return await self.is_feature_enabled_for_user(user_id, feature)

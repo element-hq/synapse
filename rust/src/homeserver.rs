@@ -15,11 +15,14 @@
 
 //! A typed wrapper around the Python `HomeServer`.
 
+use std::sync::Arc;
+
 use pyo3::{intern, prelude::*, types::PyDict};
 
 use crate::config::SynapseHomeServerConfig;
 use crate::reactor::Reactor;
 use crate::runtime::RustRuntime;
+use crate::storage::{python::RustStore, store::Store};
 
 /// The Python `HomeServer`, as seen from Rust.
 ///
@@ -98,5 +101,18 @@ impl HomeServer {
             .call_method0(intern!(py, "get_datastores"))?
             .getattr(intern!(py, "main"))?
             .getattr(intern!(py, "db_pool"))
+    }
+
+    /// The Rust `Store` (`hs.get_rust_store()`), which the main datastore
+    /// builds and owns. See [`crate::storage::python`].
+    pub fn get_rust_store(&self, py: Python<'_>) -> PyResult<Arc<Store>> {
+        Ok(self
+            .0
+            .bind(py)
+            .call_method0(intern!(py, "get_rust_store"))?
+            .cast::<RustStore>()?
+            .get()
+            .store()
+            .clone())
     }
 }

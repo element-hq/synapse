@@ -69,6 +69,14 @@ fn logging_context_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
         .bind(py))
 }
 
+/// An already-fired Twisted deferred holding `value`.
+pub(crate) fn succeed<'py, V: IntoPyObject<'py>>(
+    py: Python<'py>,
+    value: V,
+) -> PyResult<Bound<'py, PyAny>> {
+    defer(py)?.call_method1("succeed", (value,))
+}
+
 /// Creates a twisted deferred from the given future, spawning the task on the
 /// tokio runtime.
 ///
