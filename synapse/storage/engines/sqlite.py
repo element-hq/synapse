@@ -34,6 +34,8 @@ if TYPE_CHECKING:
 
 
 class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
+    driver_name = "sqlite3"
+
     def __init__(self, database_config: Mapping[str, Any]):
         super().__init__(sqlite3, database_config)
 

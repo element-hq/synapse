@@ -70,6 +70,7 @@ class RustPostgresEngine(PostgresEngine[Connection, Cursor]):
     # shim-backed path (its pipelined `executemany`) instead, and the callers of
     # `execute_values` fall back to `executemany` / `unnest()` for the Rust engine.
     uses_psycopg2_extras: bool = False
+    driver_name = "rust-postgres"
 
     # SQL isolation-level names for each `IsolationLevel`. The shim has no
     # psycopg2-style `set_isolation_level`, so a per-transaction override is

@@ -48,6 +48,12 @@ CursorType = TypeVar("CursorType", bound=Cursor)
 
 
 class BaseDatabaseEngine(Generic[ConnectionType, CursorType], metaclass=abc.ABCMeta):
+    # A short name for the driver behind this engine, for phone-home stats.
+    # Distinct from the configured engine `name`, since one engine name can be
+    # served by more than one driver (`psycopg2` by psycopg2 or the native
+    # Rust driver).
+    driver_name: str
+
     def __init__(self, module: DBAPI2Module, config: Mapping[str, Any]):
         self.module = module
 

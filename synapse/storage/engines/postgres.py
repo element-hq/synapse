@@ -46,6 +46,7 @@ class Psycopg2Engine(
     # psycopg2's cursor is a real psycopg2 cursor, so the `psycopg2.extras`
     # helpers can be used on it directly.
     uses_psycopg2_extras: bool = True
+    driver_name = "psycopg2"
 
     def __init__(self, database_config: Mapping[str, Any]):
         super().__init__(psycopg2, database_config)

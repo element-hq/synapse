@@ -188,8 +188,12 @@ def phone_stats_home(
         # Database version
         #
 
-        # This only reports info about the *main* database.
-        stats["database_engine"] = store.db_pool.engine.module.__name__
+        # This only reports info about the *main* database. The engine is the
+        # configured `database.name` (`sqlite3` or `psycopg2`); the driver
+        # distinguishes the native Rust Postgres driver, which is selected by
+        # `use_rust_driver` under the same engine name.
+        stats["database_engine"] = hs.config.database.databases[0].config["name"]
+        stats["database_driver"] = store.db_pool.engine.driver_name
         stats["database_server_version"] = store.db_pool.engine.server_version
 
         #

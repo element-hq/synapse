@@ -258,6 +258,10 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
             self.hs.config.database.databases[0].config["name"],
         )
         self.assertEqual(
+            phone_home_stats["database_driver"],
+            self.hs.get_datastores().main.database_engine.driver_name,
+        )
+        self.assertEqual(
             phone_home_stats["database_server_version"],
             self.hs.get_datastores().main.database_engine.server_version,
         )
