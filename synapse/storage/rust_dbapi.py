@@ -279,50 +279,69 @@ def connect(
 
 
 class Cursor:
-    """A DBAPI2 cursor wrapping a Rust shim cursor."""
+    """A DBAPI2 cursor wrapping a Rust shim cursor.
+
+    Rows are pulled from the shim a batch at a time (``fetch_next_batch``) into
+    a buffer that ``fetchone``, ``fetchmany`` and iteration drain, so a
+    ``for row in txn`` loop costs one Rust call per batch rather than per row.
+    """
 
     # DBAPI2 default number of rows `fetchmany` returns when no size is given.
     arraysize = 1
 
+    # How many rows to ask the shim for at a time. A hint: the shim returns
+    # whatever is already buffered once the first row is available.
+    _BATCH_SIZE = 100
+
     def __init__(self, cursor: Any) -> None:
         self._cursor = cursor
+        # Rows fetched from the shim but not yet handed out, oldest first.
+        self._buffer: list[Any] = []
         # The shim raises if a result set is fetched past exhaustion, whereas
         # DBAPI2 wants further fetches to keep returning "no more rows". Track
         # exhaustion here so repeated / mixed fetches stay well-behaved.
         self._exhausted = False
 
+    def _reset(self) -> None:
+        self._buffer = []
+        self._exhausted = False
+
     def execute(self, sql: str, parameters: "SQLQueryParameters" = ()) -> None:
         # DBAPI2 passes an empty sequence when there are no parameters; the shim
         # wants `None` in that case (and a list of values otherwise).
-        self._exhausted = False
+        self._reset()
         self._cursor.execute(sql, list(parameters) if parameters else None)
 
     def executemany(self, sql: str, seq_of_parameters: Sequence[Any]) -> None:
-        self._exhausted = False
+        self._reset()
         self._cursor.executemany(sql, [list(p) for p in seq_of_parameters])
 
     def executescript(self, script: str) -> None:
         # The shim runs a multi-statement script on the simple-query protocol
         # (no parameters, no fetchable rows).
-        self._exhausted = False
+        self._reset()
         self._cursor.executescript(script)
 
     def _next(self) -> Any:
         """Fetch one row, or `None` once the result set is exhausted."""
-        if self._exhausted:
-            return None
-        row = self._cursor.fetch_one()
-        if row is None:
-            self._exhausted = True
-        return row
+        if not self._buffer and not self._exhausted:
+            # Blocks for the first row, then takes whatever else is already
+            # available; an empty batch means the result set is exhausted.
+            batch = self._cursor.fetch_next_batch(self._BATCH_SIZE)
+            if batch:
+                batch.reverse()
+                self._buffer = batch
+            else:
+                self._exhausted = True
+        if self._buffer:
+            return self._buffer.pop()
+        return None
 
     def fetchone(self) -> Any:
         return self._next()
 
     def fetchmany(self, size: int | None = None) -> list[Any]:
-        # DBAPI2: return at most `size` rows (defaulting to `arraysize`). The
-        # shim's `fetch_next_batch` is a size *hint* rather than a hard limit, so
-        # pull rows one at a time to honour the exact contract.
+        # DBAPI2: return at most `size` rows (defaulting to `arraysize`).
         if size is None:
             size = self.arraysize
         rows = []
@@ -334,10 +353,12 @@ class Cursor:
         return rows
 
     def fetchall(self) -> list[Any]:
-        if self._exhausted:
-            return []
-        rows = self._cursor.fetch_all()
-        self._exhausted = True
+        # Anything already buffered, then the rest of the result set in one go.
+        rows = self._buffer[::-1]
+        self._buffer = []
+        if not self._exhausted:
+            rows.extend(self._cursor.fetch_all())
+            self._exhausted = True
         return rows
 
     def __iter__(self) -> Iterator[Any]:
