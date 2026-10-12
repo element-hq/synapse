@@ -50,8 +50,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Deadlock / serialization-failure SQLSTATEs that Synapse retries.
-_RETRYABLE_PGCODES = ("40001", "40P01")
+# SQLSTATEs for which `new_transaction` retries the whole transaction.
+#
+# `40001` (serialization failure) and `40P01` (deadlock detected) are what the
+# psycopg2 engine retries. `0A000` is specific to this backend: it prepares and
+# caches statements per connection, and DDL that changes a cached statement's
+# result type (a rolling restart applying a schema delta, say) makes Postgres
+# reject the stale plan with "cached plan must not change result type". The
+# cursor drops the cached entry before the error propagates, so the retried
+# transaction prepares a fresh plan.
+_RETRYABLE_PGCODES = ("40001", "40P01", "0A000")
 
 
 class RustPostgresEngine(PostgresEngine[Connection, Cursor]):
@@ -115,6 +123,8 @@ class RustPostgresEngine(PostgresEngine[Connection, Cursor]):
         pass
 
     def is_deadlock(self, error: Exception) -> bool:
+        # Despite the name, this is the transaction driver's "retry the whole
+        # transaction" predicate; see `_RETRYABLE_PGCODES`.
         if isinstance(error, postgres.DatabaseError):
             return getattr(error, "pgcode", None) in _RETRYABLE_PGCODES
         return False

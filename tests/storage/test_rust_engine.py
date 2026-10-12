@@ -70,7 +70,9 @@ class RustPostgresEngineTestCase(unittest.TestCase):
         )
 
     def test_is_deadlock_matches_rust_database_error_pgcodes(self) -> None:
-        for pgcode in ("40001", "40P01"):
+        # Deadlock, serialization failure, and a stale cached plan after DDL:
+        # all retried as a whole transaction.
+        for pgcode in ("40001", "40P01", "0A000"):
             err = postgres.DatabaseError("boom")
             err.pgcode = pgcode
             self.assertTrue(self.engine.is_deadlock(err))
