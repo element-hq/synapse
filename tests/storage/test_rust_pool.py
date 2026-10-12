@@ -288,7 +288,9 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             postgres,
         )
 
-        pool = postgres.ConnectionPool(_build_dsn(), 1, checkout_timeout_ms=200)
+        pool = postgres.ConnectionPool(
+            _test_runtime(), _build_dsn(), 1, checkout_timeout_ms=200
+        )
         self.addCleanup(pool.close)
 
         held = pool.connect()  # take the only connection and keep it checked out
