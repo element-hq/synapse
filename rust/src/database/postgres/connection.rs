@@ -91,6 +91,18 @@ use crate::database::postgres::{
 /// being used from two threads at once, which is a caller bug rather than
 /// something to block on. `noun` names the object in both messages (e.g.
 /// `"connection"`, `"cursor"`).
+/// The isolation level of the transactions a connection opens unless told
+/// otherwise; matches `PostgresEngine.default_isolation_level`.
+const DEFAULT_ISOLATION_LEVEL: &str = "REPEATABLE READ";
+
+/// The isolation levels Postgres accepts in `BEGIN ISOLATION LEVEL ...`.
+const ISOLATION_LEVELS: [&str; 4] = [
+    "READ UNCOMMITTED",
+    "READ COMMITTED",
+    "REPEATABLE READ",
+    "SERIALIZABLE",
+];
+
 fn try_lock_or_reset<'a, T>(
     mutex: &'a Mutex<T>,
     noun: &str,
@@ -138,6 +150,12 @@ struct ConnInner {
     /// runs in its own implicit transaction. Defaults to `false`, matching
     /// psycopg2's transactional default.
     autocommit: bool,
+    /// The isolation level the implicit `BEGIN` asks for. Like psycopg2's
+    /// `set_isolation_level`, this applies to the transactions this connection
+    /// opens and not to autocommit statements, which run at the server's
+    /// default (normally READ COMMITTED). Synapse's lock bookkeeping relies on
+    /// that distinction.
+    isolation_level: &'static str,
     /// The query states of every cursor opened on this connection, held weakly
     /// so a dropped cursor doesn't leak an entry (pruned on each sweep). Used
     /// by [`ConnInner::drop_cursor_streams`] to drop live row streams before a
@@ -234,6 +252,7 @@ impl Connection {
                 client: Some(conn),
                 in_txn: false,
                 autocommit: false,
+                isolation_level: DEFAULT_ISOLATION_LEVEL,
                 cursor_states: Vec::new(),
             })),
             handle,
@@ -278,8 +297,9 @@ impl Connection {
         if !guard.autocommit && !guard.in_txn {
             {
                 let client = client_ref(&guard)?;
+                // The level is one of `ISOLATION_LEVELS`, never caller text.
                 client
-                    .batch_execute("BEGIN")
+                    .batch_execute(&format!("BEGIN ISOLATION LEVEL {}", guard.isolation_level))
                     .block_on_pg_result(py, &self.handle)?;
             }
             guard.in_txn = true;
@@ -441,6 +461,35 @@ impl Connection {
             ));
         }
         guard.autocommit = autocommit;
+        Ok(())
+    }
+
+    /// Set the isolation level of the transactions this connection opens, or
+    /// reset it to the default (REPEATABLE READ) with `None`.
+    ///
+    /// Mirrors psycopg2's `set_isolation_level`: it takes effect from the next
+    /// transaction and does not touch autocommit statements, which keep the
+    /// server's default. Like `set_autocommit`, it cannot be changed while a
+    /// transaction is in progress.
+    #[pyo3(signature = (level))]
+    fn set_isolation_level(&self, level: Option<&str>) -> PyResult<()> {
+        let level = match level {
+            None => DEFAULT_ISOLATION_LEVEL,
+            Some(name) => ISOLATION_LEVELS
+                .iter()
+                .copied()
+                .find(|known| known.eq_ignore_ascii_case(name))
+                .ok_or_else(|| {
+                    PyRuntimeError::new_err(format!("unknown isolation level {name:?}"))
+                })?,
+        };
+        let mut guard = self.lock()?;
+        if guard.in_txn {
+            return Err(PyRuntimeError::new_err(
+                "cannot change the isolation level while a transaction is in progress",
+            ));
+        }
+        guard.isolation_level = level;
         Ok(())
     }
 

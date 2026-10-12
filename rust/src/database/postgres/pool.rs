@@ -71,15 +71,14 @@ impl Default for SessionConfig {
 
 impl SessionConfig {
     /// The `SET` statements to run on a freshly-opened connection.
+    ///
+    /// The transaction isolation level is deliberately not set here: like
+    /// psycopg2, the `Connection` asks for it on each `BEGIN`, so autocommit
+    /// statements keep the server's default (READ COMMITTED).
     fn setup_sql(&self) -> String {
-        // Match the engine's `default_isolation_level` (REPEATABLE READ) as the
-        // session default, so a plain `BEGIN` gets the same isolation psycopg2
-        // gave us.
-        let mut sql = String::from(
-            "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ;",
-        );
+        let mut sql = String::new();
         if !self.synchronous_commit {
-            sql.push_str(" SET synchronous_commit TO OFF;");
+            sql.push_str("SET synchronous_commit TO OFF;");
         }
         if let Some(ms) = self.statement_timeout_ms {
             // `ms` is an integer we control (from config), so inlining is safe.
@@ -238,7 +237,10 @@ impl Manager for ConnectionManager {
 
         // Apply per-connection session setup once, up front (the native
         // equivalent of the engine's `on_new_connection`).
-        client.batch_execute(&self.session.setup_sql()).await?;
+        let setup = self.session.setup_sql();
+        if !setup.is_empty() {
+            client.batch_execute(&setup).await?;
+        }
 
         Ok(PooledClient {
             client,
@@ -357,10 +359,9 @@ impl PyConnectionPool {
     ///
     /// This only parses the DSN; connections are opened lazily on the first
     /// (and each subsequent) [`connect`](Self::connect) that needs a new one.
-    /// Each connection gets the same per-connection session setup: the default
-    /// (REPEATABLE READ) isolation level, plus `synchronous_commit`,
-    /// `statement_timeout` and `idle_in_transaction_session_timeout` if
-    /// configured here.
+    /// Each connection gets the same per-connection session setup:
+    /// `synchronous_commit`, `statement_timeout` and
+    /// `idle_in_transaction_session_timeout` if configured here.
     #[new]
     #[pyo3(signature = (runtime, dsn, max_size = 10, *, synchronous_commit = true, statement_timeout_ms = None, idle_in_transaction_session_timeout_ms = None, checkout_timeout_ms = None, max_uses = None, sslmode = None, sslrootcert = None, sslcert = None, sslkey = None, sslpassword = None))]
     #[allow(clippy::too_many_arguments)]
@@ -604,8 +605,9 @@ mod tests {
         rt.block_on(async {
             let client = pool.get().await.unwrap();
 
-            // The session default isolation matches the engine's default, and
-            // the configured `synchronous_commit` / `statement_timeout` are set.
+            // Autocommit statements keep the server's default isolation (the
+            // transactions a `Connection` opens ask for REPEATABLE READ
+            // themselves), and the configured settings are applied.
             let show = |name: &'static str| {
                 let client = &client;
                 async move {
@@ -618,7 +620,7 @@ mod tests {
             };
             assert_eq!(
                 show("default_transaction_isolation").await,
-                "repeatable read"
+                "read committed"
             );
             assert_eq!(show("synchronous_commit").await, "off");
             assert_eq!(show("statement_timeout").await, "1234ms");

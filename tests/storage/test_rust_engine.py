@@ -85,44 +85,31 @@ class RustPostgresEngineTestCase(unittest.TestCase):
         # Neither is an unrelated exception.
         self.assertFalse(self.engine.is_deadlock(ValueError("unrelated")))
 
-    def test_isolation_level_sets_session_characteristics(self) -> None:
-        # The shim has no psycopg2 `set_isolation_level`, so the engine issues a
-        # `SET SESSION CHARACTERISTICS` statement (and commits it) instead —
-        # rolling back any pending transaction first, as psycopg2 does. Check
-        # the level mapping, and that `None` resets to the default (REPEATABLE
-        # READ) — see `attempt_to_set_isolation_level`.
-        executed: list[str] = []
-
-        class FakeCursor:
-            def execute(self, sql: str) -> None:
-                executed.append(sql)
-
-            def close(self) -> None:
-                pass
+    def test_isolation_level_is_set_on_the_connection(self) -> None:
+        # The engine hands the level to the shim's `set_isolation_level` (which
+        # applies it to the transactions it opens, like psycopg2), rolling back
+        # any pending transaction first as psycopg2 does. `None` resets to the
+        # default.
+        calls: list[Any] = []
 
         class FakeConn:
-            def cursor(self) -> "FakeCursor":
-                return FakeCursor()
-
-            def commit(self) -> None:
-                executed.append("COMMIT")
-
             def rollback(self) -> None:
-                executed.append("ROLLBACK")
+                calls.append("ROLLBACK")
+
+            def set_isolation_level(self, level: str | None) -> None:
+                calls.append(("set_isolation_level", level))
 
         conn = FakeConn()
         self.engine.attempt_to_set_isolation_level(conn, IsolationLevel.SERIALIZABLE)
         self.engine.attempt_to_set_isolation_level(conn, None)
 
         self.assertEqual(
-            executed,
+            calls,
             [
                 "ROLLBACK",
-                "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE",
-                "COMMIT",
+                ("set_isolation_level", "SERIALIZABLE"),
                 "ROLLBACK",
-                "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ",
-                "COMMIT",
+                ("set_isolation_level", None),
             ],
         )
 
@@ -170,6 +157,29 @@ class RustPostgresEngineConnectionTestCase(unittest.TestCase):
         self.assertFalse(self.engine.is_connection_closed(self.conn))
         self.conn.close()
         self.assertTrue(self.engine.is_connection_closed(self.conn))
+
+    def test_isolation_level_applies_to_transactions_not_autocommit(self) -> None:
+        # Transactions open at REPEATABLE READ by default and at the level the
+        # engine sets; autocommit statements keep the server's default (READ
+        # COMMITTED), exactly as psycopg2 behaves.
+        cursor = self._exec("SHOW transaction_isolation")
+        self.assertEqual(cursor.fetch_one()[0], "repeatable read")
+        self.conn.rollback()
+
+        self.engine.attempt_to_set_isolation_level(
+            self.conn, IsolationLevel.SERIALIZABLE
+        )
+        cursor = self._exec("SHOW transaction_isolation")
+        self.assertEqual(cursor.fetch_one()[0], "serializable")
+        self.conn.rollback()
+        self.engine.attempt_to_set_isolation_level(self.conn, None)
+
+        self.engine.attempt_to_set_autocommit(self.conn, True)
+        try:
+            cursor = self._exec("SHOW transaction_isolation")
+            self.assertEqual(cursor.fetch_one()[0], "read committed")
+        finally:
+            self.engine.attempt_to_set_autocommit(self.conn, False)
 
     def test_isolation_level_reset_rolls_back_pending_writes(self) -> None:
         # `attempt_to_set_isolation_level` runs from `runWithConnection`'s

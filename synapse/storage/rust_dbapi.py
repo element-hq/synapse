@@ -431,6 +431,9 @@ class Connection:
     def set_autocommit(self, autocommit: bool) -> None:
         self._conn.set_autocommit(autocommit)
 
+    def set_isolation_level(self, level: str | None) -> None:
+        self._conn.set_isolation_level(level)
+
     @property
     def autocommit(self) -> bool:
         return bool(self._conn.autocommit)

@@ -45,9 +45,10 @@ class ConnectionPool:
         setup and in tests.
 
         Each connection gets the same session setup when opened: the default
-        (REPEATABLE READ) isolation level, plus ``synchronous_commit`` off,
-        ``statement_timeout`` and ``idle_in_transaction_session_timeout``
-        (both in milliseconds) if configured.
+        ``synchronous_commit`` off, ``statement_timeout`` and
+        ``idle_in_transaction_session_timeout`` (both in milliseconds) if
+        configured. Transactions open at REPEATABLE READ unless a connection's
+        ``set_isolation_level`` says otherwise.
         ``checkout_timeout_ms`` bounds how long ``connect`` may wait for a
         connection; ``None`` or ``0`` waits indefinitely. ``max_uses`` closes
         and replaces a connection after that many checkouts; ``None`` or ``0``
@@ -90,6 +91,16 @@ class Connection:
     def is_closed(self) -> bool: ...
     def in_transaction(self) -> bool: ...
     def set_autocommit(self, autocommit: bool) -> None: ...
+    def set_isolation_level(self, level: str | None) -> None:
+        """Set the isolation level of the transactions this connection opens
+        (``"READ COMMITTED"``, ``"REPEATABLE READ"``, ``"SERIALIZABLE"``), or
+        reset it to the default, REPEATABLE READ, with ``None``.
+
+        As with psycopg2's ``set_isolation_level``, autocommit statements are
+        unaffected and keep the server's default. Raises if a transaction is
+        in progress.
+        """
+
     def __enter__(self) -> Connection: ...
     def __exit__(
         self,
