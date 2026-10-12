@@ -246,6 +246,9 @@ def _make_rust_pool(
         ssl_params=ssl_params,
     )
     pool.start()
+    # Close the pool "during" shutdown: the RustRuntime that drives its
+    # connections stops its tokio threads in the "after" phase, so the
+    # connections are returned and closed while the runtime can still run them.
     clock.add_system_event_trigger("during", "shutdown", pool.close)
 
     register_threadpool(
