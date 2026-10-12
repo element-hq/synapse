@@ -64,9 +64,13 @@ class StatsController:
         # anyway its good enough.
         room_estimates: Counter[str] = Counter()
 
-        # Return size of the table on disk, including indexes and TOAST.
+        # Return size of the table on disk, including indexes and TOAST. The
+        # table name is bound as text and cast to `regclass` in SQL: the native
+        # Rust driver binds by the placeholder's inferred type, and a bare
+        # `pg_total_relation_size(?)` would ask for a `regclass` parameter,
+        # which cannot be produced from a name.
         table_sql = """
-            SELECT pg_total_relation_size(?)
+            SELECT pg_total_relation_size(?::text::regclass)
         """
 
         # Get an estimate for the largest rooms and their frequency.
