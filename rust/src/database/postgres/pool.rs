@@ -255,43 +255,46 @@ pub type ConnectionPool = Pool<ConnectionManager>;
 /// underlying [`tokio_postgres::Client`]; returned to the pool when dropped.
 pub type PooledConnection = Object<ConnectionManager>;
 
-/// Build a [`ConnectionPool`] from a libpq-style DSN, capped at `max_size`
-/// connections, using the default [`SessionConfig`] and no checkout timeout.
-/// Connection tasks run on the runtime behind `handle`.
-pub fn create_pool(
-    dsn: &str,
-    max_size: usize,
-    handle: Handle,
-) -> Result<ConnectionPool, anyhow::Error> {
-    create_pool_with_session(
-        dsn,
-        max_size,
-        handle,
-        SessionConfig::default(),
-        &TlsParams::default(),
-        None,
-    )
+/// Everything that configures a [`ConnectionPool`] apart from the DSN and the
+/// runtime it is driven on.
+#[derive(Clone)]
+pub struct PoolConfig {
+    /// The most connections the pool will open.
+    pub max_size: usize,
+    /// Per-connection session setup, applied when a connection is opened.
+    pub session: SessionConfig,
+    /// How to (or whether to) negotiate TLS.
+    pub tls: TlsParams,
+    /// If set, a checkout ([`PyConnectionPool::connect`] / [`Pool::get`])
+    /// blocks for at most this long before failing with a
+    /// [`PoolError::Timeout`] rather than waiting indefinitely. Bounds both
+    /// the wait-for-a-free-slot phase and the establish-a-new-connection
+    /// phase, so a checkout can never hang forever (e.g. against an
+    /// unreachable server).
+    pub checkout_timeout: Option<Duration>,
 }
 
-/// Build a [`ConnectionPool`] with explicit per-connection [`SessionConfig`] and
-/// TLS params.
-///
-/// If `checkout_timeout` is set, a checkout ([`PyConnectionPool::connect`] /
-/// [`Pool::get`]) blocks for at most that long before failing with a
-/// [`PoolError::Timeout`] rather than waiting indefinitely. We bound both the
-/// wait-for-a-free-slot phase and the establish-a-new-connection phase, so a
-/// checkout can never hang forever (e.g. against an unreachable server).
-pub fn create_pool_with_session(
+impl Default for PoolConfig {
+    fn default() -> Self {
+        Self {
+            max_size: 10,
+            session: SessionConfig::default(),
+            tls: TlsParams::default(),
+            checkout_timeout: None,
+        }
+    }
+}
+
+/// Build a [`ConnectionPool`] from a libpq-style DSN. Connection tasks run on
+/// the runtime behind `handle`.
+pub fn create_pool(
     dsn: &str,
-    max_size: usize,
     handle: Handle,
-    session: SessionConfig,
-    tls_params: &TlsParams,
-    checkout_timeout: Option<Duration>,
+    config: PoolConfig,
 ) -> Result<ConnectionPool, anyhow::Error> {
-    let manager = ConnectionManager::from_dsn(dsn, handle, session, tls_params)?;
-    let mut builder = Pool::builder(manager).max_size(max_size);
-    if let Some(timeout) = checkout_timeout {
+    let manager = ConnectionManager::from_dsn(dsn, handle, config.session, &config.tls)?;
+    let mut builder = Pool::builder(manager).max_size(config.max_size);
+    if let Some(timeout) = config.checkout_timeout {
         // deadpool enforces timeouts by sleeping on a runtime (we drive `get()`
         // on our own tokio runtime, so `Runtime::Tokio1` is correct). `recycle`
         // is left unbounded: it's a cheap local `is_closed` check, not I/O.
@@ -304,12 +307,6 @@ pub fn create_pool_with_session(
     Ok(builder.build()?)
 }
 
-/// The Python-facing connection pool.
-///
-/// This is the single entry point Python uses to obtain a [`Connection`]:
-/// build a pool from a DSN once, then check connections out of it with
-/// [`PyConnectionPool::connect`]. Each checkout hands back a [`Connection`]
-/// borrowed from the pool that returns itself for reuse when closed or dropped.
 #[pyclass(name = "ConnectionPool", frozen)]
 pub struct PyConnectionPool {
     pool: ConnectionPool,
@@ -349,31 +346,28 @@ impl PyConnectionPool {
         sslpassword: Option<String>,
     ) -> PyResult<Self> {
         let handle = runtime.tokio_handle()?;
-        let session = SessionConfig {
-            synchronous_commit,
-            statement_timeout_ms,
-        };
-        let tls_params = TlsParams {
-            sslmode,
-            sslrootcert,
-            sslcert,
-            sslkey,
-            sslpassword,
-        };
-        // A `checkout_timeout_ms` of `None` or `0` means no timeout (block until a
-        // connection is available), matching the previous behaviour.
-        let checkout_timeout = checkout_timeout_ms
-            .filter(|&ms| ms > 0)
-            .map(Duration::from_millis);
-        let pool = create_pool_with_session(
-            dsn,
+        let config = PoolConfig {
             max_size,
-            handle.clone(),
-            session,
-            &tls_params,
-            checkout_timeout,
-        )
-        .map_err(|e| PyRuntimeError::new_err(format!("failed to build connection pool: {e}")))?;
+            session: SessionConfig {
+                synchronous_commit,
+                statement_timeout_ms,
+            },
+            tls: TlsParams {
+                sslmode,
+                sslrootcert,
+                sslcert,
+                sslkey,
+                sslpassword,
+            },
+            // A `checkout_timeout_ms` of `None` or `0` means no timeout (block
+            // until a connection is available).
+            checkout_timeout: checkout_timeout_ms
+                .filter(|&ms| ms > 0)
+                .map(Duration::from_millis),
+        };
+        let pool = create_pool(dsn, handle.clone(), config).map_err(|e| {
+            PyRuntimeError::new_err(format!("failed to build connection pool: {e}"))
+        })?;
         Ok(Self { pool, handle })
     }
 
@@ -463,7 +457,15 @@ mod tests {
         };
 
         let rt = test_runtime();
-        let pool = create_pool(&dsn, 2, rt.handle().clone()).unwrap();
+        let pool = create_pool(
+            &dsn,
+            rt.handle().clone(),
+            PoolConfig {
+                max_size: 2,
+                ..PoolConfig::default()
+            },
+        )
+        .unwrap();
 
         rt.block_on(async {
             // Acquire a connection and run a query with the standard async API.
@@ -490,7 +492,15 @@ mod tests {
         };
 
         let rt = test_runtime();
-        let pool = create_pool(&dsn, 2, rt.handle().clone()).unwrap();
+        let pool = create_pool(
+            &dsn,
+            rt.handle().clone(),
+            PoolConfig {
+                max_size: 2,
+                ..PoolConfig::default()
+            },
+        )
+        .unwrap();
 
         rt.block_on(async {
             // Two live checkouts at once => two distinct connections created.
@@ -528,13 +538,14 @@ mod tests {
             statement_timeout_ms: Some(1234),
         };
         let rt = test_runtime();
-        let pool = create_pool_with_session(
+        let pool = create_pool(
             &dsn,
-            1,
             rt.handle().clone(),
-            session,
-            &TlsParams::default(),
-            None,
+            PoolConfig {
+                max_size: 1,
+                session,
+                ..PoolConfig::default()
+            },
         )
         .unwrap();
 
@@ -571,13 +582,14 @@ mod tests {
 
         // A single-connection pool with a short checkout timeout.
         let rt = test_runtime();
-        let pool = create_pool_with_session(
+        let pool = create_pool(
             &dsn,
-            1,
             rt.handle().clone(),
-            SessionConfig::default(),
-            &TlsParams::default(),
-            Some(Duration::from_millis(200)),
+            PoolConfig {
+                max_size: 1,
+                checkout_timeout: Some(Duration::from_millis(200)),
+                ..PoolConfig::default()
+            },
         )
         .unwrap();
 

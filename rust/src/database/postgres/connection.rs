@@ -796,7 +796,7 @@ mod tests {
     use tokio::runtime::Runtime;
 
     use super::*;
-    use crate::database::postgres::pool::create_pool;
+    use crate::database::postgres::pool::{create_pool, PoolConfig};
 
     /// A throwaway runtime standing in for the shared one: the pool and the
     /// `Connection` take the runtime to drive on explicitly.
@@ -822,7 +822,15 @@ mod tests {
         };
 
         let rt = test_runtime();
-        let pool = create_pool(&dsn, 1, rt.handle().clone()).unwrap();
+        let pool = create_pool(
+            &dsn,
+            rt.handle().clone(),
+            PoolConfig {
+                max_size: 1,
+                ..PoolConfig::default()
+            },
+        )
+        .unwrap();
         let obj = rt.block_on(async { pool.get().await.unwrap() });
         assert_eq!(pool.status().size, 1);
 
@@ -854,7 +862,15 @@ mod tests {
         };
 
         let rt = test_runtime();
-        let pool = create_pool(&dsn, 1, rt.handle().clone()).unwrap();
+        let pool = create_pool(
+            &dsn,
+            rt.handle().clone(),
+            PoolConfig {
+                max_size: 1,
+                ..PoolConfig::default()
+            },
+        )
+        .unwrap();
         let obj = rt.block_on(async { pool.get().await.unwrap() });
         assert_eq!(pool.status().size, 1);
 
@@ -884,7 +900,15 @@ mod tests {
         };
 
         let rt = test_runtime();
-        let pool = create_pool(&dsn, 1, rt.handle().clone()).unwrap();
+        let pool = create_pool(
+            &dsn,
+            rt.handle().clone(),
+            PoolConfig {
+                max_size: 1,
+                ..PoolConfig::default()
+            },
+        )
+        .unwrap();
         let obj = rt.block_on(async { pool.get().await.unwrap() });
 
         Python::initialize();
@@ -922,7 +946,15 @@ mod tests {
         };
 
         let rt = test_runtime();
-        let pool = create_pool(&dsn, 1, rt.handle().clone()).unwrap();
+        let pool = create_pool(
+            &dsn,
+            rt.handle().clone(),
+            PoolConfig {
+                max_size: 1,
+                ..PoolConfig::default()
+            },
+        )
+        .unwrap();
         let obj = rt.block_on(async { pool.get().await.unwrap() });
 
         Python::initialize();
