@@ -51,6 +51,10 @@ impl SynapseError {
     }
 }
 
+import_exception!(synapse.api.errors, AuthError);
+
+import_exception!(synapse.api.errors, UnstableSpecAuthError);
+
 import_exception!(synapse.api.errors, NotFoundError);
 
 impl NotFoundError {

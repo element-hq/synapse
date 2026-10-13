@@ -710,7 +710,7 @@ impl EventInternalMetadata {
             .map(|s| s.to_owned()))
     }
 
-    fn need_to_check_redaction(&self) -> PyResult<bool> {
+    pub fn need_to_check_redaction(&self) -> PyResult<bool> {
         Ok(self.read_inner()?.need_to_check_redaction())
     }
 

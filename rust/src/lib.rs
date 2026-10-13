@@ -15,6 +15,7 @@ pub mod database;
 pub mod deferred;
 pub mod duration;
 pub mod errors;
+pub mod event_auth;
 pub mod events;
 pub mod handlers;
 pub mod homeserver;
@@ -93,6 +94,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     database::register_module(py, m)?;
     push::register_module(py, m)?;
     events::register_module(py, m)?;
+    event_auth::register_module(py, m)?;
     handlers::register_module(py, m)?;
     http_client::register_module(py, m)?;
     rendezvous::register_module(py, m)?;

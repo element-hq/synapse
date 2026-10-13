@@ -212,8 +212,13 @@ impl Event {
 
         let internal_metadata = EventInternalMetadata::new(internal_metadata_dict)?;
 
-        Event::from_parts(parsed_event, internal_metadata, room_version, rejected_reason)
-            .map_err(|err| PyValueError::new_err(format!("{err:#}")))
+        Event::from_parts(
+            parsed_event,
+            internal_metadata,
+            room_version,
+            rejected_reason,
+        )
+        .map_err(|err| PyValueError::new_err(format!("{err:#}")))
     }
 
     /// Convert the event to a dictionary suitable for serialisation.
@@ -656,8 +661,8 @@ impl Event {
             EventFormatEnum::V4(format) => format
                 .room_id(&event_id, &parsed_event.common_fields)
                 .map_err(|err| {
-                    anyhow::anyhow!("Failed to calculate room_id for event {event_id}: {err}")
-                })?,
+                anyhow::anyhow!("Failed to calculate room_id for event {event_id}: {err}")
+            })?,
             EventFormatEnum::VMSC4242(format) => format
                 .room_id(&event_id, &parsed_event.common_fields)
                 .map_err(|err| {
@@ -682,9 +687,15 @@ impl Event {
         internal_metadata: EventInternalMetadata,
         rejected_reason: Option<Box<str>>,
     ) -> Result<Event, Error> {
-        let parsed_event = event_dict_from_json_str(room_version, event_json)
-            .map_err(|err| anyhow::anyhow!("Failed to parse event for room version {room_version}: {err}"))?;
-        Event::from_parts(parsed_event, internal_metadata, room_version, rejected_reason)
+        let parsed_event = event_dict_from_json_str(room_version, event_json).map_err(|err| {
+            anyhow::anyhow!("Failed to parse event for room version {room_version}: {err}")
+        })?;
+        Event::from_parts(
+            parsed_event,
+            internal_metadata,
+            room_version,
+            rejected_reason,
+        )
     }
 
     /// The event's `type`.
