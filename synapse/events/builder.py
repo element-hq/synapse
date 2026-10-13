@@ -24,7 +24,13 @@ from typing import TYPE_CHECKING, Any
 import attr
 from signedjson.types import SigningKey
 
-from synapse.api.constants import MAX_DEPTH, EventTypes, StickyEvent, StickyEventField
+from synapse.api.constants import (
+    MAX_DEPTH,
+    EventTypes,
+    StateDag,
+    StickyEvent,
+    StickyEventField,
+)
 from synapse.api.room_versions import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     EventFormatVersions,
@@ -157,6 +163,10 @@ class EventBuilder:
             assert self.room_version.msc4242_state_dags
         if self.room_version.msc4242_state_dags:
             assert prev_state_events is not None
+            # FIXME: choose more intelligently
+            prev_state_events = sorted(prev_state_events)[
+                : StateDag.MAX_PREV_STATE_EVENTS
+            ]
             if self.room_id:
                 state_ids = await self._state.compute_state_after_events(
                     self.room_id,
