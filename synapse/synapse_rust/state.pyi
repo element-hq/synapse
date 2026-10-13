@@ -27,6 +27,7 @@ class StateResStats:
 
     total_time: float
     db_time: float
+    parse_time: float
     cpu_time: float
     sort_time: float
     auth_time: float

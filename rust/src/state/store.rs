@@ -100,6 +100,9 @@ pub struct DbStats {
     pub events_fetched: u64,
     /// Time spent waiting on statements.
     pub db_time: Duration,
+    /// Time spent building events from rows: parsing the JSON and computing
+    /// the event IDs.
+    pub parse_time: Duration,
 }
 
 /// A [`StateResStore`] reading Postgres through the native driver.
@@ -119,6 +122,7 @@ pub struct PostgresStateResStore {
     rows: AtomicU64,
     events_fetched: AtomicU64,
     db_nanos: AtomicU64,
+    parse_nanos: AtomicU64,
 }
 
 /// How many event IDs to send per event-loading statement.
@@ -148,6 +152,7 @@ impl PostgresStateResStore {
             rows: AtomicU64::new(0),
             events_fetched: AtomicU64::new(0),
             db_nanos: AtomicU64::new(0),
+            parse_nanos: AtomicU64::new(0),
         };
         // If this fails, dropping the store sends a ROLLBACK, which is
         // harmless outside a transaction.
@@ -176,6 +181,7 @@ impl PostgresStateResStore {
             rows: self.rows.load(Ordering::Relaxed),
             events_fetched: self.events_fetched.load(Ordering::Relaxed),
             db_time: Duration::from_nanos(self.db_nanos.load(Ordering::Relaxed)),
+            parse_time: Duration::from_nanos(self.parse_nanos.load(Ordering::Relaxed)),
         }
     }
 
@@ -233,11 +239,14 @@ impl StateResStore for PostgresStateResStore {
         for batch in ids.chunks(EVENT_BATCH_SIZE) {
             let batch: Vec<&str> = batch.iter().map(|id| &**id).collect();
             let rows = self.query(LOAD_EVENTS_SQL, &[&batch]).await?;
+            let start = Instant::now();
             for row in rows {
                 if let Some((event_id, event)) = event_from_row(&row)? {
                     events.insert(event_id, StateResEvent::from_rust(event)?);
                 }
             }
+            self.parse_nanos
+                .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         self.events_fetched
             .fetch_add(events.len() as u64, Ordering::Relaxed);

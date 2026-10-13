@@ -346,6 +346,8 @@ pub struct StateResStats {
     pub total_time: f64,
     /// Time waiting on the database.
     pub db_time: f64,
+    /// Time building events from database rows.
+    pub parse_time: f64,
     /// Time in the algorithm (sorts and auth checks).
     pub cpu_time: f64,
     pub sort_time: f64,
@@ -498,6 +500,7 @@ impl StateResolutionHandler {
             let stats = StateResStats {
                 total_time: start.elapsed().as_secs_f64(),
                 db_time: db.db_time.as_secs_f64(),
+                parse_time: db.parse_time.as_secs_f64(),
                 cpu_time: (core.sort_time + core.auth_time + core.mainline_time).as_secs_f64(),
                 sort_time: core.sort_time.as_secs_f64(),
                 auth_time: core.auth_time.as_secs_f64(),
