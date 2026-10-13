@@ -98,6 +98,10 @@ pub struct ResolveStats {
     pub auth_time: Duration,
     /// Time in the mainline sort.
     pub mainline_time: Duration,
+    /// Time computing the auth chain difference, caches included.
+    pub auth_chain_time: Duration,
+    /// Time loading the conflicted events and the prefetch, caches included.
+    pub load_events_time: Duration,
 }
 
 /// Resolve `state_sets` with state resolution v2 or v2.1.
@@ -216,6 +220,7 @@ pub async fn prepare(
 
     let conflicted_ids: HashSet<Arc<str>> = conflicted.values().flatten().cloned().collect();
     let is_v21 = room_version.state_res == StateResolutionVersions::V2_1;
+    let start = Instant::now();
     let auth_diff = get_auth_chain_difference(
         room_id,
         state_sets,
@@ -224,6 +229,7 @@ pub async fn prepare(
         is_v21.then_some(&conflicted_ids),
     )
     .await?;
+    stats.auth_chain_time = start.elapsed();
 
     let mut full_conflicted_set: HashSet<Arc<str>> =
         conflicted_ids.iter().chain(&auth_diff).cloned().collect();
@@ -233,7 +239,9 @@ pub async fn prepare(
         .filter(|id| !event_map.contains_key(*id))
         .cloned()
         .collect();
+    let start = Instant::now();
     event_map.extend(store.get_events(&missing).await?);
+    stats.load_events_time = start.elapsed();
 
     // Everything in the event map should be in the right room.
     for event in event_map.values() {
@@ -286,7 +294,9 @@ pub async fn prepare(
         }
     }
 
+    let start = Instant::now();
     prefetch(store, &mut event_map, &full_conflicted_set, &base_state).await?;
+    stats.load_events_time += start.elapsed();
 
     Ok(Prepared::Pending(Box::new(PendingResolution {
         room_id: Box::from(room_id),

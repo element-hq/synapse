@@ -32,10 +32,15 @@ class StateResStats:
     sort_time: float
     auth_time: float
     mainline_time: float
+    auth_chain_time: float
+    load_events_time: float
+    connection_time: float
     db_queries: int
     db_rows: int
     db_events: int
     event_cache_hits: int
+    chain_position_cache_hits: int
+    chain_link_cache_hits: int
     conflicted_events: int
     cache_hit: bool
 
@@ -72,16 +77,19 @@ class StateResolutionHandler:
         fake reactor does not wait for a deferred fired from another thread."""
 
     def clear_conflict_cache_for_test(self) -> None:
-        """Empty the conflict cache, keeping the event cache."""
+        """Empty the conflict cache, keeping the event and chain caches."""
 
     def event_cache_len(self) -> int:
         """The number of events in the event cache."""
 
+    def chain_link_cache_len(self) -> int:
+        """The number of chains in the chain link cache."""
+
     def invalidate_event(self, event_id: str) -> None:
-        """Drop an event from the event cache."""
+        """Drop an event from the event and chain position caches."""
 
     def clear_event_cache(self) -> None:
-        """Empty the event cache."""
+        """Empty the event and chain caches."""
 
 def get_auth_chain_difference_for_test(
     pool: ConnectionPool,
@@ -89,10 +97,11 @@ def get_auth_chain_difference_for_test(
     state_sets: Sequence[Collection[str]],
     conflicted: Collection[str] | None = None,
     additional_backwards: Collection[str] | None = None,
+    handler: StateResolutionHandler | None = None,
 ) -> tuple[set[str], set[str] | None]:
     """The auth chain difference computed by the Rust store with the chain
     cover index, as `_get_auth_chain_difference_using_cover_index_txn` does.
-    For tests."""
+    With `handler`, reads go through its chain caches. For tests."""
 
 def load_events_for_test(
     pool: ConnectionPool, event_ids: Sequence[str]

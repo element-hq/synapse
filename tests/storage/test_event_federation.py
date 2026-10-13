@@ -603,6 +603,25 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             f"state sets {state_sets}",
         )
 
+        # Again through the state resolution handler's chain caches, twice:
+        # the first call reads what earlier calls on this room cached and
+        # fills in the rest, the second reads only from the caches.
+        handler = self.hs.get_rust_handlers().state_resolution
+        assert handler is not None
+        for attempt in range(2):
+            self.assertEqual(
+                get_auth_chain_difference_for_test(
+                    pool,
+                    room_id,
+                    state_sets,
+                    conflicted,
+                    additional_backwards_reachable,
+                    handler,
+                ),
+                (auth_difference, conflicted_subgraph),
+                f"state sets {state_sets}, cached attempt {attempt}",
+            )
+
     def test_auth_difference_partial_cover(self) -> None:
         """Test that we correctly handle rooms where not all events have a chain
         cover calculated. This can happen in some obscure edge cases, including

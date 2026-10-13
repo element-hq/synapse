@@ -162,8 +162,9 @@ class RustStateResHandlerTestCase(unittest.HomeserverTestCase):
         self.assertIn(self._current_topic(room_id), topics)
 
     def test_event_cache(self) -> None:
-        """A second resolution reads its events from the handler's event
-        cache, which the store's event cache invalidation empties."""
+        """A second resolution reads its events, chain positions and chain
+        links from the handler's caches, which the store's event cache
+        invalidation empties."""
         rust = self.hs.get_rust_handlers().state_resolution
         assert rust is not None
 
@@ -190,8 +191,11 @@ class RustStateResHandlerTestCase(unittest.HomeserverTestCase):
         )
         self.assertGreater(first_stats.db_events, 0)
         self.assertEqual(first_stats.event_cache_hits, 0)
+        self.assertEqual(first_stats.chain_position_cache_hits, 0)
+        self.assertEqual(first_stats.chain_link_cache_hits, 0)
         cached = rust.event_cache_len()
         self.assertEqual(cached, first_stats.db_events)
+        self.assertGreater(rust.chain_link_cache_len(), 0)
 
         # Clear the conflict cache, so the resolution runs again rather than
         # being answered from it.
@@ -202,9 +206,16 @@ class RustStateResHandlerTestCase(unittest.HomeserverTestCase):
         self.assertEqual(second, first)
         self.assertEqual(second_stats.db_events, 0)
         self.assertEqual(second_stats.event_cache_hits, first_stats.db_events)
+        # Every event in the state sets has its position cached, and every
+        # chain its links, so the only chain query left is for the gap
+        # events the auth difference needs.
+        self.assertGreater(second_stats.chain_position_cache_hits, 0)
+        self.assertGreater(second_stats.chain_link_cache_hits, 0)
+        self.assertLess(second_stats.db_queries, first_stats.db_queries)
 
         self.store._invalidate_local_get_event_cache(topic_a)
         self.assertEqual(rust.event_cache_len(), cached - 1)
 
         self.store._invalidate_local_get_event_cache_room_id(room_id)
         self.assertEqual(rust.event_cache_len(), 0)
+        self.assertEqual(rust.chain_link_cache_len(), 0)

@@ -34,7 +34,7 @@ use pyo3::{
 use tokio::runtime::Handle;
 use tokio_postgres::{types::ToSql, Row};
 
-use super::{auth_chain, lru::EventCache, EventMap, StateResEvent};
+use super::{auth_chain, lru::StateResCaches, EventMap, StateResEvent};
 use crate::database::postgres::pool::{ConnectionPool, PooledConnection, PyConnectionPool};
 use crate::events::{
     constants::event_type::M_ROOM_MEMBER, internal_metadata::EventInternalMetadata, Event,
@@ -97,6 +97,10 @@ pub struct DbStats {
     pub events_fetched: u64,
     /// Events [`StateResStore::get_events`] found in the event cache.
     pub events_cached: u64,
+    /// Chain positions found in the chain position cache.
+    pub chain_positions_cached: u64,
+    /// Chains whose links came from the chain link cache.
+    pub chain_links_cached: u64,
     /// Time spent waiting on statements.
     pub db_time: Duration,
     /// Time spent building events from rows: parsing the JSON and computing
@@ -117,8 +121,9 @@ pub struct DbStats {
 pub struct PostgresStateResStore {
     conn: Option<PooledConnection>,
     handle: Handle,
-    /// Events loaded earlier, consulted before the database.
-    event_cache: Option<Arc<EventCache>>,
+    /// Events, chain positions and chain links loaded earlier, consulted
+    /// before the database.
+    caches: Option<Arc<StateResCaches>>,
     db_stats: Mutex<DbStats>,
 }
 
@@ -137,12 +142,12 @@ const LOAD_EVENTS_SQL: &str = "
 
 impl PostgresStateResStore {
     /// Check a connection out of `pool` and open the read-only transaction.
-    /// Events are read from `event_cache` first, and loaded events are added
-    /// to it.
+    /// Reads consult `caches` first, and what they load from the database is
+    /// added to it.
     pub async fn begin(
         pool: &ConnectionPool,
         handle: Handle,
-        event_cache: Option<Arc<EventCache>>,
+        caches: Option<Arc<StateResCaches>>,
     ) -> anyhow::Result<Self> {
         let conn = pool
             .get()
@@ -151,7 +156,7 @@ impl PostgresStateResStore {
         let store = PostgresStateResStore {
             conn: Some(conn),
             handle,
-            event_cache,
+            caches,
             db_stats: Mutex::default(),
         };
         // If this fails, dropping the store sends a ROLLBACK, which is
@@ -177,6 +182,17 @@ impl PostgresStateResStore {
 
     pub fn stats(&self) -> DbStats {
         *self.db_stats.lock().expect("not poisoned")
+    }
+
+    pub(super) fn caches(&self) -> Option<&StateResCaches> {
+        self.caches.as_deref()
+    }
+
+    /// Count cache hits for metrics.
+    pub(super) fn record_cached(&self, positions: u64, chains: u64) {
+        let mut stats = self.db_stats.lock().expect("not poisoned");
+        stats.chain_positions_cached += positions;
+        stats.chain_links_cached += chains;
     }
 
     fn client(&self) -> &PooledConnection {
@@ -240,7 +256,8 @@ impl StateResStore for PostgresStateResStore {
     async fn get_events(&self, ids: &[Arc<str>]) -> anyhow::Result<EventMap> {
         let mut events = EventMap::with_capacity(ids.len());
 
-        let missing: Vec<Arc<str>> = match &self.event_cache {
+        let event_cache = self.caches.as_ref().map(|caches| &caches.events);
+        let missing: Vec<Arc<str>> = match event_cache {
             Some(cache) => {
                 let mut missing = Vec::new();
                 for id in ids {
@@ -264,7 +281,7 @@ impl StateResStore for PostgresStateResStore {
             for row in rows {
                 if let Some((event_id, event)) = event_from_row(&row)? {
                     let event = StateResEvent::new(event)?;
-                    if let Some(cache) = &self.event_cache {
+                    if let Some(cache) = event_cache {
                         cache.insert(Arc::clone(&event_id), event.clone(), 1);
                     }
                     events.insert(event_id, event);
@@ -474,12 +491,13 @@ fn anyhow_to_py(e: anyhow::Error) -> PyErr {
 
 /// Compute the auth chain difference with the chain cover index, as
 /// `_get_auth_chain_difference_using_cover_index_txn` does: without checking
-/// the room's `has_auth_chain_index` first.
+/// the room's `has_auth_chain_index` first. With `handler`, reads go
+/// through its chain caches.
 ///
 /// Returns `(auth_difference, conflicted_subgraph)`. Blocks, releasing the
 /// GIL. For tests only.
 #[pyfunction]
-#[pyo3(signature = (pool, room_id, state_sets, conflicted=None, additional_backwards=None))]
+#[pyo3(signature = (pool, room_id, state_sets, conflicted=None, additional_backwards=None, handler=None))]
 fn get_auth_chain_difference_for_test<'py>(
     py: Python<'py>,
     pool: &Bound<'py, PyConnectionPool>,
@@ -487,8 +505,10 @@ fn get_auth_chain_difference_for_test<'py>(
     state_sets: Vec<HashSet<String>>,
     conflicted: Option<HashSet<String>>,
     additional_backwards: Option<HashSet<String>>,
+    handler: Option<&Bound<'py, super::StateResolutionHandler>>,
 ) -> PyResult<(Bound<'py, PySet>, Option<Bound<'py, PySet>>)> {
     let (pool, handle) = pool_and_handle(pool);
+    let caches = handler.map(|handler| handler.get().caches());
     let state_sets: Vec<HashSet<Arc<str>>> = state_sets
         .into_iter()
         .map(|set| set.into_iter().map(Arc::from).collect())
@@ -499,7 +519,7 @@ fn get_auth_chain_difference_for_test<'py>(
     let difference = py
         .detach(|| {
             handle.block_on(async {
-                let store = PostgresStateResStore::begin(&pool, handle.clone(), None).await?;
+                let store = PostgresStateResStore::begin(&pool, handle.clone(), caches).await?;
                 let difference = auth_chain::get_auth_chain_difference_using_cover_index(
                     &store,
                     &room_id,

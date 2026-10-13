@@ -29,6 +29,13 @@
 //!   goes stale when its rejection status or internal metadata changes.
 //!   `EventsWorkerStore` invalidates it alongside its own event cache, by
 //!   event ID and on a room purge, so the two stay in step.
+//! - [`ChainPositionCache`]: the chain cover position of an event, which is
+//!   fixed once assigned. Invalidated with the event.
+//! - [`ChainLinkCache`]: the links out of a chain, which only grow as events
+//!   are appended to the chain. See [`CachedChainLinks`].
+//!
+//! [`StateResCaches`] bundles the three, as the store reads them together
+//! and `EventsWorkerStore` invalidates them together.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -45,6 +52,72 @@ pub type CacheKey = [u8; 32];
 pub type ConflictCache = SizedLru<CacheKey, Arc<StateMap>>;
 
 pub type EventCache = SizedLru<Arc<str>, StateResEvent>;
+
+/// An event's position in the chain cover index: `(chain_id, sequence_number)`.
+pub type ChainPosition = (i64, i64);
+
+pub type ChainPositionCache = SizedLru<Arc<str>, ChainPosition>;
+
+/// A link in the chain cover index: `(origin_sequence_number, target_chain_id,
+/// target_sequence_number)`, read from `event_auth_chain_links` for one
+/// origin chain.
+pub type ChainLink = (i64, i64, i64);
+
+/// The links out of one chain, as read from the database.
+///
+/// A chain grows at the end: an event appended at sequence number `n` adds
+/// links out of `(chain, n)`, and nothing changes the links below it. So the
+/// links are complete for every origin sequence number up to the highest one
+/// known to be persisted when they were read, and a reader walking backwards
+/// from a lower position can use them as they are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CachedChainLinks {
+    /// The highest sequence number on the chain known to exist when the links
+    /// were read: the links are complete up to it.
+    pub complete_to: i64,
+    pub links: Arc<[ChainLink]>,
+}
+
+pub type ChainLinkCache = SizedLru<i64, CachedChainLinks>;
+
+/// The caches a [`super::store::PostgresStateResStore`] reads before the
+/// database. Sized in events, positions and links respectively.
+pub struct StateResCaches {
+    pub events: EventCache,
+    pub chain_positions: ChainPositionCache,
+    pub chain_links: ChainLinkCache,
+}
+
+impl StateResCaches {
+    pub fn new(
+        max_events: usize,
+        max_positions: usize,
+        max_links: usize,
+        expiry: Duration,
+    ) -> Self {
+        StateResCaches {
+            events: EventCache::new(max_events, expiry),
+            chain_positions: ChainPositionCache::new(max_positions, expiry),
+            chain_links: ChainLinkCache::new(max_links, expiry),
+        }
+    }
+
+    /// Drop what is cached about an event: the event, and its chain position
+    /// in case the event is purged and later received again.
+    pub fn invalidate_event(&self, event_id: &str) {
+        let event_id: Arc<str> = Arc::from(event_id);
+        self.events.remove(&event_id);
+        self.chain_positions.remove(&event_id);
+    }
+
+    /// Empty every cache. A room purge deletes its chains and links, and the
+    /// chain links are keyed on chain ID rather than room, so all go.
+    pub fn clear(&self) {
+        self.events.clear();
+        self.chain_positions.clear();
+        self.chain_links.clear();
+    }
+}
 
 struct Entry<V> {
     value: V,
@@ -226,6 +299,30 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         assert!(cache.get(&[1; 32]).is_none());
         assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn store_caches_invalidate_together() {
+        let caches = StateResCaches::new(10, 10, 10, Duration::from_secs(60));
+        caches.chain_positions.insert(Arc::from("$a"), (1, 1), 1);
+        caches.chain_positions.insert(Arc::from("$b"), (1, 2), 1);
+        caches.chain_links.insert(
+            1,
+            CachedChainLinks {
+                complete_to: 2,
+                links: Arc::from([]),
+            },
+            1,
+        );
+
+        caches.invalidate_event("$a");
+        assert!(caches.chain_positions.get(&Arc::from("$a")).is_none());
+        assert_eq!(caches.chain_positions.get(&Arc::from("$b")), Some((1, 2)));
+        assert_eq!(caches.chain_links.len(), 1);
+
+        caches.clear();
+        assert!(caches.chain_positions.is_empty());
+        assert!(caches.chain_links.is_empty());
     }
 
     #[test]

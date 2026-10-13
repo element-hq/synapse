@@ -19,14 +19,14 @@
 //!   with a Postgres implementation and an in-memory one for tests.
 //! - [`auth_chain`]: the chain cover auth chain difference.
 //! - [`v2`]: the algorithm.
-//! - [`lru`]: the conflict and event caches.
+//! - [`lru`]: the conflict, event and chain cover caches.
 //!
 //! [`StateResolutionHandler`] is the Python entry point, used by
 //! `synapse.state.StateResolutionHandler` when `rust_state_res` is enabled.
 
 use std::{
     borrow::Borrow,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     future::Future,
     hash::{Hash, Hasher},
     pin::Pin,
@@ -55,7 +55,7 @@ pub mod lru;
 pub mod store;
 pub mod v2;
 
-use lru::{ConflictCache, EventCache};
+use lru::{ConflictCache, StateResCaches};
 use store::{NoChainCoverIndex, PostgresStateResStore};
 
 create_exception!(
@@ -192,7 +192,7 @@ pub type EventMap = HashMap<Arc<str>, StateResEvent>;
 /// Interns strings, so the same event ID or event type read from several
 /// Python state sets shares one allocation.
 #[derive(Default)]
-struct Interner(HashSet<Arc<str>>);
+struct Interner(rustc_hash::FxHashSet<Arc<str>>);
 
 impl Interner {
     fn intern(&mut self, s: &str) -> Arc<str> {
@@ -322,8 +322,19 @@ const CONFLICT_CACHE_EXPIRY: Duration = Duration::from_secs(60 * 60);
 /// TODO: size this from `event_cache_size`, as the Python event cache is.
 const EVENT_CACHE_MAX_SIZE: usize = 10_000;
 
-/// How long an unused event cache entry lives.
-const EVENT_CACHE_EXPIRY: Duration = Duration::from_secs(60 * 60);
+/// The bound on the chain position cache, in events. A resolution needs the
+/// position of every event in its state sets, so this holds more than the
+/// event cache, whose events are only the conflicted ones and their auth
+/// difference.
+/// TODO: size from the cache factor.
+const CHAIN_POSITION_CACHE_MAX_SIZE: usize = 100_000;
+
+/// The bound on the chain link cache, in links.
+/// TODO: size from the cache factor.
+const CHAIN_LINK_CACHE_MAX_SIZE: usize = 1_000_000;
+
+/// How long an unused event, chain position or chain link cache entry lives.
+const STORE_CACHE_EXPIRY: Duration = Duration::from_secs(60 * 60);
 
 /// Timings and counts for one resolution, for metrics. Times are in seconds.
 #[pyclass(frozen, get_all, skip_from_py_object)]
@@ -340,12 +351,23 @@ pub struct StateResStats {
     pub sort_time: f64,
     pub auth_time: f64,
     pub mainline_time: f64,
+    /// Time computing the auth chain difference, caches included.
+    pub auth_chain_time: f64,
+    /// Time loading events, caches included.
+    pub load_events_time: f64,
+    /// Time checking out the connection, beginning and committing the
+    /// transaction.
+    pub connection_time: f64,
     pub db_queries: u64,
     pub db_rows: u64,
     /// Events loaded from the database.
     pub db_events: u64,
     /// Events found in the handler's event cache.
     pub event_cache_hits: u64,
+    /// Chain positions found in the handler's chain position cache.
+    pub chain_position_cache_hits: u64,
+    /// Chains whose links came from the handler's chain link cache.
+    pub chain_link_cache_hits: u64,
     /// Time converting the state sets from Python, under the GIL.
     pub convert_in_time: f64,
     /// Time converting the resolved state to Python, under the GIL.
@@ -407,7 +429,8 @@ pub struct StateResolutionHandler {
     db_pool: Py<PyAny>,
     runtime: RustRuntime,
     cache: Arc<ConflictCache>,
-    event_cache: Arc<EventCache>,
+    /// The event, chain position and chain link caches the store reads.
+    caches: Arc<StateResCaches>,
 }
 
 impl StateResolutionHandler {
@@ -419,8 +442,17 @@ impl StateResolutionHandler {
                 CONFLICT_CACHE_MAX_SIZE,
                 CONFLICT_CACHE_EXPIRY,
             )),
-            event_cache: Arc::new(EventCache::new(EVENT_CACHE_MAX_SIZE, EVENT_CACHE_EXPIRY)),
+            caches: Arc::new(StateResCaches::new(
+                EVENT_CACHE_MAX_SIZE,
+                CHAIN_POSITION_CACHE_MAX_SIZE,
+                CHAIN_LINK_CACHE_MAX_SIZE,
+                STORE_CACHE_EXPIRY,
+            )),
         }
+    }
+
+    pub(crate) fn caches(&self) -> Arc<StateResCaches> {
+        Arc::clone(&self.caches)
     }
 
     /// Convert the inputs under the GIL and start a resolution: either the
@@ -470,13 +502,14 @@ impl StateResolutionHandler {
 
         let handle = self.runtime.tokio_handle()?;
         let cache = Arc::clone(&self.cache);
-        let event_cache = Arc::clone(&self.event_cache);
+        let caches = Arc::clone(&self.caches);
 
         Ok(Started::Pending(Box::pin(async move {
             let start = Instant::now();
-            let store = PostgresStateResStore::begin(&pool, handle, Some(event_cache))
+            let store = PostgresStateResStore::begin(&pool, handle, Some(caches))
                 .await
                 .map_err(resolve_error_to_py)?;
+            let mut connection_time = start.elapsed();
             let prepared = v2::prepare(
                 &store,
                 &room_id,
@@ -490,7 +523,9 @@ impl StateResolutionHandler {
             .map_err(resolve_error_to_py)?;
 
             // The rest does no I/O, so give the connection back first.
+            let finish_start = Instant::now();
             let db = store.finish().await.map_err(resolve_error_to_py)?;
+            connection_time += finish_start.elapsed();
             let resolution = match prepared {
                 v2::Prepared::Done(resolution) => resolution,
                 v2::Prepared::Pending(pending) => pending
@@ -508,10 +543,15 @@ impl StateResolutionHandler {
                 sort_time: core.sort_time.as_secs_f64(),
                 auth_time: core.auth_time.as_secs_f64(),
                 mainline_time: core.mainline_time.as_secs_f64(),
+                auth_chain_time: core.auth_chain_time.as_secs_f64(),
+                load_events_time: core.load_events_time.as_secs_f64(),
+                connection_time: connection_time.as_secs_f64(),
                 db_queries: db.queries,
                 db_rows: db.rows,
                 db_events: db.events_fetched,
                 event_cache_hits: db.events_cached,
+                chain_position_cache_hits: db.chain_positions_cached,
+                chain_link_cache_hits: db.chain_links_cached,
                 convert_in_time,
                 convert_out_time: 0.0,
                 conflicted_events: core.conflicted_events,
@@ -585,27 +625,33 @@ impl StateResolutionHandler {
         output.into_pyobject(py)
     }
 
-    /// Empty the conflict cache, keeping the event cache. For benchmarks and
-    /// tests that want to time the algorithm again on loaded events.
+    /// Empty the conflict cache, keeping the event and chain caches. For
+    /// benchmarks and tests that want to time the algorithm again on loaded
+    /// events.
     fn clear_conflict_cache_for_test(&self) {
         self.cache.clear();
     }
 
     /// The number of events in the event cache.
     fn event_cache_len(&self) -> usize {
-        self.event_cache.len()
+        self.caches.events.len()
     }
 
-    /// Drop an event from the event cache. Called whenever the Python event
-    /// cache drops it, so a change to its rejection status or internal
-    /// metadata reaches the next resolution.
+    /// The number of chains in the chain link cache.
+    fn chain_link_cache_len(&self) -> usize {
+        self.caches.chain_links.len()
+    }
+
+    /// Drop an event from the event and chain position caches. Called
+    /// whenever the Python event cache drops it, so a change to its rejection
+    /// status or internal metadata reaches the next resolution.
     fn invalidate_event(&self, event_id: &str) {
-        self.event_cache.remove(&Arc::from(event_id));
+        self.caches.invalidate_event(event_id);
     }
 
-    /// Empty the event cache. Called when a room is purged.
+    /// Empty the event and chain caches. Called when a room is purged.
     fn clear_event_cache(&self) {
-        self.event_cache.clear();
+        self.caches.clear();
     }
 }
 

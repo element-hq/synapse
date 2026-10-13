@@ -1718,6 +1718,7 @@ dependencies = [
  "pythonize",
  "regex",
  "reqwest",
+ "rustc-hash",
  "rustc_version",
  "rustls",
  "rustls-native-certs",
