@@ -197,7 +197,7 @@ all = [
     # opentracing
     "jaeger-client>=4.2.0", "opentracing>=2.2.0",
     # redis
-    "txredisapi>=1.4.12", "hiredis>=0.3",
+    "txredisapi>=1.4.12,<1.6.0", "hiredis>=0.3",
     # cache-memory
     # 1.0 added support for python 3.10, our current minimum supported python version
     "pympler>=1.0",
