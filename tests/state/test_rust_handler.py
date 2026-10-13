@@ -29,7 +29,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.state import _rust_shadow_counter
+from synapse.state import _make_state_cache_entry, _rust_shadow_counter
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.types import create_requester
 from synapse.util.clock import Clock
@@ -117,8 +117,9 @@ class RustStateResHandlerTestCase(unittest.HomeserverTestCase):
         self.assertIn(self._current_topic(room_id), topics)
 
     def test_on_mode_uses_rust(self) -> None:
-        """In "on" mode, v2 and v2.1 resolutions run in Rust and the metrics
-        come from its stats."""
+        """In "on" mode, v2 and v2.1 resolutions of state groups run in Rust,
+        through its state group entry point, and the metrics come from its
+        stats."""
         self.handler._rust_state_res_mode = "on"
         self.handler._rust_state_res = self.hs.get_rust_handlers().state_resolution
         assert self.handler._rust_state_res is not None
@@ -128,9 +129,16 @@ class RustStateResHandlerTestCase(unittest.HomeserverTestCase):
                 self.user_id, room_version=room_version.identifier, tok=self.tok
             )
 
-            with patch(
-                "synapse.state.v2.resolve_events_with_store",
-                side_effect=AssertionError("Python state res should not run"),
+            with (
+                patch(
+                    "synapse.state.v2.resolve_events_with_store",
+                    side_effect=AssertionError("Python state res should not run"),
+                ),
+                patch.object(
+                    self.handler,
+                    "_resolve_with_rust",
+                    side_effect=AssertionError("state groups resolve as groups"),
+                ),
             ):
                 topics = self._fork(room_id)
 
@@ -160,6 +168,76 @@ class RustStateResHandlerTestCase(unittest.HomeserverTestCase):
             any("Falling back to Python state res" in line for line in logs.output)
         )
         self.assertIn(self._current_topic(room_id), topics)
+
+    def test_resolve_state_groups(self) -> None:
+        """Resolving state groups picks the cache entry's base as
+        `_make_state_cache_entry` does, and a second resolution does not
+        convert the groups' state again."""
+        rust = self.hs.get_rust_handlers().state_resolution
+        assert rust is not None
+
+        room_id = self.helper.create_room_as(
+            self.user_id, room_version=RoomVersions.V10.identifier, tok=self.tok
+        )
+        topic_a, topic_b = self._fork(room_id)
+        groups = self.get_success(
+            self.store._get_state_group_for_events([topic_a, topic_b])
+        )
+        state_controller = self.hs.get_storage_controllers().state
+        state_groups = self.get_success(
+            state_controller.get_state_for_groups(set(groups.values()))
+        )
+        state_sets = list(state_groups.values())
+
+        rust.clear_event_cache()
+        rust.clear_conflict_cache_for_test()
+        self.assertEqual(rust.state_map_cache_len(), 0)
+
+        # What the Python picks from the resolved state.
+        resolved, _ = self.get_success(
+            rust.resolve(room_id, RoomVersions.V10.identifier, state_sets)
+        )
+        expected = _make_state_cache_entry(resolved, state_groups)
+
+        for attempt in range(2):
+            rust.clear_conflict_cache_for_test()
+            state_group, prev_group, delta_ids, state, stats = self.get_success(
+                rust.resolve_state_groups(
+                    room_id, RoomVersions.V10.identifier, state_groups
+                )
+            )
+            self.assertEqual(
+                (state_group, prev_group, delta_ids, state),
+                (
+                    expected.state_group,
+                    expected.prev_group,
+                    expected.delta_ids,
+                    expected._state,
+                ),
+                f"attempt {attempt}",
+            )
+            # The fork's two groups differ only in the topic, so the resolved
+            # state is one of them.
+            self.assertIn(state_group, state_groups)
+            self.assertIsNone(prev_group)
+            self.assertIsNone(delta_ids)
+            self.assertIsNone(state)
+            self.assertEqual(
+                stats.state_map_cache_hits, len(state_groups) if attempt else 0
+            )
+        self.assertEqual(rust.state_map_cache_len(), len(state_groups))
+
+        # A group passed with partial state is converted afresh, not served
+        # the cached full state.
+        (group, full_state), *_ = state_groups.items()
+        partial = {group: {("m.room.create", ""): full_state[("m.room.create", "")]}}
+        _, _, _, _, stats = self.get_success(
+            rust.resolve_state_groups(room_id, RoomVersions.V10.identifier, partial)
+        )
+        self.assertEqual(stats.state_map_cache_hits, 0)
+
+        rust.clear_event_cache()
+        self.assertEqual(rust.state_map_cache_len(), 0)
 
     def test_event_cache(self) -> None:
         """A second resolution reads its events, chain positions and chain

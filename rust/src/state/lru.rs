@@ -34,8 +34,14 @@
 //! - [`ChainLinkCache`]: the links out of a chain, which only grow as events
 //!   are appended to the chain. See [`CachedChainLinks`].
 //!
-//! [`StateResCaches`] bundles the three, as the store reads them together
-//! and `EventsWorkerStore` invalidates them together.
+//! - [`StateMapCache`]: a state group's state converted from Python, keyed
+//!   on the group ID, so a group that takes part in one resolution after
+//!   another is converted once. State groups are immutable and their IDs
+//!   are never reused, so an entry can only go stale by the group being
+//!   deleted, which makes it dead weight rather than wrong.
+//!
+//! [`StateResCaches`] bundles the first three, as the store reads them
+//! together and `EventsWorkerStore` invalidates them together.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -79,6 +85,9 @@ pub struct CachedChainLinks {
 }
 
 pub type ChainLinkCache = SizedLru<i64, CachedChainLinks>;
+
+/// State group ID to its state, sized by entries.
+pub type StateMapCache = SizedLru<i64, Arc<StateMap>>;
 
 /// The caches a [`super::store::PostgresStateResStore`] reads before the
 /// database. Sized in events, positions and links respectively.

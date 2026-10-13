@@ -1519,7 +1519,8 @@ def setup_test_homeserver(
 
 
 class _BlockingRustStateResolution:
-    """Wraps the Rust `StateResolutionHandler` so that `resolve` blocks.
+    """Wraps the Rust `StateResolutionHandler` so that `resolve` and
+    `resolve_state_groups` block.
 
     The Rust resolution fires its deferred from the tokio runtime's threads.
     Nothing in the fake reactor waits for that, so code that resolves state in
@@ -1542,6 +1543,22 @@ class _BlockingRustStateResolution:
             return succeed(
                 self._handler.resolve_blocking(
                     room_id, room_version, state_sets, event_map
+                )
+            )
+        except Exception:
+            return fail()
+
+    def resolve_state_groups(
+        self,
+        room_id: str,
+        room_version: str,
+        state_groups: Any,
+        event_map: Any = None,
+    ) -> "Deferred[Any]":
+        try:
+            return succeed(
+                self._handler.resolve_state_groups_blocking(
+                    room_id, room_version, state_groups, event_map
                 )
             )
         except Exception:

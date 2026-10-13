@@ -201,8 +201,10 @@ impl Graph {
                 0 => StateMap::new(),
                 1 => state_at[prev_nodes[0]].clone(),
                 _ => {
-                    let sets: Vec<StateMap> =
-                        prev_nodes.iter().map(|n| state_at[n].clone()).collect();
+                    let sets: Vec<Arc<StateMap>> = prev_nodes
+                        .iter()
+                        .map(|n| Arc::new(state_at[n].clone()))
+                        .collect();
                     let store = MemoryStateResStore::new(event_map.clone());
                     rt.block_on(resolve(
                         &store,
@@ -269,12 +271,13 @@ impl Graph {
         cache: &ConflictCache,
     ) -> StateMap {
         let store = MemoryStateResStore::new(self.event_map.clone());
+        let state_sets: Vec<Arc<StateMap>> = state_sets.iter().cloned().map(Arc::new).collect();
         runtime()
             .block_on(resolve(
                 &store,
                 ROOM_ID,
                 room_version,
-                state_sets,
+                &state_sets,
                 EventMap::new(),
                 Some(cache),
             ))
@@ -581,7 +584,7 @@ fn event_map_none() {
             &store,
             ROOM_ID,
             &RoomVersion::V2,
-            &[at_bob, at_charlie],
+            &[Arc::new(at_bob), Arc::new(at_charlie)],
             EventMap::new(),
             None,
         ))
@@ -742,12 +745,14 @@ fn auth_difference(
             .collect()
     };
     let store = MemoryStateResStore::new(to_map(persisted));
-    let state_sets: Vec<StateMap> = state_sets
+    let state_sets: Vec<Arc<StateMap>> = state_sets
         .iter()
         .map(|set| {
-            set.iter()
-                .map(|(t, e)| (key(t, ""), Arc::from(e.event_id())))
-                .collect()
+            Arc::new(
+                set.iter()
+                    .map(|(t, e)| (key(t, ""), Arc::from(e.event_id())))
+                    .collect(),
+            )
         })
         .collect();
     runtime()

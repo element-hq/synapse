@@ -116,7 +116,7 @@ pub async fn resolve(
     store: &dyn StateResStore,
     room_id: &str,
     room_version: &'static RoomVersion,
-    state_sets: &[StateMap],
+    state_sets: &[Arc<StateMap>],
     event_map: EventMap,
     conflict_cache: Option<&ConflictCache>,
 ) -> anyhow::Result<Resolution> {
@@ -201,7 +201,7 @@ pub async fn prepare(
     store: &dyn StateResStore,
     room_id: &str,
     room_version: &'static RoomVersion,
-    state_sets: &[StateMap],
+    state_sets: &[Arc<StateMap>],
     (unconflicted, conflicted): (StateMap, Conflicted),
     mut event_map: EventMap,
     conflict_cache: Option<&ConflictCache>,
@@ -320,7 +320,7 @@ pub type Conflicted = HashMap<StateKey, HashSet<Arc<str>>>;
 /// Unlike the original algorithm, a key is conflicted if one of the state
 /// sets doesn't have it. The conflicted state maps each key to the event IDs
 /// the sets have for it.
-pub fn separate(state_sets: &[StateMap]) -> (StateMap, Conflicted) {
+pub fn separate(state_sets: &[Arc<StateMap>]) -> (StateMap, Conflicted) {
     let mut unconflicted = StateMap::new();
     let mut conflicted = Conflicted::new();
 
@@ -349,7 +349,7 @@ pub fn separate(state_sets: &[StateMap]) -> (StateMap, Conflicted) {
 /// subgraph.
 pub async fn get_auth_chain_difference(
     room_id: &str,
-    state_sets: &[StateMap],
+    state_sets: &[Arc<StateMap>],
     unpersisted_events: &EventMap,
     store: &dyn StateResStore,
     conflicted_state: Option<&HashSet<Arc<str>>>,

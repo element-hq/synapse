@@ -790,6 +790,19 @@ class StateResolutionHandler:
                 **{SERVER_NAME_LABEL: self.server_name}
             ).observe(len(state_groups_ids))
 
+            if (
+                self._rust_state_res is not None
+                and self._rust_state_res_mode == "on"
+                and KNOWN_ROOM_VERSIONS[room_version].state_res
+                != StateResolutionVersions.V1
+            ):
+                cache = await self._resolve_state_groups_with_rust(
+                    room_id, room_version, state_groups_ids, event_map
+                )
+                if cache is not None:
+                    self._state_cache[group_names] = cache
+                    return cache
+
             new_state = await self.resolve_events_with_store(
                 room_id,
                 room_version,
@@ -888,6 +901,48 @@ class StateResolutionHandler:
                 )
         finally:
             self._record_state_res_metrics(room_id, m.get_resource_usage(), rust_stats)
+
+    async def _resolve_state_groups_with_rust(
+        self,
+        room_id: str,
+        room_version: str,
+        state_groups_ids: Mapping[int, StateMap[str]],
+        event_map: dict[str, EventBase] | None,
+    ) -> _StateCacheEntry | None:
+        """Resolve state groups with the Rust state resolution, which picks
+        the cache entry's base group itself and remembers each group's state
+        across resolutions, so repeated groups are not converted again.
+
+        Returns None if the room has no chain cover index, which the Rust
+        implementation needs: the caller should use the Python one.
+        """
+        assert self._rust_state_res is not None
+        with Measure(
+            self.clock, name="state._resolve_events", server_name=self.server_name
+        ) as m:
+            try:
+                (
+                    state_group,
+                    prev_group,
+                    delta_ids,
+                    state,
+                    rust_stats,
+                ) = await self._rust_state_res.resolve_state_groups(
+                    room_id, room_version, state_groups_ids, event_map
+                )
+            except NoChainCoverIndexError as e:
+                # The Python resolution records its own metrics.
+                logger.info("Falling back to Python state res for %s: %s", room_id, e)
+                return None
+        self._record_state_res_metrics(room_id, m.get_resource_usage(), rust_stats)
+
+        logger.debug("Resolved state groups for %s in Rust: %r", room_id, rust_stats)
+        return _StateCacheEntry(
+            state=state,
+            state_group=state_group,
+            prev_group=prev_group,
+            delta_ids=delta_ids,
+        )
 
     async def _resolve_with_rust(
         self,

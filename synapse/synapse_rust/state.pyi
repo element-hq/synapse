@@ -41,6 +41,7 @@ class StateResStats:
     event_cache_hits: int
     chain_position_cache_hits: int
     chain_link_cache_hits: int
+    state_map_cache_hits: int
     conflicted_events: int
     cache_hit: bool
 
@@ -76,6 +77,47 @@ class StateResolutionHandler:
         """As `resolve`, but blocks and returns the result. For tests, where the
         fake reactor does not wait for a deferred fired from another thread."""
 
+    def resolve_state_groups(
+        self,
+        room_id: str,
+        room_version: str,
+        state_groups: Mapping[int, StateMap[str]],
+        event_map: Mapping[str, Event] | None = None,
+    ) -> Deferred[
+        tuple[
+            int | None,
+            int | None,
+            dict[StateKey, str] | None,
+            dict[StateKey, str] | None,
+            StateResStats,
+        ]
+    ]:
+        """Resolve the state of state groups, each given with its full state.
+        A group that took part in an earlier resolution is not converted again.
+
+        Returns a deferred resolving to `(state_group, prev_group, delta_ids,
+        state, stats)`: the fields of a `_StateCacheEntry` chosen as
+        `_make_state_cache_entry` does. Fails as `resolve` does."""
+
+    def resolve_state_groups_blocking(
+        self,
+        room_id: str,
+        room_version: str,
+        state_groups: Mapping[int, StateMap[str]],
+        event_map: Mapping[str, Event] | None = None,
+    ) -> tuple[
+        int | None,
+        int | None,
+        dict[StateKey, str] | None,
+        dict[StateKey, str] | None,
+        StateResStats,
+    ]:
+        """As `resolve_state_groups`, but blocks and returns the tuple. For
+        tests."""
+
+    def state_map_cache_len(self) -> int:
+        """The number of state groups in the state map cache."""
+
     def clear_conflict_cache_for_test(self) -> None:
         """Empty the conflict cache, keeping the event and chain caches."""
 
@@ -89,7 +131,7 @@ class StateResolutionHandler:
         """Drop an event from the event and chain position caches."""
 
     def clear_event_cache(self) -> None:
-        """Empty the event and chain caches."""
+        """Empty the event, chain and state map caches."""
 
 def get_auth_chain_difference_for_test(
     pool: ConnectionPool,
