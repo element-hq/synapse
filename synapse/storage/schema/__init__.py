@@ -182,6 +182,7 @@ Changes in SCHEMA_VERSION = 95
     - MSC4140: Stop using the `delayed_events_stream_pos` table, now that
       delayed state events are no longer canceled by more recent state events
       sent from a different user.
+    - `event_edges.is_state` is no longer read from (it has not been written to since SCHEMA_VERSION 72).
 """
 
 
