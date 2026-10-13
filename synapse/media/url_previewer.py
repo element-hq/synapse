@@ -47,7 +47,11 @@ from synapse.media.media_storage import (
     SHA256TransparentIOWriter,
 )
 from synapse.media.oembed import OEmbedProvider
-from synapse.media.preview_html import decode_body, parse_html_to_open_graph
+from synapse.media.preview_html import (
+    SITE_LOGO_CONTENT_TYPES,
+    decode_body,
+    parse_html_to_open_graph,
+)
 from synapse.types import JsonDict, UserID
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.expiringcache import ExpiringCache
@@ -754,8 +758,9 @@ class UrlPreviewer:
         if image_url == site_logo_url and "og:image" in og:
             # The favicon is standing in for a missing preview image, so it has
             # just been downloaded: reuse it rather than fetching it again.
-            og["msc4448:site_logo"] = og["og:image"]
-            og["msc4448:site_logo:size"] = og["matrix:image:size"]
+            if _is_site_logo_type(og.get("og:image:type", "")):
+                og["msc4448:site_logo"] = og["og:image"]
+                og["msc4448:site_logo:size"] = og["matrix:image:size"]
         else:
             og["msc4448:site_logo"] = site_logo_url
             await self._precache_image(user, media_info, og, "msc4448:site_logo")
@@ -808,6 +813,10 @@ class UrlPreviewer:
         mxc = f"mxc://{self.server_name}/{image_info.filesystem_id}"
 
         if key == "msc4448:site_logo":
+            # Many sites serve an undeclared favicon.ico or SVG, which clients
+            # can't safely display.
+            if not _is_site_logo_type(image_info.media_type):
+                return
             # MSC4448 only defines the URI and the size of the logo.
             og[key] = mxc
             og["msc4448:site_logo:size"] = image_info.media_length
@@ -990,6 +999,10 @@ def _filter_site_logo(jsonog: bytes, include_site_logo: bool) -> bytes:
 
 def _is_media(content_type: str) -> bool:
     return content_type.lower().startswith("image/")
+
+
+def _is_site_logo_type(content_type: str) -> bool:
+    return content_type.lower().split(";", 1)[0].strip() in SITE_LOGO_CONTENT_TYPES
 
 
 def _is_html(content_type: str) -> bool:

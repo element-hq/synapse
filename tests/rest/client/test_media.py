@@ -1022,6 +1022,31 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self._assert_small_png(channel.json_body)
         self.assertNotIn("msc4448:site_logo", channel.json_body)
 
+    @override_config({"experimental_features": {"msc4448_enabled": True}})
+    def test_site_logo_unsupported_format(self) -> None:
+        """MSC4448: a favicon in a format clients can't safely display is dropped."""
+        self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
+        self.lookups["cdn.matrix.org"] = [(IPv4Address, "10.1.2.4")]
+        self.lookups["icons.matrix.org"] = [(IPv4Address, "10.1.2.5")]
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org"
+            "&msc4448_include=msc4448:site_logo",
+            shorthand=False,
+            await_result=False,
+        )
+        self.pump()
+
+        self._respond(0, b'text/html; charset="utf8"', self.SITE_LOGO_HTML)
+        self._respond(1, b"image/png", SMALL_PNG)
+        self._respond(2, b"image/x-icon", SMALL_PNG)
+
+        self.assertEqual(channel.code, 200)
+        self._assert_small_png(channel.json_body)
+        self.assertNotIn("msc4448:site_logo", channel.json_body)
+        self.assertNotIn("msc4448:site_logo:size", channel.json_body)
+
     def test_site_logo_disabled(self) -> None:
         """MSC4448: without the feature flag the favicon is neither fetched nor returned."""
         self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]

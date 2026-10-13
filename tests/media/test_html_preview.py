@@ -451,7 +451,6 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
     def test_site_logo(self) -> None:
         """The favicon is returned as the MSC4448 site logo, separately from the image."""
         html = b"""<html>
-            <link rel="apple-touch-icon" href="https://example.com/touch.png">
             <link rel="shortcut icon" href="/favicon.ico">
             <link rel="icon" href="https://example.com/other.png">
             <img src="https://example.com/img.png">
@@ -465,11 +464,37 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
                 "og:title": None,
                 "og:description": None,
                 "og:image": "https://example.com/img.png",
-                # The first standard icon wins; "shortcut icon" counts as one. The
-                # URL is left as-is, the URL previewer resolves relative ones.
+                # Without declared sizes the first standard icon wins; "shortcut
+                # icon" counts as one. The URL is left as-is, the URL previewer
+                # resolves relative ones.
                 "msc4448:site_logo": "/favicon.ico",
             },
         )
+
+    def test_site_logo_largest(self) -> None:
+        """The largest icon is picked, skipping formats clients can't display."""
+        html = b"""<html>
+            <link rel="icon" href="/favicon.ico" sizes="16x16 32x32">
+            <link rel="icon" href="/icon.svg" type="image/svg+xml" sizes="any">
+            <link rel="icon" href="/huge.svg" type="image/svg+xml" sizes="512x512">
+            <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192">
+            <link rel="apple-touch-icon" href="/touch.png">
+        </html>"""
+        tree = decode_body(html, "http://example.com/test.html")
+        assert tree is not None
+        og = parse_html_to_open_graph(tree)
+        self.assertEqual(og["msc4448:site_logo"], "/icon-192.png")
+
+    def test_site_logo_prefers_apple_touch_icon(self) -> None:
+        """An Apple touch icon beats a favicon which does not declare its size."""
+        html = b"""<html>
+            <link rel="icon" href="/favicon.ico">
+            <link rel="apple-touch-icon" href="/touch.png">
+        </html>"""
+        tree = decode_body(html, "http://example.com/test.html")
+        assert tree is not None
+        og = parse_html_to_open_graph(tree)
+        self.assertEqual(og["msc4448:site_logo"], "/touch.png")
 
     def test_site_logo_apple_touch_icon(self) -> None:
         """An Apple touch icon is used as the site logo if there is no favicon."""

@@ -175,12 +175,51 @@ def _map_twitter_to_open_graph(key: str) -> str | None:
     return "og" + key[7:]
 
 
+# Image formats which clients can safely display inline, matching the images in
+# synapse.media._base.INLINE_CONTENT_TYPES. Notably excludes SVG and ICO.
+SITE_LOGO_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/gif",
+    "image/png",
+    "image/apng",
+    "image/webp",
+    "image/avif",
+}
+
+# Apple touch icons rarely declare their size, but are 180x180 by convention.
+_APPLE_TOUCH_ICON_SIZE = 180
+
+
+def _icon_size(link: "Tag", default: int) -> int:
+    """
+    Get the largest dimension declared in an icon's `sizes` attribute.
+
+    Args:
+        link: The icon's <link> tag.
+        default: The size to assume if the icon does not declare one.
+
+    Returns:
+        The size in pixels, or 0 for a scalable icon (sizes="any").
+    """
+    sizes = link.get("sizes")
+    if not isinstance(sizes, str) or not sizes:
+        return default
+    best = 0
+    for size in sizes.lower().split():
+        width, _, height = size.partition("x")
+        if width.isdigit() and height.isdigit():
+            best = max(best, int(width), int(height))
+    return best
+
+
 def _find_favicon(soup: "BeautifulSoup") -> str | None:
     """
-    Find the favicon of an HTML document, for use as the MSC4448 site logo.
+    Find the best icon of an HTML document, for use as the MSC4448 site logo.
 
-    A standard icon (``<link rel="icon">`` or the legacy ``rel="shortcut icon"``)
-    is preferred, falling back to an Apple touch icon.
+    Both standard icons (``rel="icon"`` or the legacy ``rel="shortcut icon"``) and
+    Apple touch icons are considered. Icons declaring a format clients can't safely
+    display (e.g. SVG) are skipped, and the largest remaining one is picked, the
+    first one winning ties.
 
     Args:
         soup: The parsed HTML document.
@@ -189,14 +228,27 @@ def _find_favicon(soup: "BeautifulSoup") -> str | None:
         The favicon URL, which may be relative to the document, or None if the
         document does not declare one.
     """
+    best_href = None
+    best_size = -1
     # BeautifulSoup treats rel as a multi-valued attribute, so rel="shortcut icon"
     # is parsed as ["shortcut", "icon"] and still matches "icon".
-    favicon = soup.find("link", href=NON_BLANK, rel="icon")
-    if favicon is None:
-        favicon = soup.find("link", href=NON_BLANK, rel="apple-touch-icon")
-    if favicon is None:
-        return None
-    return get_attribute(favicon, "href")
+    for rel, default_size in (
+        ("icon", 0),
+        ("apple-touch-icon", _APPLE_TOUCH_ICON_SIZE),
+    ):
+        for link in soup.find_all("link", href=NON_BLANK, rel=rel):
+            content_type = link.get("type")
+            if (
+                isinstance(content_type, str)
+                and content_type
+                and content_type.lower() not in SITE_LOGO_CONTENT_TYPES
+            ):
+                continue
+            size = _icon_size(link, default_size)
+            if size > best_size:
+                best_href = get_attribute(link, "href")
+                best_size = size
+    return best_href
 
 
 def parse_html_to_open_graph(soup: "BeautifulSoup") -> dict[str, str | None]:
