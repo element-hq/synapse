@@ -18,21 +18,31 @@
 //! - [`store`]: what state resolution reads from the database, as a trait
 //!   with a Postgres implementation and an in-memory one for tests.
 //! - [`auth_chain`]: the chain cover auth chain difference.
+//! - [`v2`]: the algorithm.
+//! - [`conflict_cache`]: the cache of resolved conflicted sets.
 
 use std::{
     borrow::Borrow,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     sync::Arc,
 };
 
 use anyhow::Context;
-use pyo3::{prelude::*, types::PyModule};
+use pyo3::{
+    exceptions::{PyRuntimeError, PyValueError},
+    intern,
+    prelude::*,
+    types::{PyDict, PyModule, PyTuple},
+};
 
 use crate::events::Event;
+use crate::room_versions::RoomVersion;
 
 pub mod auth_chain;
+pub mod conflict_cache;
 pub mod store;
+pub mod v2;
 
 /// A `(type, state_key)` pair.
 ///
@@ -179,10 +189,132 @@ fn auth_event_ids_of(event: &Event) -> anyhow::Result<Box<[Arc<str>]>> {
 /// Events by ID.
 pub type EventMap = HashMap<Arc<str>, StateResEvent>;
 
+/// Interns strings, so the same event ID or event type read from several
+/// Python state sets shares one allocation.
+#[derive(Default)]
+struct Interner(HashSet<Arc<str>>);
+
+impl Interner {
+    fn intern(&mut self, s: &str) -> Arc<str> {
+        if let Some(existing) = self.0.get(s) {
+            return Arc::clone(existing);
+        }
+        let new: Arc<str> = Arc::from(s);
+        self.0.insert(Arc::clone(&new));
+        new
+    }
+}
+
+/// Convert a Python state map (any mapping of `(type, state_key)` to event
+/// ID) to a [`StateMap`].
+fn state_map_from_py(state: &Bound<'_, PyAny>, interner: &mut Interner) -> PyResult<StateMap> {
+    let mut map = StateMap::new();
+    let mut add = |key: Bound<'_, PyAny>, value: Bound<'_, PyAny>| -> PyResult<()> {
+        let key = key.cast_into::<PyTuple>()?;
+        let event_type = key.get_item(0)?;
+        let state_key = key.get_item(1)?;
+        map.insert(
+            StateKey(
+                interner.intern(event_type.extract()?),
+                interner.intern(state_key.extract()?),
+            ),
+            interner.intern(value.extract()?),
+        );
+        Ok(())
+    };
+
+    if let Ok(dict) = state.cast::<PyDict>() {
+        for (key, value) in dict.iter() {
+            add(key, value)?;
+        }
+    } else {
+        for item in state
+            .call_method0(intern!(state.py(), "items"))?
+            .try_iter()?
+        {
+            let (key, value): (Bound<'_, PyAny>, Bound<'_, PyAny>) = item?.extract()?;
+            add(key, value)?;
+        }
+    }
+    Ok(map)
+}
+
+/// Convert a [`StateMap`] to a Python dict.
+fn state_map_to_py<'py>(py: Python<'py>, state: &StateMap) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    for (key, event_id) in state {
+        dict.set_item((&*key.0, &*key.1), &**event_id)?;
+    }
+    Ok(dict)
+}
+
+/// Convert a Python dict of event ID to `Event` to an [`EventMap`].
+fn event_map_from_py(
+    events: Option<&Bound<'_, PyDict>>,
+    interner: &mut Interner,
+) -> PyResult<EventMap> {
+    let mut map = EventMap::new();
+    for (event_id, event) in events.into_iter().flat_map(|m| m.iter()) {
+        let event = event.cast_into::<Event>()?.unbind();
+        map.insert(
+            interner.intern(event_id.extract()?),
+            StateResEvent::from_py(event).map_err(|e| PyValueError::new_err(format!("{e:#}")))?,
+        );
+    }
+    Ok(map)
+}
+
+/// Resolve state with [`v2::resolve`] over an in-memory store holding
+/// `persisted_events`, treating `unpersisted_events` as the caller's event
+/// map. Returns the resolved state. For tests: trial compares it with the
+/// Python implementation.
+#[pyfunction]
+#[pyo3(signature = (room_id, room_version, state_sets, persisted_events, unpersisted_events=None))]
+fn resolve_in_memory_for_test<'py>(
+    py: Python<'py>,
+    room_id: &str,
+    room_version: &str,
+    state_sets: Vec<Bound<'py, PyAny>>,
+    persisted_events: Bound<'py, PyDict>,
+    unpersisted_events: Option<Bound<'py, PyDict>>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let room_version: &'static RoomVersion = room_version
+        .parse()
+        .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+    let mut interner = Interner::default();
+    let state_sets = state_sets
+        .iter()
+        .map(|set| state_map_from_py(set, &mut interner))
+        .collect::<PyResult<Vec<_>>>()?;
+    let store =
+        store::MemoryStateResStore::new(event_map_from_py(Some(&persisted_events), &mut interner)?);
+    let unpersisted = event_map_from_py(unpersisted_events.as_ref(), &mut interner)?;
+
+    // Release the GIL: the auth checks take it for third-party invites.
+    let resolution = py
+        .detach(|| {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .context("building a runtime")?;
+            runtime.block_on(v2::resolve(
+                &store,
+                room_id,
+                room_version,
+                &state_sets,
+                unpersisted,
+                None,
+            ))
+        })
+        .map_err(|e| PyRuntimeError::new_err(format!("{e:#}")))?;
+
+    state_map_to_py(py, &resolution.merged())
+}
+
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "state")?;
     store::register_test_functions(py, &child_module)?;
+    child_module.add_function(wrap_pyfunction!(resolve_in_memory_for_test, &child_module)?)?;
 
     m.add_submodule(&child_module)?;
 

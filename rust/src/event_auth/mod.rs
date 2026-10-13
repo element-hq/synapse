@@ -719,4 +719,4 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
