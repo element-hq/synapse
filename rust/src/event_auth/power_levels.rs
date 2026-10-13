@@ -22,11 +22,9 @@ use std::collections::BTreeSet;
 
 use serde_json::{Map, Value};
 
-use super::{
-    is_creator, user_id_from_string, AuthFailure, AuthMap, CREATE_KEY, CREATOR_POWER_LEVEL,
-    POWER_LEVELS_KEY,
-};
+use super::{is_creator, AuthFailure, AuthMap, CREATE_KEY, CREATOR_POWER_LEVEL, POWER_LEVELS_KEY};
 use crate::events::{json_object::JsonObject, Event};
+use crate::identifier::UserID;
 use crate::room_versions::RoomVersion;
 
 /// The keys of `m.room.power_levels` content that hold a single level.
@@ -276,7 +274,7 @@ impl<'a> Location<'a> {
 /// Validate that `value` is a valid user ID for a power levels `users` key,
 /// as `UserID.from_string` does.
 fn check_user_id(user_id: &str) -> Result<(), AuthFailure> {
-    if user_id_from_string(user_id).is_none() {
+    if UserID::try_from(user_id).is_err() {
         return Err(AuthFailure::invalid(format!(
             "Not a valid user_id: {user_id}"
         )));

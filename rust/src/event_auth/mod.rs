@@ -47,6 +47,7 @@ use crate::events::{
     },
     Event,
 };
+use crate::identifier::UserID;
 use crate::room_versions::{EventFormatVersions, RoomVersion};
 
 pub mod membership;
@@ -174,18 +175,12 @@ pub fn get_domain_from_id(id: &str) -> Result<&str, AuthFailure> {
     }
 }
 
-/// Split a user ID into localpart and domain, as `UserID.from_string` does.
-/// Returns `None` where it raises.
-pub fn user_id_from_string(s: &str) -> Option<(&str, &str)> {
-    s.strip_prefix('@')?.split_once(':')
-}
-
 /// Port of `UserID.is_valid`: `from_string` plus server name validation.
 pub fn user_id_is_valid(s: &str) -> bool {
-    let Some((_, domain)) = user_id_from_string(s) else {
-        return false;
-    };
-    is_valid_server_name(domain)
+    match UserID::try_from(s) {
+        Ok(user_id) => is_valid_server_name(user_id.server_name()),
+        Err(_) => false,
+    }
 }
 
 /// Port of `parse_and_validate_server_name`, returning whether it succeeds.
