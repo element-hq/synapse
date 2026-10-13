@@ -38,7 +38,6 @@ use std::{
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
-use anyhow::Context;
 use log::warn;
 use pyo3::{
     exceptions::{PyAttributeError, PyRuntimeError},
@@ -47,6 +46,7 @@ use pyo3::{
     types::{PyAnyMethods, PyDict, PyDictMethods, PyString},
     Bound, IntoPyObject, Py, PyAny, PyResult, Python,
 };
+use pythonize::depythonize;
 
 use crate::UnwrapInfallible;
 
@@ -148,101 +148,29 @@ impl EventInternalMetadataData {
         }
     }
 
-    /// Converts from python key/values to the field.
+    /// Converts from python key/values to the field, by way of JSON: the dict
+    /// is the decoded form of what [`Self::from_json_pair`] reads.
     ///
-    /// Returns `None` if the key is a valid but unrecognized string.
+    /// Returns `None` if the key is a valid but unrecognized string, and an
+    /// error if the value has the wrong type.
     fn from_python_pair(
         key: &Bound<'_, PyAny>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<Option<Self>> {
         let key_str: PyBackedStr = key.extract()?;
-
-        let e = match &*key_str {
-            "out_of_band_membership" => EventInternalMetadataData::OutOfBandMembership(
-                value
-                    .extract()
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-
-            "send_on_behalf_of" => EventInternalMetadataData::SendOnBehalfOf(
-                value
-                    .extract()
-                    .map(String::into_boxed_str)
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "recheck_redaction" => EventInternalMetadataData::RecheckRedaction(
-                value
-                    .extract()
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "soft_failed" => EventInternalMetadataData::SoftFailed(
-                value
-                    .extract()
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "proactively_send" => EventInternalMetadataData::ProactivelySend(
-                value
-                    .extract()
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "policy_server_spammy" => EventInternalMetadataData::PolicyServerSpammy(
-                value
-                    .extract()
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "spam_checker_spammy" => EventInternalMetadataData::SpamCheckerSpammy(
-                value
-                    .extract()
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "redacted" => EventInternalMetadataData::Redacted(
-                value
-                    .extract()
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "txn_id" => EventInternalMetadataData::TxnId(
-                value
-                    .extract()
-                    .map(String::into_boxed_str)
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "delay_id" => EventInternalMetadataData::DelayId(
-                value
-                    .extract()
-                    .map(String::into_boxed_str)
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "token_id" => EventInternalMetadataData::TokenId(
-                value
-                    .extract()
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "device_id" => EventInternalMetadataData::DeviceId(
-                value
-                    .extract()
-                    .map(String::into_boxed_str)
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "calculated_auth_event_ids" => EventInternalMetadataData::CalculatedAuthEventIDs(
-                value
-                    .extract()
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            _ => return Ok(None),
-        };
-
-        Ok(Some(e))
+        let value: serde_json::Value = depythonize(value)?;
+        Self::from_json_pair(&key_str, &value)
+            .map_err(|err| PyRuntimeError::new_err(err.to_string()))
     }
-}
 
-impl EventInternalMetadataData {
     /// Converts a key/value from the JSON stored in the database to the
-    /// field, as [`Self::from_python_pair`] does for the decoded dict.
+    /// field.
     ///
-    /// Returns `None` if the key is unrecognized or the value has the wrong
-    /// type (which `from_python_pair` reports and the caller ignores).
-    fn from_json_pair(key: &str, value: &serde_json::Value) -> Option<Self> {
+    /// Returns `None` if the key is unrecognized, and an error if the value
+    /// has the wrong type.
+    fn from_json_pair(key: &str, value: &serde_json::Value) -> anyhow::Result<Option<Self>> {
         use serde_json::Value;
+        use EventInternalMetadataData as Data;
 
         let boolean = || match value {
             Value::Bool(b) => Some(*b),
@@ -250,28 +178,33 @@ impl EventInternalMetadataData {
         };
         let string = || value.as_str().map(Box::from);
 
-        Some(match key {
-            "out_of_band_membership" => EventInternalMetadataData::OutOfBandMembership(boolean()?),
-            "send_on_behalf_of" => EventInternalMetadataData::SendOnBehalfOf(string()?),
-            "recheck_redaction" => EventInternalMetadataData::RecheckRedaction(boolean()?),
-            "soft_failed" => EventInternalMetadataData::SoftFailed(boolean()?),
-            "proactively_send" => EventInternalMetadataData::ProactivelySend(boolean()?),
-            "policy_server_spammy" => EventInternalMetadataData::PolicyServerSpammy(boolean()?),
-            "spam_checker_spammy" => EventInternalMetadataData::SpamCheckerSpammy(boolean()?),
-            "redacted" => EventInternalMetadataData::Redacted(boolean()?),
-            "txn_id" => EventInternalMetadataData::TxnId(string()?),
-            "delay_id" => EventInternalMetadataData::DelayId(string()?),
-            "token_id" => EventInternalMetadataData::TokenId(value.as_i64()?),
-            "device_id" => EventInternalMetadataData::DeviceId(string()?),
-            "calculated_auth_event_ids" => EventInternalMetadataData::CalculatedAuthEventIDs(
-                value
-                    .as_array()?
-                    .iter()
-                    .map(|v| v.as_str().map(str::to_owned))
-                    .collect::<Option<Vec<_>>>()?,
-            ),
-            _ => return None,
-        })
+        let entry = match key {
+            "out_of_band_membership" => boolean().map(Data::OutOfBandMembership),
+            "send_on_behalf_of" => string().map(Data::SendOnBehalfOf),
+            "recheck_redaction" => boolean().map(Data::RecheckRedaction),
+            "soft_failed" => boolean().map(Data::SoftFailed),
+            "proactively_send" => boolean().map(Data::ProactivelySend),
+            "policy_server_spammy" => boolean().map(Data::PolicyServerSpammy),
+            "spam_checker_spammy" => boolean().map(Data::SpamCheckerSpammy),
+            "redacted" => boolean().map(Data::Redacted),
+            "txn_id" => string().map(Data::TxnId),
+            "delay_id" => string().map(Data::DelayId),
+            "token_id" => value.as_i64().map(Data::TokenId),
+            "device_id" => string().map(Data::DeviceId),
+            "calculated_auth_event_ids" => value
+                .as_array()
+                .and_then(|ids| {
+                    ids.iter()
+                        .map(|v| v.as_str().map(str::to_owned))
+                        .collect::<Option<Vec<_>>>()
+                })
+                .map(Data::CalculatedAuthEventIDs),
+            _ => return Ok(None),
+        };
+
+        entry
+            .map(Some)
+            .ok_or_else(|| anyhow::anyhow!("'{key}' has invalid type: {value}"))
     }
 }
 
@@ -593,20 +526,18 @@ impl EventInternalMetadata {
 
 impl EventInternalMetadata {
     /// Build internal metadata from the JSON stored in the
-    /// `event_json.internal_metadata` column. Fields Synapse does not know,
-    /// or with the wrong type, are skipped, as [`Self::new`] skips them.
+    /// `event_json.internal_metadata` column. As [`Self::new`] does, this
+    /// skips fields Synapse does not know, and skips fields with the wrong
+    /// type with a warning.
     pub fn from_json_str(json: &str) -> anyhow::Result<Self> {
         let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(json)?;
 
         let mut data = Vec::with_capacity(map.len());
         for (key, value) in &map {
             match EventInternalMetadataData::from_json_pair(key, value) {
-                Some(entry) => data.push(entry),
-                None => {
-                    if !value.is_null() {
-                        warn!("Ignoring internal metadata field '{key}' with value {value}");
-                    }
-                }
+                Ok(Some(entry)) => data.push(entry),
+                Ok(None) => {}
+                Err(err) => warn!("Ignoring internal metadata field {err}"),
             }
         }
         data.shrink_to_fit();
