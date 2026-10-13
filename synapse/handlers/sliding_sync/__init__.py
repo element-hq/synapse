@@ -106,6 +106,7 @@ class SlidingSyncHandler:
         self.notifier = hs.get_notifier()
         self.event_sources = hs.get_event_sources()
         self.relations_handler = hs.get_relations_handler()
+        self.member_info_handler = hs.get_member_info_handler()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
 
@@ -1499,6 +1500,14 @@ class SlidingSyncHandler:
 
         set_tag(SynapseTags.RESULT_PREFIX + "initial", initial)
 
+        member_info = await self.member_info_handler.member_info_for_response(
+            room_id,
+            itertools.chain(
+                (ev.event for ev in timeline_events), required_room_state.values()
+            ),
+            heroes=(hero.user_id for hero in heroes),
+        )
+
         return SlidingSyncResult.RoomResult(
             name=room_name,
             avatar=room_avatar,
@@ -1521,6 +1530,7 @@ class SlidingSyncHandler:
             # (encrypted rooms).
             notification_count=0,
             highlight_count=0,
+            member_info=member_info,
         )
 
     @trace

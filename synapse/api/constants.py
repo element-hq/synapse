@@ -332,6 +332,16 @@ class EventUnsignedContentFields:
     MSC4428_STABLE_ID: Final = "org.matrix.msc4428.stable_id"
 
 
+class MemberInfo:
+    """MSC4428: the per-room `member_info` map of stable ID -> user ID."""
+
+    FIELD: Final = "org.matrix.msc4428.member_info"
+    """The map's field name on `/sync`, sliding sync and `/members` responses."""
+
+    USER_ID: Final = "user_id"
+    """The user ID an entry maps to; `null` once the user is erased."""
+
+
 class MTextFields:
     """Fields found inside m.text content blocks."""
 

@@ -97,6 +97,7 @@ from synapse.handlers.federation import FederationHandler
 from synapse.handlers.federation_event import FederationEventHandler
 from synapse.handlers.identity import IdentityHandler
 from synapse.handlers.initial_sync import InitialSyncHandler
+from synapse.handlers.member_info import MemberInfoHandler
 from synapse.handlers.message import EventCreationHandler, MessageHandler
 from synapse.handlers.pagination import PaginationHandler
 from synapse.handlers.password_policy import PasswordPolicyHandler
@@ -867,6 +868,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_sliding_sync_handler(self) -> SlidingSyncHandler:
         return SlidingSyncHandler(self)
+
+    @cache_in_self
+    def get_member_info_handler(self) -> MemberInfoHandler:
+        return MemberInfoHandler(self)
 
     @cache_in_self
     def get_room_list_handler(self) -> RoomListHandler:

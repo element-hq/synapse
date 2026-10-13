@@ -35,6 +35,7 @@ from synapse.api.constants import (
     GuestAccess,
     HistoryVisibility,
     JoinRules,
+    MemberInfo,
     Membership,
     RelationTypes,
     UserTypes,
@@ -112,6 +113,7 @@ class MessageHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
         self._event_serializer = hs.get_event_client_serializer()
+        self._member_info_handler = hs.get_member_info_handler()
         self._ephemeral_events_enabled = hs.config.server.enable_ephemeral_messages
 
         # The scheduled call to self._expire_event. None if no call is currently
@@ -340,7 +342,9 @@ class MessageHandler:
             requester: The user requesting state events.
             room_id: The room ID to get all state events from.
         Returns:
-            A dict of user_id to profile info
+            A dict of stable ID (today: user ID) to profile info. With MSC4428
+            enabled, each entry also carries the `user_id` the stable ID maps
+            to, `None` once that user is erased.
         """
         if not requester.app_service_id:
             # We check AS auth after fetching the room membership, as it
@@ -381,13 +385,27 @@ class MessageHandler:
                     errcode=Codes.NOT_JOINED,
                 )
 
-        return {
+        result = {
             user_id: {
                 "avatar_url": profile.avatar_url,
                 "display_name": profile.display_name,
             }
             for user_id, profile in users_with_profile.items()
         }
+
+        if self._member_info_handler.enabled:
+            # MSC4428: the map is keyed by stable ID; tell the client which user
+            # ID each one maps to (the stable ID itself unless erased).
+            member_info = await self._member_info_handler.get_member_info(
+                room_id, list(result.keys())
+            )
+            for stable_id, entry in result.items():
+                info = member_info.get(stable_id)
+                entry[MemberInfo.USER_ID] = (
+                    info[MemberInfo.USER_ID] if info is not None else stable_id
+                )
+
+        return result
 
     def maybe_schedule_expiry(self, event: EventBase) -> None:
         """Schedule the expiry of an event if there's not already one scheduled,

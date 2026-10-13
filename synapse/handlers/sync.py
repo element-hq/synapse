@@ -267,6 +267,9 @@ class JoinedSyncResult:
     unread_thread_notifications: JsonDict
     summary: JsonDict | None
     unread_count: int
+    member_info: JsonDict | None
+    """MSC4428: the stable ID -> user ID entries for this response, or None if
+    there are none (or the feature is disabled)."""
 
     def __bool__(self) -> bool:
         """Make the result appear empty if there are no updates. This is used
@@ -278,6 +281,7 @@ class JoinedSyncResult:
             or self.ephemeral
             or self.account_data
             or self.sticky
+            or self.member_info
             # nb the notification count does not, er, count: if there's nothing
             # else in the result, we don't need to send it.
         )
@@ -289,12 +293,16 @@ class ArchivedSyncResult:
     timeline: TimelineBatch
     state: StateMap[EventBase]
     account_data: list[JsonDict]
+    member_info: JsonDict | None
+    """MSC4428: as for `JoinedSyncResult.member_info`."""
 
     def __bool__(self) -> bool:
         """Make the result appear empty if there are no updates. This is used
         to tell if room needs to be part of the sync result.
         """
-        return bool(self.timeline or self.state or self.account_data)
+        return bool(
+            self.timeline or self.state or self.account_data or self.member_info
+        )
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -420,6 +428,7 @@ class SyncHandler:
         self.auth_blocking = hs.get_auth_blocking()
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
+        self._member_info_handler = hs.get_member_info_handler()
         self._device_handler = hs.get_device_handler()
         self._task_scheduler = hs.get_task_scheduler()
 
@@ -3500,6 +3509,17 @@ class SyncHandler:
                             # > Any joined user is authorised to see sticky events for the duration they remain sticky.
                             always_include_ids=frozenset(sticky_event_ids),
                         )
+
+                member_info = await self._member_info_handler.member_info_for_response(
+                    room_id,
+                    itertools.chain(
+                        (ev.event for ev in batch.events),
+                        state.values(),
+                        (ev.event for ev in sticky_events),
+                    ),
+                    heroes=summary.get("m.heroes", ()) if summary else (),
+                )
+
                 room_sync = JoinedSyncResult(
                     room_id=room_id,
                     timeline=batch,
@@ -3511,6 +3531,7 @@ class SyncHandler:
                     summary=summary,
                     unread_count=0,
                     sticky=sticky_events,
+                    member_info=member_info,
                 )
 
                 if room_sync or always_include:
@@ -3555,11 +3576,17 @@ class SyncHandler:
                         len(state),
                     )
             elif room_builder.rtype == "archived":
+                member_info = await self._member_info_handler.member_info_for_response(
+                    room_id,
+                    itertools.chain((ev.event for ev in batch.events), state.values()),
+                    heroes=summary.get("m.heroes", ()) if summary else (),
+                )
                 archived_room_sync = ArchivedSyncResult(
                     room_id=room_id,
                     timeline=batch,
                     state=state,
                     account_data=account_data_events,
+                    member_info=member_info,
                 )
                 if archived_room_sync or always_include:
                     sync_result_builder.archived.append(archived_room_sync)

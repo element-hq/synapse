@@ -24,7 +24,13 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 import attr
 
-from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
+from synapse.api.constants import (
+    AccountDataTypes,
+    EduTypes,
+    MemberInfo,
+    Membership,
+    PresenceState,
+)
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
@@ -648,6 +654,10 @@ class SyncRestServlet(RestServlet):
             "account_data": {"events": account_data},
         }
 
+        if room.member_info is not None:
+            # MSC4428
+            result[MemberInfo.FIELD] = room.member_info
+
         if joined:
             assert isinstance(room, JoinedSyncResult)
             ephemeral_events = room.ephemeral
@@ -1046,6 +1056,10 @@ class SlidingSyncRestServlet(RestServlet):
             # Field should be absent on non-DM rooms
             if room_result.is_dm:
                 serialized_rooms[room_id]["is_dm"] = room_result.is_dm
+
+            # MSC4428: omitted when there is nothing to say.
+            if room_result.member_info is not None:
+                serialized_rooms[room_id][MemberInfo.FIELD] = room_result.member_info
 
             # Stripped state only applies to invite/knock rooms
             if (

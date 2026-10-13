@@ -12,12 +12,11 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 """Tests for MSC4428 (stable identifiers for room members): the
-`unsigned.org.matrix.msc4428.stable_id` field on events served to clients.
+`unsigned.org.matrix.msc4428.stable_id` field on events served to clients, and
+the per-room `member_info` map.
 
-This stands in for the Complement test "stable_id on every event" (COMPLEMENT.md
-§2.2) until that suite exists: every event-returning client endpoint, including
-the events embedded in `unsigned` (`redacted_because`, bundled edits and thread
-summaries), carries the field.
+These stand in for the Complement tests of COMPLEMENT.md §2 (C#2, C#3, C#4 and
+C#14) until that suite exists.
 """
 
 import json
@@ -25,14 +24,20 @@ from typing import Iterable
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes, EventUnsignedContentFields, RelationTypes
+from synapse.api.constants import (
+    EventTypes,
+    EventUnsignedContentFields,
+    MemberInfo,
+    RelationTypes,
+)
 from synapse.rest import admin
 from synapse.rest.client import login, relations, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 
 STABLE_ID = EventUnsignedContentFields.MSC4428_STABLE_ID
 
@@ -268,3 +273,268 @@ class StableIdDisabledTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
         for event in channel.json_body["rooms"]["join"][room_id]["timeline"]["events"]:
             self.assertNotIn(STABLE_ID, event.get("unsigned", {}))
+
+
+class MemberInfoTestCase(unittest.HomeserverTestCase):
+    """The `member_info` map: stands in for Complement tests C#3, C#4 and C#14
+    (COMPLEMENT.md §2) until that suite exists. In today's rooms stable IDs equal
+    user IDs, so the map only ever names erased users."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4428_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.alice = self.register_user("alice", "pass")
+        self.alice_tok = self.login("alice", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_tok = self.login("bob", "pass")
+
+        self.room_id = self.helper.create_room_as(self.alice, tok=self.alice_tok)
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        self.helper.send(self.room_id, body="hi", tok=self.bob_tok)
+
+    def _erase(self, user_id: str) -> None:
+        """Mark a user erased without deactivating them, so they stay joined."""
+        self.get_success(self.store.mark_user_erased(user_id))
+
+    def _sync(self, since: str | None = None, **params: str) -> JsonDict:
+        query = {**params}
+        if since is not None:
+            query["since"] = since
+        qs = "&".join(f"{k}={v}" for k, v in query.items())
+        channel = self.make_request(
+            "GET", f"/sync?{qs}" if qs else "/sync", access_token=self.alice_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        return channel.json_body
+
+    def test_sync_omits_map_when_nothing_to_say(self) -> None:
+        room = self._sync()["rooms"]["join"][self.room_id]
+        self.assertNotIn(MemberInfo.FIELD, room)
+
+    def test_sync_full_map_names_erased_member(self) -> None:
+        """C#14: erasure is visible on the next full sync."""
+        self._erase(self.bob)
+
+        room = self._sync()["rooms"]["join"][self.room_id]
+        self.assertEqual(room[MemberInfo.FIELD], {self.bob: {MemberInfo.USER_ID: None}})
+
+        # Likewise on a `full_state` incremental sync.
+        since = self._sync()["next_batch"]
+        room = self._sync(since, full_state="true")["rooms"]["join"][self.room_id]
+        self.assertEqual(room[MemberInfo.FIELD], {self.bob: {MemberInfo.USER_ID: None}})
+
+    def test_sync_incremental_only_for_mentioned_members(self) -> None:
+        """An incremental sync carries entries only for the stable IDs the
+        response mentions. A change with no event to anchor it (the erasure
+        itself) waits for the next event from, or about, that member."""
+        since = self._sync()["next_batch"]
+        self._erase(self.bob)
+
+        # Alice's own message mentions nobody but Alice.
+        self.helper.send(self.room_id, body="alice", tok=self.alice_tok)
+        body = self._sync(since)
+        room = body["rooms"]["join"][self.room_id]
+        self.assertNotIn(MemberInfo.FIELD, room)
+        since = body["next_batch"]
+
+        # Bob's next message is the anchor.
+        self.helper.send(self.room_id, body="bob", tok=self.bob_tok)
+        room = self._sync(since)["rooms"]["join"][self.room_id]
+        self.assertEqual(room[MemberInfo.FIELD], {self.bob: {MemberInfo.USER_ID: None}})
+
+    def test_sync_deactivation_leave_anchors_erasure(self) -> None:
+        """Deactivating with `erase: true` parts the user from their rooms;
+        the parting leave anchors the `null` entry for other members."""
+        since = self._sync()["next_batch"]
+
+        self.get_success(
+            self.hs.get_deactivate_account_handler().deactivate_account(
+                self.bob, erase_data=True, requester=create_requester(self.bob)
+            )
+        )
+        # Parting rooms happens in the background.
+        self.pump()
+        self.reactor.advance(1)
+        self.pump()
+
+        room = self._sync(since)["rooms"]["join"][self.room_id]
+        leave = [
+            e
+            for e in room["timeline"]["events"]
+            if e["type"] == EventTypes.Member and e["state_key"] == self.bob
+        ]
+        self.assertEqual(len(leave), 1, room["timeline"])
+        self.assertEqual(leave[0]["content"]["membership"], "leave")
+        self.assertEqual(room[MemberInfo.FIELD], {self.bob: {MemberInfo.USER_ID: None}})
+
+    def test_sync_left_room(self) -> None:
+        """The map is also present on rooms under `rooms.leave`."""
+        since = self._sync()["next_batch"]
+        self._erase(self.bob)
+        self.helper.send(self.room_id, body="bob", tok=self.bob_tok)
+        self.helper.leave(self.room_id, self.alice, tok=self.alice_tok)
+
+        room = self._sync(since)["rooms"]["leave"][self.room_id]
+        self.assertEqual(room[MemberInfo.FIELD], {self.bob: {MemberInfo.USER_ID: None}})
+
+    def test_members(self) -> None:
+        """C#4: `/members` always carries the map."""
+        channel = self.make_request(
+            "GET", f"/rooms/{self.room_id}/members", access_token=self.alice_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body[MemberInfo.FIELD], {})
+
+        self._erase(self.bob)
+        channel = self.make_request(
+            "GET", f"/rooms/{self.room_id}/members", access_token=self.alice_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(
+            channel.json_body[MemberInfo.FIELD], {self.bob: {MemberInfo.USER_ID: None}}
+        )
+
+        # The map only covers the members in the (filtered) chunk.
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/members?not_membership=join",
+            access_token=self.alice_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body["chunk"], [])
+        self.assertEqual(channel.json_body[MemberInfo.FIELD], {})
+
+    def test_joined_members(self) -> None:
+        """C#4: `/joined_members` is keyed by stable ID and names the user ID."""
+        channel = self.make_request(
+            "GET", f"/rooms/{self.room_id}/joined_members", access_token=self.alice_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        joined = channel.json_body["joined"]
+        self.assertEqual(joined[self.alice][MemberInfo.USER_ID], self.alice)
+        self.assertEqual(joined[self.bob][MemberInfo.USER_ID], self.bob)
+        self.assertEqual(joined[self.bob]["display_name"], "bob")
+
+        self._erase(self.bob)
+        channel = self.make_request(
+            "GET", f"/rooms/{self.room_id}/joined_members", access_token=self.alice_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        joined = channel.json_body["joined"]
+        self.assertEqual(joined[self.alice][MemberInfo.USER_ID], self.alice)
+        self.assertIsNone(joined[self.bob][MemberInfo.USER_ID])
+
+
+class MemberInfoSlidingSyncTestCase(SlidingSyncBase):
+    """C#3 for sliding sync: `rooms.<id>.member_info`."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"]["msc4428_enabled"] = True
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.store = hs.get_datastores().main
+        self.alice = self.register_user("alice", "pass")
+        self.alice_tok = self.login("alice", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_tok = self.login("bob", "pass")
+
+        self.room_id = self.helper.create_room_as(self.alice, tok=self.alice_tok)
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        self.helper.send(self.room_id, body="hi", tok=self.bob_tok)
+
+        self.sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [[EventTypes.Member, "*"]],
+                    "timeline_limit": 2,
+                }
+            }
+        }
+
+    def test_member_info(self) -> None:
+        body, pos = self.do_sync(self.sync_body, tok=self.alice_tok)
+        self.assertTrue(body["rooms"][self.room_id]["initial"])
+        self.assertNotIn(MemberInfo.FIELD, body["rooms"][self.room_id])
+
+        self.get_success(self.store.mark_user_erased(self.bob))
+
+        # Incrementally: only once Bob is mentioned again.
+        self.helper.send(self.room_id, body="alice", tok=self.alice_tok)
+        body, pos = self.do_sync(self.sync_body, since=pos, tok=self.alice_tok)
+        self.assertNotIn(MemberInfo.FIELD, body["rooms"][self.room_id])
+
+        self.helper.send(self.room_id, body="bob", tok=self.bob_tok)
+        body, pos = self.do_sync(self.sync_body, since=pos, tok=self.alice_tok)
+        self.assertEqual(
+            body["rooms"][self.room_id][MemberInfo.FIELD],
+            {self.bob: {MemberInfo.USER_ID: None}},
+        )
+
+        # A fresh connection: the initial response mentions every member.
+        body, _ = self.do_sync(self.sync_body, tok=self.alice_tok)
+        self.assertTrue(body["rooms"][self.room_id]["initial"])
+        self.assertEqual(
+            body["rooms"][self.room_id][MemberInfo.FIELD],
+            {self.bob: {MemberInfo.USER_ID: None}},
+        )
+
+
+class MemberInfoDisabledTestCase(unittest.HomeserverTestCase):
+    """Without the flag nothing changes on the wire, even with an erased member."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def test_no_member_info(self) -> None:
+        alice = self.register_user("alice", "pass")
+        alice_tok = self.login("alice", "pass")
+        bob = self.register_user("bob", "pass")
+        bob_tok = self.login("bob", "pass")
+        room_id = self.helper.create_room_as(alice, tok=alice_tok)
+        self.helper.join(room_id, bob, tok=bob_tok)
+        self.get_success(self.hs.get_datastores().main.mark_user_erased(bob))
+
+        channel = self.make_request("GET", "/sync", access_token=alice_tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertNotIn(MemberInfo.FIELD, channel.json_body["rooms"]["join"][room_id])
+
+        channel = self.make_request(
+            "GET", f"/rooms/{room_id}/members", access_token=alice_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(set(channel.json_body.keys()), {"chunk"})
+
+        channel = self.make_request(
+            "GET", f"/rooms/{room_id}/joined_members", access_token=alice_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(
+            set(channel.json_body["joined"][bob].keys()),
+            {"avatar_url", "display_name"},
+        )

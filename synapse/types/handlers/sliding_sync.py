@@ -169,6 +169,9 @@ class SlidingSyncResult:
                 as sync v2)
             highlight_count: The number of unread notifications for this room with the highlight
                 flag set. (same as sync v2)
+            member_info: MSC4428: the stable ID -> user ID entries for the members
+                this response mentions, or None if there are none (or the feature
+                is disabled).
         """
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -201,6 +204,7 @@ class SlidingSyncResult:
         invited_count: int | None
         notification_count: int
         highlight_count: int
+        member_info: JsonDict | None
 
         def __bool__(self) -> bool:
             """Are there any updates that should be returned immediately to
@@ -220,6 +224,7 @@ class SlidingSyncResult:
                 or bool(self.required_state)
                 or bool(self.timeline_events)
                 or bool(self.stripped_state)
+                or bool(self.member_info)
             )
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)

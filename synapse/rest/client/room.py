@@ -37,6 +37,7 @@ from synapse import event_auth
 from synapse.api.constants import (
     Direction,
     EventTypes,
+    MemberInfo,
     Membership,
     StickyEvent,
     StickyEventField,
@@ -716,6 +717,7 @@ class RoomMemberListRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.message_handler = hs.get_message_handler()
+        self.member_info_handler = hs.get_member_info_handler()
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
 
@@ -760,7 +762,18 @@ class RoomMemberListRestServlet(RestServlet):
                 continue
             chunk.append(event)
 
-        return 200, {"chunk": chunk}
+        response: JsonDict = {"chunk": chunk}
+
+        if self.member_info_handler.enabled:
+            # MSC4428: the map is always present here, unlike on `/sync`, since
+            # this is the endpoint a lazy-loading client learns members from.
+            stable_ids = {event["state_key"] for event in chunk}
+            stable_ids.update(event["sender"] for event in chunk)
+            response[MemberInfo.FIELD] = await self.member_info_handler.get_member_info(
+                room_id, stable_ids
+            )
+
+        return 200, response
 
 
 # deprecated in favour of /members?membership=join?
