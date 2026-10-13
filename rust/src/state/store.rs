@@ -130,6 +130,10 @@ pub struct PostgresStateResStore {
 /// How many event IDs to send per event-loading statement.
 const EVENT_BATCH_SIZE: usize = 500;
 
+/// SPIKE: build events with the row's event ID instead of recomputing it
+/// from the canonical JSON.
+const TRUST_DB_EVENT_ID: bool = std::option_env!("SYNAPSE_TRUST_DB_EVENT_ID").is_some();
+
 const LOAD_EVENTS_SQL: &str = "
     SELECT e.event_id, ej.internal_metadata, ej.json, ej.format_version,
         r.room_version, rej.reason, e.outlier
@@ -377,12 +381,19 @@ fn event_from_row(row: &Row) -> anyhow::Result<Option<(Arc<str>, Event)>> {
         .set_outlier_flag(outlier)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let event = match Event::from_json_str(
-        &json,
-        room_version,
-        metadata,
-        rejected_reason.map(String::into_boxed_str),
-    ) {
+    let rejected_reason = rejected_reason.map(String::into_boxed_str);
+    let parsed = if TRUST_DB_EVENT_ID {
+        Event::from_json_str_with_id(
+            &json,
+            Arc::from(&*event_id),
+            room_version,
+            metadata,
+            rejected_reason,
+        )
+    } else {
+        Event::from_json_str(&json, room_version, metadata, rejected_reason)
+    };
+    let event = match parsed {
         Ok(event) => event,
         Err(e) => {
             error!("Unable to parse event from database {event_id}: {e:#}");

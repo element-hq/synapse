@@ -654,7 +654,45 @@ impl Event {
                     .into()
             }
         };
+        Event::from_parts_with_id(
+            parsed_event,
+            event_id,
+            internal_metadata,
+            room_version,
+            rejected_reason,
+        )
+    }
 
+    /// As [`Event::from_json_str`], taking the event ID as known rather than
+    /// computing it from the JSON. For events read from the database, whose
+    /// IDs were checked when they were persisted.
+    pub(crate) fn from_json_str_with_id(
+        event_json: &str,
+        event_id: Arc<str>,
+        room_version: &'static RoomVersion,
+        internal_metadata: EventInternalMetadata,
+        rejected_reason: Option<Box<str>>,
+    ) -> Result<Event, Error> {
+        let parsed_event = event_dict_from_json_str(room_version, event_json).map_err(|err| {
+            anyhow::anyhow!("Failed to parse event for room version {room_version}: {err}")
+        })?;
+        Event::from_parts_with_id(
+            parsed_event,
+            event_id,
+            internal_metadata,
+            room_version,
+            rejected_reason,
+        )
+    }
+
+    /// Build an event whose ID is already known. See [`Event::from_parts`].
+    fn from_parts_with_id(
+        parsed_event: FormattedEvent,
+        event_id: Arc<str>,
+        internal_metadata: EventInternalMetadata,
+        room_version: &'static RoomVersion,
+        rejected_reason: Option<Box<str>>,
+    ) -> Result<Event, Error> {
         let room_id = match &*parsed_event.specific_fields {
             EventFormatEnum::V1(format) => Arc::clone(&format.room_id),
             EventFormatEnum::V2V3(format) => Arc::clone(&format.room_id),
