@@ -15,7 +15,7 @@
 import yaml
 from parameterized import parameterized
 
-from synapse.config._base import RootConfig
+from synapse.config._base import ConfigError, RootConfig
 from synapse.config.experimental import ExperimentalConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.types import JsonDict
@@ -56,9 +56,28 @@ class ExperimentalConfigTestCase(unittest.TestCase):
 
         _read_config(config_values)
 
+    @parameterized.expand(
+        [
+            ("rust_state_res: shadow", "shadow"),
+            # YAML reads these as booleans.
+            ("rust_state_res: on", "on"),
+            ("rust_state_res: off", "off"),
+            ("rust_state_res: 'on'", "on"),
+            ("{}", "off"),
+        ]
+    )
+    def test_rust_state_res(self, features_yaml: str, expected: str) -> None:
+        config = _read_config({"experimental_features": yaml.safe_load(features_yaml)})
+        self.assertEqual(config.rust_state_res, expected)
 
-def _read_config(config_values: JsonDict) -> None:
-    ExperimentalConfig(RootConfig()).read_config(
+    def test_rust_state_res_rejects_unknown_modes(self) -> None:
+        with self.assertRaises(ConfigError):
+            _read_config({"experimental_features": {"rust_state_res": "maybe"}})
+
+
+def _read_config(config_values: JsonDict) -> ExperimentalConfig:
+    config = ExperimentalConfig(RootConfig())
+    config.read_config(
         yaml.safe_load(
             HomeServerConfig().generate_config(
                 config_dir_path="CONFDIR",
@@ -69,3 +88,4 @@ def _read_config(config_values: JsonDict) -> None:
         | config_values,
         allow_secrets_in_config=False,
     )
+    return config

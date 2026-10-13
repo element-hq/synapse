@@ -325,6 +325,11 @@ class ExperimentalConfig(Config):
         #    one and log any difference (`synapse_state_res_rust_shadow_total`).
         #  - "on": use the Rust implementation.
         rust_state_res = experimental.get("rust_state_res", "off")
+        # YAML reads an unquoted `on` or `off` as a boolean.
+        if rust_state_res is True:
+            rust_state_res = "on"
+        elif rust_state_res is False:
+            rust_state_res = "off"
         if rust_state_res not in ("off", "shadow", "on"):
             raise ConfigError(
                 "experimental_features.rust_state_res must be one of "

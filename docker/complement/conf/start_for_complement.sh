@@ -132,7 +132,7 @@ export SYNAPSE_TLS_KEY=/conf/server.tls.key
 # the shared config's `experimental_features`, as a config snippet with its own
 # `experimental_features` would replace the shared one.
 if [[ -n "$SYNAPSE_RUST_STATE_RES" ]]; then
-  sed -i "s/^experimental_features:$/experimental_features:\n  rust_state_res: $SYNAPSE_RUST_STATE_RES/" /conf/shared.yaml.j2
+  sed -i "s/^experimental_features:$/experimental_features:\n  rust_state_res: \"$SYNAPSE_RUST_STATE_RES\"/" /conf/shared.yaml.j2
 fi
 
 # Add a directory for tests to add config overrides if they want
