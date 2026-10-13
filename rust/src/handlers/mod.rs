@@ -16,12 +16,14 @@
 use std::sync::Arc;
 
 use pyo3::{
+    intern,
     prelude::*,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
     Bound, PyResult, Python,
 };
 
 use crate::homeserver::HomeServer;
+use crate::state::StateResolutionHandler;
 use crate::storage::db::python_db_pool::PythonDatabasePoolWrapper;
 use crate::storage::store::Store;
 
@@ -30,6 +32,8 @@ pub mod versions;
 #[pyclass]
 struct RustHandlers {
     versions: Py<versions::VersionsHandler>,
+    /// Only when the main database uses the native Rust driver.
+    state_resolution: Option<Py<StateResolutionHandler>>,
 }
 
 #[pymethods]
@@ -43,8 +47,8 @@ impl RustHandlers {
         // and the Twisted reactor.
         let runtime = homeserver.get_rust_runtime(py)?;
 
-        let db_pool =
-            PythonDatabasePoolWrapper::new(&homeserver.main_database_pool(py)?, runtime.clone())?;
+        let main_db_pool = homeserver.main_database_pool(py)?;
+        let db_pool = PythonDatabasePoolWrapper::new(&main_db_pool, runtime.clone())?;
 
         // Store is shared across all of the handlers so let's use an `Arc`
         let store = Arc::new(Store {
@@ -64,12 +68,37 @@ impl RustHandlers {
             },
         )?;
 
-        Ok(RustHandlers { versions })
+        // The Rust state resolution reads the database through the native
+        // driver's pool, so it needs the main database to use that driver.
+        let connection_pool = main_db_pool.getattr(intern!(py, "_db_pool"))?;
+        let rust_connection_pool_class = py
+            .import("synapse.storage.rust_pool")?
+            .getattr("RustConnectionPool")?;
+        let state_resolution = if connection_pool.is_instance(&rust_connection_pool_class)? {
+            Some(Py::new(
+                py,
+                StateResolutionHandler::new(connection_pool.unbind(), runtime.clone()),
+            )?)
+        } else {
+            None
+        };
+
+        Ok(RustHandlers {
+            versions,
+            state_resolution,
+        })
     }
 
     #[getter]
     fn versions(&self, py: Python<'_>) -> Py<versions::VersionsHandler> {
         self.versions.clone_ref(py)
+    }
+
+    /// The Rust state resolution, or `None` if the main database does not
+    /// use the native Rust driver.
+    #[getter]
+    fn state_resolution(&self, py: Python<'_>) -> Option<Py<StateResolutionHandler>> {
+        self.state_resolution.as_ref().map(|h| h.clone_ref(py))
     }
 }
 
