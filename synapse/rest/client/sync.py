@@ -666,7 +666,9 @@ class SyncRestServlet(RestServlet):
                 # appearing in the timeline won't appear again here
                 result["msc4354_sticky"] = {
                     "events": await self._event_serializer.serialize_events(
-                        room.sticky, time_now, config=serialize_options
+                        _filter_out_expired_sticky_events(room.sticky, time_now),
+                        time_now,
+                        config=serialize_options,
                     )
                 }
             if room.unread_thread_notifications:
@@ -1242,7 +1244,9 @@ class SlidingSyncRestServlet(RestServlet):
                 ]
             rooms_out[room_id] = {
                 "events": await self.event_serializer.serialize_events(
-                    sticky_events_to_write, time_now, config=serialize_options
+                    _filter_out_expired_sticky_events(sticky_events_to_write, time_now),
+                    time_now,
+                    config=serialize_options,
                 )
             }
 
@@ -1250,6 +1254,29 @@ class SlidingSyncRestServlet(RestServlet):
             "rooms": rooms_out,
             "next_batch": sticky_events.next_batch.serialise(),
         }
+
+
+def _filter_out_expired_sticky_events(
+    events: list[FilteredEvent], time_now: int
+) -> list[FilteredEvent]:
+    """
+    Filter out sticky events which have expired since they were selected.
+    To be used at the very last moment prior to serialisation.
+
+    If we didn't filter them this way, events in the `sticky` section could
+    be returned without a sticky duration if they expired during processing.
+
+    Args:
+        events: The sticky events to filter.
+        time_now: The current time (milliseconds since the unix epoch).
+            MUST be the same time used to serialise the events.
+    """
+    unexpired_events = []
+    for ev in events:
+        sticky_until_ts = ev.event.locally_sticky_until_ts()
+        if sticky_until_ts is not None and time_now < sticky_until_ts:
+            unexpired_events.append(ev)
+    return unexpired_events
 
 
 def _serialise_thread_subscriptions(
