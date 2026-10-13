@@ -39,6 +39,7 @@ from synapse.replication.tcp.protocol import (
 from synapse.replication.tcp.resource import ReplicationStreamProtocolFactory
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.server import FakeTransport
@@ -169,17 +170,12 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up client side protocol
         client_address = IPv4Address("TCP", "127.0.0.1", 1234)
-        client_protocol = client_factory.buildProtocol(("127.0.0.1", 1234))
+        client_protocol = client_factory.buildProtocol(client_address)
+        assert client_protocol is not None
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        # The type ignore is here because mypy doesn't think the host/port tuple is of
-        # the correct type, even though it is the exact example given for
-        # `twisted.internet.interfaces.IAddress`.
-        # Mypy was happy with the type before we overrode `buildProtocol` in
-        # `SynapseSite`, probably because there was enough inheritance indirection before
-        # withe the argument not having a type associated with it.
-        channel = self.site.buildProtocol((host, port))  # type: ignore[arg-type]
+        channel = self.site.buildProtocol(server_address)
 
         # hook into the channel's request factory so that we can keep a record
         # of the requests
@@ -434,11 +430,12 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up client side protocol
         client_address = IPv4Address("TCP", "127.0.0.1", 1234)
-        client_protocol = client_factory.buildProtocol(("127.0.0.1", 1234))
+        client_protocol = client_factory.buildProtocol(client_address)
+        assert client_protocol is not None
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        channel = self._hs_to_site[hs].buildProtocol((host, port))  # type: ignore[arg-type]
+        channel = self._hs_to_site[hs].buildProtocol(server_address)
 
         # Connect client to server and vice versa.
         client_to_server_transport = FakeTransport(
@@ -469,6 +466,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
 
             client_address = IPv4Address("TCP", "127.0.0.1", 6379)
             client_protocol = client_factory.buildProtocol(client_address)
+            assert client_protocol is not None
 
             server_address = IPv4Address("TCP", host, port)
             server_protocol = self._redis_server.buildProtocol(server_address)
@@ -482,6 +480,78 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
                 client_protocol, self.reactor, server_protocol
             )
             server_protocol.makeConnection(server_to_client_transport)
+
+    def _generate_rooms_on_worker(
+        self,
+        user_id: str,
+        user_tok: str,
+        list_of_worker_names: list[str] | None = None,
+        try_at_most_count: int | None = None,
+    ) -> dict[str, str]:
+        """
+        Given a list of worker names, generate rooms until there is at least one on each
+        of the named workers.
+
+        Args:
+            user_id: The user_id of the user making the room.
+            user_tok: The token of the user making the room.
+            list_of_worker_names: A list of worker names that need to have rooms. By
+                default, each `events` worker provided in the homeserver config will be used.
+            try_at_most_count: A given number of iterations to try and produce rooms. If
+                not provided, use the number of workers multiplied by 3 for the count.
+        Returns:
+            A mapping of `worker_name`->`room_id`
+        """
+        # Save a shorter reference to the `RoutableShardedWorkerHandlingConfig` that
+        # contains the information needed to not only identify the full list of workers
+        # (in case the default for `list_of_workernames` is used) and provides the
+        # routing hash function that decides which worker a given room id should go to.
+        events_writers_config = self.hs.config.worker.events_shard_config
+
+        if list_of_worker_names is None:
+            _set_of_worker_names = set(events_writers_config.instances)
+        else:
+            _set_of_worker_names = set(list_of_worker_names)
+
+        assert len(_set_of_worker_names) > 0
+        # Save a copy of this to use now, we can use the original to assert expectations
+        # before returning.
+        set_of_workernames = set(_set_of_worker_names)
+
+        results_mapping = {}
+
+        # Maintain a count, in case of a runaway process. The number 3 has no magical
+        # significance other than at the time of writing it allowed all tests that used
+        # this function to pass. The count is on a one based index(counts down to 1 and
+        # doesn't go past), so this will allow for (3 * num_of_workers) attempts before
+        # giving up if `try_at_most_count` does not override.
+        count = try_at_most_count or len(set_of_workernames) * 3
+
+        while set_of_workernames:
+            # Rooms created at the same millisecond will have the same room_id for
+            # MSC4291 rooms. Bump the reactor by that much so a different room_id will
+            # be tried on the next iteration.
+            self.reactor.advance(Duration(milliseconds=1).as_secs())
+            _room_id = self.helper.create_room_as(user_id, tok=user_tok)
+
+            _worker_responsible = events_writers_config.get_instance(_room_id)
+
+            if _worker_responsible in set_of_workernames:
+                results_mapping[_worker_responsible] = _room_id
+                # Remember to remove the worker now that it is found
+                set_of_workernames.remove(_worker_responsible)
+
+            count -= 1
+            if count == 1:
+                raise AssertionError(
+                    "Count exhausted attempting to generate rooms. Aborting and failing test"
+                )
+
+        # Since this *IS* part of a test, lets make sure all worker names requested are
+        # accounted for
+        assert results_mapping.keys() == _set_of_worker_names
+
+        return results_mapping
 
 
 class TestReplicationDataHandler(ReplicationDataHandler):
@@ -508,6 +578,10 @@ class FakeRedisPubSubServer:
         self._subscribers_by_channel: dict[bytes, set["FakeRedisPubSubProtocol"]] = (
             defaultdict(set)
         )
+
+        # The arguments of every `AUTH` command received, in order: `(password,)`
+        # when only a password is configured, `(username, password)` with both.
+        self.auth_attempts: list[tuple[bytes, ...]] = []
 
     def add_subscriber(self, conn: "FakeRedisPubSubProtocol", channel: bytes) -> None:
         """A connection has called SUBSCRIBE"""
@@ -580,6 +654,11 @@ class FakeRedisPubSubProtocol(Protocol):
         # Connection keep-alives.
         elif command == b"PING":
             self.send("PONG")
+
+        # We don't check the credentials, just record that they were sent.
+        elif command == b"AUTH":
+            self._server.auth_attempts.append(args)
+            self.send("OK")
 
         else:
             raise Exception(f"Unknown command: {command!r}")

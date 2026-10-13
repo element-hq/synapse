@@ -1,7 +1,7 @@
 # ignore everything by default
 *
 
-# things to include
+# Things to include
 !docker
 !synapse
 !rust
@@ -12,6 +12,7 @@
 !Cargo.toml
 !build_rust.py
 
+# Things to re-ignore
 rust/target
 synapse/*.so
 

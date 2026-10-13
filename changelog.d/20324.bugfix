@@ -1,0 +1,1 @@
+Fix the expiry of [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) being reported differently to how the server tracks them.

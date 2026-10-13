@@ -1,0 +1,1 @@
+Remove the legacy mention push rules by default, as per [MSC4210](https://github.com/matrix-org/matrix-spec-proposals/pull/4210). The `experimental_features.msc4210_enabled` flag now defaults to `true`.

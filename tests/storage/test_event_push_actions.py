@@ -22,7 +22,7 @@
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import MAIN_TIMELINE, RelationTypes
+from synapse.api.constants import MAIN_TIMELINE, EventContentFields, RelationTypes
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -84,6 +84,7 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
             content={
                 "msgtype": "m.text",
                 "body": user_id,
+                EventContentFields.MENTIONS: {"user_ids": [user_id]},
                 "m.relates_to": {
                     "rel_type": RelationTypes.THREAD,
                     "event_id": first_event_id,
@@ -194,7 +195,13 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
             result = self.helper.send_event(
                 room_id,
                 type="m.room.message",
-                content={"msgtype": "m.text", "body": user_id if highlight else "msg"},
+                content={
+                    "msgtype": "m.text",
+                    "body": "msg",
+                    EventContentFields.MENTIONS: {"user_ids": [user_id]}
+                    if highlight
+                    else {},
+                },
                 tok=other_token,
             )
             nonlocal last_event_id
@@ -388,7 +395,13 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
             return self.helper.send_event(
                 room_id,
                 type="m.room.message",
-                content={"msgtype": "m.text", "body": user_id if highlight else "msg"},
+                content={
+                    "msgtype": "m.text",
+                    "body": "msg",
+                    EventContentFields.MENTIONS: {"user_ids": [user_id]}
+                    if highlight
+                    else {},
+                },
                 tok=other_token,
             )["event_id"]
 
@@ -435,7 +448,10 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         def _send(thread_root: str | None = None, highlight: bool = False) -> str:
             content: JsonDict = {
                 "msgtype": "m.text",
-                "body": user_id if highlight else "msg",
+                "body": "msg",
+                EventContentFields.MENTIONS: {"user_ids": [user_id]}
+                if highlight
+                else {},
             }
             if thread_root is not None:
                 content["m.relates_to"] = {
@@ -471,6 +487,82 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         # Without the fix: badge = 2 (thread highlight re-counted). With: badge = 1.
         self.get_success(self.store._rotate_notifs())
         _assert_badge(1)
+
+    def test_count_aggregation_badge_recount_is_scoped_per_room(self) -> None:
+        """
+        Regression test: a room whose summary row is out of date must be recounted
+        from `event_push_actions`, even when another room has an up-to-date summary
+        for the same thread ID.
+
+        The set of threads a valid summary was found for used to be keyed on the
+        thread ID alone, so a single room with an up-to-date `main` summary excluded
+        `main` from the recount in *every* room, dropping those rooms' counts.
+        """
+        user_id, token, other_id, other_token, room_id = self._create_users_and_room()
+
+        stale_room_id = self.helper.create_room_as(user_id, tok=token)
+        self.helper.join(stale_room_id, other_id, tok=other_token)
+
+        def _send(room: str) -> str:
+            return self.helper.send_event(
+                room,
+                type="m.room.message",
+                content={"msgtype": "m.text", "body": "msg"},
+                tok=other_token,
+            )["event_id"]
+
+        def _read(room: str, event_id: str) -> None:
+            self.get_success(
+                self.store.insert_receipt(
+                    room,
+                    "m.read",
+                    user_id=user_id,
+                    event_ids=[event_id],
+                    thread_id=None,
+                    data={},
+                )
+            )
+
+        def _badge(room: str) -> int:
+            counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-aggregate-unread-counts",
+                    self.store._get_unread_counts_by_room_for_user_txn,
+                    user_id,
+                )
+            )
+            return counts.get(room, 0)
+
+        # `room_id` keeps an up-to-date summary throughout, so its `main` thread is
+        # always one we found a valid summary for.
+        first = _send(room_id)
+        _send(room_id)
+
+        stale_first = _send(stale_room_id)
+        stale_second = _send(stale_room_id)
+        _send(stale_room_id)
+
+        # Read one event in each room and rotate, so that both summary rows record
+        # the receipt they were calculated against.
+        _read(room_id, first)
+        _read(stale_room_id, stale_first)
+        self.get_success(self.store._rotate_notifs())
+
+        self.assertEqual(_badge(room_id), 1)
+        self.assertEqual(_badge(stale_room_id), 2)
+
+        # A second receipt, which rotation has not processed yet: `stale_room_id`'s
+        # summary row no longer matches it, so its count has to be recovered from
+        # `event_push_actions`.
+        _read(stale_room_id, stale_second)
+
+        self.assertEqual(_badge(room_id), 1)
+        self.assertEqual(_badge(stale_room_id), 1)
+        # A new event, not yet rotated, while the summary row is still stale.
+        _send(stale_room_id)
+
+        self.assertEqual(_badge(room_id), 1)
+        self.assertEqual(_badge(stale_room_id), 2)
 
     def test_count_aggregation_threads(self) -> None:
         """
@@ -533,7 +625,10 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         def _create_event(highlight: bool = False, thread_id: str | None = None) -> str:
             content: JsonDict = {
                 "msgtype": "m.text",
-                "body": user_id if highlight else "msg",
+                "body": "msg",
+                EventContentFields.MENTIONS: {"user_ids": [user_id]}
+                if highlight
+                else {},
             }
             if thread_id:
                 content["m.relates_to"] = {
@@ -713,7 +808,10 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         def _create_event(highlight: bool = False, thread_id: str | None = None) -> str:
             content: JsonDict = {
                 "msgtype": "m.text",
-                "body": user_id if highlight else "msg",
+                "body": "msg",
+                EventContentFields.MENTIONS: {"user_ids": [user_id]}
+                if highlight
+                else {},
             }
             if thread_id:
                 content["m.relates_to"] = {

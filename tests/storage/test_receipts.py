@@ -21,11 +21,13 @@
 
 from typing import Collection
 
+from immutabledict import immutabledict
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import ReceiptTypes
 from synapse.server import HomeServer
-from synapse.types import UserID, create_requester
+from synapse.types import MultiWriterStreamToken, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests.test_utils.event_injection import create_event
@@ -307,3 +309,67 @@ class ReceiptTestCase(HomeserverTestCase):
             [ReceiptTypes.READ, ReceiptTypes.READ_PRIVATE], room_id=self.room_id2
         )
         self.assertEqual(res, event2_1_id)
+
+
+class MultiWriterReceiptPagingTestCase(HomeserverTestCase):
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+
+    def test_reached_token_does_not_cover_receipts_from_lagging_writer(self) -> None:
+        """
+        Writers `rw1` and `rw2` alternate stream IDs 1001 to 1008. The paging
+        worker has heard from `rw2` up to 1008 but from `rw1` only up to 1000.
+
+        With a limit of 4 the SQL fetches 1001 to 1004, then `rw1`'s 1001 and
+        1003 are filtered out as beyond its known position. The returned token
+        must not claim `rw1` was handled past 1000, or those receipts are
+        skipped once `rw1` catches up.
+        """
+        self.get_success(
+            self.store.db_pool.simple_insert_many(
+                table="receipts_linearized",
+                keys=(
+                    "stream_id",
+                    "instance_name",
+                    "room_id",
+                    "receipt_type",
+                    "user_id",
+                    "event_id",
+                    "data",
+                ),
+                values=[
+                    (
+                        stream_id,
+                        "rw1" if stream_id % 2 else "rw2",
+                        f"!room_{stream_id}:test",
+                        ReceiptTypes.READ,
+                        "@user:test",
+                        f"$event_{stream_id}",
+                        "{}",
+                    )
+                    for stream_id in range(1001, 1009)
+                ],
+                desc="insert_receipts",
+            )
+        )
+
+        from_key = MultiWriterStreamToken(stream=1000)
+        to_key = MultiWriterStreamToken(
+            stream=1000, instance_map=immutabledict({"rw2": 1008})
+        )
+
+        rooms_to_events, reached_token = self.get_success(
+            self.store.get_linearized_receipts_for_all_rooms(
+                to_key=to_key, from_key=from_key, limit=4
+            )
+        )
+
+        # `rw1`'s receipts are behind its position in `to_key`, so none of them
+        # are returned...
+        self.assertFalse({"!room_1001:test", "!room_1003:test"} & set(rooms_to_events))
+
+        # ...and therefore the returned token must not claim `rw1` has been
+        # handled beyond 1000.
+        self.assertLessEqual(reached_token.get_stream_pos_for_instance("rw1"), 1000)

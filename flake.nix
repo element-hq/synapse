@@ -100,7 +100,6 @@
                   libjpeg
                   libpqxx
                   libwebp
-                  libxml2
                   libxslt
                   sqlite
 

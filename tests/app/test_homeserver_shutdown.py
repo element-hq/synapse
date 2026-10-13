@@ -103,6 +103,39 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
                 f"{get_memory_debug_info_for_object(hs_after_shutdown)}",
             )
 
+    def test_rust_runtime_is_garbage_collected_with_the_homeserver(self) -> None:
+        """The `RustRuntime` should be garbage collected with its homeserver.
+
+        This catches reference cycles through Rust fields, which Python's
+        garbage collector cannot see into.
+        """
+        self.reactor, self.clock = get_clock()
+        self.hs = setup_test_homeserver(
+            cleanup_func=self.addCleanup,
+            reactor=self.reactor,
+            homeserver_to_use=SynapseHomeServer,
+            clock=self.clock,
+        )
+
+        # Trigger the homeserver to create the Rust handlers, otherwise nothing
+        # in these tests would create them (as we don't register any servlets).
+        self.hs.get_rust_handlers()
+
+        # Get a weakref to the Rust runtime so that we can check it got garbage
+        # collected.
+        runtime_ref = weakref.ref(self.hs.get_rust_runtime())
+
+        # The same shutdown sequence as `test_clean_homeserver_shutdown`.
+        self.reactor.run()
+        cleanup_test_reactor_system_event_triggers(self.reactor)
+        self.get_success(self.hs.shutdown())
+        self.reactor.advance(0)
+        del self.hs
+        gc.collect()
+
+        # Check the RustRuntime has been garbage collected.
+        self.assertIsNone(runtime_ref(), "RustRuntime outlived its HomeServer")
+
     @logcontext_clean
     def test_clean_homeserver_shutdown_mid_background_updates(self) -> None:
         """Ensure the `SynapseHomeServer` can be fully shutdown and garbage collected

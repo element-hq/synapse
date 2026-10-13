@@ -452,16 +452,19 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
     def _get_catch_up_outstanding_destinations_txn(
         txn: LoggingTransaction, now_time_ms: int, after_destination: str | None
     ) -> list[str]:
-        # We're looking for destinations which satisfy either of the following
+        # We're looking for destinations which satisfy one of the following
         # conditions:
         #
         #   * There is at least one room where we have an event that we have not yet
         #     sent to them, indicated by a row in `destination_rooms` with a
         #     `stream_ordering` older than the `last_successful_stream_ordering`
-        #     (if any) in `destinations`, or:
+        #     (if any) in `destinations`,
         #
         #   * There is at least one to-device message outstanding for the destination,
-        #     indicated by a row in `device_federation_outbox`.
+        #     indicated by a row in `device_federation_outbox`, or
+        #
+        #   * There is at least one room where we have a sticky event backlog,
+        #     denoted by a row in `destination_rooms_sticky_events_backlog`
         #
         # Of course, that may produce destinations where we are already busy sending
         # the relevant PDU or to-device message, but in that case, waking up the
@@ -514,10 +517,23 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
                )
             ORDER BY destination
             LIMIT 25
+        ), sticky_event_destinations AS (
+            SELECT DISTINCT destination
+            FROM destination_rooms_sticky_events_backlog
+            LEFT JOIN destinations USING (destination)
+            WHERE
+               destination > ?
+               AND (
+                    destinations.retry_last_ts IS NULL OR
+                    destinations.retry_last_ts + destinations.retry_interval < ?
+               )
+            ORDER BY destination
+            LIMIT 25
         )
 
         SELECT destination FROM pdu_destinations
         UNION SELECT destination FROM to_device_destinations
+        UNION SELECT destination FROM sticky_event_destinations
             ORDER BY destination
             LIMIT 25
         """
@@ -528,7 +544,14 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
 
         txn.execute(
             q,
-            (after_destination, now_time_ms, after_destination, now_time_ms),
+            (
+                after_destination,
+                now_time_ms,
+                after_destination,
+                now_time_ms,
+                after_destination,
+                now_time_ms,
+            ),
         )
         destinations = [row[0] for row in txn]
 

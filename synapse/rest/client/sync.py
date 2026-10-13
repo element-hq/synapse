@@ -33,6 +33,7 @@ from synapse.events.utils import (
     EventFormat,
     FilteredEvent,
     SerializeEventConfig,
+    strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
@@ -174,11 +175,12 @@ class SyncRestServlet(RestServlet):
         filter_id = parse_string(request, "filter")
         full_state = parse_boolean(request, "full_state", default=False)
 
-        use_state_after = False
-        if await self.store.is_feature_enabled(
-            user.to_string(), ExperimentalFeature.MSC4222
-        ):
-            use_state_after = parse_boolean(
+        use_state_after = parse_boolean(request, "use_state_after", default=False)
+        use_unstable_state_after_name = False
+        # FIXME(unstable_state_after): Remove support for the unstable identifiers after 2027-09-01
+        # (to allow some time for the ecosystem to adapt to the stable identifiers)
+        if not use_state_after:
+            use_state_after = use_unstable_state_after_name = parse_boolean(
                 request, "org.matrix.msc4222.use_state_after", default=False
             )
 
@@ -215,6 +217,7 @@ class SyncRestServlet(RestServlet):
             device_id,
             last_ignore_accdata_streampos,
             use_state_after,
+            use_unstable_state_after_name,
         )
 
         if filter_id is None:
@@ -252,6 +255,7 @@ class SyncRestServlet(RestServlet):
             is_guest=requester.is_guest,
             device_id=device_id,
             use_state_after=use_state_after,
+            use_unstable_state_after_name=use_unstable_state_after_name,
         )
 
         since_token = None
@@ -477,7 +481,8 @@ class SyncRestServlet(RestServlet):
                 invited_state = []
 
             invited_state = list(invited_state)
-            invited_state.append(invite)
+            # MSC4319: Add the invite itself
+            invited_state.append(strip_event(room.invite))
             invited[room.room_id] = {"invite_state": {"events": invited_state}}
 
         return invited
@@ -523,12 +528,11 @@ class SyncRestServlet(RestServlet):
                 knocked_state = []
             knocked_state = list(knocked_state)
 
-            # Append the actual knock membership event itself as well. This provides
-            # the client with:
+            # MSC4319: Append the actual knock membership event itself as well. This
+            # provides the client with:
             #
             # * A knock state event that they can use for easier internal tracking
-            # * The rough timestamp of when the knock occurred contained within the event
-            knocked_state.append(knock)
+            knocked_state.append(strip_event(room.knock))
 
             # Build the `knock_state` dictionary, which will contain the state of the
             # room that the client has knocked on
@@ -633,7 +637,12 @@ class SyncRestServlet(RestServlet):
         # We either include a `state` or `state_after` field depending on
         # whether the client has opted in to the newer `state_after` behavior.
         if sync_config.use_state_after:
-            state_key_name = "org.matrix.msc4222.state_after"
+            # Clients which opted in via the unstable MSC4222 query parameter
+            # get the unstable field name back, for the transition period.
+            if sync_config.use_unstable_state_after_name:
+                state_key_name = "org.matrix.msc4222.state_after"
+            else:
+                state_key_name = "state_after"
         else:
             state_key_name = "state"
 

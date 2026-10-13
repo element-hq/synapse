@@ -284,6 +284,7 @@ await wait_for_room("!aAAaaAaaaAAAaAaAA:matrix.org")
 await wait_for_room("!aAAaaAaaaAAAaAaAA:matrix.org")
 ```
 </td>
+</tr>
 </table>
 
 ### Uncancelled processing
