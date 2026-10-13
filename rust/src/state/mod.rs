@@ -19,7 +19,7 @@
 //!   with a Postgres implementation and an in-memory one for tests.
 //! - [`auth_chain`]: the chain cover auth chain difference.
 //! - [`v2`]: the algorithm.
-//! - [`conflict_cache`]: the cache of resolved conflicted sets.
+//! - [`lru`]: the conflict and event caches.
 //!
 //! [`StateResolutionHandler`] is the Python entry point, used by
 //! `synapse.state.StateResolutionHandler` when `rust_state_res` is enabled.
@@ -51,11 +51,11 @@ use crate::room_versions::{RoomVersion, StateResolutionVersions};
 use crate::runtime::RustRuntime;
 
 pub mod auth_chain;
-pub mod conflict_cache;
+pub mod lru;
 pub mod store;
 pub mod v2;
 
-use conflict_cache::ConflictCache;
+use lru::{ConflictCache, EventCache};
 use store::{NoChainCoverIndex, PostgresStateResStore};
 
 create_exception!(
@@ -318,6 +318,13 @@ const CONFLICT_CACHE_MAX_SIZE: usize = 100_000;
 /// `EVICTION_TIMEOUT_SECONDS`.
 const CONFLICT_CACHE_EXPIRY: Duration = Duration::from_secs(60 * 60);
 
+/// The bound on the event cache, in events.
+/// TODO: size this from `event_cache_size`, as the Python event cache is.
+const EVENT_CACHE_MAX_SIZE: usize = 10_000;
+
+/// How long an unused event cache entry lives.
+const EVENT_CACHE_EXPIRY: Duration = Duration::from_secs(60 * 60);
+
 /// Timings and counts for one resolution, for metrics. Times are in seconds.
 #[pyclass(frozen, get_all, skip_from_py_object)]
 #[derive(Debug, Default, Clone)]
@@ -337,6 +344,12 @@ pub struct StateResStats {
     pub db_rows: u64,
     /// Events loaded from the database.
     pub db_events: u64,
+    /// Events found in the handler's event cache.
+    pub event_cache_hits: u64,
+    /// Time converting the state sets from Python, under the GIL.
+    pub convert_in_time: f64,
+    /// Time converting the resolved state to Python, under the GIL.
+    pub convert_out_time: f64,
     /// Events in the full conflicted set.
     pub conflicted_events: usize,
     /// The resolution of the conflicted set came from the cache.
@@ -362,8 +375,11 @@ impl<'py> IntoPyObject<'py> for ResolveOutput {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
+        let start = Instant::now();
         let state = state_map_to_py(py, &self.state)?;
-        (state, Bound::new(py, self.stats)?).into_pyobject(py)
+        let mut stats = self.stats;
+        stats.convert_out_time = start.elapsed().as_secs_f64();
+        (state, Bound::new(py, stats)?).into_pyobject(py)
     }
 }
 
@@ -391,6 +407,7 @@ pub struct StateResolutionHandler {
     db_pool: Py<PyAny>,
     runtime: RustRuntime,
     cache: Arc<ConflictCache>,
+    event_cache: Arc<EventCache>,
 }
 
 impl StateResolutionHandler {
@@ -402,6 +419,7 @@ impl StateResolutionHandler {
                 CONFLICT_CACHE_MAX_SIZE,
                 CONFLICT_CACHE_EXPIRY,
             )),
+            event_cache: Arc::new(EventCache::new(EVENT_CACHE_MAX_SIZE, EVENT_CACHE_EXPIRY)),
         }
     }
 
@@ -430,6 +448,7 @@ impl StateResolutionHandler {
         }
         let pool = pool.cast::<PyConnectionPool>()?.get().pool.clone();
 
+        let convert_start = Instant::now();
         let mut interner = Interner::default();
         let state_sets = state_sets
             .iter()
@@ -439,6 +458,7 @@ impl StateResolutionHandler {
         // Without conflicts there is nothing to read or resolve, so answer
         // straight away rather than on the runtime.
         let (unconflicted, conflicted) = v2::separate(&state_sets);
+        let convert_in_time = convert_start.elapsed().as_secs_f64();
         if conflicted.is_empty() {
             return Ok(Started::Done(ResolveOutput {
                 state: unconflicted,
@@ -450,10 +470,11 @@ impl StateResolutionHandler {
 
         let handle = self.runtime.tokio_handle()?;
         let cache = Arc::clone(&self.cache);
+        let event_cache = Arc::clone(&self.event_cache);
 
         Ok(Started::Pending(Box::pin(async move {
             let start = Instant::now();
-            let store = PostgresStateResStore::begin(&pool, handle)
+            let store = PostgresStateResStore::begin(&pool, handle, Some(event_cache))
                 .await
                 .map_err(resolve_error_to_py)?;
             let prepared = v2::prepare(
@@ -490,6 +511,9 @@ impl StateResolutionHandler {
                 db_queries: db.queries,
                 db_rows: db.rows,
                 db_events: db.events_fetched,
+                event_cache_hits: db.events_cached,
+                convert_in_time,
+                convert_out_time: 0.0,
                 conflicted_events: core.conflicted_events,
                 cache_hit: core.cache_hit,
             };
@@ -559,6 +583,29 @@ impl StateResolutionHandler {
             }
         };
         output.into_pyobject(py)
+    }
+
+    /// Empty the conflict cache, keeping the event cache. For benchmarks and
+    /// tests that want to time the algorithm again on loaded events.
+    fn clear_conflict_cache_for_test(&self) {
+        self.cache.clear();
+    }
+
+    /// The number of events in the event cache.
+    fn event_cache_len(&self) -> usize {
+        self.event_cache.len()
+    }
+
+    /// Drop an event from the event cache. Called whenever the Python event
+    /// cache drops it, so a change to its rejection status or internal
+    /// metadata reaches the next resolution.
+    fn invalidate_event(&self, event_id: &str) {
+        self.event_cache.remove(&Arc::from(event_id));
+    }
+
+    /// Empty the event cache. Called when a room is purged.
+    fn clear_event_cache(&self) {
+        self.event_cache.clear();
     }
 }
 

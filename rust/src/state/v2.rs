@@ -46,8 +46,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::{
-    conflict_cache::ConflictCache,
     lookup,
+    lru::ConflictCache,
     store::{StateDifference, StateResStore},
     EventMap, StateKey, StateMap, StateResEvent,
 };
@@ -178,7 +178,7 @@ impl PendingResolution {
 
         let resolved = Arc::new(resolved);
         if let (Some(cache), Some(key)) = (conflict_cache, cache_key) {
-            cache.insert(key, Arc::clone(&resolved));
+            cache.insert_state(key, Arc::clone(&resolved));
         }
 
         Ok(Resolution {

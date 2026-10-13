@@ -160,3 +160,51 @@ class RustStateResHandlerTestCase(unittest.HomeserverTestCase):
             any("Falling back to Python state res" in line for line in logs.output)
         )
         self.assertIn(self._current_topic(room_id), topics)
+
+    def test_event_cache(self) -> None:
+        """A second resolution reads its events from the handler's event
+        cache, which the store's event cache invalidation empties."""
+        rust = self.hs.get_rust_handlers().state_resolution
+        assert rust is not None
+
+        room_id = self.helper.create_room_as(
+            self.user_id, room_version=RoomVersions.V10.identifier, tok=self.tok
+        )
+        topic_a, topic_b = self._fork(room_id)
+        groups = self.get_success(
+            self.store._get_state_group_for_events([topic_a, topic_b])
+        )
+        state_controller = self.hs.get_storage_controllers().state
+        state_sets = [
+            self.get_success(state_controller.get_state_ids_for_group(group))
+            for group in groups.values()
+        ]
+
+        # Persisting the fork may already have resolved it here, depending on
+        # the test's `rust_state_res` mode.
+        rust.clear_event_cache()
+        rust.clear_conflict_cache_for_test()
+
+        first, first_stats = self.get_success(
+            rust.resolve(room_id, RoomVersions.V10.identifier, state_sets)
+        )
+        self.assertGreater(first_stats.db_events, 0)
+        self.assertEqual(first_stats.event_cache_hits, 0)
+        cached = rust.event_cache_len()
+        self.assertEqual(cached, first_stats.db_events)
+
+        # Clear the conflict cache, so the resolution runs again rather than
+        # being answered from it.
+        rust.clear_conflict_cache_for_test()
+        second, second_stats = self.get_success(
+            rust.resolve(room_id, RoomVersions.V10.identifier, state_sets)
+        )
+        self.assertEqual(second, first)
+        self.assertEqual(second_stats.db_events, 0)
+        self.assertEqual(second_stats.event_cache_hits, first_stats.db_events)
+
+        self.store._invalidate_local_get_event_cache(topic_a)
+        self.assertEqual(rust.event_cache_len(), cached - 1)
+
+        self.store._invalidate_local_get_event_cache_room_id(room_id)
+        self.assertEqual(rust.event_cache_len(), 0)

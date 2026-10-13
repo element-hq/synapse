@@ -35,6 +35,7 @@ class StateResStats:
     db_queries: int
     db_rows: int
     db_events: int
+    event_cache_hits: int
     conflicted_events: int
     cache_hit: bool
 
@@ -69,6 +70,18 @@ class StateResolutionHandler:
     ) -> tuple[dict[StateKey, str], StateResStats]:
         """As `resolve`, but blocks and returns the result. For tests, where the
         fake reactor does not wait for a deferred fired from another thread."""
+
+    def clear_conflict_cache_for_test(self) -> None:
+        """Empty the conflict cache, keeping the event cache."""
+
+    def event_cache_len(self) -> int:
+        """The number of events in the event cache."""
+
+    def invalidate_event(self, event_id: str) -> None:
+        """Drop an event from the event cache."""
+
+    def clear_event_cache(self) -> None:
+        """Empty the event cache."""
 
 def get_auth_chain_difference_for_test(
     pool: ConnectionPool,

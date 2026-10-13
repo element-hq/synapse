@@ -26,7 +26,7 @@ use std::{
 
 use anyhow::{bail, Context};
 use async_trait::async_trait;
-use log::{error, warn};
+use log::{debug, error, warn};
 use pyo3::{
     prelude::*,
     types::{PyDict, PyModule, PySet},
@@ -34,7 +34,7 @@ use pyo3::{
 use tokio::runtime::Handle;
 use tokio_postgres::{types::ToSql, Row};
 
-use super::{auth_chain, EventMap, StateResEvent};
+use super::{auth_chain, lru::EventCache, EventMap, StateResEvent};
 use crate::database::postgres::pool::{ConnectionPool, PooledConnection, PyConnectionPool};
 use crate::events::{
     constants::event_type::M_ROOM_MEMBER, internal_metadata::EventInternalMetadata, Event,
@@ -93,8 +93,10 @@ pub struct DbStats {
     pub queries: u64,
     /// Rows returned.
     pub rows: u64,
-    /// Events loaded by [`StateResStore::get_events`].
+    /// Events loaded from the database by [`StateResStore::get_events`].
     pub events_fetched: u64,
+    /// Events [`StateResStore::get_events`] found in the event cache.
+    pub events_cached: u64,
     /// Time spent waiting on statements.
     pub db_time: Duration,
     /// Time spent building events from rows: parsing the JSON and computing
@@ -115,6 +117,8 @@ pub struct DbStats {
 pub struct PostgresStateResStore {
     conn: Option<PooledConnection>,
     handle: Handle,
+    /// Events loaded earlier, consulted before the database.
+    event_cache: Option<Arc<EventCache>>,
     db_stats: Mutex<DbStats>,
 }
 
@@ -133,7 +137,13 @@ const LOAD_EVENTS_SQL: &str = "
 
 impl PostgresStateResStore {
     /// Check a connection out of `pool` and open the read-only transaction.
-    pub async fn begin(pool: &ConnectionPool, handle: Handle) -> anyhow::Result<Self> {
+    /// Events are read from `event_cache` first, and loaded events are added
+    /// to it.
+    pub async fn begin(
+        pool: &ConnectionPool,
+        handle: Handle,
+        event_cache: Option<Arc<EventCache>>,
+    ) -> anyhow::Result<Self> {
         let conn = pool
             .get()
             .await
@@ -141,6 +151,7 @@ impl PostgresStateResStore {
         let store = PostgresStateResStore {
             conn: Some(conn),
             handle,
+            event_cache,
             db_stats: Mutex::default(),
         };
         // If this fails, dropping the store sends a ROLLBACK, which is
@@ -197,6 +208,14 @@ impl PostgresStateResStore {
             .await
             .with_context(|| format!("running {}", sql.trim()))?;
         self.record(start, rows.len());
+        if log::log_enabled!(log::Level::Debug) {
+            let head: String = sql.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
+            debug!(
+                "State res query [{head}] returned {} rows in {:?}",
+                rows.len(),
+                start.elapsed()
+            );
+        }
         Ok(rows)
     }
 }
@@ -220,18 +239,43 @@ impl Drop for PostgresStateResStore {
 impl StateResStore for PostgresStateResStore {
     async fn get_events(&self, ids: &[Arc<str>]) -> anyhow::Result<EventMap> {
         let mut events = EventMap::with_capacity(ids.len());
-        for batch in ids.chunks(EVENT_BATCH_SIZE) {
+
+        let missing: Vec<Arc<str>> = match &self.event_cache {
+            Some(cache) => {
+                let mut missing = Vec::new();
+                for id in ids {
+                    match cache.get(id) {
+                        Some(event) => {
+                            events.insert(Arc::clone(id), event);
+                        }
+                        None => missing.push(Arc::clone(id)),
+                    }
+                }
+                missing
+            }
+            None => ids.to_vec(),
+        };
+        let cached = events.len() as u64;
+
+        for batch in missing.chunks(EVENT_BATCH_SIZE) {
             let batch: Vec<&str> = batch.iter().map(|id| &**id).collect();
             let rows = self.query(LOAD_EVENTS_SQL, &[&batch]).await?;
             let start = Instant::now();
             for row in rows {
                 if let Some((event_id, event)) = event_from_row(&row)? {
-                    events.insert(event_id, StateResEvent::new(event)?);
+                    let event = StateResEvent::new(event)?;
+                    if let Some(cache) = &self.event_cache {
+                        cache.insert(Arc::clone(&event_id), event.clone(), 1);
+                    }
+                    events.insert(event_id, event);
                 }
             }
             self.db_stats.lock().expect("not poisoned").parse_time += start.elapsed();
         }
-        self.db_stats.lock().expect("not poisoned").events_fetched += events.len() as u64;
+
+        let mut stats = self.db_stats.lock().expect("not poisoned");
+        stats.events_cached += cached;
+        stats.events_fetched += events.len() as u64 - cached;
         Ok(events)
     }
 
@@ -455,7 +499,7 @@ fn get_auth_chain_difference_for_test<'py>(
     let difference = py
         .detach(|| {
             handle.block_on(async {
-                let store = PostgresStateResStore::begin(&pool, handle.clone()).await?;
+                let store = PostgresStateResStore::begin(&pool, handle.clone(), None).await?;
                 let difference = auth_chain::get_auth_chain_difference_using_cover_index(
                     &store,
                     &room_id,
@@ -494,7 +538,7 @@ fn load_events_for_test<'py>(
     let events = py
         .detach(|| {
             handle.block_on(async {
-                let store = PostgresStateResStore::begin(&pool, handle.clone()).await?;
+                let store = PostgresStateResStore::begin(&pool, handle.clone(), None).await?;
                 let events = store.get_events(&ids).await?;
                 store.finish().await?;
                 anyhow::Ok(events)
