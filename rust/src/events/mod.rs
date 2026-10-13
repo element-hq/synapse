@@ -680,6 +680,25 @@ impl Event {
         })
     }
 
+    /// A copy sharing everything with this event, including the internal
+    /// metadata (so a change to one's metadata shows in the other, as for
+    /// two references to the same Python object).
+    pub(crate) fn shallow_clone(&self) -> Event {
+        Event {
+            parsed_event: FormattedEvent {
+                signatures: self.parsed_event.signatures.clone(),
+                unsigned: self.parsed_event.unsigned.clone(),
+                specific_fields: Arc::clone(&self.parsed_event.specific_fields),
+                common_fields: Arc::clone(&self.parsed_event.common_fields),
+            },
+            event_id: Arc::clone(&self.event_id),
+            room_id: Arc::clone(&self.room_id),
+            internal_metadata: self.internal_metadata.clone(),
+            room_version: self.room_version,
+            rejected_reason: self.rejected_reason.clone(),
+        }
+    }
+
     /// Parse an event from its JSON text. See [`Event::from_parts`].
     pub(crate) fn from_json_str(
         event_json: &str,

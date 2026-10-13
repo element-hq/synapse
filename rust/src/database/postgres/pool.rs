@@ -342,10 +342,10 @@ pub fn create_pool(
 
 #[pyclass(name = "ConnectionPool", frozen)]
 pub struct PyConnectionPool {
-    pool: ConnectionPool,
+    pub(crate) pool: ConnectionPool,
     /// Handle to the extension's shared tokio runtime: checkouts block on it,
     /// and each `Connection` handed out drives its calls on it.
-    handle: Handle,
+    pub(crate) handle: Handle,
 }
 
 #[pymethods]
