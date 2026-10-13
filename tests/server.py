@@ -107,6 +107,9 @@ from synapse.storage.database import (
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.synapse_rust.runtime import RustRuntime, set_virtual_time_msec
+from synapse.synapse_rust.state import (
+    StateResolutionHandler as RustStateResolutionHandler,
+)
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
@@ -1503,7 +1506,46 @@ def setup_test_homeserver(
     # rename this function.
     start_test_homeserver(hs=hs, cleanup_func=cleanup_func, reactor=reactor)
 
+    if RUST_STATE_RES_FOR_TESTS:
+        # Make the Rust state resolution synchronous, as `make_fake_db_pool` does
+        # for database transactions.
+        state_res_handler = hs.get_state_resolution_handler()
+        if state_res_handler._rust_state_res is not None:
+            state_res_handler._rust_state_res = cast(
+                Any, _BlockingRustStateResolution(state_res_handler._rust_state_res)
+            )
+
     return hs
+
+
+class _BlockingRustStateResolution:
+    """Wraps the Rust `StateResolutionHandler` so that `resolve` blocks.
+
+    The Rust resolution fires its deferred from the tokio runtime's threads.
+    Nothing in the fake reactor waits for that, so code that resolves state in
+    the background (e.g. processing a PDU after `/send` has returned) would not
+    have finished when a test checks. Tests that exercise the deferred itself
+    are in `tests/state/test_rust_handler.py`.
+    """
+
+    def __init__(self, handler: "RustStateResolutionHandler") -> None:
+        self._handler = handler
+
+    def resolve(
+        self,
+        room_id: str,
+        room_version: str,
+        state_sets: Any,
+        event_map: Any = None,
+    ) -> "Deferred[Any]":
+        try:
+            return succeed(
+                self._handler.resolve_blocking(
+                    room_id, room_version, state_sets, event_map
+                )
+            )
+        except Exception:
+            return fail()
 
 
 def start_test_homeserver(

@@ -27,7 +27,9 @@
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
+    future::Future,
     hash::{Hash, Hasher},
+    pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -424,28 +426,17 @@ impl StateResolutionHandler {
             )),
         }
     }
-}
 
-#[pymethods]
-impl StateResolutionHandler {
-    /// Resolve the state sets.
-    ///
-    /// `event_map` holds events that are not persisted yet; everything else
-    /// is read from the database. It is not modified.
-    ///
-    /// Returns a deferred resolving to `(state, stats)`. If nothing
-    /// conflicts, the deferred has already fired. Fails with
-    /// `NoChainCoverIndexError` if the room has no chain cover index, in
-    /// which case the caller should use the Python implementation.
-    #[pyo3(signature = (room_id, room_version, state_sets, event_map=None))]
-    fn resolve<'py>(
+    /// Convert the inputs under the GIL and start a resolution: either the
+    /// answer, if nothing conflicts, or the future that computes it.
+    fn start(
         &self,
-        py: Python<'py>,
+        py: Python<'_>,
         room_id: String,
         room_version: &str,
-        state_sets: Vec<Bound<'py, PyAny>>,
-        event_map: Option<Bound<'py, PyDict>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+        state_sets: Vec<Bound<'_, PyAny>>,
+        event_map: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<Started> {
         let room_version: &'static RoomVersion = room_version
             .parse()
             .map_err(|e| PyValueError::new_err(format!("{e}")))?;
@@ -471,13 +462,10 @@ impl StateResolutionHandler {
         // straight away rather than on the runtime.
         let (unconflicted, conflicted) = v2::separate(&state_sets);
         if conflicted.is_empty() {
-            let output = ResolveOutput {
+            return Ok(Started::Done(ResolveOutput {
                 state: unconflicted,
                 stats: StateResStats::default(),
-            };
-            return py
-                .import(intern!(py, "twisted.internet.defer"))?
-                .call_method1(intern!(py, "succeed"), (output,));
+            }));
         }
 
         let events = event_map_from_py(event_map.as_ref(), &mut interner)?;
@@ -485,7 +473,7 @@ impl StateResolutionHandler {
         let handle = self.runtime.tokio_handle()?;
         let cache = Arc::clone(&self.cache);
 
-        create_deferred(py, &self.runtime, async move {
+        Ok(Started::Pending(Box::pin(async move {
             let start = Instant::now();
             let store = PostgresStateResStore::begin(&pool, handle)
                 .await
@@ -531,7 +519,68 @@ impl StateResolutionHandler {
                 state: resolution.merged(),
                 stats,
             })
-        })
+        })))
+    }
+}
+
+/// A started resolution. See [`StateResolutionHandler::start`].
+enum Started {
+    Done(ResolveOutput),
+    Pending(Pin<Box<dyn Future<Output = PyResult<ResolveOutput>> + Send>>),
+}
+
+#[pymethods]
+impl StateResolutionHandler {
+    /// Resolve the state sets.
+    ///
+    /// `event_map` holds events that are not persisted yet; everything else
+    /// is read from the database. It is not modified.
+    ///
+    /// Returns a deferred resolving to `(state, stats)`. If nothing
+    /// conflicts, the deferred has already fired. Fails with
+    /// `NoChainCoverIndexError` if the room has no chain cover index, in
+    /// which case the caller should use the Python implementation.
+    #[pyo3(signature = (room_id, room_version, state_sets, event_map=None))]
+    fn resolve<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        room_version: &str,
+        state_sets: Vec<Bound<'py, PyAny>>,
+        event_map: Option<Bound<'py, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        match self.start(py, room_id, room_version, state_sets, event_map)? {
+            Started::Done(output) => py
+                .import(intern!(py, "twisted.internet.defer"))?
+                .call_method1(intern!(py, "succeed"), (output,)),
+            Started::Pending(future) => create_deferred(py, &self.runtime, future),
+        }
+    }
+
+    /// As [`Self::resolve`], but blocks (releasing the GIL) and returns
+    /// `(state, stats)` directly.
+    ///
+    /// For tests: under trial's fake reactor nothing waits for a deferred
+    /// fired from another thread, so code that resolves state in the
+    /// background would not see the result in time. The Rust DB pool's test
+    /// shim blocks the main thread in the same way.
+    #[pyo3(signature = (room_id, room_version, state_sets, event_map=None))]
+    fn resolve_blocking<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        room_version: &str,
+        state_sets: Vec<Bound<'py, PyAny>>,
+        event_map: Option<Bound<'py, PyDict>>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        let output = match self.start(py, room_id, room_version, state_sets, event_map)? {
+            Started::Done(output) => output,
+            Started::Pending(future) => {
+                let handle = self.runtime.tokio_handle()?;
+                py.detach(|| handle.block_on(future))?
+            }
+        };
+        output.into_pyobject(py)
     }
 }
 

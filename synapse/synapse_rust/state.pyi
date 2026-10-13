@@ -60,6 +60,16 @@ class StateResolutionHandler:
             SynapseError: an event in the conflicted set is malformed.
         """
 
+    def resolve_blocking(
+        self,
+        room_id: str,
+        room_version: str,
+        state_sets: Sequence[StateMap[str]],
+        event_map: Mapping[str, Event] | None = None,
+    ) -> tuple[dict[StateKey, str], StateResStats]:
+        """As `resolve`, but blocks and returns the result. For tests, where the
+        fake reactor does not wait for a deferred fired from another thread."""
+
 def get_auth_chain_difference_for_test(
     pool: ConnectionPool,
     room_id: str,
