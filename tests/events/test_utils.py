@@ -22,7 +22,7 @@
 import unittest as stdlib_unittest
 from typing import TYPE_CHECKING, Any, Mapping
 
-from synapse.api.constants import EventContentFields
+from synapse.api.constants import EventContentFields, EventUnsignedContentFields
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.utils import (
@@ -41,7 +41,7 @@ from synapse.types import JsonDict
 from synapse.util.frozenutils import freeze
 
 from tests.test_utils.event_builders import make_test_event
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, override_config
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -924,6 +924,71 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "unsigned": {
                     "redacted_because": self.serialize(redaction_event, fields=None),
                 },
+            },
+        )
+
+    def test_msc4428_stable_id_absent_by_default(self) -> None:
+        serialized = self.serialize(
+            make_test_event(sender="@alice:localhost", room_id="!foo:bar"), None
+        )
+        self.assertNotIn(
+            EventUnsignedContentFields.MSC4428_STABLE_ID, serialized["unsigned"]
+        )
+
+    @override_config({"experimental_features": {"msc4428_enabled": True}})
+    def test_msc4428_stable_id(self) -> None:
+        """With MSC4428 enabled, every serialized event carries the sender as
+        `unsigned.org.matrix.msc4428.stable_id`, including the embedded
+        `redacted_because` event."""
+        redaction_id = "$redaction_event_id"
+
+        event = make_test_event(
+            type="foo",
+            event_id="test",
+            sender="@alice:localhost",
+            room_id="!foo:bar",
+            content={"foo": "bar"},
+        )
+        event.internal_metadata.redacted_by = redaction_id
+
+        redaction_event = make_test_event(
+            type="m.room.redaction",
+            event_id=redaction_id,
+            sender="@mod:localhost",
+            content={"redacts": "test"},
+        )
+
+        serialized = self.serialize(
+            event, None, redaction_map={redaction_id: redaction_event}
+        )
+        self.assertEqual(
+            serialized["unsigned"][EventUnsignedContentFields.MSC4428_STABLE_ID],
+            "@alice:localhost",
+        )
+        self.assertEqual(
+            serialized["unsigned"]["redacted_because"]["unsigned"][
+                EventUnsignedContentFields.MSC4428_STABLE_ID
+            ],
+            "@mod:localhost",
+        )
+
+        # The field is subject to the client's field allowlist like any other
+        # (the dots in its name need escaping in the allowlist).
+        self.assertEqual(
+            self.serialize(event, ["content.foo"]), {"content": {"foo": "bar"}}
+        )
+        self.assertEqual(
+            self.serialize(
+                event,
+                [
+                    "unsigned."
+                    + EventUnsignedContentFields.MSC4428_STABLE_ID.replace(".", r"\.")
+                ],
+            ),
+            {
+                "unsigned": {
+                    EventUnsignedContentFields.MSC4428_STABLE_ID: "@alice:localhost"
+                }
             },
         )
 

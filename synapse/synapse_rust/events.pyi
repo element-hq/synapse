@@ -371,6 +371,7 @@ class SerializeEventConfig:
         include_stripped_room_state: bool,
         include_admin_metadata: bool,
         msc4354_enabled: bool,
+        msc4428_enabled: bool,
     ) -> None: ...
     @property
     def as_client_event(self) -> bool:
@@ -410,6 +411,12 @@ class SerializeEventConfig:
     def msc4354_enabled(self) -> bool:
         """Whether MSC4354 (sticky events) is enabled. When ``True``, the
         remaining stickiness TTL is computed and added to ``unsigned``."""
+
+    @property
+    def msc4428_enabled(self) -> bool:
+        """Whether MSC4428 (stable identifiers for room members) is enabled.
+        When ``True``, the sender is repeated in ``unsigned`` as
+        ``org.matrix.msc4428.stable_id``."""
 
 def serialize_events(
     events: list[tuple[Event, str | None]],

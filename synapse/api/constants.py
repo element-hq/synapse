@@ -328,6 +328,9 @@ class EventUnsignedContentFields:
 
     STICKY_TTL: Final = "msc4354_sticky_duration_ttl_ms"
 
+    # MSC4428: the stable identifier of the room member who sent the event.
+    MSC4428_STABLE_ID: Final = "org.matrix.msc4428.stable_id"
+
 
 class MTextFields:
     """Fields found inside m.text content blocks."""

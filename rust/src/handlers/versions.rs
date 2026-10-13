@@ -261,6 +261,9 @@ pub struct UnstableFeatureMap {
     /// MSC4354: Sticky events
     #[serde(rename = "org.matrix.msc4354")]
     msc4354: bool,
+    /// MSC4428: Stable identifiers for room members.
+    #[serde(rename = "org.matrix.msc4428")]
+    msc4428: bool,
     /// MSC4380: Invite blocking
     #[serde(rename = "org.matrix.msc4380.stable")]
     msc4380: bool,
@@ -329,6 +332,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
         msc4169: config.experimental.msc4169_enabled,
         msc4262: config.server.include_profile_updates_in_sync,
         msc4354: config.experimental.msc4354_enabled,
+        msc4428: config.experimental.msc4428_enabled,
         msc4380: true,
         msc4429: config.server.include_profile_updates_in_sync,
         msc4445_initial_sync_timeline_topological_ordering: true,

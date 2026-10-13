@@ -128,6 +128,10 @@ pub struct SerializeEventConfig {
     /// Whether MSC4354 (sticky events) is enabled. When `true`, the remaining
     /// stickiness TTL is computed and added to `unsigned`.
     msc4354_enabled: bool,
+    /// Whether MSC4428 (stable identifiers for room members) is enabled. When
+    /// `true`, the sender is repeated in `unsigned` as
+    /// `org.matrix.msc4428.stable_id`.
+    msc4428_enabled: bool,
 }
 
 #[pymethods]
@@ -142,6 +146,7 @@ impl SerializeEventConfig {
         include_stripped_room_state: bool,
         include_admin_metadata: bool,
         msc4354_enabled: bool,
+        msc4428_enabled: bool,
     ) -> PyResult<Self> {
         let requester = requester.map(|r| r.get().clone());
 
@@ -153,6 +158,7 @@ impl SerializeEventConfig {
             include_stripped_room_state,
             include_admin_metadata,
             msc4354_enabled,
+            msc4428_enabled,
         })
     }
 }
@@ -516,6 +522,16 @@ fn serialize_event_value(
                 Value::Bool(true),
             );
         }
+    }
+
+    if config.msc4428_enabled {
+        // MSC4428: clients must use this, not `sender`, to identify the room
+        // member who sent the event: a later room version may drop `sender`.
+        // Today the stable ID is the sender's user ID.
+        unsigned.insert(
+            unsigned_field::MSC4428_STABLE_ID.to_owned(),
+            Value::String(event.sender().to_owned()),
+        );
     }
 
     if config.msc4354_enabled {

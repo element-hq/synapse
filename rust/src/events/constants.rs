@@ -84,6 +84,9 @@ pub mod unsigned_field {
     pub const MEMBERSHIP: &str = "membership";
     /// Unsigned field: msc4354_sticky_duration_ttl_ms (MSC4354)
     pub const STICKY_TTL: &str = "msc4354_sticky_duration_ttl_ms";
+    /// Unsigned field: org.matrix.msc4428.stable_id (MSC4428), the stable
+    /// identifier of the room member who sent the event.
+    pub const MSC4428_STABLE_ID: &str = "org.matrix.msc4428.stable_id";
     /// Unsigned field: io.element.synapse.soft_failed (admin metadata)
     pub const SOFT_FAILED: &str = "io.element.synapse.soft_failed";
     /// Unsigned field: io.element.synapse.policy_server_spammy (admin metadata)
