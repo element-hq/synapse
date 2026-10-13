@@ -163,6 +163,10 @@ class EventBuilder:
             assert self.room_version.msc4242_state_dags
         if self.room_version.msc4242_state_dags:
             assert prev_state_events is not None
+            # FIXME: choose more intelligently
+            prev_state_events = sorted(prev_state_events)[
+                : StateDag.MAX_PREV_STATE_EVENTS
+            ]
             if self.room_id:
                 state_ids = await self._state.compute_state_after_events(
                     self.room_id,
@@ -313,7 +317,6 @@ class EventBuilder:
             # Auth events are removed entirely on state DAG rooms
             event_dict.pop("auth_events")
             assert prev_state_events is not None
-            assert len(prev_state_events) <= StateDag.MAX_PREV_STATE_EVENTS
             event_dict["prev_state_events"] = prev_state_events
         if self.room_id is not None:
             event_dict["room_id"] = self.room_id
