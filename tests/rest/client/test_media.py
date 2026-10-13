@@ -944,8 +944,8 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertNotIn("msc4448:site_logo:size", channel.json_body)
 
     @override_config({"experimental_features": {"msc4448_enabled": True}})
-    def test_site_logo_cached_for_later(self) -> None:
-        """MSC4448: the logo is cached even if the first client did not ask for it."""
+    def test_site_logo_fetched_on_demand(self) -> None:
+        """MSC4448: the logo is only fetched once a client asks for it, then cached."""
         self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
         self.lookups["cdn.matrix.org"] = [(IPv4Address, "10.1.2.4")]
         self.lookups["icons.matrix.org"] = [(IPv4Address, "10.1.2.5")]
@@ -960,23 +960,46 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         self._respond(0, b'text/html; charset="utf8"', self.SITE_LOGO_HTML)
         self._respond(1, b"image/png", SMALL_PNG)
-        self._respond(2, b"image/png", SMALL_PNG)
 
+        # The favicon was not fetched, and its URL is not leaked.
+        self.assertEqual(len(self.reactor.tcpClients), 2)
         self.assertEqual(channel.code, 200)
         self._assert_small_png(channel.json_body)
         self.assertNotIn("msc4448:site_logo", channel.json_body)
+        self.assertNotIn("msc4448:site_logo:source", channel.json_body)
 
-        # Asking for the logo afterwards is served from the cache, logo included.
+        # The first client asking for the logo fetches it.
         channel = self.make_request(
             "GET",
             "/_matrix/client/v1/media/preview_url?url=http://matrix.org"
             "&msc4448_include=msc4448:site_logo",
             shorthand=False,
+            await_result=False,
         )
-        self.assertEqual(len(self.reactor.tcpClients), 3)
+        self.pump()
+
+        self.assertEqual(self.reactor.tcpClients[2][0], "10.1.2.5")
+        self._respond(2, b"image/png", SMALL_PNG)
+
         self.assertEqual(channel.code, 200)
+        self._assert_small_png(channel.json_body)
         self.assertTrue(channel.json_body["msc4448:site_logo"].startswith("mxc://"))
         self.assertEqual(channel.json_body["msc4448:site_logo:size"], len(SMALL_PNG))
+        self.assertNotIn("msc4448:site_logo:source", channel.json_body)
+
+        # Later clients are served the logo from the in-memory cache, then from
+        # the database once that is gone; nothing is fetched again.
+        for _ in range(2):
+            channel = self.make_request(
+                "GET",
+                "/_matrix/client/v1/media/preview_url?url=http://matrix.org"
+                "&msc4448_include=msc4448:site_logo",
+                shorthand=False,
+            )
+            self.assertEqual(len(self.reactor.tcpClients), 3)
+            self.assertEqual(channel.code, 200)
+            self.assertTrue(channel.json_body["msc4448:site_logo"].startswith("mxc://"))
+            self.url_previewer._cache.pop("http://matrix.org")
 
     @override_config({"experimental_features": {"msc4448_enabled": True}})
     def test_site_logo_replaces_favicon_as_image(self) -> None:

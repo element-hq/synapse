@@ -633,6 +633,18 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             desc="store_url_cache",
         )
 
+    async def update_url_cache_og(self, url: str, old_og: str, new_og: str) -> None:
+        """Replace the OG data of a cached URL preview, if it is still `old_og`.
+
+        Used to add the MSC4448 site logo to a preview once a client asks for it.
+        """
+        await self.db_pool.simple_update(
+            "local_media_repository_url_cache",
+            keyvalues={"url": url, "og": old_og},
+            updatevalues={"og": new_og},
+            desc="update_url_cache_og",
+        )
+
     async def get_local_media_thumbnails(self, media_id: str) -> list[ThumbnailInfo]:
         rows = cast(
             list[tuple[int, int, str, str, int]],

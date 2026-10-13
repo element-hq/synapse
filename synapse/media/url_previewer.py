@@ -34,6 +34,7 @@ from urllib.request import urlopen
 
 import attr
 
+from twisted.internet import defer
 from twisted.internet.defer import Deferred
 from twisted.internet.error import DNSLookupError
 
@@ -230,6 +231,9 @@ class UrlPreviewer:
         self.url_preview_accept_language = hs.config.media.url_preview_accept_language
         # MSC4448: whether to collect the site logo along with the preview.
         self._site_logo_enabled = hs.config.experimental.msc4448_enabled
+        # MSC4448: in-flight site logo fetches, mapping urls to an
+        # ObservableDeferred returning the JSON-encoded OG metadata with the logo.
+        self._site_logo_fetches: dict[str, ObservableDeferred[bytes]] = {}
 
         # memory cache mapping urls to an ObservableDeferred returning
         # JSON-encoded OG metadata
@@ -258,8 +262,8 @@ class UrlPreviewer:
             user: The user requesting the preview.
             ts: The timestamp requested for the preview.
             include_site_logo: Whether to include the MSC4448 site logo in the
-                response. The logo is cached along with the rest of the preview,
-                but only returned to clients which ask for it.
+                response. The logo is only fetched the first time a client asks
+                for it, then cached along with the rest of the preview.
 
         Returns:
             json-encoded og data
@@ -283,7 +287,68 @@ class UrlPreviewer:
             logger.info("Returning cached response")
 
         jsonog = await make_deferred_yieldable(observable.observe())
+        if include_site_logo and _SITE_LOGO_SOURCE_KEY.encode() in jsonog:
+            jsonog = await self._get_site_logo(url, user, jsonog)
         return _filter_site_logo(jsonog, include_site_logo)
+
+    async def _get_site_logo(self, url: str, user: UserID, jsonog: bytes) -> bytes:
+        """
+        Fetch the MSC4448 site logo of a cached preview which does not have it yet.
+
+        Only one fetch per URL runs at a time.
+
+        Args:
+            url: The URL being previewed.
+            user: The user requesting the preview.
+            jsonog: The cached, JSON-encoded Open Graph data, holding the logo's
+                source URL.
+
+        Returns:
+            The JSON-encoded Open Graph data, with the logo if it could be fetched.
+        """
+        observable = self._site_logo_fetches.get(url)
+        if not observable:
+            download = run_in_background(self._fetch_site_logo, url, user, jsonog)
+            observable = ObservableDeferred(download, consumeErrors=True)
+            self._site_logo_fetches[url] = observable
+            download.addBoth(self._site_logo_fetch_done, url)
+
+        try:
+            return await make_deferred_yieldable(observable.observe())
+        except Exception as e:
+            logger.warning("Fetching the site logo of %s failed: %s", url, e)
+            return jsonog
+
+    def _site_logo_fetch_done(self, result: object, url: str) -> object:
+        # The caches have been updated, so later requests won't fetch it again.
+        self._site_logo_fetches.pop(url, None)
+        return result
+
+    async def _fetch_site_logo(self, url: str, user: UserID, jsonog: bytes) -> bytes:
+        """
+        Download the MSC4448 site logo of a cached preview, and update the caches.
+
+        Args:
+            url: The URL being previewed.
+            user: The user requesting the preview.
+            jsonog: The cached, JSON-encoded Open Graph data, holding the logo's
+                source URL.
+
+        Returns:
+            The updated JSON-encoded Open Graph data.
+        """
+        og = json_decoder.decode(jsonog.decode("utf8"))
+        source = og.pop(_SITE_LOGO_SOURCE_KEY)
+        og["msc4448:site_logo"] = source
+        # If this fails the source is dropped all the same, so it isn't retried.
+        await self._precache_image(user, source, og, "msc4448:site_logo")
+
+        new_jsonog = json_encoder.encode(og)
+        await self.store.update_url_cache_og(url, jsonog.decode("utf8"), new_jsonog)
+
+        result = new_jsonog.encode("utf8")
+        self._cache[url] = ObservableDeferred(defer.succeed(result), consumeErrors=True)
+        return result
 
     async def _do_preview(self, url: str, user: UserID, ts: int) -> bytes:
         """Check the db, and download the URL and build a preview
@@ -737,7 +802,8 @@ class UrlPreviewer:
         self, user: UserID, media_info: MediaInfo, og: JsonDict
     ) -> None:
         """
-        Pre-cache the image and MSC4448 site logo (if they exist) for posterity
+        Pre-cache the image (if one exists) for posterity, and note where the
+        MSC4448 site logo is so it can be fetched when a client asks for it.
 
         Args:
             user: The user requesting the preview.
@@ -750,7 +816,7 @@ class UrlPreviewer:
             site_logo_url = None
         image_url = og.get("og:image")
 
-        await self._precache_image(user, media_info, og, "og:image")
+        await self._precache_image(user, media_info.uri, og, "og:image")
 
         if not site_logo_url:
             return
@@ -762,18 +828,21 @@ class UrlPreviewer:
                 og["msc4448:site_logo"] = og["og:image"]
                 og["msc4448:site_logo:size"] = og["matrix:image:size"]
         else:
-            og["msc4448:site_logo"] = site_logo_url
-            await self._precache_image(user, media_info, og, "msc4448:site_logo")
+            # Only fetched once a client asks for it, see `_get_site_logo`.
+            if urlparse(site_logo_url).scheme != "data":
+                site_logo_url = urljoin(media_info.uri, site_logo_url)
+            og[_SITE_LOGO_SOURCE_KEY] = site_logo_url
 
     async def _precache_image(
-        self, user: UserID, media_info: MediaInfo, og: JsonDict, key: str
+        self, user: UserID, base_url: str, og: JsonDict, key: str
     ) -> None:
         """
         Download the image at `og[key]` and replace it with an mxc:// URI.
 
         Args:
             user: The user requesting the preview.
-            media_info: The media being previewed.
+            base_url: The URL to resolve a relative image URL against, normally
+                the URL of the media being previewed.
             og: The Open Graph dictionary. This is modified with image information.
             key: The Open Graph key holding the image URL: "og:image" or the
                 MSC4448 "msc4448:site_logo".
@@ -791,7 +860,7 @@ class UrlPreviewer:
         # convert it to a URL which can be requested directly.
         url_parts = urlparse(image_url)
         if url_parts.scheme != "data":
-            image_url = urljoin(media_info.uri, image_url)
+            image_url = urljoin(base_url, image_url)
 
         # FIXME: it might be cleaner to use the same flow as the main /preview_url
         # request itself and benefit from the same caching etc.  But for now we
@@ -966,6 +1035,11 @@ class UrlPreviewer:
             logger.debug("No media removed from url preview cache")
 
 
+# Where a preview notes the source URL of an MSC4448 site logo not fetched yet.
+# Never returned to clients.
+_SITE_LOGO_SOURCE_KEY = "msc4448:site_logo:source"
+
+
 def _filter_site_logo(jsonog: bytes, include_site_logo: bool) -> bytes:
     """
     Apply the client's choice about the MSC4448 site logo to a cached preview.
@@ -973,7 +1047,8 @@ def _filter_site_logo(jsonog: bytes, include_site_logo: bool) -> bytes:
     The logo is cached with the preview so that the cache stays keyed by URL
     alone, but it is only returned to clients which asked for it. For those, a
     favicon which was only standing in for a missing `og:image` is returned as
-    the logo alone, not twice.
+    the logo alone, not twice. The source URL of a logo not fetched yet is never
+    returned.
 
     Args:
         jsonog: The cached, JSON-encoded Open Graph data.
@@ -994,6 +1069,7 @@ def _filter_site_logo(jsonog: bytes, include_site_logo: bool) -> bytes:
             for k, v in og.items()
             if not k.startswith("og:image") and k != "matrix:image:size"
         }
+    og.pop(_SITE_LOGO_SOURCE_KEY, None)
     return json_encoder.encode(og).encode("utf8")
 
 
