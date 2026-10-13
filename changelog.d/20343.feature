@@ -1,1 +1,1 @@
-Add `room_forbidden_join_rules` config option to prevent non-admin users from setting specific room join rules, advertised via the `io.element.forbidden_join_rules` capability.
+Remove support for the unstable io.element.msc4452.preview_url capability and the msc4452_enabled experimental flag, now that MSC4452 is stable.
