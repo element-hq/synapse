@@ -40,7 +40,15 @@ from synapse.events.utils import (
     validate_canonicaljson,
 )
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
-from synapse.types import EventID, JsonDict, JsonMapping, RoomID, StrCollection, UserID
+from synapse.types import (
+    EventID,
+    JsonDict,
+    JsonMapping,
+    MemberKey,
+    RoomID,
+    StrCollection,
+    UserID,
+)
 
 
 class EventValidator:
@@ -199,7 +207,14 @@ class EventValidator:
             ):
                 raise SynapseError(400, f"Invalid room ID '{event.room_id}'")
 
-        UserID.from_string(event.sender)
+        if event.room_version.msc4430_member_keys:
+            # MSC4430: the sender, and the target of a membership event, are
+            # member keys (canonically encoded: one key, one identity).
+            MemberKey.from_string(event.sender)
+            if event.type == EventTypes.Member and hasattr(event, "state_key"):
+                MemberKey.from_string(event.state_key)
+        else:
+            UserID.from_string(event.sender)
 
         if event.type == EventTypes.Message:
             strings = ["body", "msgtype"]

@@ -351,9 +351,8 @@ impl RoomVersion {
     /// of MSC4242; only the identifier type of `sender` / `m.room.member` `state_key`,
     /// the signatures and the `m.room.member` redaction rules differ.
     ///
-    /// Note: this version is deliberately *not* in `KNOWN_ROOM_VERSIONS`, and is not
-    /// registered there when `msc4430_enabled` is set either, until the server can
-    /// actually create and join such rooms.
+    /// Note: this version is not in `KNOWN_ROOM_VERSIONS` by default; the Python
+    /// config registers it when `msc4430_enabled` is set.
     pub const MSC4430V12: RoomVersion = RoomVersion {
         identifier: "org.matrix.msc4430.12",
         msc4430_member_keys: true,

@@ -84,6 +84,11 @@ class EventValidatorTestCase(HomeserverTestCase):
                     # state events instead of the auth events.
                     del event_dict["auth_events"]
                     event_dict["prev_state_events"] = []
+                if room_version.msc4430_member_keys:
+                    # Members of such rooms are member keys, not user IDs.
+                    event_dict["sender"] = (
+                        "@l8Hft5qXKn1vfHrg3p4-W8gELQVo8N13JkluMfmn2sQ"
+                    )
 
                 event = make_event_from_dict(
                     event_dict,

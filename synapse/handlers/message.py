@@ -56,7 +56,10 @@ from synapse.api.urls import ConsentURIBuilder
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase, relation_from_event
 from synapse.events.builder import EventBuilder
-from synapse.events.py_protocol import supports_msc4242_state_dag
+from synapse.events.py_protocol import (
+    supports_msc4242_state_dag,
+    supports_msc4430_member_keys,
+)
 from synapse.events.snapshot import (
     EventContext,
     EventPersistencePair,
@@ -508,6 +511,7 @@ class EventCreationHandler:
         self.hs = hs
         self.validator = EventValidator()
         self.event_builder_factory = hs.get_event_builder_factory()
+        self._member_key_handler = hs.get_member_key_handler()
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.auth_blocking = hs.get_auth_blocking()
@@ -700,7 +704,11 @@ class EventCreationHandler:
                             event_dict["content"]["redacts"], allow_none=True
                         )
                         if event:
-                            if event.sender != requester.user.to_string():
+                            # (In an MSC4430 room the sender is the user's key.)
+                            redacted_sender = await self._member_key_handler.local_user_id_for_identity(
+                                event.room_id, event.sender
+                            )
+                            if redacted_sender != requester.user.to_string():
                                 raise SynapseError(
                                     403,
                                     "You can only redact your own events while account is suspended.",
@@ -741,6 +749,12 @@ class EventCreationHandler:
             except NotFoundError:
                 raise AuthError(403, "Unknown room")
 
+        if room_version_obj.msc4430_member_keys:
+            # MSC4430: the client speaks in user IDs, the room in member keys.
+            await self._member_key_handler.translate_event_dict(
+                room_version_obj, event_dict
+            )
+
         builder = self.event_builder_factory.for_room_version(
             room_version_obj, event_dict
         )
@@ -765,18 +779,28 @@ class EventCreationHandler:
 
         builder.internal_metadata.outlier = outlier
 
-        event, unpersisted_context = await self.create_new_client_event(
-            builder=builder,
-            requester=requester,
-            prev_event_ids=prev_event_ids,
-            auth_event_ids=auth_event_ids,
-            state_event_ids=state_event_ids,
-            depth=depth,
-            state_map=state_map,
-            for_batch=for_batch,
-            current_state_group=current_state_group,
-            prev_state_events=prev_state_events,
-        )
+        try:
+            event, unpersisted_context = await self.create_new_client_event(
+                builder=builder,
+                requester=requester,
+                prev_event_ids=prev_event_ids,
+                auth_event_ids=auth_event_ids,
+                state_event_ids=state_event_ids,
+                depth=depth,
+                state_map=state_map,
+                for_batch=for_batch,
+                current_state_group=current_state_group,
+                prev_state_events=prev_state_events,
+            )
+        except Exception:
+            if is_create_event and room_version_obj.msc4430_member_keys:
+                self._member_key_handler.discard_pending_member_keys(event_dict)
+            raise
+
+        if is_create_event and room_version_obj.msc4430_member_keys:
+            # The creators' member keys could only be stored once the room ID,
+            # which is derived from the create event, was known.
+            await self._member_key_handler.persist_pending_member_keys(event)
 
         # In an ideal world we wouldn't need the second part of this condition. However,
         # this behaviour isn't spec'd yet, meaning we should be able to deactivate this
@@ -842,6 +866,9 @@ class EventCreationHandler:
                 return await self.store.is_server_notice_room(builder.room_id)
             elif membership == Membership.LEAVE:
                 # the user is always allowed to leave (but not kick people)
+                if builder.room_version.msc4430_member_keys:
+                    # MSC4430: both are the requester's member key.
+                    return builder.state_key == builder.sender
                 return builder.state_key == requester.user.to_string()
         return False
 
@@ -1095,7 +1122,11 @@ class EventCreationHandler:
 
             is_admin_redaction = await self.is_admin_redaction(
                 event_type=event_dict["type"],
-                sender=event_dict["sender"],
+                # The sender as the room knows them: the redacted event's sender
+                # is a member key in an MSC4430 room.
+                sender=await self._member_key_handler.room_identity_for_user(
+                    room_id, event_dict["sender"], room_version
+                ),
                 redacts=redacts,
             )
             await self.request_ratelimiter.ratelimit(
@@ -1184,9 +1215,14 @@ class EventCreationHandler:
                 )
                 context = await unpersisted_context.persist(event)
 
-                assert self.hs.is_mine_id(event.sender), "User must be our own: %s" % (
-                    event.sender,
-                )
+                if supports_msc4430_member_keys(event):
+                    assert await self._member_key_handler.is_local_identity(
+                        event.room_id, event.sender
+                    ), "Member key must be our own: %s" % (event.sender,)
+                else:
+                    assert self.hs.is_mine_id(event.sender), (
+                        "User must be our own: %s" % (event.sender,)
+                    )
                 # if this room uses a policy server, try to get a signature now.
                 # We use verify=False here as we are about to call is_event_allowed on the same event
                 # which will do sig checks.
@@ -1608,7 +1644,13 @@ class EventCreationHandler:
                 EventTypes.Message,
                 EventTypes.Encrypted,
             ]:
-                await self.store.set_room_participation(event.sender, event.room_id)
+                # Participation is recorded by user ID; in an MSC4430 room the
+                # sender is the user's key.
+                participant = await self._member_key_handler.local_user_id_for_identity(
+                    event.room_id, event.sender
+                )
+                if participant is not None:
+                    await self.store.set_room_participation(participant, event.room_id)
 
             if event.internal_metadata.is_out_of_band_membership():
                 # the only sort of out-of-band-membership events we expect to see here are
@@ -2011,16 +2053,24 @@ class EventCreationHandler:
 
             # run checks/actions on event based on type
             if event.type == EventTypes.Member and event.membership == Membership.JOIN:
-                (
-                    current_membership,
-                    _,
-                ) = await self.store.get_local_current_membership_for_user_in_room(
-                    event.state_key, event.room_id
-                )
-                if current_membership != Membership.JOIN:
-                    self._notifier.notify_user_joined_room(
-                        event.event_id, event.room_id
+                # `local_current_membership` is keyed by user ID; in an MSC4430
+                # room the state key is the joiner's member key.
+                joining_user_id = (
+                    await self._member_key_handler.local_user_id_for_identity(
+                        event.room_id, event.state_key
                     )
+                )
+                if joining_user_id is not None:
+                    (
+                        current_membership,
+                        _,
+                    ) = await self.store.get_local_current_membership_for_user_in_room(
+                        joining_user_id, event.room_id
+                    )
+                    if current_membership != Membership.JOIN:
+                        self._notifier.notify_user_joined_room(
+                            event.event_id, event.room_id
+                        )
 
             if event.type == EventTypes.ServerACL:
                 self._storage_controllers.state.get_server_acl_for_room.invalidate(
@@ -2102,18 +2152,35 @@ class EventCreationHandler:
                         ),
                     )
 
-                    invitee = UserID.from_string(event.state_key)
-                    if not self.hs.is_mine(invitee):
-                        # TODO: Can we add signature from remote server in a nicer
-                        # way? If we have been invited by a remote server, we need
-                        # to get them to sign the event.
+                    if supports_msc4430_member_keys(event):
+                        # MSC4430: the invitee is a member key. Only keys we hold
+                        # can be invited for now; inviting another server's
+                        # member (by looking its key up there and having it
+                        # co-sign the invite) is a later change.
+                        if not await self._member_key_handler.is_local_identity(
+                            event.room_id, event.state_key
+                        ):
+                            raise SynapseError(
+                                400,
+                                "Users of other servers cannot be invited to a "
+                                "room with member keys yet",
+                                Codes.INVALID_PARAM,
+                            )
+                    else:
+                        invitee = UserID.from_string(event.state_key)
+                        if not self.hs.is_mine(invitee):
+                            # TODO: Can we add signature from remote server in a nicer
+                            # way? If we have been invited by a remote server, we need
+                            # to get them to sign the event.
 
-                        returned_invite = await federation_handler.send_invite(
-                            invitee.domain, event, context
-                        )
+                            returned_invite = await federation_handler.send_invite(
+                                invitee.domain, event, context
+                            )
 
-                        # TODO: Make sure the signatures actually are correct.
-                        event.signatures.update(returned_invite.signatures.as_dict())
+                            # TODO: Make sure the signatures actually are correct.
+                            event.signatures.update(
+                                returned_invite.signatures.as_dict()
+                            )
 
                 if event.content["membership"] == Membership.KNOCK:
                     maybe_upsert_event_field(
@@ -2459,6 +2526,22 @@ class EventCreationHandler:
 
         # Construct a new EventBuilder and validate it, which helps with the
         # rest of these checks.
+        if original_event.room_version.msc4430_member_keys:
+            # The module's dict is as untrusted as a client's: translate it
+            # again (sender, target and linkage information come from the
+            # store, whatever it says), and a module cannot name who authorised
+            # a restricted join: that signature is the server's statement.
+            await self._member_key_handler.translate_event_dict(
+                original_event.room_version, third_party_result
+            )
+            if third_party_result.get("content", {}).get(
+                EventContentFields.AUTHORISING_USER
+            ) != original_event.content.get(EventContentFields.AUTHORISING_USER):
+                raise Exception(
+                    "Third party rules module created an invalid event: "
+                    "cannot change field join_authorised_via_users_server"
+                )
+
         try:
             builder = self.event_builder_factory.for_room_version(
                 original_event.room_version, third_party_result
@@ -2493,7 +2576,16 @@ class EventCreationHandler:
                 )
 
         # check that the new sender belongs to this HS
-        if not self.hs.is_mine_id(builder.sender):
+        if builder.room_version.msc4430_member_keys:
+            sender_is_ours = (
+                await self._member_key_handler.local_user_id_for_identity(
+                    builder.room_id, builder.sender
+                )
+                is not None
+            )
+        else:
+            sender_is_ours = self.hs.is_mine_id(builder.sender)
+        if not sender_is_ours:
             raise Exception(
                 "Third party rules module created an invalid event: "
                 "invalid sender " + builder.sender

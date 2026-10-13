@@ -39,7 +39,7 @@ from synapse.storage.util.partial_state_events_tracker import (
     PartialStateEventsTracker,
 )
 from synapse.synapse_rust.acl import ServerAclEvaluator
-from synapse.types import MutableStateMap, StateMap, StreamToken, get_domain_from_id
+from synapse.types import MutableStateMap, StateMap, StreamToken
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
 from synapse.util.caches import intern_string
@@ -859,11 +859,21 @@ class StateStorageController:
                 # The cached work is for the previous state group, so we work out
                 # the delta.
                 assert state_entry.delta_ids is not None
+                # The server behind each changed member (in an MSC4430 room the
+                # members are keys; one we cannot place belongs to no host).
+                member_hosts = await self.stores.main.get_hosts_for_identities(
+                    room_id,
+                    (
+                        state_key
+                        for (typ, state_key) in state_entry.delta_ids
+                        if typ == EventTypes.Member
+                    ),
+                )
                 for (typ, state_key), event_id in state_entry.delta_ids.items():
-                    if typ != EventTypes.Member:
+                    if typ != EventTypes.Member or state_key not in member_hosts:
                         continue
 
-                    host = intern_string(get_domain_from_id(state_key))
+                    host = intern_string(member_hosts[state_key])
                     user_id = state_key
                     known_joins = cache.hosts_to_joined_users.setdefault(host, set())
 
@@ -910,8 +920,11 @@ class StateStorageController:
                 )
 
                 cache.hosts_to_joined_users = {}
-                for user_id in chain(joined_user_ids, joined_users_in_current_state):
-                    host = intern_string(get_domain_from_id(user_id))
+                joined_hosts = await self.stores.main.get_hosts_for_identities(
+                    room_id, chain(joined_user_ids, joined_users_in_current_state)
+                )
+                for user_id, joined_host in joined_hosts.items():
+                    host = intern_string(joined_host)
                     cache.hosts_to_joined_users.setdefault(host, set()).add(user_id)
 
             if state_entry.state_group:

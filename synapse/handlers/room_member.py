@@ -43,6 +43,7 @@ from synapse.api.errors import (
     UnsupportedRoomVersionError,
 )
 from synapse.api.ratelimiting import Ratelimiter
+from synapse.api.room_versions import RoomVersion
 from synapse.event_auth import get_named_level, get_power_level_event
 from synapse.events import EventBase, is_creator
 from synapse.events.snapshot import EventContext
@@ -106,6 +107,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.registration_handler = hs.get_registration_handler()
         self.profile_handler = hs.get_profile_handler()
         self.event_creation_handler = hs.get_event_creation_handler()
+        self._member_key_handler = hs.get_member_key_handler()
         self.account_data_handler = hs.get_account_data_handler()
         self.event_auth_handler = hs.get_event_auth_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
@@ -501,12 +503,14 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     delay_id=delay_id,
                 )
                 context = await unpersisted_context.persist(event)
+                # The event's state key is the target as the room knows them (in
+                # an MSC4430 room, their member key rather than `user_id`).
                 prev_state_ids = await context.get_prev_state_ids(
-                    StateFilter.from_types([(EventTypes.Member, user_id)])
+                    StateFilter.from_types([(EventTypes.Member, event.state_key)])
                 )
 
                 prev_member_event_id = prev_state_ids.get(
-                    (EventTypes.Member, user_id), None
+                    (EventTypes.Member, event.state_key), None
                 )
 
                 with opentracing.start_active_span("handle_new_client_event"):
@@ -963,11 +967,27 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             )
 
         is_state_dags = False
+        room_version: RoomVersion | None = None
         try:
             room_version = await self.store.get_room_version(room_id)
             is_state_dags = room_version.msc4242_state_dags
         except (NotFoundError, UnsupportedRoomVersionError):
             pass
+
+        # The identities under which the target and the requester appear in the
+        # room's state: their user IDs, or in an MSC4430 room their member keys
+        # (a user of ours with no key in the room yet is under nothing, which is
+        # the right answer; users of other servers are refused when the event is
+        # built, a later change learns their keys over federation).
+        target_identity = target.to_string()
+        requester_identity = requester.user.to_string()
+        if room_version is not None and room_version.msc4430_member_keys:
+            target_identity = await self._member_key_handler.room_identity_for_user(
+                room_id, target_identity, room_version
+            )
+            requester_identity = await self._member_key_handler.room_identity_for_user(
+                room_id, requester_identity, room_version
+            )
 
         if is_state_dags:
             latest_event_ids = list(await self.store.get_state_dag_extremities(room_id))
@@ -981,7 +1001,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # `is_partial_state_room` also indicates whether `partial_state_before_join` is
         # partial.
 
-        is_host_in_room = await self._is_host_in_room(partial_state_before_join)
+        is_host_in_room = await self._is_host_in_room(
+            room_id, partial_state_before_join
+        )
 
         # if we are not in the room, we won't have the current state
         if is_host_in_room:
@@ -989,7 +1011,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             # between old and new state, with specific error messages for some
             # transitions and generic otherwise
             old_state_id = partial_state_before_join.get(
-                (EventTypes.Member, target.to_string())
+                (EventTypes.Member, target_identity)
             )
 
             if old_state_id:
@@ -1014,7 +1036,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 if old_state:
                     same_content = content == old_state.content
                     same_membership = old_membership == effective_membership_state
-                    same_sender = requester.user.to_string() == old_state.sender
+                    same_sender = requester_identity == old_state.sender
                     if same_sender and same_membership and same_content:
                         # duplicate event.
                         # we know it was persisted, so must have a stream ordering.
@@ -1082,7 +1104,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             else:
                 bypass_spam_checker = await self.auth.is_server_admin(requester)
 
-            inviter = await self._get_inviter(target.to_string(), room_id)
+            pending_invite = await self.store.get_invite_for_local_user_in_room(
+                user_id=target.to_string(), room_id=room_id
+            )
             if (
                 not bypass_spam_checker
                 # We assume that if the spam checker allowed the user to create
@@ -1091,7 +1115,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             ):
                 spam_check = (
                     await self._spam_checker_module_callbacks.user_may_join_room(
-                        target.to_string(), room_id, is_invited=inviter is not None
+                        target.to_string(),
+                        room_id,
+                        is_invited=pending_invite is not None,
                     )
                 )
                 if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
@@ -1104,7 +1130,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
             # Check if a remote join should be performed.
             remote_join, remote_room_hosts = await self._should_perform_remote_join(
-                target.to_string(),
+                target_identity,
                 room_id,
                 remote_room_hosts,
                 content,
@@ -1123,9 +1149,20 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         update=False,
                     )
 
-                inviter = await self._get_inviter(target.to_string(), room_id)
-                if inviter and not self.hs.is_mine(inviter):
-                    remote_room_hosts.append(inviter.domain)
+                pending_invite = await self.store.get_invite_for_local_user_in_room(
+                    user_id=target.to_string(), room_id=room_id
+                )
+                if pending_invite is not None:
+                    # The inviter's server can answer the join. (In an MSC4430
+                    # room the inviter is a member key, routed by its claimed
+                    # domain, if known.)
+                    inviter_domain = await self._member_key_handler.domain_for_identity(
+                        room_id, pending_invite.sender
+                    )
+                    if inviter_domain is not None and not self.hs.is_mine_server_name(
+                        inviter_domain
+                    ):
+                        remote_room_hosts.append(inviter_domain)
 
                 content["membership"] = Membership.JOIN
 
@@ -1179,7 +1216,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         invite.sender,
                     )
 
-                    if not self.hs.is_mine_id(invite.sender):
+                    if not await self._member_key_handler.is_local_identity(
+                        room_id, invite.sender
+                    ):
                         # send the rejection to the inviter's HS (with fallback to
                         # local event)
                         return await self.remote_reject_invite(
@@ -1671,14 +1710,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         return RoomID.from_string(room_id), servers
 
-    async def _get_inviter(self, user_id: str, room_id: str) -> UserID | None:
-        invite = await self.store.get_invite_for_local_user_in_room(
-            user_id=user_id, room_id=room_id
-        )
-        if invite:
-            return UserID.from_string(invite.sender)
-        return None
-
     async def do_3pid_invite(
         self,
         room_id: str,
@@ -1903,10 +1934,13 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         )
         return event, stream_id
 
-    async def _is_host_in_room(self, partial_current_state_ids: StateMap[str]) -> bool:
+    async def _is_host_in_room(
+        self, room_id: str, partial_current_state_ids: StateMap[str]
+    ) -> bool:
         """Returns whether the homeserver is in the room based on its current state.
 
         Args:
+            room_id: The room.
             partial_current_state_ids: The current state of the room. May be full or
                 partial state.
         """
@@ -1917,8 +1951,19 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             # We can only get here if we're in the process of creating the room
             return True
 
+        # Which of the members are ours: by user ID, or in an MSC4430 room by the
+        # member keys we hold in it.
+        local_members = await self.store.get_local_identity_map(
+            room_id,
+            (
+                state_key
+                for etype, state_key in partial_current_state_ids
+                if etype == EventTypes.Member
+            ),
+        )
+
         for etype, state_key in partial_current_state_ids:
-            if etype != EventTypes.Member or not self.hs.is_mine_id(state_key):
+            if etype != EventTypes.Member or state_key not in local_members:
                 continue
 
             event_id = partial_current_state_ids[(etype, state_key)]

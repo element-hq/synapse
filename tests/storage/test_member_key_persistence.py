@@ -30,6 +30,7 @@ from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.rest import admin
 from synapse.server import HomeServer
+from synapse.storage.member_keys import MemberLink
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
@@ -519,6 +520,124 @@ class MemberKeyPersistenceTestCase(unittest.HomeserverTestCase):
             {recent.event_id, other_sender.event_id},
         )
         self.assertEqual(self._prune(same_sender, [recent]), {same_sender.event_id})
+
+
+class HostsInMemberKeyRoomTestCase(unittest.HomeserverTestCase):
+    """Which servers are in a member key room: ours for the keys we hold, the
+    claimed domain for a key we have a link for, nothing for a key we cannot
+    place. These feed the federation sender."""
+
+    servlets = [admin.register_servlets]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {}).setdefault(
+            "msc4430_enabled", True
+        )
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        register_member_key_room_version()
+        self.store = hs.get_datastores().main
+        self.state_controller = hs.get_storage_controllers().state
+        self.state_handler = hs.get_state_handler()
+        self.alice = self.register_user("alice", "pass")
+        self.alice_member = Member()
+        self.room = MemberKeyRoom(hs, self.alice_member)
+        self.get_success(self.room.create())
+        self.get_success(
+            self.store.create_local_member_key(
+                self.room.room_id, self.alice, self.alice_member.signing_key
+            )
+        )
+        self.room_id = self.room.room_id
+
+    def test_hosts_for_identities(self) -> None:
+        stranger, linked = Member(), Member()
+        self.get_success(
+            self.store.upsert_member_link(
+                MemberLink(
+                    room_id=self.room_id,
+                    member_key=linked.key,
+                    domain="other.example",
+                    localpart="carol",
+                    verified=False,
+                    event_id=None,
+                    key_id=None,
+                )
+            )
+        )
+        hosts = self.get_success(
+            self.store.get_hosts_for_identities(
+                self.room_id,
+                [self.alice_member.key, stranger.key, linked.key, "@bob:b.example"],
+            )
+        )
+        self.assertEqual(
+            hosts,
+            {
+                self.alice_member.key: self.hs.hostname,
+                linked.key: "other.example",
+                "@bob:b.example": "b.example",
+            },
+        )
+
+    def test_current_hosts(self) -> None:
+        stranger = Member()
+        self.get_success(self.room.send_member(self.alice_member, "join"))
+        self.get_success(self.room.send_member(stranger, "join"))
+
+        self.assertEqual(
+            self.get_success(self.store.get_current_hosts_in_room(self.room_id)),
+            {self.hs.hostname},
+        )
+        self.assertEqual(
+            self.get_success(
+                self.store.get_current_hosts_in_room_ordered(self.room_id)
+            ),
+            (self.hs.hostname,),
+        )
+        self.assertEqual(
+            self.get_success(
+                self.state_controller.get_current_hosts_in_room_or_partial_state_approximation(
+                    self.room_id
+                )
+            ),
+            {self.hs.hostname},
+        )
+
+    def test_hosts_at_events(self) -> None:
+        """The hosts at a point in the room, as the federation sender asks for
+        them: computed from the state at those events, and kept up with the
+        state deltas that follow."""
+        join = self.get_success(self.room.send_member(self.alice_member, "join"))
+        self.assertEqual(
+            self.get_success(
+                self.state_handler.get_hosts_in_room_at_events(
+                    self.room_id, [join.event_id]
+                )
+            ),
+            {self.hs.hostname},
+        )
+        stranger = Member()
+        stranger_join = self.get_success(self.room.send_member(stranger, "join"))
+        self.assertEqual(
+            self.get_success(
+                self.state_handler.get_hosts_in_room_at_events(
+                    self.room_id, [stranger_join.event_id]
+                )
+            ),
+            {self.hs.hostname},
+        )
+        leave = self.get_success(self.room.send_member(self.alice_member, "leave"))
+        self.assertEqual(
+            self.get_success(
+                self.state_handler.get_hosts_in_room_at_events(
+                    self.room_id, [leave.event_id]
+                )
+            ),
+            set(),
+        )
 
 
 class InvalidateStateCachesTestCase(unittest.HomeserverTestCase):

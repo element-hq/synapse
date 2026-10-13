@@ -34,7 +34,7 @@ from typing import (
 import attr
 
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.errors import Codes, SynapseError
+from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.logging.opentracing import trace
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
@@ -1266,9 +1266,30 @@ class RoomMemberWorkerStore(EventsWorkerStore, MemberKeysWorkerStore):
 
         return True
 
+    async def _is_member_key_room(self, room_id: str) -> bool:
+        """Whether the room's version identifies members by MSC4430 member keys.
+        `False` for an unknown room."""
+        if not self._msc4430_enabled:
+            return False
+        try:
+            room_version_id = await self.get_room_version_id(room_id)  # type: ignore[attr-defined]
+        except NotFoundError:
+            return False
+        room_version = KNOWN_ROOM_VERSIONS.get(room_version_id)
+        return room_version is not None and room_version.msc4430_member_keys
+
     @cached(iterable=True, max_entries=10000)
     async def get_current_hosts_in_room(self, room_id: str) -> AbstractSet[str]:
         """Get current hosts in room based on current state."""
+
+        if await self._is_member_key_room(room_id):
+            # MSC4430: the members are keys, which name no server. Ours are
+            # this server; the others are routed by the domain their link claims,
+            # if we have one. (A later change learns the links; until then a
+            # room of this version holds only our own members.)
+            users = await self.get_users_in_room(room_id)
+            hosts = await self.get_hosts_for_identities(room_id, users)
+            return set(hosts.values())
 
         # First we check if we already have `get_users_in_room` in the cache, as
         # we can just calculate result from that
@@ -1328,9 +1349,13 @@ class RoomMemberWorkerStore(EventsWorkerStore, MemberKeysWorkerStore):
             sorted by join with the lowest depth first).
         """
 
-        if isinstance(self.database_engine, Sqlite3Engine):
+        if isinstance(self.database_engine, Sqlite3Engine) or (
+            await self._is_member_key_room(room_id)
+        ):
             # If we're using SQLite then let's just always use
-            # `get_users_in_room` rather than funky SQL.
+            # `get_users_in_room` rather than funky SQL. Likewise in an MSC4430
+            # room, whose state keys name no domain for the SQL to extract (and
+            # whose hosts are then not ordered by join depth).
 
             domains = await self.get_current_hosts_in_room(room_id)
             return tuple(domains)

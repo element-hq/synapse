@@ -136,6 +136,7 @@ class RoomCreationHandler:
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.event_creation_handler = hs.get_event_creation_handler()
         self.room_member_handler = hs.get_room_member_handler()
+        self._member_key_handler = hs.get_member_key_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
         self.config = hs.config
         self.common_request_ratelimiter = hs.get_request_ratelimiter()
@@ -1144,7 +1145,13 @@ class RoomCreationHandler:
             raise SynapseError(400, "room_version must be a string", Codes.BAD_JSON)
 
         room_version = KNOWN_ROOM_VERSIONS.get(room_version_id)
-        if room_version is None:
+        if room_version is None or (
+            # MSC4430 rooms need the feature on. The version is registered when
+            # the flag is set, but the registry is process wide, so check the
+            # flag here as well rather than rely on that.
+            room_version.msc4430_member_keys
+            and not self.config.experimental.msc4430_enabled
+        ):
             raise SynapseError(
                 400,
                 "Your homeserver does not support this room version",
@@ -1184,6 +1191,16 @@ class RoomCreationHandler:
                 parse_and_validate_server_name(uid.domain)
             except Exception:
                 raise SynapseError(400, "Invalid user_id: %s" % (i,))
+            if room_version.msc4430_member_keys and not self.hs.is_mine(uid):
+                # Refused before anything is created, rather than by the invite
+                # after the room exists. A later change learns remote members'
+                # keys over federation.
+                raise SynapseError(
+                    400,
+                    "Users of other servers cannot be invited to a room with "
+                    "member keys yet: %s" % (i,),
+                    Codes.INVALID_PARAM,
+                )
 
         if (invite_list or invite_3pid_list) and requester.shadow_banned:
             # We randomly sleep a bit just to annoy the requester.
@@ -1438,8 +1455,11 @@ class RoomCreationHandler:
         # older room versions.
         attempts = 0
         while attempts < 5:
+            # A copy per attempt: building the event in an MSC4430 room rewrites
+            # the content (its additional creators become keys), and a retry
+            # must start from what the client sent.
             event_dict: JsonDict = {
-                "content": creation_content,
+                "content": copy.deepcopy(creation_content),
                 "sender": creator.user.to_string(),
                 "type": EventTypes.Create,
                 "state_key": "",
@@ -1660,7 +1680,11 @@ class RoomCreationHandler:
         # update the depth and state map here as the membership event has been created
         # through a different code path
         depth += 1
-        state_map[(EventTypes.Member, creator.user.to_string())] = member_event_id
+        # (In an MSC4430 room the membership's state key is the creator's member key.)
+        creator_room_identity = await self._member_key_handler.room_identity_for_user(
+            room_id, creator_id, room_version
+        )
+        state_map[(EventTypes.Member, creator_room_identity)] = member_event_id
 
         # we need the state group of the membership event as it is the current state group
         event_to_state = (

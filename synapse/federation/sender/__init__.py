@@ -555,7 +555,11 @@ class FederationSender(AbstractFederationSender):
                 async def handle_event(event: EventBase) -> None:
                     # Only send events for this server.
                     send_on_behalf_of = event.internal_metadata.get_send_on_behalf_of()
-                    is_mine = self.is_mine_id(event.sender)
+                    # (In an MSC4430 room the sender is a member key; ours are
+                    # the ones we hold in that room.)
+                    is_mine = event.sender in await self.store.get_local_identity_map(
+                        event.room_id, [event.sender]
+                    )
                     if not is_mine and send_on_behalf_of is None:
                         logger.debug("Not sending remote-origin event %s", event)
                         return
@@ -694,8 +698,17 @@ class FederationSender(AbstractFederationSender):
                                 and auth_event.state_key == event.state_key
                                 and auth_event.membership == Membership.INVITE
                             ):
-                                destinations = set(destinations)
-                                destinations.add(get_domain_from_id(event.state_key))
+                                # The invitee's server (a member key's claimed
+                                # domain in an MSC4430 room; unknown for a key we
+                                # cannot place).
+                                invitee_host = (
+                                    await self.store.get_hosts_for_identities(
+                                        event.room_id, [event.state_key]
+                                    )
+                                ).get(event.state_key)
+                                if invitee_host is not None:
+                                    destinations = set(destinations)
+                                    destinations.add(invitee_host)
                                 break
 
                     sharded_destinations = {

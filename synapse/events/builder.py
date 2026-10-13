@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 import attr
 from signedjson.types import SigningKey
@@ -30,7 +30,11 @@ from synapse.api.room_versions import (
     EventFormatVersions,
     RoomVersion,
 )
-from synapse.crypto.event_signing import add_hashes_and_signatures
+from synapse.crypto.event_signing import (
+    EventSigner,
+    add_hashes_and_signatures,
+    add_hashes_and_signatures_from_signers,
+)
 from synapse.event_auth import auth_types_for_event
 from synapse.events import EventBase, make_event_from_dict
 from synapse.state import StateHandler
@@ -43,6 +47,7 @@ from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
     from synapse.handlers.event_auth import EventAuthHandler
+    from synapse.handlers.member_keys import MemberKeyHandler
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -99,6 +104,10 @@ class EventBuilder:
     _state_key: str | None = None
     _redacts: str | None = None
     _origin_server_ts: int | None = None
+
+    # Chooses the member key signatures for events in MSC4430 member key rooms;
+    # required for such rooms, unused otherwise.
+    _member_key_handler: Optional["MemberKeyHandler"] = None
 
     internal_metadata: EventInternalMetadata = attr.Factory(
         lambda: EventInternalMetadata({})
@@ -329,6 +338,18 @@ class EventBuilder:
         if self.sticky is not None:
             event_dict[StickyEvent.EVENT_FIELD_NAME] = self.sticky
 
+        signers: Sequence[EventSigner] | None = None
+        if self.room_version.msc4430_member_keys:
+            # MSC4430: the sender's member key signs the event (with our server
+            # key co-signing linkage information on membership events, and an
+            # authorising member's key on restricted joins), not the server key.
+            assert self._member_key_handler is not None, (
+                "An EventBuilder for a member key room needs a MemberKeyHandler"
+            )
+            signers = await self._member_key_handler.get_signers_for_event_dict(
+                self.room_version, event_dict
+            )
+
         return create_local_event_from_event_dict(
             clock=self._clock,
             hostname=self._hostname,
@@ -336,6 +357,7 @@ class EventBuilder:
             room_version=self.room_version,
             event_dict=event_dict,
             internal_metadata_dict=self.internal_metadata.get_dict(),
+            signers=signers,
         )
 
 
@@ -348,6 +370,7 @@ class EventBuilderFactory:
         self.store = hs.get_datastores().main
         self.state = hs.get_state_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
+        self._member_key_handler = hs.get_member_key_handler()
 
     def for_room_version(
         self, room_version: RoomVersion, key_values: dict
@@ -379,6 +402,7 @@ class EventBuilderFactory:
             redacts=key_values.get("redacts", None),
             origin_server_ts=key_values.get("origin_server_ts", None),
             sticky=key_values.get(StickyEvent.EVENT_FIELD_NAME, None),
+            member_key_handler=self._member_key_handler,
         )
 
 
@@ -389,10 +413,18 @@ def create_local_event_from_event_dict(
     room_version: RoomVersion,
     event_dict: JsonDict,
     internal_metadata_dict: JsonDict | None = None,
+    signers: Sequence[EventSigner] | None = None,
 ) -> EventBase:
     """Takes a fully formed event dict, ensuring that fields like
     `origin_server_ts` have correct values for a locally produced event,
     then signs and hashes it.
+
+    Args:
+        signers: In an MSC4430 member key room, the (entity, key) pairs that sign
+            the event in place of the server key (see
+            `MemberKeyHandler.get_signers_for_event_dict`); may be empty, in
+            which case the event is only hashed. Must be given for such rooms
+            and must not be given for any other.
     """
 
     format_version = room_version.event_format
@@ -415,7 +447,14 @@ def create_local_event_from_event_dict(
 
     event_dict.setdefault("signatures", {})
 
-    add_hashes_and_signatures(room_version, event_dict, hostname, signing_key)
+    if room_version.msc4430_member_keys:
+        assert signers is not None, "Events in member key rooms are signed by keys"
+        add_hashes_and_signatures_from_signers(
+            room_version, event_dict, signers, server_name=hostname
+        )
+    else:
+        assert signers is None, "Only member key rooms take signers"
+        add_hashes_and_signatures(room_version, event_dict, hostname, signing_key)
     return make_event_from_dict(
         event_dict, room_version, internal_metadata_dict=internal_metadata_dict
     )

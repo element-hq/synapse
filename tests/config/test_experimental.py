@@ -84,12 +84,15 @@ class ExperimentalConfigTestCase(unittest.TestCase):
         self.assertFalse(config.msc4430_enabled)
         self.assertFalse(config.msc4428_enabled)
 
-    def test_msc4430_room_version_not_registered(self) -> None:
-        """The member key room version is defined but cannot yet be used: enabling
-        the flag must not add it to the known room versions."""
+    def test_msc4430_room_version_registered_with_flag(self) -> None:
+        """Enabling the flag registers the member key room version. (The registry
+        is process wide and never unregisters, so "not registered without the
+        flag" cannot be asserted here; room creation checks the flag itself.)"""
         _read_config({"experimental_features": {"msc4430_enabled": True}})
-        self.assertNotIn(RoomVersions.MSC4430v12.identifier, KNOWN_ROOM_VERSIONS)
-        self.assertNotIn("org.matrix.msc4430.12", KNOWN_ROOM_VERSIONS)
+        self.assertIn(RoomVersions.MSC4430v12.identifier, KNOWN_ROOM_VERSIONS)
+        self.assertTrue(
+            KNOWN_ROOM_VERSIONS["org.matrix.msc4430.12"].msc4430_member_keys
+        )
 
 
 def _read_config(config_values: JsonDict) -> ExperimentalConfig:

@@ -86,6 +86,15 @@ class RoomUpgradeRestServlet(RestServlet):
                 "Your homeserver does not support this room version",
                 Codes.UNSUPPORTED_ROOM_VERSION,
             )
+        if new_version.msc4430_member_keys:
+            # Cloning a room into one with member keys (its power levels, bans
+            # and invites name user IDs) is a later change; refusing here keeps
+            # it from creating a room it cannot finish.
+            raise SynapseError(
+                400,
+                "Upgrading into a room with member keys is not supported yet",
+                Codes.UNSUPPORTED_ROOM_VERSION,
+            )
         additional_creators = None
         if new_version.msc4289_creator_power_enabled:
             additional_creators = content.get("additional_creators")

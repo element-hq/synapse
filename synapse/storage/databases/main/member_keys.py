@@ -49,7 +49,7 @@ from synapse.storage.member_keys import (
     decode_member_signing_key,
     encode_member_signing_key,
 )
-from synapse.types import MemberKey, is_member_key
+from synapse.types import MemberKey, get_domain_from_id, is_member_key
 from synapse.util.caches.descriptors import cached, cachedList
 
 if TYPE_CHECKING:
@@ -233,6 +233,44 @@ class MemberKeysWorkerStore(CacheInvalidationWorkerStore):
                 if local_key is not None:
                     local_users[member_key] = local_key.user_id
         return local_users
+
+    async def get_hosts_for_identities(
+        self, room_id: str, identities: Iterable[str]
+    ) -> dict[str, str]:
+        """The server behind each room member identity, for routing: the domain
+        of a user ID, our own name for a member key we hold in the room, and the
+        *claimed* domain of any other member key we have a link for (verified or
+        not: an unverified claim is enough to route to, and grants nothing).
+        Identities whose server we do not know are left out, as are member keys
+        when MSC4430 is off.
+
+        The member-key aware form of taking `get_domain_from_id` of every
+        member; rooms without member keys query nothing.
+        """
+        hosts: dict[str, str] = {}
+        member_keys: list[str] = []
+        for identity in identities:
+            if is_member_key(identity):
+                if self._msc4430_enabled:
+                    member_keys.append(identity)
+            else:
+                hosts[identity] = get_domain_from_id(identity)
+        if not member_keys:
+            return hosts
+
+        local_keys = await self.get_local_member_keys_by_key(room_id, member_keys)
+        remote_keys = []
+        for member_key in member_keys:
+            if local_keys.get(member_key) is not None:
+                hosts[member_key] = self.server_name
+            else:
+                remote_keys.append(member_key)
+        if remote_keys:
+            links = await self.get_member_links(room_id, remote_keys)
+            for member_key, link in links.items():
+                if link is not None:
+                    hosts[member_key] = link.domain
+        return hosts
 
     @cached(max_entries=100000)
     async def get_local_member_keys_for_user(self, user_id: str) -> Mapping[str, str]:
