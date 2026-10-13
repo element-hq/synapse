@@ -25,10 +25,11 @@
 //! State resolution skips an event on the first kind and aborts on the second,
 //! because `_iterative_auth_checks` only catches `AuthError`.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use log::debug;
 use pyo3::{
+    exceptions::PyAttributeError,
     prelude::*,
     types::{PyModule, PySet, PyTuple},
 };
@@ -547,10 +548,15 @@ fn verify_third_party_invite(
 /// The result may be a superset of what is needed, depending on the room
 /// state. A non-string `third_party_invite` token or authorising user is left
 /// out, as no state key can match it.
+///
+/// The pairs are distinct and in the order the Python adds them to its set.
+/// The order matters to Python callers: building the same set in the same
+/// order gives the same iteration order, and event creation lists the auth
+/// events in that order, which feeds into the event ID.
 pub fn auth_types_for_event<'a>(
     room_version: &RoomVersion,
     event: &'a Event,
-) -> Result<HashSet<(&'a str, &'a str)>, AuthFailure> {
+) -> Result<Vec<(&'a str, &'a str)>, AuthFailure> {
     auth_types_for(
         room_version,
         event.type_(),
@@ -560,16 +566,16 @@ pub fn auth_types_for_event<'a>(
     )
 }
 
-fn auth_types_for<'a>(
+pub(crate) fn auth_types_for<'a>(
     room_version: &RoomVersion,
     event_type: &'a str,
     sender: &'a str,
     state_key: Option<&'a str>,
     content: &'a BTreeMap<Box<str>, Value>,
-) -> Result<HashSet<(&'a str, &'a str)>, AuthFailure> {
-    let mut auth_types = HashSet::new();
+) -> Result<Vec<(&'a str, &'a str)>, AuthFailure> {
+    let mut auth_types = OrderedSet::default();
     if event_type == M_ROOM_CREATE {
-        return Ok(auth_types);
+        return Ok(auth_types.0);
     }
 
     auth_types.insert(POWER_LEVELS_KEY);
@@ -613,7 +619,20 @@ fn auth_types_for<'a>(
         }
     }
 
-    Ok(auth_types)
+    Ok(auth_types.0)
+}
+
+/// A set that keeps insertion order. It holds at most seven pairs, so a
+/// linear scan is cheapest.
+#[derive(Default)]
+struct OrderedSet<'a>(Vec<(&'a str, &'a str)>);
+
+impl<'a> OrderedSet<'a> {
+    fn insert(&mut self, pair: (&'a str, &'a str)) {
+        if !self.0.contains(&pair) {
+            self.0.push(pair);
+        }
+    }
 }
 
 /// Python entry point for [`check_state_dependent_auth_rules`].
@@ -640,15 +659,15 @@ fn check_state_dependent_auth_rules_py(
 }
 
 /// Python entry point for [`auth_types_for_event`]. Also accepts an
-/// `EventBuilder`, read through its `type`, `sender`, `state_key` and
-/// `content` attributes.
+/// `EventBuilder` (or any object with `type`, `sender`, `state_key` and
+/// `content` attributes).
 #[pyfunction(name = "auth_types_for_event")]
 fn auth_types_for_event_py<'py>(
     py: Python<'py>,
     room_version: &RoomVersion,
     event: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PySet>> {
-    let to_py = |types: HashSet<(&str, &str)>| {
+    let to_py = |types: Vec<(&str, &str)>| {
         let tuples = types
             .into_iter()
             .map(|(t, k)| PyTuple::new(py, [t, k]))
@@ -664,10 +683,11 @@ fn auth_types_for_event_py<'py>(
 
     let event_type: String = event.getattr("type")?.extract()?;
     let sender: String = event.getattr("sender")?.extract()?;
-    let state_key: Option<String> = if event.call_method0("is_state")?.extract()? {
-        Some(event.getattr("state_key")?.extract()?)
-    } else {
-        None
+    // `EventBuilder.state_key` raises `AttributeError` for non-state events.
+    let state_key: Option<String> = match event.getattr("state_key") {
+        Ok(state_key) => state_key.extract()?,
+        Err(err) if err.is_instance_of::<PyAttributeError>(py) => None,
+        Err(err) => return Err(err),
     };
     let content: BTreeMap<Box<str>, Value> = depythonize(&event.getattr("content")?)?;
     let types = auth_types_for(

@@ -179,10 +179,6 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                 mock_send_join,
             ),
             patch(
-                "synapse.event_auth._is_membership_change_allowed",
-                return_value=None,
-            ),
-            patch(
                 "synapse.handlers.federation_event.check_state_dependent_auth_rules",
                 return_value=None,
             ),

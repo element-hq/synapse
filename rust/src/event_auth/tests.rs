@@ -552,18 +552,30 @@ fn auth_types() {
                "content": {"membership": "invite",
                            "third_party_invite": {"signed": {"token": "tok"}}}}),
     );
+    // In the order the Python adds them.
     let types = auth_types_for_event(V6, &invite).unwrap();
-    let expected: HashSet<(&str, &str)> = [
+    let expected = vec![
         POWER_LEVELS_KEY,
+        (M_ROOM_MEMBER, CREATOR),
         CREATE_KEY,
         JOIN_RULES_KEY,
-        (M_ROOM_MEMBER, CREATOR),
         (M_ROOM_MEMBER, JOINER),
         (M_ROOM_THIRD_PARTY_INVITE, "tok"),
-    ]
-    .into_iter()
-    .collect();
+    ];
     assert_eq!(types, expected);
+
+    // Pairs are distinct: a self-invite names the sender twice.
+    let self_join = member(V6, JOINER, "join");
+    let types = auth_types_for_event(V6, &self_join).unwrap();
+    assert_eq!(
+        types,
+        vec![
+            POWER_LEVELS_KEY,
+            (M_ROOM_MEMBER, JOINER),
+            CREATE_KEY,
+            JOIN_RULES_KEY
+        ]
+    );
 
     assert!(auth_types_for_event(V6, &create(V6)).unwrap().is_empty());
 }

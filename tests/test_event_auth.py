@@ -891,6 +891,37 @@ class EventAuthTestCase(unittest.TestCase):
             auth_events.values(),
         )
 
+    def test_auth_types_for_event_iteration_order(self) -> None:
+        """`auth_types_for_event` returns a set that iterates in the same order as
+        the set the Python implementation built.
+
+        Event creation lists the auth events in this order, so it feeds into the
+        event ID: two otherwise identical events must get the same ID.
+        """
+        creator = "@creator:example.com"
+        joiner = "@joiner:example.com"
+        token = "abc"
+        event = _member_event(
+            RoomVersions.V10,
+            joiner,
+            "invite",
+            sender=creator,
+            additional_content={"third_party_invite": {"signed": {"token": token}}},
+        )
+
+        # Built the way the Python implementation did.
+        expected = {
+            ("m.room.power_levels", ""),
+            ("m.room.member", creator),
+            ("m.room.create", ""),
+        }
+        expected.add(("m.room.join_rules", ""))
+        expected.add(("m.room.member", joiner))
+        expected.add(("m.room.third_party_invite", token))
+
+        auth_types = event_auth.auth_types_for_event(RoomVersions.V10, event)
+        self.assertEqual(list(auth_types), list(expected))
+
     def test_room_v10_rejects_string_power_levels(self) -> None:
         pl_event_content = {"users_default": "42"}
         pl_event = make_test_event(
@@ -920,15 +951,22 @@ class EventAuthTestCase(unittest.TestCase):
             room_version=RoomVersions.V10,
         )
 
-        with self.assertRaises(SynapseError):
-            event_auth._check_power_levels(
-                pl_event.room_version, pl_event, {("fake_type", "fake_key"): pl_event2}
-            )
+        self._assert_invalid_power_levels(pl_event)
+        self._assert_invalid_power_levels(pl_event2)
 
-        with self.assertRaises(SynapseError):
-            event_auth._check_power_levels(
-                pl_event.room_version, pl_event2, {("fake_type", "fake_key"): pl_event}
-            )
+    def _assert_invalid_power_levels(self, pl_event: EventBase) -> None:
+        """Assert that auth fails `pl_event` with a `SynapseError` that is not an
+        `AuthError`, i.e. that the power levels are malformed rather than merely
+        not allowed. The sender is the room creator, so nothing else can fail.
+        """
+        sender = pl_event.sender
+        auth_events = [
+            _create_event(pl_event.room_version, sender),
+            _join_event(pl_event.room_version, sender),
+        ]
+        with self.assertRaises(SynapseError) as cm:
+            event_auth.check_state_dependent_auth_rules(pl_event, auth_events)
+        self.assertNotIsInstance(cm.exception, AuthError)
 
     def test_room_v10_rejects_other_non_integer_power_levels(self) -> None:
         """We should reject PLs that are non-integer, non-string JSON values.
@@ -956,9 +994,7 @@ class EventAuthTestCase(unittest.TestCase):
             {"users_default": {}},
         ]
         for content in contents:
-            event = create_event(content)
-            with self.assertRaises(SynapseError):
-                event_auth._check_power_levels(event.room_version, event, {})
+            self._assert_invalid_power_levels(create_event(content))
 
     def test_event_exists_in_state_dag(self) -> None:
         events_that_exist_in_state_dag = [
