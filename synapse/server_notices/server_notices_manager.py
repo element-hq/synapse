@@ -126,10 +126,17 @@ class ServerNoticesManager:
             is_server_notices_room = await self._store.check_local_user_in_room(
                 user_id=self.server_notices_mxid, room_id=room.room_id
             )
-            if is_server_notices_room:
-                # we found a room which our user shares with the system notice
-                # user
-                return room.room_id
+            # Make sure this isn't a server announcement room.
+            is_server_announcements_room = (
+                await self._store.get_server_announcement_id(room.room_id) is not None
+            )
+
+            if not is_server_notices_room or is_server_announcements_room:
+                continue
+
+            # we found a room which our user shares with the system notice
+            # user
+            return room.room_id
 
         return None
 
