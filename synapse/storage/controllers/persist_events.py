@@ -366,7 +366,6 @@ class EventsPersistenceStorageController:
         self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
-        self.is_mine_id = hs.is_mine_id
         self._event_persist_queue = _EventPeristenceQueue(
             hs, self.server_name, self._process_event_persist_queue_task
         )
@@ -623,8 +622,13 @@ class EventsPersistenceStorageController:
         # possible that different send event requests race in such a way that
         # they both pass the earlier checks. Checking here isn't racey as we can
         # have only one `_persist_events` per room being called at a time.
+        # Transaction IDs are recorded by user; in a member key room the sender
+        # is the user's key, so map the senders that are ours first.
         replaced_events = await self.main_store.get_already_persisted_events(
-            (event for event, _ in events_and_contexts)
+            (event for event, _ in events_and_contexts),
+            await self.main_store.get_local_identity_map(
+                room_id, {event.sender for event, _ in events_and_contexts}
+            ),
         )
 
         if replaced_events:
@@ -1405,7 +1409,17 @@ class EventsPersistenceStorageController:
             redact_behaviour=EventRedactBehaviour.as_is,
         )
 
-        new_senders = {get_domain_from_id(e.sender) for e, _ in events_context}
+        # The senders are grouped by origin: an old extremity from the same origin
+        # as a new event is dropped sooner. In an MSC4430 member key room the
+        # senders are member keys, which name no server, so each key is its own
+        # group. That is the stricter reading; a later change may group keys by
+        # their verified links.
+        def sender_origin(event: EventBase) -> str:
+            if event.room_version.msc4430_member_keys:
+                return event.sender
+            return get_domain_from_id(event.sender)
+
+        new_senders = {sender_origin(e) for e, _ in events_context}
 
         one_day_ago = self._clock.time_msec() - 24 * 60 * 60 * 1000
         current_depth = max(e.depth for e, _ in events_context)
@@ -1423,8 +1437,13 @@ class EventsPersistenceStorageController:
             events_to_check: Collection[EventBase] = [event]
             while events_to_check:
                 new_events: set[str] = set()
+                # Which of these were sent by our users (the senders we hold the
+                # member key for, in a member key room).
+                local_senders = await self.main_store.get_local_identity_map(
+                    room_id, {e.sender for e in events_to_check}
+                )
                 for event_to_check in events_to_check:
-                    if self.is_mine_id(event_to_check.sender):
+                    if event_to_check.sender in local_senders:
                         if event_to_check.type != EventTypes.Dummy:
                             logger.debug("Not dropping own event")
                             return new_latest_event_ids
@@ -1446,10 +1465,7 @@ class EventsPersistenceStorageController:
             # We can be less conservative about dropping extremities from the
             # same domain, though we do want to wait a little bit (otherwise
             # we'll immediately remove all extremities from a given server).
-            if (
-                get_domain_from_id(event.sender) in new_senders
-                and event.depth < current_depth - 20
-            ):
+            if sender_origin(event) in new_senders and event.depth < current_depth - 20:
                 continue
 
             logger.debug(
@@ -1504,11 +1520,18 @@ class EventsPersistenceStorageController:
                 and what the new current state will be.
         """
 
-        if not any(
-            self.is_mine_id(state_key)
-            for typ, state_key in itertools.chain(delta.to_delete, delta.to_insert)
-            if typ == EventTypes.Member
-        ):
+        # The membership state keys in the delta that are our users (in a member
+        # key room, the keys we hold), mapped to their user IDs.
+        local_identity_map = await self.main_store.get_local_identity_map(
+            room_id,
+            (
+                state_key
+                for typ, state_key in itertools.chain(delta.to_delete, delta.to_insert)
+                if typ == EventTypes.Member
+            ),
+        )
+
+        if not local_identity_map:
             # There have been no changes to membership of our users, so nothing
             # has changed and we assume we're still in the room.
             return True
@@ -1517,7 +1540,7 @@ class EventsPersistenceStorageController:
         # current state
         events_to_check = []  # Event IDs that aren't an event we're persisting
         for (typ, state_key), event_id in delta.to_insert.items():
-            if typ != EventTypes.Member or not self.is_mine_id(state_key):
+            if typ != EventTypes.Member or state_key not in local_identity_map:
                 continue
 
             for event, _ in ev_ctx_rm:
@@ -1544,11 +1567,8 @@ class EventsPersistenceStorageController:
         # None of the new state events are local joins, so we check the database
         # to see if there are any other local users in the room. We ignore users
         # whose state has changed as we've already their new state above.
-        users_to_ignore = [
-            state_key
-            for typ, state_key in itertools.chain(delta.to_insert, delta.to_delete)
-            if typ == EventTypes.Member and self.is_mine_id(state_key)
-        ]
+        # (`local_current_membership` is keyed by user ID, hence the mapped IDs.)
+        users_to_ignore = set(local_identity_map.values())
 
         if await self.main_store.is_local_host_in_room_ignoring_users(
             room_id, users_to_ignore

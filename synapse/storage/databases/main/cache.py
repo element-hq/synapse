@@ -64,6 +64,13 @@ PURGE_HISTORY_CACHE_NAME = "ph_cache_fake"
 # As above, but for invalidating room caches on room deletion
 DELETE_ROOM_CACHE_NAME = "dr_cache_fake"
 
+# As above, but for the caches keyed by user ID that a membership change under
+# an MSC4430 member key must invalidate: the room's events name the key, so the
+# events stream rows cannot name the user. The keys of the row are
+# `[room_id, stream_ordering, *user_ids]`, the stream ordering being the
+# membership event's position (sent as a string, the keys being strings).
+MEMBER_KEY_USERS_CACHE_NAME = "mku_cache_fake"
+
 # This cache takes a list of tuples as its first argument, which requires
 # special handling.
 GET_E2E_CROSS_SIGNING_SIGNATURES_FOR_DEVICE_CACHE_NAME = (
@@ -236,6 +243,16 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     )
                     for user_id in members_changed:
                         self._membership_stream_cache.entity_has_changed(user_id, token)  # type: ignore[attr-defined]
+                elif row.cache_func == MEMBER_KEY_USERS_CACHE_NAME:
+                    if row.keys is None:
+                        raise Exception(
+                            "Can't send an 'invalidate all' for 'member key users' cache"
+                        )
+
+                    room_id, stream_ordering, *user_ids = row.keys
+                    self._invalidate_user_caches_for_member_keys(
+                        room_id, user_ids, int(stream_ordering)
+                    )
                 elif row.cache_func == PURGE_HISTORY_CACHE_NAME:
                     if row.keys is None:
                         raise Exception(
@@ -689,6 +706,82 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         txn.call_after(cache_func.invalidate_all)
         self._send_invalidation_to_replication(txn, cache_func.__name__, None)
 
+    def _invalidate_user_caches_for_member_keys(
+        self, room_id: str, user_ids: Collection[str], stream_ordering: int
+    ) -> None:
+        """Invalidate the caches keyed by user ID for local users whose membership
+        of `room_id` changed under an MSC4430 member key, and record the change
+        in the membership stream cache at `stream_ordering`. Local only: see
+        `_invalidate_user_caches_for_member_keys_and_stream`.
+
+        These are the user-keyed invalidations `_invalidate_caches_for_event`
+        makes by the membership event's state key, which in a member key room is
+        the key rather than the user.
+        """
+        for user_id in user_ids:
+            self._membership_stream_cache.entity_has_changed(user_id, stream_ordering)  # type: ignore[attr-defined]
+            self._attempt_to_invalidate_cache("get_rooms_for_user", (user_id,))
+            self._attempt_to_invalidate_cache(
+                "_get_rooms_for_local_user_where_membership_is_inner", (user_id,)
+            )
+            self._attempt_to_invalidate_cache(
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots",
+                (user_id,),
+            )
+            self._attempt_to_invalidate_cache(
+                "get_invited_rooms_for_local_user", (user_id,)
+            )
+            self._attempt_to_invalidate_cache("did_forget", (user_id, room_id))
+            self._attempt_to_invalidate_cache(
+                "get_forgotten_rooms_for_user", (user_id,)
+            )
+
+    def _invalidate_user_caches_for_member_keys_and_stream(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        user_ids: Collection[str],
+        stream_ordering: int,
+    ) -> None:
+        """`_invalidate_user_caches_for_member_keys`, here and on every worker.
+
+        Membership cache invalidations are keyed by the membership event's state
+        key: `_invalidate_caches_for_event` for every event (the events stream
+        for workers) and `_invalidate_state_caches` for current state changes
+        (the caches stream). In a member key room that key is a member key, so
+        the user-keyed caches would be left stale for the user behind it; this
+        sends them a row of their own on the caches stream, carrying the event
+        position, since the events stream rows name the key and a worker cannot
+        map it. A worker is right once it has processed both streams; between
+        the events stream row and this one it still has the stale entries, a
+        window a later change closes by carrying the user on the event row.
+
+        Args:
+            txn
+            room_id: The room whose membership changed.
+            user_ids: The local users whose membership changed under a member
+                key. Users whose state key is their user ID must not be included:
+                their invalidations have already happened.
+            stream_ordering: The membership event's position (or the batch's
+                minimum, for a change with no event in the batch).
+        """
+        if not user_ids:
+            return
+        txn.call_after(
+            self._invalidate_user_caches_for_member_keys,
+            room_id,
+            user_ids,
+            stream_ordering,
+        )
+        # Chunked as `_invalidate_state_caches_and_stream` does, for the same
+        # reason: the row must stay well under the replication line length.
+        for chunk in batch_iter(user_ids, 50):
+            self._send_invalidation_to_replication(
+                txn,
+                MEMBER_KEY_USERS_CACHE_NAME,
+                [room_id, str(stream_ordering), *chunk],
+            )
+
     def _invalidate_state_caches_and_stream(
         self, txn: LoggingTransaction, room_id: str, members_changed: Collection[str]
     ) -> None:
@@ -756,6 +849,11 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
 
         if cache_name == DELETE_ROOM_CACHE_NAME and keys is None:
             raise Exception("Can't stream invalidate all with magic delete room cache")
+
+        if cache_name == MEMBER_KEY_USERS_CACHE_NAME and keys is None:
+            raise Exception(
+                "Can't stream invalidate all with magic member key users cache"
+            )
 
         if isinstance(self.database_engine, PostgresEngine):
             assert self._cache_id_gen is not None

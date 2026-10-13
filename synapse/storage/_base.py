@@ -28,7 +28,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     make_in_list_sql_clause,  # noqa: F401
 )
-from synapse.types import get_domain_from_id
+from synapse.types import get_domain_from_id, is_member_key
 from synapse.util.caches.descriptors import CachedFunction
 from synapse.util.json import json_decoder
 
@@ -103,9 +103,26 @@ class SQLBaseStore(metaclass=ABCMeta):
         # `_invalidate_state_caches_all` as well.
 
         # If there were any membership changes, purge the appropriate caches.
-        for host in {get_domain_from_id(u) for u in members_changed}:
+        #
+        # In an MSC4430 member key room the members are keys, which name no host;
+        # a membership change there can affect any host's answer, so the per-host
+        # entries for the room are dropped together (the caches are tree caches
+        # keyed by room first). `members_changed` can hold both kinds: the keys as
+        # the room knows its members, and the user IDs behind the ones that are
+        # ours, for the caches below that are keyed by user ID.
+        hosts: set[str] = set()
+        member_keys_changed = False
+        for u in members_changed:
+            if is_member_key(u):
+                member_keys_changed = True
+            else:
+                hosts.add(get_domain_from_id(u))
+        for host in hosts:
             self._attempt_to_invalidate_cache("is_host_joined", (room_id, host))
             self._attempt_to_invalidate_cache("is_host_invited", (room_id, host))
+        if member_keys_changed:
+            self._attempt_to_invalidate_cache("is_host_joined", (room_id,))
+            self._attempt_to_invalidate_cache("is_host_invited", (room_id,))
         if members_changed:
             self._attempt_to_invalidate_cache("get_users_in_room", (room_id,))
             self._attempt_to_invalidate_cache("get_current_hosts_in_room", (room_id,))

@@ -21,16 +21,27 @@ resolve to anything there.
 
 This store is mixed into `RoomMemberWorkerStore` so that the membership queries
 which will need to translate member keys can use it directly, on workers too.
+
+It also owns the *local identity map* (`get_local_identity_map_txn` and
+`get_local_identity_map`): the one way storage code turns the identities a
+room's events name (user IDs, or member keys in a member key room) into the
+local users behind them, for the tables and caches that are keyed by user ID.
+Storage cannot import the handler that owns identity resolution for the rest of
+the server (`synapse.handlers.member_keys`), so the storage half lives here.
 """
 
 import logging
-from typing import Collection, Iterable, Mapping, cast
+from typing import TYPE_CHECKING, Collection, Iterable, Mapping, cast
 
 from signedjson.types import SigningKey
 
 from synapse.api.constants import MemberKeys
 from synapse.storage._base import make_in_list_sql_clause
-from synapse.storage.database import LoggingTransaction
+from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
+    LoggingTransaction,
+)
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.member_keys import (
     LocalMemberKey,
@@ -38,13 +49,26 @@ from synapse.storage.member_keys import (
     decode_member_signing_key,
     encode_member_signing_key,
 )
-from synapse.types import MemberKey
+from synapse.types import MemberKey, is_member_key
 from synapse.util.caches.descriptors import cached, cachedList
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
 
 class MemberKeysWorkerStore(CacheInvalidationWorkerStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+        self._msc4430_enabled = hs.config.experimental.msc4430_enabled
+        self._is_mine_id = hs.is_mine_id
+
     # ------------------------------------------------------------------
     # The keys we hold
     # ------------------------------------------------------------------
@@ -146,6 +170,69 @@ class MemberKeysWorkerStore(CacheInvalidationWorkerStore):
             [room_id, *args],
         )
         return dict(cast(Iterable[tuple[str, str]], txn))
+
+    # ------------------------------------------------------------------
+    # The local identity map
+    # ------------------------------------------------------------------
+
+    def _partition_identities(
+        self, identities: Iterable[str]
+    ) -> tuple[dict[str, str], list[str]]:
+        """Split room member identities into the local user IDs (mapped to
+        themselves) and the member keys still to be looked up. Everything else,
+        other servers' user IDs included, is dropped.
+
+        Member keys are only looked up when MSC4430 is enabled: with it off there
+        are no member key rooms, and a member-key-shaped state key in some other
+        room is as malformed as it always was.
+        """
+        local_users: dict[str, str] = {}
+        member_keys: list[str] = []
+        for identity in identities:
+            if is_member_key(identity):
+                if self._msc4430_enabled:
+                    member_keys.append(identity)
+            elif self._is_mine_id(identity):
+                local_users[identity] = identity
+        return local_users, member_keys
+
+    def get_local_identity_map_txn(
+        self, txn: LoggingTransaction, room_id: str, identities: Iterable[str]
+    ) -> dict[str, str]:
+        """Map room member identities appearing in `room_id` to the local users
+        behind them: our users' IDs map to themselves, and member keys we hold in
+        that room map to their user. Identities that are not ours (other servers'
+        user IDs, other members' keys, and our own keys for *other* rooms) are left
+        out.
+
+        This is the member-key aware form of filtering identities with
+        `is_mine_id`, for the tables and caches that are keyed by user ID
+        (`local_current_membership`, the sliding sync snapshots,
+        `event_txn_id_device_id`, `get_rooms_for_user` and friends). One batched
+        query, and none at all when no identity is a member key, so rooms without
+        member keys cost nothing extra.
+        """
+        local_users, member_keys = self._partition_identities(identities)
+        if member_keys:
+            local_users.update(
+                self.get_local_user_ids_for_member_keys_txn(txn, room_id, member_keys)
+            )
+        return local_users
+
+    async def get_local_identity_map(
+        self, room_id: str, identities: Iterable[str]
+    ) -> dict[str, str]:
+        """`get_local_identity_map_txn` outside a transaction, from the cached
+        per-key lookups. Keys never change once created, so a cached answer can
+        only ever be missing (and `create_local_member_key` invalidates), never
+        wrong."""
+        local_users, member_keys = self._partition_identities(identities)
+        if member_keys:
+            keys = await self.get_local_member_keys_by_key(room_id, member_keys)
+            for member_key, local_key in keys.items():
+                if local_key is not None:
+                    local_users[member_key] = local_key.user_id
+        return local_users
 
     @cached(max_entries=100000)
     async def get_local_member_keys_for_user(self, user_id: str) -> Mapping[str, str]:

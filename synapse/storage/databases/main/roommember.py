@@ -789,6 +789,21 @@ class RoomMemberWorkerStore(EventsWorkerStore, MemberKeysWorkerStore):
             desc="get_rooms_for_user",
         )
 
+        if self._msc4430_enabled and self._is_mine_id(user_id):
+            # In an MSC4430 member key room the membership state key is the user's
+            # member key, not their user ID, so the query above cannot see those
+            # rooms. `local_current_membership` is keyed by user ID in every room
+            # (persistence maps the keys we hold to our users), so for our own
+            # users it is the complete answer; for rooms without member keys it
+            # agrees with `current_state_events`, so the union adds nothing there.
+            local_room_ids = await self.db_pool.simple_select_onecol(
+                table="local_current_membership",
+                keyvalues={"user_id": user_id, "membership": Membership.JOIN},
+                retcol="room_id",
+                desc="get_rooms_for_user_local",
+            )
+            return frozenset(room_ids).union(local_room_ids)
+
         return frozenset(room_ids)
 
     @cachedList(
@@ -826,6 +841,24 @@ class RoomMemberWorkerStore(EventsWorkerStore, MemberKeysWorkerStore):
 
         for state_key, room_id in rows:
             user_rooms[state_key].add(room_id)
+
+        if self._msc4430_enabled:
+            # See `get_rooms_for_user`.
+            local_user_ids = [u for u in user_ids if self._is_mine_id(u)]
+            if local_user_ids:
+                local_rows = cast(
+                    list[tuple[str, str]],
+                    await self.db_pool.simple_select_many_batch(
+                        table="local_current_membership",
+                        column="user_id",
+                        iterable=local_user_ids,
+                        retcols=("user_id", "room_id"),
+                        keyvalues={"membership": Membership.JOIN},
+                        desc="get_rooms_for_users_local",
+                    ),
+                )
+                for user_id, room_id in local_rows:
+                    user_rooms[user_id].add(room_id)
 
         return {key: frozenset(rooms) for key, rooms in user_rooms.items()}
 
@@ -1188,11 +1221,14 @@ class RoomMemberWorkerStore(EventsWorkerStore, MemberKeysWorkerStore):
 
         return dict(rows)
 
-    @cached(max_entries=10000)
+    # Tree caches, keyed by room first, so that a membership change in an MSC4430
+    # member key room (whose members name no host) can drop every host's entry
+    # for that room at once; see `_invalidate_state_caches`.
+    @cached(max_entries=10000, tree=True)
     async def is_host_joined(self, room_id: str, host: str) -> bool:
         return await self._check_host_room_membership(room_id, host, Membership.JOIN)
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def is_host_invited(self, room_id: str, host: str) -> bool:
         return await self._check_host_room_membership(room_id, host, Membership.INVITE)
 

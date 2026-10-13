@@ -78,6 +78,12 @@ class EventValidatorTestCase(HomeserverTestCase):
 
                 if room_version.event_format == EventFormatVersions.ROOM_V1_V2:
                     event_dict["event_id"] = "$event:test"
+                if room_version.msc4242_state_dags:
+                    # The state DAG event format (whose versions may be registered
+                    # by an earlier test in the same process) lists the previous
+                    # state events instead of the auth events.
+                    del event_dict["auth_events"]
+                    event_dict["prev_state_events"] = []
 
                 event = make_event_from_dict(
                     event_dict,

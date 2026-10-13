@@ -2344,7 +2344,7 @@ class EventsWorkerStore(SQLBaseStore):
         )
 
     async def get_already_persisted_events(
-        self, events: Iterable[EventBase]
+        self, events: Iterable[EventBase], local_identity_map: Mapping[str, str]
     ) -> dict[str, str]:
         """Look up if we have already persisted an event for the transaction ID,
         returning a mapping from event ID in the given list to the event ID of
@@ -2352,6 +2352,12 @@ class EventsWorkerStore(SQLBaseStore):
 
         Also checks if there are duplicates in the given events, if there are
         will map duplicates to the *first* event.
+
+        Args:
+            events
+            local_identity_map: The events' senders that are our users, mapped
+                to their user IDs. Transaction IDs are recorded by user ID (and
+                device), which in an MSC4430 member key room is not the sender.
         """
 
         mapping = {}
@@ -2362,9 +2368,11 @@ class EventsWorkerStore(SQLBaseStore):
             txn_id = getattr(event.internal_metadata, "txn_id", None)
 
             if device_id and txn_id:
+                user_id = local_identity_map.get(event.sender, event.sender)
+
                 # Check if this is a duplicate of an event in the given events.
                 existing = txn_id_to_event.get(
-                    (event.room_id, event.sender, device_id, txn_id)
+                    (event.room_id, user_id, device_id, txn_id)
                 )
                 if existing:
                     mapping[event.event_id] = existing
@@ -2373,17 +2381,17 @@ class EventsWorkerStore(SQLBaseStore):
                 # Check if this is a duplicate of an event we've already
                 # persisted.
                 existing = await self.get_event_id_from_transaction_id_and_device_id(
-                    event.room_id, event.sender, device_id, txn_id
+                    event.room_id, user_id, device_id, txn_id
                 )
                 if existing:
                     mapping[event.event_id] = existing
-                    txn_id_to_event[
-                        (event.room_id, event.sender, device_id, txn_id)
-                    ] = existing
+                    txn_id_to_event[(event.room_id, user_id, device_id, txn_id)] = (
+                        existing
+                    )
                 else:
-                    txn_id_to_event[
-                        (event.room_id, event.sender, device_id, txn_id)
-                    ] = event.event_id
+                    txn_id_to_event[(event.room_id, user_id, device_id, txn_id)] = (
+                        event.event_id
+                    )
 
         return mapping
 

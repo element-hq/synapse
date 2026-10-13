@@ -60,7 +60,13 @@ from synapse.replication.tcp.streams.partial_state import (
     UnPartialStatedEventStreamRow,
     UnPartialStatedRoomStreamRow,
 )
-from synapse.types import PersistedEventPosition, ReadReceipt, StreamKeyType, UserID
+from synapse.types import (
+    PersistedEventPosition,
+    ReadReceipt,
+    StreamKeyType,
+    UserID,
+    is_member_key,
+)
 from synapse.util.async_helpers import Linearizer, timeout_deferred
 from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
@@ -224,7 +230,18 @@ class ReplicationDataHandler:
 
                 extra_users: tuple[UserID, ...] = ()
                 if row.data.type == EventTypes.Member and row.data.state_key:
-                    extra_users = (UserID.from_string(row.data.state_key),)
+                    if is_member_key(row.data.state_key):
+                        # MSC4430: the member is a key. Wake the user behind it
+                        # if it is one of ours; nobody here, otherwise.
+                        local_users = await self.store.get_local_identity_map(
+                            row.data.room_id, [row.data.state_key]
+                        )
+                        extra_users = tuple(
+                            UserID.from_string(user_id)
+                            for user_id in local_users.values()
+                        )
+                    else:
+                        extra_users = (UserID.from_string(row.data.state_key),)
 
                 max_token = self.store.get_room_max_token()
                 event_pos = PersistedEventPosition(instance_name, token)

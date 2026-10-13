@@ -30,6 +30,7 @@ from typing import (
     Collection,
     Generator,
     Iterable,
+    Mapping,
     Sequence,
     TypedDict,
     cast,
@@ -186,6 +187,30 @@ class SlidingSyncMembershipSnapshotSharedInsertValues(
     has_known_state: bool | None
 
 
+def _identities_to_map(
+    events_and_contexts: Sequence[EventPersistencePair],
+    state_delta_for_room: DeltaState | None,
+) -> set[str]:
+    """The identities in a persistence batch that the user-ID keyed tables and
+    caches may need the user behind: every sender, every membership event's state
+    key, and every membership state key in the state delta. Fed to
+    `get_local_identity_map_txn`, which drops the ones that are not ours."""
+    identities: set[str] = set()
+    for event, _ in events_and_contexts:
+        identities.add(event.sender)
+        if event.type == EventTypes.Member and event.state_key is not None:
+            identities.add(event.state_key)
+    if state_delta_for_room is not None:
+        identities.update(
+            state_key
+            for etype, state_key in itertools.chain(
+                state_delta_for_room.to_delete, state_delta_for_room.to_insert
+            )
+            if etype == EventTypes.Member
+        )
+    return identities
+
+
 @attr.s(slots=True, auto_attribs=True)
 class SlidingSyncMembershipInfo:
     """
@@ -281,7 +306,6 @@ class PersistEventsStore:
         )
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
-        self.is_mine_id = hs.is_mine_id
 
         # This should only exist on instances that are configured to write
         assert hs.get_instance_name() in hs.config.worker.writers.events, (
@@ -428,10 +452,14 @@ class PersistEventsStore:
                     **{SERVER_NAME_LABEL: self.server_name}
                 ).set(stream)
 
+            # Whether each sender is one of our users, member keys included.
+            local_senders = await self.store.get_local_identity_map(
+                room_id, {event.sender for event, _ in events_and_contexts}
+            )
             for event, context in events_and_contexts:
                 if context.app_service:
                     origin_type = "application_service"
-                elif self.hs.is_mine_id(event.sender):
+                elif event.sender in local_senders:
                     origin_type = "local"
                 else:
                     origin_type = "remote"
@@ -628,13 +656,25 @@ class PersistEventsStore:
 
         event_map = {event.event_id: event for event, _ in events_and_contexts}
 
+        # The sliding sync tables are keyed by user ID. In a member key room the
+        # membership state keys are member keys, so map the ones that are ours to
+        # their users (`local_identity_map` drops everything that is not ours).
+        local_identity_map = await self.store.get_local_identity_map(
+            room_id,
+            (
+                state_key
+                for event_type, state_key in itertools.chain(to_delete, to_insert)
+                if event_type == EventTypes.Member
+            ),
+        )
+
         # Handle gathering info for the `sliding_sync_membership_snapshots` table
         #
         # This would only happen if someone was state reset out of the room
         user_ids_to_delete_membership_snapshots = [
-            state_key
+            local_identity_map[state_key]
             for event_type, state_key in to_delete
-            if event_type == EventTypes.Member and self.is_mine_id(state_key)
+            if event_type == EventTypes.Member and state_key in local_identity_map
         ]
 
         membership_snapshot_shared_insert_values: SlidingSyncMembershipSnapshotSharedInsertValues = {}
@@ -644,8 +684,13 @@ class PersistEventsStore:
         if to_insert:
             membership_event_id_to_user_id_map: dict[str, str] = {}
             for state_key, event_id in to_insert.items():
-                if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
-                    membership_event_id_to_user_id_map[event_id] = state_key[1]
+                if (
+                    state_key[0] == EventTypes.Member
+                    and state_key[1] in local_identity_map
+                ):
+                    membership_event_id_to_user_id_map[event_id] = local_identity_map[
+                        state_key[1]
+                    ]
 
             membership_event_map: dict[str, EventBase] = {}
             # In normal event persist scenarios, we should be able to find the
@@ -1140,6 +1185,18 @@ class PersistEventsStore:
         assert min_stream_order
         assert max_stream_order
 
+        # The identities this batch names that the user-ID keyed tables and caches
+        # care about, mapped to our users (see `get_local_identity_map_txn`): the
+        # senders (for `event_txn_id_device_id`), the membership state keys (for
+        # `local_current_membership` and the sliding sync snapshots, whether the
+        # events reach the current state or are out of band) and the membership
+        # changes in the state delta. Built once per batch; `_update_current_state_txn`
+        # extends it with the room's members if we are leaving the room, the one
+        # set of identities not known until then.
+        local_identity_map = self.store.get_local_identity_map_txn(
+            txn, room_id, _identities_to_map(events_and_contexts, state_delta_for_room)
+        )
+
         # Once the txn completes, invalidate all of the relevant caches. Note that we do this
         # up here because it captures all the events_and_contexts before any are removed.
         for event, _ in events_and_contexts:
@@ -1164,6 +1221,18 @@ class PersistEventsStore:
                 relates_to,
                 backfilled=False,
             )
+            # `_invalidate_caches_for_event` keys the per-user membership caches
+            # by the state key; where that is a member key, redo them (here and
+            # on workers) for the user behind it, at this event's position.
+            if event.type == EventTypes.Member and event.state_key is not None:
+                local_user_id = local_identity_map.get(event.state_key)
+                if local_user_id is not None and local_user_id != event.state_key:
+                    self.store._invalidate_user_caches_for_member_keys_and_stream(
+                        txn,
+                        event.room_id,
+                        {local_user_id},
+                        event.internal_metadata.stream_ordering,
+                    )
 
         # Ensure that we don't have the same event twice.
         events_and_contexts = self._filter_events_and_contexts_for_duplicates(
@@ -1202,7 +1271,7 @@ class PersistEventsStore:
                 txn, room_id, new_state_dag_forward_extremities
             )
 
-        self._persist_transaction_ids_txn(txn, events_and_contexts)
+        self._persist_transaction_ids_txn(txn, events_and_contexts, local_identity_map)
 
         # Insert into event_to_state_groups.
         self._store_event_state_mappings_txn(txn, events_and_contexts + gained_state)
@@ -1236,6 +1305,7 @@ class PersistEventsStore:
             events_and_contexts=events_and_contexts,
             all_events_and_contexts=all_events_and_contexts,
             inhibit_local_membership_updates=inhibit_local_membership_updates,
+            local_identity_map=local_identity_map,
         )
 
         # We call this last as it assumes we've inserted the events into
@@ -1251,6 +1321,7 @@ class PersistEventsStore:
                 state_delta_for_room,
                 min_stream_order,
                 sliding_sync_table_changes,
+                local_identity_map,
             )
 
         if self._msc4354_enabled:
@@ -1762,8 +1833,21 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         events_and_contexts: list[EventPersistencePair],
+        local_identity_map: Mapping[str, str],
     ) -> None:
-        """Persist the mapping from transaction IDs to event IDs (if defined)."""
+        """Persist the mapping from transaction IDs to event IDs (if defined).
+
+        Args:
+            txn
+            events_and_contexts
+            local_identity_map: The batch's senders mapped to our users, see
+                `get_local_identity_map_txn`. `event_txn_id_device_id` is keyed by
+                (user ID, device ID), with a foreign key to `devices`, so a sender
+                that is a member key is stored as the user behind it. A sender the
+                map does not know is stored as is, as before: a transaction ID is
+                only ever set on an event one of our users sent, so a key that
+                does not map is a bug and the foreign key makes it fail loudly.
+        """
 
         inserted_ts = self._clock.time_msec()
         to_insert_device_id: list[tuple[str, str, str, str, str, int]] = []
@@ -1777,7 +1861,7 @@ class PersistEventsStore:
                         (
                             event.event_id,
                             event.room_id,
-                            event.sender,
+                            local_identity_map.get(event.sender, event.sender),
                             device_id,
                             txn_id,
                             inserted_ts,
@@ -1822,14 +1906,22 @@ class PersistEventsStore:
         if state_delta.is_noop():
             return
 
-        async with self._stream_id_gen.get_next() as stream_ordering:
-            await self.db_pool.runInteraction(
-                "update_current_state",
-                self._update_current_state_txn,
+        def update_current_state_txn(txn: LoggingTransaction, stream_id: int) -> None:
+            local_identity_map = self.store.get_local_identity_map_txn(
+                txn, room_id, _identities_to_map([], state_delta)
+            )
+            self._update_current_state_txn(
+                txn,
                 room_id,
                 delta_state=state_delta,
-                stream_id=stream_ordering,
+                stream_id=stream_id,
                 sliding_sync_table_changes=sliding_sync_table_changes,
+                local_identity_map=local_identity_map,
+            )
+
+        async with self._stream_id_gen.get_next() as stream_ordering:
+            await self.db_pool.runInteraction(
+                "update_current_state", update_current_state_txn, stream_ordering
             )
 
     def _update_current_state_txn(
@@ -1839,6 +1931,7 @@ class PersistEventsStore:
         delta_state: DeltaState,
         stream_id: int,
         sliding_sync_table_changes: SlidingSyncTableChanges,
+        local_identity_map: Mapping[str, str],
     ) -> None:
         """
         Handles updating tables that track the current state of a room.
@@ -1848,6 +1941,11 @@ class PersistEventsStore:
             room_id
             delta_state: Deltas that are going to be used to update the
                 `current_state_events` table. Changes to the current state of the room.
+            local_identity_map: The membership state keys in `delta_state` that are
+                our users, mapped to their user IDs (see
+                `get_local_identity_map_txn`). In a member key room the state keys
+                are member keys; `local_current_membership`, the sliding sync
+                snapshots and the per-user caches are keyed by user ID.
             stream_id: This is expected to be the minimum `stream_ordering` for the
                 batch of events that we are persisting; which means we do not end up in a
                 situation where workers see events before the `current_state_delta` updates.
@@ -1905,6 +2003,12 @@ class PersistEventsStore:
             # We also want to invalidate the membership caches for users
             # that were in the room.
             members_to_cache_bust.update(users_in_room)
+            # The map we were given covers the state delta; the room's members
+            # are only known now.
+            local_identity_map = {
+                **local_identity_map,
+                **self.store.get_local_identity_map_txn(txn, room_id, users_in_room),
+            }
 
             self.db_pool.simple_delete_txn(
                 txn,
@@ -2054,9 +2158,9 @@ class PersistEventsStore:
                 "DELETE FROM local_current_membership"
                 " WHERE room_id = ? AND user_id = ?",
                 [
-                    (room_id, state_key)
+                    (room_id, local_identity_map[state_key])
                     for etype, state_key in itertools.chain(to_delete, to_insert)
-                    if etype == EventTypes.Member and self.is_mine_id(state_key)
+                    if etype == EventTypes.Member and state_key in local_identity_map
                 ],
             )
 
@@ -2071,9 +2175,9 @@ class PersistEventsStore:
                     )
                     """,
                 [
-                    (room_id, key[1], ev_id, ev_id, ev_id)
+                    (room_id, local_identity_map[key[1]], ev_id, ev_id, ev_id)
                     for key, ev_id in to_insert.items()
-                    if key[0] == EventTypes.Member and self.is_mine_id(key[1])
+                    if key[0] == EventTypes.Member and key[1] in local_identity_map
                 ],
             )
 
@@ -2174,10 +2278,31 @@ class PersistEventsStore:
             txn, room_id, members_to_cache_bust
         )
 
+        # `members_to_cache_bust` names the members as the room does. Where that is
+        # a member key, the caches keyed by user ID (and the membership stream
+        # cache, here and on workers) must be invalidated for the user behind it.
+        # Members with an event in this batch have had this at the event's own
+        # position already; this also covers the ones without (a state reset, or
+        # everyone in the room when we leave it), at the batch's position.
+        self.store._invalidate_user_caches_for_member_keys_and_stream(
+            txn,
+            room_id,
+            {
+                user_id
+                for identity, user_id in local_identity_map.items()
+                if identity in members_to_cache_bust and identity != user_id
+            },
+            stream_id,
+        )
+
         # Check if any of the remote membership changes requires us to
-        # unsubscribe from their device lists.
+        # unsubscribe from their device lists. In a member key room the members
+        # that are not ours are keys we cannot name a user for yet (links are a
+        # later change); they reach this as opaque identities, answered from
+        # `current_state_events` by state key as for any remote member, where
+        # unsubscribing is a no-op delete and one cache invalidation.
         self.store.handle_potentially_left_users_txn(
-            txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
+            txn, {m for m in members_to_cache_bust if m not in local_identity_map}
         )
 
         if self._include_profile_updates_in_sync:
@@ -3185,6 +3310,7 @@ class PersistEventsStore:
         events_and_contexts: list[EventPersistencePair],
         all_events_and_contexts: list[EventPersistencePair],
         inhibit_local_membership_updates: bool = False,
+        local_identity_map: Mapping[str, str],
     ) -> None:
         """Update all the miscellaneous tables for new events
 
@@ -3198,6 +3324,8 @@ class PersistEventsStore:
                 from being updated by these events. This should be set to True
                 for backfilled events because backfilled events in the past do
                 not affect the current local state.
+            local_identity_map: The batch's membership state keys that are our
+                users, mapped to their user IDs; see `_store_room_members_txn`.
         """
 
         # Insert all the push actions into the event_push_actions table.
@@ -3276,6 +3404,7 @@ class PersistEventsStore:
                 if event.type == EventTypes.Member
             ],
             inhibit_local_membership_updates=inhibit_local_membership_updates,
+            local_identity_map=local_identity_map,
         )
 
         # Prefill the event cache
@@ -3422,6 +3551,7 @@ class PersistEventsStore:
         events: list[EventBase],
         *,
         inhibit_local_membership_updates: bool = False,
+        local_identity_map: Mapping[str, str],
     ) -> None:
         """
         Store a room member in the database.
@@ -3433,6 +3563,11 @@ class PersistEventsStore:
                 from being updated by these events. This should be set to True
                 for backfilled events because backfilled events in the past do
                 not affect the current local state.
+            local_identity_map: The events' state keys that are our users, mapped
+                to their user IDs (see `get_local_identity_map_txn`).
+                `room_memberships` is keyed by the state key as the room knows it
+                (a member key in a member key room); `local_current_membership`
+                and the sliding sync snapshots by user ID.
         """
 
         self.db_pool.simple_insert_many_txn(
@@ -3468,6 +3603,8 @@ class PersistEventsStore:
             assert event.internal_metadata.stream_ordering is not None
             assert event.internal_metadata.instance_name is not None
 
+            local_user_id = local_identity_map.get(event.state_key)
+
             # We update the local_current_membership table only if the event is
             # "current", i.e., its something that has just happened.
             #
@@ -3475,7 +3612,7 @@ class PersistEventsStore:
             # unless its an outlier, and an outlier is only "current" if it's an "out of
             # band membership", like a remote invite or a rejection of a remote invite.
             if (
-                self.is_mine_id(event.state_key)
+                local_user_id is not None
                 and not inhibit_local_membership_updates
                 and event.internal_metadata.is_outlier()
                 and event.internal_metadata.is_out_of_band_membership()
@@ -3493,7 +3630,7 @@ class PersistEventsStore:
                 self.db_pool.simple_upsert_txn(
                     txn,
                     table="local_current_membership",
-                    keyvalues={"room_id": event.room_id, "user_id": event.state_key},
+                    keyvalues={"room_id": event.room_id, "user_id": local_user_id},
                     values={
                         "event_id": event.event_id,
                         "event_stream_ordering": event.internal_metadata.stream_ordering,
@@ -3549,7 +3686,7 @@ class PersistEventsStore:
                     table="sliding_sync_membership_snapshots",
                     keyvalues={
                         "room_id": event.room_id,
-                        "user_id": event.state_key,
+                        "user_id": local_user_id,
                     },
                     values=insert_values,
                 )

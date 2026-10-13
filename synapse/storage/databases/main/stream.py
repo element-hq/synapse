@@ -620,6 +620,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             current_stream_pos=events_max,
         )
 
+        self._msc4430_enabled = hs.config.experimental.msc4430_enabled
+
         self._stream_order_on_start = self.get_room_max_stream_ordering()
         self._min_stream_order_on_start = self.get_room_min_stream_ordering()
 
@@ -1362,7 +1364,24 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             min_from_id = from_key.stream
             max_to_id = to_key.get_max_stream_pos()
 
-            args: list[Any] = [user_id, min_from_id, max_to_id]
+            if self._msc4430_enabled:
+                # In an MSC4430 member key room, `room_memberships.user_id` is the
+                # member's state key, i.e. the user's member key for that room,
+                # so the user's membership events there are the ones under the
+                # keys we hold for them. Scoped to the event's room: a key of
+                # ours from another room appearing as a state key here is not
+                # this user (keys are public strings anyone can name).
+                user_clause = """(
+                        m.user_id = ?
+                        OR m.user_id IN (
+                            SELECT k.member_key FROM msc4430_member_keys AS k
+                            WHERE k.room_id = m.room_id AND k.user_id = ?
+                        )
+                    )"""
+                args: list[Any] = [user_id, user_id, min_from_id, max_to_id]
+            else:
+                user_clause = "m.user_id = ?"
+                args = [user_id, min_from_id, max_to_id]
 
             ignore_room_clause = ""
             if excluded_rooms is not None and len(excluded_rooms) > 0:
@@ -1376,11 +1395,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 SELECT m.event_id, instance_name, topological_ordering, stream_ordering
                 FROM events AS e, room_memberships AS m
                 WHERE e.event_id = m.event_id
-                    AND m.user_id = ?
+                    AND %s
                     AND e.stream_ordering > ? AND e.stream_ordering <= ?
                     %s
                 ORDER BY e.stream_ordering ASC
-            """ % (ignore_room_clause,)
+            """ % (user_clause, ignore_room_clause)
 
             txn.execute(sql, args)
 
