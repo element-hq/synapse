@@ -24,7 +24,13 @@ from typing import TYPE_CHECKING, Any
 import attr
 from signedjson.types import SigningKey
 
-from synapse.api.constants import MAX_DEPTH, EventTypes, StickyEvent, StickyEventField
+from synapse.api.constants import (
+    MAX_DEPTH,
+    EventTypes,
+    StateDag,
+    StickyEvent,
+    StickyEventField,
+)
 from synapse.api.room_versions import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     EventFormatVersions,
@@ -307,7 +313,7 @@ class EventBuilder:
             # Auth events are removed entirely on state DAG rooms
             event_dict.pop("auth_events")
             assert prev_state_events is not None
-            assert len(prev_state_events) <= 20
+            assert len(prev_state_events) <= StateDag.MAX_PREV_STATE_EVENTS
             event_dict["prev_state_events"] = prev_state_events
         if self.room_id is not None:
             event_dict["room_id"] = self.room_id

@@ -34,7 +34,7 @@ from typing import (
 import attr
 from prometheus_client import Counter, Gauge
 
-from synapse.api.constants import MAX_DEPTH
+from synapse.api.constants import MAX_DEPTH, StateDag
 from synapse.api.errors import StoreError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
 from synapse.events import EventBase, make_event_from_dict
@@ -1732,7 +1732,8 @@ class EventFederationWorkerStore(
             retcol="event_id",
             desc="get_state_dag_extremities",
         )
-        return frozenset(event_ids)
+        # FIXME: choose more intelligently
+        return frozenset(event_ids[: StateDag.MAX_PREV_STATE_EVENTS])
 
     async def get_min_depth(self, room_id: str) -> int | None:
         """For the given room, get the minimum depth we have seen for it."""

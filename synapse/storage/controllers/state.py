@@ -535,8 +535,10 @@ class StateStorageController:
             RuntimeError if we don't have a state group for one or more of the events
                (ie. they are outliers or unknown) AND the lookup reached the database.
 
-               Callers MUST NOT rely on this to determine missing events, as cached responses
-               return None for the state group instead of raising.
+               XXX: `_get_state_group_for_events` raises `RuntimeError` for unknown events, but
+               the `@cachedList` wrapper swallows it and the caller just gets partial results.
+               For the time-being, Callers MUST NOT rely on this to determine missing events,
+               as cached responses return None for the state group instead of raising.
 
                TODO: audit every caller, as some of them may be relying on the current behaviour.
         """

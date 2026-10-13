@@ -286,6 +286,14 @@ class FederationServer(FederationBase):
             origin_host, _ = parse_server_name(origin)
             await self.check_server_matches_acl(origin_host, room_id)
 
+            if (await self.store.get_room_version(room_id)).msc4242_state_dags:
+                # TODO: we currently don't support /timestamp_to_event in MSC4242 rooms.
+                raise SynapseError(
+                    404,
+                    "This endpoint is not yet implemented in MSC4242 rooms",
+                    errcode=Codes.NOT_FOUND,
+                )
+
             # We only try to fetch data from the local database
             event_id = await self.store.get_event_id_for_timestamp(
                 room_id, timestamp, direction
@@ -1354,6 +1362,7 @@ class FederationServer(FederationBase):
                     origin, room_id, earliest_events, latest_events, limit
                 )
             else:
+                # TODO: currently we only handle /send_join and connected events in /send for state DAG rooms
                 await self._assert_not_state_dag_room(room_id, "/get_missing_events")
                 missing_events = await self.handler.on_get_missing_events(
                     origin, room_id, earliest_events, latest_events, limit
