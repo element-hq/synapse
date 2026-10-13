@@ -16,11 +16,12 @@
 //!
 //! The work is split in two:
 //!
-//! - [`resolve`] is async. It separates the conflicted state, computes the
-//!   auth chain difference, and loads every event the algorithm can touch
-//!   (the "prefetch closure", see [`prefetch`]).
-//! - [`Core::resolve_conflicted_set`] does no I/O. It runs the power sort,
-//!   the iterative auth checks and the mainline sort over the loaded events.
+//! - [`prepare`] separates the conflicted state, computes the auth chain
+//!   difference, and loads every event the algorithm can touch (the
+//!   "prefetch closure", see [`prefetch`]).
+//! - [`PendingResolution::run`] does no I/O. It runs the power sort, the
+//!   iterative auth checks and the mainline sort over the loaded events (see
+//!   [`Core::resolve_conflicted_set`]).
 //!
 //! The Python fetches events lazily, one at a time, inside the sorts. The
 //! core cannot, which is why the async layer loads everything up front.
@@ -102,24 +103,115 @@ pub struct ResolveStats {
 ///
 /// `event_map` holds events that are not yet persisted (e.g. those being
 /// persisted now). Everything else is read from `store`.
+///
+/// This is [`prepare`] followed by [`PendingResolution::run`]. Callers that
+/// hold a database connection for the store should call those separately and
+/// release the connection in between, as `run` does no I/O.
 pub async fn resolve(
+    store: &dyn StateResStore,
+    room_id: &str,
+    room_version: &'static RoomVersion,
+    state_sets: &[StateMap],
+    event_map: EventMap,
+    conflict_cache: Option<&ConflictCache>,
+) -> anyhow::Result<Resolution> {
+    match prepare(
+        store,
+        room_id,
+        room_version,
+        state_sets,
+        event_map,
+        conflict_cache,
+    )
+    .await?
+    {
+        Prepared::Done(resolution) => Ok(resolution),
+        Prepared::Pending(pending) => pending.run(conflict_cache).await,
+    }
+}
+
+/// The outcome of [`prepare`].
+pub enum Prepared {
+    /// Resolved without running the algorithm: there were no conflicts, or
+    /// the conflict cache had the answer.
+    Done(Resolution),
+    /// Everything is loaded; [`PendingResolution::run`] resolves it.
+    Pending(Box<PendingResolution>),
+}
+
+/// A resolution with every event it can read loaded, ready to run.
+pub struct PendingResolution {
+    room_id: Box<str>,
+    room_version: &'static RoomVersion,
+    unconflicted: StateMap,
+    full_conflicted_set: HashSet<Arc<str>>,
+    base_state: StateMap,
+    event_map: EventMap,
+    cache_key: Option<[u8; 32]>,
+    stats: ResolveStats,
+}
+
+impl PendingResolution {
+    /// Run the algorithm over the loaded events, and cache the result.
+    pub async fn run(self, conflict_cache: Option<&ConflictCache>) -> anyhow::Result<Resolution> {
+        let PendingResolution {
+            room_id,
+            room_version,
+            unconflicted,
+            full_conflicted_set,
+            base_state,
+            event_map,
+            cache_key,
+            mut stats,
+        } = self;
+
+        let core = Core {
+            room_id: &room_id,
+            room_version,
+            events: &event_map,
+        };
+        let (resolved, cpu) = core
+            .resolve_conflicted_set(&full_conflicted_set, base_state)
+            .await?;
+
+        stats.sort_time = cpu.sort_time;
+        stats.auth_time = cpu.auth_time;
+        stats.mainline_time = cpu.mainline_time;
+
+        let resolved = Arc::new(resolved);
+        if let (Some(cache), Some(key)) = (conflict_cache, cache_key) {
+            cache.insert(key, Arc::clone(&resolved));
+        }
+
+        Ok(Resolution {
+            unconflicted,
+            resolved,
+            stats,
+        })
+    }
+}
+
+/// Everything in a resolution that reads the database: separate the
+/// conflicted state, compute the auth chain difference, check the conflict
+/// cache and load the events the algorithm can read (see [`prefetch`]).
+pub async fn prepare(
     store: &dyn StateResStore,
     room_id: &str,
     room_version: &'static RoomVersion,
     state_sets: &[StateMap],
     mut event_map: EventMap,
     conflict_cache: Option<&ConflictCache>,
-) -> anyhow::Result<Resolution> {
+) -> anyhow::Result<Prepared> {
     let mut stats = ResolveStats::default();
 
     // First split up the un/conflicted state.
     let (unconflicted, conflicted) = separate(state_sets);
     if conflicted.is_empty() {
-        return Ok(Resolution {
+        return Ok(Prepared::Done(Resolution {
             unconflicted,
             resolved: Arc::default(),
             stats,
-        });
+        }));
     }
 
     debug!("{} conflicted state entries", conflicted.len());
@@ -188,39 +280,26 @@ pub async fn resolve(
                 full_conflicted_set.len()
             );
             stats.cache_hit = true;
-            return Ok(Resolution {
+            return Ok(Prepared::Done(Resolution {
                 unconflicted,
                 resolved,
                 stats,
-            });
+            }));
         }
     }
 
     prefetch(store, &mut event_map, &full_conflicted_set, &base_state).await?;
 
-    let core = Core {
-        room_id,
+    Ok(Prepared::Pending(Box::new(PendingResolution {
+        room_id: Box::from(room_id),
         room_version,
-        events: &event_map,
-    };
-    let (resolved, cpu) = core
-        .resolve_conflicted_set(&full_conflicted_set, base_state)
-        .await?;
-
-    stats.sort_time = cpu.sort_time;
-    stats.auth_time = cpu.auth_time;
-    stats.mainline_time = cpu.mainline_time;
-
-    let resolved = Arc::new(resolved);
-    if let (Some(cache), Some(key)) = (conflict_cache, cache_key) {
-        cache.insert(key, Arc::clone(&resolved));
-    }
-
-    Ok(Resolution {
         unconflicted,
-        resolved,
+        full_conflicted_set,
+        base_state,
+        event_map,
+        cache_key,
         stats,
-    })
+    })))
 }
 
 /// Split the state into unconflicted and conflicted state. Port of

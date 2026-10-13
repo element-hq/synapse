@@ -398,6 +398,10 @@ fn resolve_error_to_py(err: anyhow::Error) -> PyErr {
 
 /// Resolves state with the Rust implementation of state resolution v2 and
 /// v2.1, reading the database through the native Postgres driver.
+///
+/// Each resolution reads the database inside one read-only transaction on a
+/// pooled connection, and returns the connection before running the
+/// algorithm itself, which does no I/O.
 #[pyclass(frozen)]
 pub struct StateResolutionHandler {
     /// The Python `RustConnectionPool`. Its `_pool` is read per call, as
@@ -469,7 +473,7 @@ impl StateResolutionHandler {
             let store = PostgresStateResStore::begin(&pool, handle)
                 .await
                 .map_err(resolve_error_to_py)?;
-            let resolution = v2::resolve(
+            let prepared = v2::prepare(
                 &store,
                 &room_id,
                 room_version,
@@ -479,7 +483,16 @@ impl StateResolutionHandler {
             )
             .await
             .map_err(resolve_error_to_py)?;
+
+            // The rest does no I/O, so give the connection back first.
             let db = store.finish().await.map_err(resolve_error_to_py)?;
+            let resolution = match prepared {
+                v2::Prepared::Done(resolution) => resolution,
+                v2::Prepared::Pending(pending) => pending
+                    .run(Some(&cache))
+                    .await
+                    .map_err(resolve_error_to_py)?,
+            };
 
             let core = &resolution.stats;
             let stats = StateResStats {
