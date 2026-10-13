@@ -349,7 +349,6 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
         Skips inserting events:
             - if they are considered spammy by the policy server;
-              (unsure if correct, track: https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r2727593350)
             - if they are considered spammy by a Synapse spam checker module;
             - if they are rejected;
             - if they are outliers (they should be reconsidered for insertion when de-outliered); or
@@ -372,27 +371,19 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         # event, expires_at
         sticky_events: list[tuple[EventBase, int]] = []
         for ev in events:
-            # MSC: Note: policy servers and other similar antispam techniques still apply to these events.
-            # We don't filter out soft-failed events altogether (in case they get re-evaluated later),
-            # so filter out `spam_checker_spammy` events specifically as we don't want to re-evaluate _those_ later.
-            if (
-                ev.internal_metadata.policy_server_spammy
-                or ev.internal_metadata.spam_checker_spammy
-            ):
-                continue
-            # We shouldn't be passed rejected events, but if we do, we filter them out too.
-            if ev.rejected_reason is not None:
-                continue
             # We can't persist outlier sticky events as we don't know the room state at that event
             if ev.internal_metadata.is_outlier():
                 continue
-            sticky_duration = ev.sticky_duration()
-            if sticky_duration is None:
-                continue
+
             # Calculate the end time as start_time + effective sticky duration
-            expires_at = min(ev.origin_server_ts, now_ms) + sticky_duration.as_millis()
-            # Filter out already expired sticky events
-            if expires_at <= now_ms:
+            expires_at = ev.locally_sticky_until_ts()
+            if (
+                # Not a sticky event altogether
+                expires_at is None
+                or
+                # Filter out already expired sticky events
+                expires_at <= now_ms
+            ):
                 continue
 
             sticky_events.append((ev, expires_at))
@@ -437,6 +428,38 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                 )
                 for (ev, expires_at), stream_id in sticky_events_with_ids
             ],
+        )
+
+    def delete_sticky_events_txn(
+        self, txn: LoggingTransaction, event_ids: Collection[str]
+    ) -> None:
+        """
+        Given a list of event IDs, deletes `sticky_events` entries for those events.
+        This prevents us from retrieving those events as if they are still sticky
+        in the future.
+
+        Ignores entries that are not present in the `sticky_events` table.
+
+        This is used when an event is redacted.
+        """
+        if not event_ids:
+            return
+
+        event_id_clause, event_id_args = make_in_list_sql_clause(
+            self.database_engine, "event_id", event_ids
+        )
+        txn.execute(
+            # The `sticky_events` table doesn't have an index on `event_id`,
+            # so use the `events` table to assist us, by getting the events'
+            # stream orderings, which _are_ indexed in the `sticky_events` table.
+            f"""
+            DELETE FROM sticky_events
+            WHERE event_stream_ordering IN (
+                SELECT stream_ordering FROM events
+                WHERE {event_id_clause}
+            )
+            """,
+            event_id_args,
         )
 
     async def compute_sticky_events_to_un_soft_fail(

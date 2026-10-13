@@ -14,6 +14,7 @@ import sqlite3
 from http import HTTPStatus
 
 from immutabledict import immutabledict
+from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
@@ -158,6 +159,54 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
                 (end_id, event_id_2),
             ],
         )
+
+    def test_redaction_removes_sticky_event(self) -> None:
+        """
+        Tests that redacting a sticky event causes it to be removed from the `sticky_events` table.
+        """
+
+        def _sticky_event_ids_from_table() -> list[str]:
+            """Return all event IDs in the `sticky_events` table, in sticky stream order."""
+            rows = self.get_success(
+                self.store.db_pool.simple_select_list(
+                    table="sticky_events",
+                    keyvalues=None,
+                    retcols=("stream_id", "event_id"),
+                )
+            )
+            return [event_id for _, event_id in sorted(rows)]
+
+        redacted_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "to be redacted", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+        kept_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "to be left alone", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+
+        # Before redaction, both sticky events are in the table.
+        self.assertEqual(
+            set(_sticky_event_ids_from_table()), {redacted_event_id, kept_event_id}
+        )
+
+        # Redact
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room_id}/redact/{redacted_event_id}/txn1",
+            {},
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # After redaction, only the unredacted sticky event is left in the table.
+        self.assertEqual(set(_sticky_event_ids_from_table()), {kept_event_id})
 
     def test_get_updated_sticky_events_with_limit(self) -> None:
         """Test that the limit parameter works correctly."""
@@ -405,6 +454,79 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         # The event should have been persisted in its redacted form.
         event = self.get_success(self.store.get_event(sticky_event.event_id))
         self.assertEqual(event.event_id, sticky_event.event_id)
+        self.assertEqual(event.internal_metadata.redacted_by, redaction_event.event_id)
+        self.assertEqual(event.content, {})
+        self.assertIsNone(event.sticky_duration())
+
+        # Since it is redacted, it must not have been added to the sticky_events
+        # table...
+        sticky_events = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="sticky_events", keyvalues=None, retcols=("event_id",)
+            )
+        )
+        self.assertEqual(sticky_events, [])
+
+        # ...nor shown to clients down sync.
+        self.assertEqual(self._get_visible_sticky_event_ids(), set())
+
+    @parameterized.expand([(True,), (False,)])
+    def test_redacted_in_same_batch_not_tracked(
+        self, flip_order_in_batch: bool
+    ) -> None:
+        """
+        Tests that a sticky event which is persisted in the same batch as a redaction of it
+        is not sent down to clients over sync and is not added to the `sticky_events` table.
+        """
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        self.helper.join(self.room_id, user2_id, tok=user2_tok)
+
+        persist_controller = self.hs.get_storage_controllers().persistence
+        assert persist_controller is not None
+
+        sticky_event, sticky_event_context = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room_id,
+                sender=user2_id,
+                type=EventTypes.Message,
+                content={"body": "sticky", "msgtype": "m.text"},
+                # Corresponds to StickyEvent.EVENT_FIELD_NAME
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=1).as_millis()
+                ),
+            )
+        )
+        redaction_event, redaction_event_context = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room_id,
+                sender=user2_id,
+                type=EventTypes.Redaction,
+                content={
+                    "reason": "nothing here but us trees",
+                    "redacts": sticky_event.event_id,
+                },
+            )
+        )
+
+        # Persist both events in a single batch.
+        # Test both orders of events to make sure it doesn't affect the outcome.
+        if flip_order_in_batch:
+            batch = [
+                (redaction_event, redaction_event_context),
+                (sticky_event, sticky_event_context),
+            ]
+        else:
+            batch = [
+                (sticky_event, sticky_event_context),
+                (redaction_event, redaction_event_context),
+            ]
+        self.get_success(persist_controller.persist_events(batch))
+
+        # The event should have been persisted in its redacted form.
+        event = self.get_success(self.store.get_event(sticky_event.event_id))
         self.assertEqual(event.internal_metadata.redacted_by, redaction_event.event_id)
         self.assertEqual(event.content, {})
         self.assertIsNone(event.sticky_duration())

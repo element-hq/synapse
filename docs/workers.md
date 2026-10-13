@@ -246,6 +246,7 @@ information.
     ^/_matrix/client/(r0|v3)/delete_devices$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)
     ^/_matrix/client/versions$
+    ^/_matrix/client/(v1|unstable/org.matrix.msc2965)/auth_metadata$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/voip/turnServer$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/rooms/.*/event/
     ^/_matrix/client/(api/v1|r0|v3|unstable)/joined_rooms$
@@ -288,7 +289,8 @@ information.
     # User directory search requests
     ^/_matrix/client/(r0|v3|unstable)/user_directory/search$
 
-    # Unstable MSC4140 support
+    # Unstable MSC4140 support (delayed event scheduling & management)
+    ^/_matrix/client/unstable/org.matrix.msc4140/rooms/.*/delayed_event/
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/[^/]+(/restart)?)?$
 
     # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
