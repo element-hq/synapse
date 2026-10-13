@@ -11,7 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-import os
 from unittest.mock import patch
 
 import yaml
@@ -23,7 +22,6 @@ from synapse.config.server_announcements import (
     ServerAnnouncementRoom,
     ServerAnnouncementsConfig,
 )
-from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.types import JsonDict
 
 from tests.unittest import TestCase
