@@ -235,6 +235,46 @@ impl EventInternalMetadataData {
     }
 }
 
+impl EventInternalMetadataData {
+    /// Converts a key/value from the JSON stored in the database to the
+    /// field, as [`Self::from_python_pair`] does for the decoded dict.
+    ///
+    /// Returns `None` if the key is unrecognized or the value has the wrong
+    /// type (which `from_python_pair` reports and the caller ignores).
+    fn from_json_pair(key: &str, value: &serde_json::Value) -> Option<Self> {
+        use serde_json::Value;
+
+        let boolean = || match value {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        };
+        let string = || value.as_str().map(Box::from);
+
+        Some(match key {
+            "out_of_band_membership" => EventInternalMetadataData::OutOfBandMembership(boolean()?),
+            "send_on_behalf_of" => EventInternalMetadataData::SendOnBehalfOf(string()?),
+            "recheck_redaction" => EventInternalMetadataData::RecheckRedaction(boolean()?),
+            "soft_failed" => EventInternalMetadataData::SoftFailed(boolean()?),
+            "proactively_send" => EventInternalMetadataData::ProactivelySend(boolean()?),
+            "policy_server_spammy" => EventInternalMetadataData::PolicyServerSpammy(boolean()?),
+            "spam_checker_spammy" => EventInternalMetadataData::SpamCheckerSpammy(boolean()?),
+            "redacted" => EventInternalMetadataData::Redacted(boolean()?),
+            "txn_id" => EventInternalMetadataData::TxnId(string()?),
+            "delay_id" => EventInternalMetadataData::DelayId(string()?),
+            "token_id" => EventInternalMetadataData::TokenId(value.as_i64()?),
+            "device_id" => EventInternalMetadataData::DeviceId(string()?),
+            "calculated_auth_event_ids" => EventInternalMetadataData::CalculatedAuthEventIDs(
+                value
+                    .as_array()?
+                    .iter()
+                    .map(|v| v.as_str().map(str::to_owned))
+                    .collect::<Option<Vec<_>>>()?,
+            ),
+            _ => return None,
+        })
+    }
+}
+
 /// Helper macro to find the given field in internal metadata, returning None if
 /// not found.
 macro_rules! get_property_opt {
@@ -548,6 +588,46 @@ impl EventInternalMetadata {
     /// Whether a spam checker marked this event as spammy.
     pub fn spam_checker_spammy(&self) -> PyResult<bool> {
         Ok(self.read_inner()?.get_spam_checker_spammy())
+    }
+}
+
+impl EventInternalMetadata {
+    /// Build internal metadata from the JSON stored in the
+    /// `event_json.internal_metadata` column. Fields Synapse does not know,
+    /// or with the wrong type, are skipped, as [`Self::new`] skips them.
+    pub fn from_json_str(json: &str) -> anyhow::Result<Self> {
+        let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(json)?;
+
+        let mut data = Vec::with_capacity(map.len());
+        for (key, value) in &map {
+            match EventInternalMetadataData::from_json_pair(key, value) {
+                Some(entry) => data.push(entry),
+                None => {
+                    if !value.is_null() {
+                        warn!("Ignoring internal metadata field '{key}' with value {value}");
+                    }
+                }
+            }
+        }
+        data.shrink_to_fit();
+
+        Ok(EventInternalMetadata {
+            inner: Arc::new(RwLock::new(EventInternalMetadataInner {
+                data,
+                stream_ordering: None,
+                received_ts: None,
+                instance_name: None,
+                redacted_by: None,
+                outlier: false,
+            })),
+        })
+    }
+
+    /// Mark whether the event is an outlier. The flag lives in its own
+    /// database column, not the metadata JSON.
+    pub fn set_outlier_flag(&self, outlier: bool) -> PyResult<()> {
+        self.write_inner()?.outlier = outlier;
+        Ok(())
     }
 }
 

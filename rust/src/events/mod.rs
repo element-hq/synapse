@@ -212,57 +212,8 @@ impl Event {
 
         let internal_metadata = EventInternalMetadata::new(internal_metadata_dict)?;
 
-        let event_id = match &*parsed_event.specific_fields {
-            EventFormatEnum::V1(format) => {
-                // V1/V2 events have the event_id in the event dict.
-                Arc::clone(&format.event_id)
-            }
-            _ => {
-                // Calculate the event ID by hashing the event JSON. This can
-                // fail if the event can't be serialized to canonical JSON (e.g.
-                // having out-of-range integers), which we report as
-                // `ValueError` as it indicates the event is invalid.
-                let event_value = serde_json::to_value(&parsed_event).map_err(|err| {
-                    PyValueError::new_err(format!("Failed to serialize event: {}", err))
-                })?;
-                calculate_event_id(&event_value, room_version)
-                    .map_err(|err| {
-                        PyValueError::new_err(format!("Failed to calculate event_id: {}", err))
-                    })?
-                    .into()
-            }
-        };
-
-        let room_id = match &*parsed_event.specific_fields {
-            EventFormatEnum::V1(format) => Arc::clone(&format.room_id),
-            EventFormatEnum::V2V3(format) => Arc::clone(&format.room_id),
-            EventFormatEnum::V4(format) => format
-                .room_id(&event_id, &parsed_event.common_fields)
-                .map_err(|err| {
-                PyValueError::new_err(format!(
-                    "Failed to calculate room_id for event {}: {}",
-                    event_id, err
-                ))
-            })?,
-            EventFormatEnum::VMSC4242(format) => format
-                .room_id(&event_id, &parsed_event.common_fields)
-                .map_err(|err| {
-                    PyValueError::new_err(format!(
-                        "Failed to calculate room_id for event {}: {}",
-                        event_id, err
-                    ))
-                })?,
-        };
-
-        Ok(Self {
-            parsed_event,
-
-            event_id,
-            room_id,
-            room_version,
-            rejected_reason,
-            internal_metadata,
-        })
+        Event::from_parts(parsed_event, internal_metadata, room_version, rejected_reason)
+            .map_err(|err| PyValueError::new_err(format!("{err:#}")))
     }
 
     /// Convert the event to a dictionary suitable for serialisation.
@@ -669,6 +620,73 @@ impl Event {
 }
 
 impl Event {
+    /// Assemble an event from its parsed JSON and the state Synapse keeps
+    /// alongside it, computing the event ID and room ID as the room version
+    /// requires.
+    ///
+    /// Fails if the event ID or room ID cannot be derived (e.g. the event
+    /// cannot be serialized to canonical JSON).
+    pub(crate) fn from_parts(
+        parsed_event: FormattedEvent,
+        internal_metadata: EventInternalMetadata,
+        room_version: &'static RoomVersion,
+        rejected_reason: Option<Box<str>>,
+    ) -> Result<Event, Error> {
+        let event_id = match &*parsed_event.specific_fields {
+            EventFormatEnum::V1(format) => {
+                // V1/V2 events have the event_id in the event dict.
+                Arc::clone(&format.event_id)
+            }
+            _ => {
+                // Calculate the event ID by hashing the event JSON. This can
+                // fail if the event can't be serialized to canonical JSON (e.g.
+                // having out-of-range integers), which indicates the event is
+                // invalid.
+                let event_value = serde_json::to_value(&parsed_event)
+                    .map_err(|err| anyhow::anyhow!("Failed to serialize event: {err}"))?;
+                calculate_event_id(&event_value, room_version)
+                    .map_err(|err| anyhow::anyhow!("Failed to calculate event_id: {err}"))?
+                    .into()
+            }
+        };
+
+        let room_id = match &*parsed_event.specific_fields {
+            EventFormatEnum::V1(format) => Arc::clone(&format.room_id),
+            EventFormatEnum::V2V3(format) => Arc::clone(&format.room_id),
+            EventFormatEnum::V4(format) => format
+                .room_id(&event_id, &parsed_event.common_fields)
+                .map_err(|err| {
+                    anyhow::anyhow!("Failed to calculate room_id for event {event_id}: {err}")
+                })?,
+            EventFormatEnum::VMSC4242(format) => format
+                .room_id(&event_id, &parsed_event.common_fields)
+                .map_err(|err| {
+                    anyhow::anyhow!("Failed to calculate room_id for event {event_id}: {err}")
+                })?,
+        };
+
+        Ok(Event {
+            parsed_event,
+            event_id,
+            room_id,
+            room_version,
+            rejected_reason,
+            internal_metadata,
+        })
+    }
+
+    /// Parse an event from its JSON text. See [`Event::from_parts`].
+    pub(crate) fn from_json_str(
+        event_json: &str,
+        room_version: &'static RoomVersion,
+        internal_metadata: EventInternalMetadata,
+        rejected_reason: Option<Box<str>>,
+    ) -> Result<Event, Error> {
+        let parsed_event = event_dict_from_json_str(room_version, event_json)
+            .map_err(|err| anyhow::anyhow!("Failed to parse event for room version {room_version}: {err}"))?;
+        Event::from_parts(parsed_event, internal_metadata, room_version, rejected_reason)
+    }
+
     /// The event's `type`.
     pub fn type_(&self) -> &str {
         &self.parsed_event.common_fields.type_
@@ -707,7 +725,7 @@ impl Event {
 }
 
 /// Parses a JSON string into a [`FormattedEvent`] for the given room version.
-fn event_dict_from_json_str(
+pub(crate) fn event_dict_from_json_str(
     room_version: &RoomVersion,
     event_json: &str,
 ) -> Result<FormattedEvent, Error> {
