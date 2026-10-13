@@ -28,7 +28,7 @@ from typing import (
     TypeVar,
     cast,
 )
-from unittest import mock
+from unittest import SkipTest, mock
 
 import attr
 from parameterized import parameterized
@@ -48,9 +48,20 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
+from synapse.storage.databases.main import DataStore
+from synapse.storage.databases.main.event_federation import (
+    StateDifference,
+    _NoChainCoverIndex,
+)
+from synapse.storage.rust_pool import RustConnectionPool
 from synapse.storage.types import Cursor
+from synapse.synapse_rust.database.postgres import ConnectionPool
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.synapse_rust.room_versions import RoomVersions
+from synapse.synapse_rust.state import (
+    get_auth_chain_difference_for_test,
+    load_events_for_test,
+)
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 from synapse.util.json import json_encoder
@@ -196,6 +207,27 @@ def get_all_topologically_consistent_subsets(
 class _BackfillSetupInfo:
     room_id: str
     depth_map: dict[str, int]
+
+
+# The auth chain difference of `AUTH_GRAPH` for various state sets.
+AUTH_DIFF_CASES: list[tuple[list[set[str]], set[str]]] = [
+    ([{"a"}, {"b"}], {"a", "b"}),
+    ([{"a"}, {"b"}, {"c"}], {"a", "b", "c", "e", "f"}),
+    ([{"a", "c"}, {"b"}], {"a", "b", "c"}),
+    ([{"a", "c"}, {"b", "c"}], {"a", "b"}),
+    ([{"a"}, {"b"}, {"d"}], {"a", "b", "d", "e"}),
+    ([{"a"}, {"b"}, {"c"}, {"d"}], {"a", "b", "c", "d", "e", "f"}),
+    ([{"a"}, {"b"}, {"e"}], {"a", "b"}),
+    ([{"a"}], set()),
+]
+
+
+def _rust_connection_pool(store: DataStore) -> ConnectionPool | None:
+    """The native Rust driver's connection pool, if the tests use it."""
+    db_pool = store.db_pool._db_pool
+    if not isinstance(db_pool, RustConnectionPool):
+        return None
+    return db_pool._pool
 
 
 class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
@@ -506,45 +538,70 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
 
     def assert_auth_diff_is_expected(self, room_id: str) -> None:
         """Assert the auth chain difference returns the correct answers."""
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}, {"b"}])
-        )
-        self.assertSetEqual(difference, {"a", "b"})
+        for state_sets, expected in AUTH_DIFF_CASES:
+            difference = self.get_success(
+                self.store.get_auth_chain_difference(
+                    room_id, [set(s) for s in state_sets]
+                )
+            )
+            self.assertSetEqual(difference, expected, f"state sets {state_sets}")
 
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}, {"b"}, {"c"}])
-        )
-        self.assertSetEqual(difference, {"a", "b", "c", "e", "f"})
+            self._assert_rust_auth_diff_matches(room_id, state_sets)
 
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a", "c"}, {"b"}])
-        )
-        self.assertSetEqual(difference, {"a", "b", "c"})
+    def _assert_rust_auth_diff_matches(
+        self,
+        room_id: str,
+        state_sets: list[set[str]],
+        conflicted: set[str] | None = None,
+        additional_backwards_reachable: set[str] | None = None,
+    ) -> None:
+        """When running against the native Rust driver, assert that the Rust
+        state res store computes the same chain cover auth difference (and
+        conflicted subgraph) as `_get_auth_chain_difference_using_cover_index_txn`.
+        """
+        pool = _rust_connection_pool(self.store)
+        if pool is None:
+            return
 
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a", "c"}, {"b", "c"}])
-        )
-        self.assertSetEqual(difference, {"a", "b"})
+        def python_txn(txn: LoggingTransaction) -> StateDifference | None:
+            try:
+                return self.store._get_auth_chain_difference_using_cover_index_txn(
+                    txn,
+                    room_id,
+                    # The fixup for unindexed events rewrites the state sets.
+                    [set(s) for s in state_sets],
+                    conflicted,
+                    additional_backwards_reachable,
+                )
+            except _NoChainCoverIndex:
+                return None
 
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}, {"b"}, {"d"}])
+        expected = self.get_success(
+            self.store.db_pool.runInteraction("python_cover_index", python_txn)
         )
-        self.assertSetEqual(difference, {"a", "b", "d", "e"})
 
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}, {"b"}, {"c"}, {"d"}])
-        )
-        self.assertSetEqual(difference, {"a", "b", "c", "d", "e", "f"})
+        if expected is None:
+            with self.assertRaisesRegex(RuntimeError, "no chain cover"):
+                get_auth_chain_difference_for_test(
+                    pool,
+                    room_id,
+                    state_sets,
+                    conflicted,
+                    additional_backwards_reachable,
+                )
+            return
 
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}, {"b"}, {"e"}])
+        auth_difference, conflicted_subgraph = get_auth_chain_difference_for_test(
+            pool, room_id, state_sets, conflicted, additional_backwards_reachable
         )
-        self.assertSetEqual(difference, {"a", "b"})
-
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}])
+        self.assertSetEqual(
+            auth_difference, expected.auth_difference, f"state sets {state_sets}"
         )
-        self.assertSetEqual(difference, set())
+        self.assertEqual(
+            conflicted_subgraph,
+            expected.conflicted_subgraph,
+            f"state sets {state_sets}",
+        )
 
     def test_auth_difference_partial_cover(self) -> None:
         """Test that we correctly handle rooms where not all events have a chain
@@ -691,46 +748,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         )
 
         # Now actually test that various combinations give the right result:
-
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}, {"b"}])
-        )
-        self.assertSetEqual(difference, {"a", "b"})
-
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}, {"b"}, {"c"}])
-        )
-        self.assertSetEqual(difference, {"a", "b", "c", "e", "f"})
-
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a", "c"}, {"b"}])
-        )
-        self.assertSetEqual(difference, {"a", "b", "c"})
-
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a", "c"}, {"b", "c"}])
-        )
-        self.assertSetEqual(difference, {"a", "b"})
-
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}, {"b"}, {"d"}])
-        )
-        self.assertSetEqual(difference, {"a", "b", "d", "e"})
-
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}, {"b"}, {"c"}, {"d"}])
-        )
-        self.assertSetEqual(difference, {"a", "b", "c", "d", "e", "f"})
-
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}, {"b"}, {"e"}])
-        )
-        self.assertSetEqual(difference, {"a", "b"})
-
-        difference = self.get_success(
-            self.store.get_auth_chain_difference(room_id, [{"a"}])
-        )
-        self.assertSetEqual(difference, set())
+        self.assert_auth_diff_is_expected(room_id)
 
     def test_conflicted_subgraph(self) -> None:
         """Test that the conflicted subgraph code in state res v2.1 can walk arbitrary length links
@@ -926,6 +944,12 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
                 self.store.db_pool.runInteraction(
                     f"test_case_{test_case.name}", run_test, test_case
                 )
+            )
+            self._assert_rust_auth_diff_matches(
+                "!not_relevant",
+                [test_case.conflicted.union(test_case.additional_backwards_reachable)],
+                test_case.conflicted,
+                test_case.additional_backwards_reachable,
             )
 
     @parameterized.expand(
@@ -1912,3 +1936,60 @@ def build_state_dag(
                 continue
             graph_events[graph_event_id] = graph_event
     return (room_id, graph_events)
+
+
+class RustStateResLoaderTestCase(tests.unittest.HomeserverTestCase):
+    """The Rust state res store loads events as the Python store does."""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def test_load_events_matches_python(self) -> None:
+        store = self.hs.get_datastores().main
+        pool = _rust_connection_pool(store)
+        if pool is None:
+            raise SkipTest("needs the native Rust Postgres driver")
+
+        user_id = self.register_user("user", "pass")
+        tok = self.login("user", "pass")
+        room_id = self.helper.create_room_as(user_id, tok=tok)
+        self.helper.send_state(room_id, "m.room.topic", {"topic": "a"}, tok=tok)
+        message_id = self.helper.send(room_id, "hello", tok=tok)["event_id"]
+
+        state_ids = self.get_success(store.get_partial_current_state_ids(room_id))
+        event_ids = [*state_ids.values(), message_id]
+
+        # Mark one event as rejected.
+        self.get_success(
+            store.db_pool.simple_insert(
+                "rejections",
+                {"event_id": message_id, "reason": "testing", "last_check": "now"},
+                desc="test_load_events_matches_python",
+            )
+        )
+
+        expected = self.get_success(store._get_events_from_db(event_ids))
+        loaded = load_events_for_test(pool, [*event_ids, "$unknown:test"])
+
+        self.assertCountEqual(loaded.keys(), event_ids)
+        for event_id, entry in expected.items():
+            want = entry.event
+            got = loaded[event_id]
+            self.assertEqual(got.event_id, want.event_id)
+            self.assertEqual(got.room_id, want.room_id)
+            self.assertEqual(got.room_version, want.room_version)
+            self.assertEqual(got.get_pdu_json(), want.get_pdu_json())
+            self.assertEqual(got.auth_event_ids(), want.auth_event_ids())
+            self.assertEqual(got.prev_event_ids(), want.prev_event_ids())
+            self.assertEqual(got.rejected_reason, want.rejected_reason)
+            self.assertEqual(
+                got.internal_metadata.outlier, want.internal_metadata.outlier
+            )
+            self.assertEqual(
+                got.internal_metadata.get_dict(), want.internal_metadata.get_dict()
+            )
+
+        self.assertEqual(loaded[message_id].rejected_reason, "testing")
