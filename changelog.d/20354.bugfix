@@ -1,0 +1,1 @@
+Fix Synapse refusing to start when installing from PyPI (avoid incompatible breaking changes in `txredisapi@1.6.0`).
