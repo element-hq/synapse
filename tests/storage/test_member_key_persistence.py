@@ -268,6 +268,54 @@ class MemberKeyPersistenceTestCase(unittest.HomeserverTestCase):
             self.get_success(self.store.get_rooms_for_user(self.bob)), frozenset()
         )
 
+    def test_state_delta_membership_changes_for_user(self) -> None:
+        """The two queries over `current_state_delta_stream` find the user's
+        changes under their key: a join, a kick by another key, and nothing
+        for a key of ours from another room."""
+        bob_member = self._local_key(self.bob)
+        stranger = Member()
+        self.get_success(self.room.send_member(self.alice_member, "join"))
+        before = self.store.get_room_max_token()
+        self.get_success(self.room.send_member(bob_member, "join"))
+        kick = self.get_success(
+            self.room.send_member(bob_member, "leave", sender=self.alice_member)
+        )
+        self.get_success(
+            self.store.create_local_member_key(
+                OTHER_ROOM, "@carol:test", stranger.signing_key
+            )
+        )
+        self.get_success(self.room.send_member(stranger, "join"))
+        after = self.store.get_room_max_token()
+
+        changes = self.get_success(
+            self.store.get_current_state_delta_membership_changes_for_user(
+                self.bob, before, after
+            )
+        )
+        self.assertEqual(
+            [(c.room_id, c.membership, c.sender) for c in changes],
+            [
+                (self.room_id, Membership.JOIN, bob_member.key),
+                (self.room_id, Membership.LEAVE, self.alice_member.key),
+            ],
+        )
+        sliding = self.get_success(
+            self.store.get_sliding_sync_membership_changes(self.bob, before, after)
+        )
+        self.assertEqual(
+            {room_id: (c.membership, c.event_id) for room_id, c in sliding.items()},
+            {self.room_id: (Membership.LEAVE, kick.event_id)},
+        )
+        self.assertEqual(
+            self.get_success(
+                self.store.get_current_state_delta_membership_changes_for_user(
+                    "@carol:test", before, after
+                )
+            ),
+            [],
+        )
+
     def test_leave_removes_membership(self) -> None:
         """A leave updates the user's row, and when the leaver was our last
         member the server leaves the room (which depends on recognising the

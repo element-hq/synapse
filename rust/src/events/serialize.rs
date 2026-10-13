@@ -28,7 +28,7 @@
 //! batch and then serializes each event — recursing entirely in Rust into
 //! redactions and bundled aggregations via [`serialize_event`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use pyo3::{
     exceptions::{PyTypeError, PyValueError},
@@ -132,12 +132,29 @@ pub struct SerializeEventConfig {
     /// `true`, the sender is repeated in `unsigned` as
     /// `org.matrix.msc4428.stable_id`.
     msc4428_enabled: bool,
+    /// MSC4430: the requester's member keys. In a member key room the `sender`
+    /// of the requester's own events is their key in that room rather than
+    /// their user ID, so sender-only fields (`transaction_id`, `delay_id`)
+    /// are also gated on these.
+    requester_member_keys: Option<HashSet<String>>,
 }
 
 #[pymethods]
 impl SerializeEventConfig {
     #[new]
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        *,
+        as_client_event,
+        event_format,
+        requester,
+        event_field_allowlist,
+        include_stripped_room_state,
+        include_admin_metadata,
+        msc4354_enabled,
+        msc4428_enabled,
+        requester_member_keys = None,
+    ))]
     fn new(
         as_client_event: bool,
         event_format: EventFormat,
@@ -147,8 +164,10 @@ impl SerializeEventConfig {
         include_admin_metadata: bool,
         msc4354_enabled: bool,
         msc4428_enabled: bool,
+        requester_member_keys: Option<Vec<String>>,
     ) -> PyResult<Self> {
         let requester = requester.map(|r| r.get().clone());
+        let requester_member_keys = requester_member_keys.map(HashSet::from_iter);
 
         Ok(Self {
             as_client_event,
@@ -159,6 +178,7 @@ impl SerializeEventConfig {
             include_admin_metadata,
             msc4354_enabled,
             msc4428_enabled,
+            requester_member_keys,
         })
     }
 }
@@ -437,7 +457,12 @@ fn serialize_event_value(
     // was sent by the same session (or, where appropriate, the same sender) as
     // the one requesting the event.
     if let Some(requester) = &config.requester {
-        if requester.user_id == event.sender() {
+        let sent_by_requester = requester.user_id == event.sender()
+            || config
+                .requester_member_keys
+                .as_ref()
+                .is_some_and(|keys| keys.contains(event.sender()));
+        if sent_by_requester {
             if let Some(txn_id) = event.internal_metadata.txn_id()? {
                 if let Some(event_device_id) = event.internal_metadata.device_id()? {
                     if Some(event_device_id.as_str()) == requester.device_id.as_deref() {

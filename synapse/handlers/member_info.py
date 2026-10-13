@@ -13,11 +13,14 @@
 #
 """MSC4428: the per-room `member_info` map.
 
-`member_info` maps a room member's stable ID (today: their user ID, carried on
-events as `unsigned.org.matrix.msc4428.stable_id`) to the user ID it currently
-stands for, which may be `None` once the user is erased. Entries whose user ID
-equals the stable ID are omitted, as the MSC allows, so in today's rooms the map
-only ever names erased users.
+`member_info` maps a room member's stable ID (carried on events as
+`unsigned.org.matrix.msc4428.stable_id`) to the user ID it currently stands
+for, which may be `None`. In rooms without member keys the stable ID is the
+user ID itself and the entry is omitted, as the MSC allows, unless the user is
+erased. In MSC4430 member key rooms the stable ID is the member key, and every
+key gets an entry: the user behind a key we hold (`None` once erased), the user
+a verified link names for another server's key, and `None` for a key whose
+link is unverified or unknown.
 
 Most changes to the map come with an event in the room (a join, a leave) and
 are delivered alongside it. Changes without such an anchor, erasure today, are
@@ -41,6 +44,7 @@ class MemberInfoHandler:
         self._store = hs.get_datastores().main
         self._state_storage_controller = hs.get_storage_controllers().state
         self._notifier = hs.get_notifier()
+        self._member_key_handler = hs.get_member_key_handler()
         self.enabled = hs.config.experimental.msc4428_enabled
 
     async def on_user_erased(self, user_id: str) -> None:
@@ -54,8 +58,11 @@ class MemberInfoHandler:
         if not room_ids:
             return
 
+        # The stable ID that changed: the user's member key in an MSC4430
+        # member key room, their user ID elsewhere.
+        member_keys = await self._store.get_local_member_keys_for_user(user_id)
         token = await self._store.add_member_info_changes(
-            dict.fromkeys(room_ids, (user_id,))
+            {room_id: (member_keys.get(room_id, user_id),) for room_id in room_ids}
         )
         self._notifier.on_new_event(StreamKeyType.MEMBER_INFO, token, rooms=room_ids)
 
@@ -96,7 +103,10 @@ class MemberInfoHandler:
         """The `member_info` entries for the given stable IDs.
 
         Only stable IDs whose mapping differs from the stable ID itself get an
-        entry; today that is erased users, whose user ID is `None`.
+        entry: a user ID gets one only once the user is erased (`None`); a
+        member key always gets one, naming the user behind it (see
+        `MemberKeyHandler.user_ids_for_identities`), `None` if that user is
+        erased or the key cannot be attributed to anyone.
 
         Args:
             room_id: The room the stable IDs belong to.
@@ -108,12 +118,19 @@ class MemberInfoHandler:
         if not stable_ids:
             return {}
 
-        erased = await self._store.are_users_erased(stable_ids)
-        return {
-            stable_id: {MemberInfo.USER_ID: None}
-            for stable_id, is_erased in erased.items()
-            if is_erased
-        }
+        user_ids = await self._member_key_handler.user_ids_for_identities(
+            room_id, stable_ids
+        )
+        erased = await self._store.are_users_erased(
+            {user_id for user_id in user_ids.values() if user_id is not None}
+        )
+        result: JsonDict = {}
+        for stable_id, user_id in user_ids.items():
+            if user_id is not None and erased.get(user_id):
+                user_id = None
+            if user_id != stable_id:
+                result[stable_id] = {MemberInfo.USER_ID: user_id}
+        return result
 
     async def member_info_for_response(
         self,

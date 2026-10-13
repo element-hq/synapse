@@ -43,6 +43,7 @@ from synapse.api.constants import (
 from synapse.api.room_versions import PushRuleRoomFlag
 from synapse.event_auth import auth_types_for_event, get_user_power_level
 from synapse.events import EventBase, relation_from_event
+from synapse.events.py_protocol import supports_msc4430_member_keys
 from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import SERVER_NAME_LABEL
@@ -130,6 +131,7 @@ class BulkPushRuleEvaluator:
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self._member_key_handler = hs.get_member_key_handler()
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.server_name = hs.hostname  # nb must be called this for @measure_func
@@ -169,14 +171,20 @@ class BulkPushRuleEvaluator:
             # We never notify a user about their own actions. This is enforced in
             # `_action_for_event_by_user` in the loop over `rules_by_user`, but we
             # do the same check here to avoid unnecessary DB queries.
-            if event.sender != event.state_key and self.hs.is_mine_id(event.state_key):
+            #
+            # (The target as a user: in an MSC4430 member key room the state
+            # key is their member key.)
+            target_user_id = await self._member_key_handler.local_user_id_for_identity(
+                event.room_id, event.state_key
+            )
+            if event.sender != event.state_key and target_user_id is not None:
                 # Check the target is in the room, to avoid notifying them of
                 # e.g. a pre-emptive ban.
                 target_already_in_room = await self.store.check_local_user_in_room(
-                    event.state_key, event.room_id
+                    target_user_id, event.room_id
                 )
                 if target_already_in_room:
-                    local_users = [event.state_key]
+                    local_users = [target_user_id]
         else:
             # We get the users who may need to be notified by first fetching the
             # local users currently in the room, finding those that have push rules,
@@ -202,13 +210,25 @@ class BulkPushRuleEvaluator:
             and event.type == EventTypes.Member
             and event.membership == Membership.INVITE
         ):
-            invited = event.state_key
-            invite_config = await self.store.get_invite_config_for_user(invited)
-            if invite_config.get_invite_rule(event.sender) != InviteRule.ALLOW:
-                # Invite was blocked or ignored, never notify.
-                return {}
-            if self.hs.is_mine_id(invited) and invited not in local_users:
-                local_users.append(invited)
+            # The invitee and the inviter as users (in an MSC4430 member key
+            # room, member keys; an inviter that maps to nobody cannot be
+            # matched by the invitee's rules).
+            invited = await self._member_key_handler.local_user_id_for_identity(
+                event.room_id, event.state_key
+            )
+            if invited is not None:
+                invite_config = await self.store.get_invite_config_for_user(invited)
+                inviter = await self._member_key_handler.user_id_for_identity(
+                    event.room_id, event.sender
+                )
+                if (
+                    inviter is not None
+                    and invite_config.get_invite_rule(inviter) != InviteRule.ALLOW
+                ):
+                    # Invite was blocked or ignored, never notify.
+                    return {}
+                if invited not in local_users:
+                    local_users.append(invited)
 
         if not local_users:
             return {}
@@ -484,8 +504,18 @@ class BulkPushRuleEvaluator:
                 event.room_id, thread_id
             )
 
+        # The sender as a user (their member key maps to them in an MSC4430
+        # member key room): we never notify a user about their own events.
+        sender_user_id = (
+            await self._member_key_handler.local_user_id_for_identity(
+                event.room_id, event.sender
+            )
+            if supports_msc4430_member_keys(event)
+            else event.sender
+        )
+
         for uid, rules in rules_by_user.items():
-            if event.sender == uid:
+            if uid in (event.sender, sender_user_id):
                 continue
 
             display_name = None

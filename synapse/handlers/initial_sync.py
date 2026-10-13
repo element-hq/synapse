@@ -466,7 +466,14 @@ class InitialSyncHandler:
             if not self.hs.config.server.presence_enabled:
                 return []
 
-            states = await presence_handler.get_states([m.sender for m in room_members])
+            # (The members as users: in an MSC4430 member key room the
+            # senders are their keys.)
+            member_users = await self.store.get_user_ids_for_identities(
+                room_id, [m.sender for m in room_members]
+            )
+            states = await presence_handler.get_states(
+                [u for u in member_users.values() if u is not None]
+            )
 
             return [
                 {

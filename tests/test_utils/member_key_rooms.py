@@ -202,6 +202,25 @@ class MemberKeyRoom:
             self._depth = max(self._depth, event.depth)
         return persisted
 
+    @classmethod
+    async def for_existing_room(
+        cls, hs: HomeServer, room_id: str, creator: Member | None = None
+    ) -> "MemberKeyRoom":
+        """Attach to a member key room that already exists (one created through
+        the client API, say), chaining new events onto its current extremities.
+        `creator` is only a label: the events sent through the room are signed
+        by whichever `Member` they name."""
+        room = cls(hs, creator or Member())
+        room.room_id = room_id
+        store = hs.get_datastores().main
+        prev_events = await store.get_prev_events_for_room(room_id)
+        room._latest_event_id = prev_events[0]
+        state_extremities = list(await store.get_state_dag_extremities(room_id))
+        room._latest_state_event_id = state_extremities[0]
+        _, depth = await store.get_max_depth_of(prev_events)
+        room._depth = depth
+        return room
+
     async def create(self, content: JsonDict | None = None) -> EventBase:
         """Store the `rooms` row and persist the create event, sent by the
         creator's member key. The room ID is the create event's ID."""

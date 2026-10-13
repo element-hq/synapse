@@ -717,6 +717,15 @@ class DeviceHandler:
 
         return device_list_updates
 
+    async def _users_behind_members(
+        self, room_id: str, members: Iterable[str]
+    ) -> set[str]:
+        """The users behind a room's membership state keys: the keys themselves
+        in rooms without member keys; in an MSC4430 member key room, the users
+        the keys map to (keys that map to nobody are left out)."""
+        mapped = await self.store.get_user_ids_for_identities(room_id, members)
+        return {user_id for user_id in mapped.values() if user_id is not None}
+
     async def generate_sync_entry_for_device_list(
         self,
         user_id: str,
@@ -774,7 +783,10 @@ class DeviceHandler:
         # Step 1b, check for newly joined rooms
         for room_id in newly_joined_rooms:
             joined_users = await self.store.get_users_in_room(room_id)
-            newly_joined_or_invited_or_knocked_users.update(joined_users)
+            # (Member keys in an MSC4430 room; device lists are about users.)
+            newly_joined_or_invited_or_knocked_users.update(
+                await self._users_behind_members(room_id, joined_users)
+            )
 
         # TODO: Check that these users are actually new, i.e. either they
         # weren't in the previous sync *or* they left and rejoined.
@@ -788,7 +800,9 @@ class DeviceHandler:
         # Now find users that we no longer track
         for room_id in newly_left_rooms:
             left_users = await self.store.get_users_in_room(room_id)
-            newly_left_users.update(left_users)
+            newly_left_users.update(
+                await self._users_behind_members(room_id, left_users)
+            )
 
         # Remove any users that we still share a room with.
         left_users_rooms = await self.store.get_rooms_for_users(newly_left_users)

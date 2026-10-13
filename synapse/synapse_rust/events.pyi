@@ -372,6 +372,7 @@ class SerializeEventConfig:
         include_admin_metadata: bool,
         msc4354_enabled: bool,
         msc4428_enabled: bool,
+        requester_member_keys: list[str] | None = None,
     ) -> None: ...
     @property
     def as_client_event(self) -> bool:
@@ -417,6 +418,13 @@ class SerializeEventConfig:
         """Whether MSC4428 (stable identifiers for room members) is enabled.
         When ``True``, the sender is repeated in ``unsigned`` as
         ``org.matrix.msc4428.stable_id``."""
+
+    @property
+    def requester_member_keys(self) -> set[str] | None:
+        """MSC4430: the requester's member keys. In a member key room the
+        ``sender`` of the requester's own events is their key in that room, so
+        sender-only fields (``transaction_id``, ``delay_id``) are gated on these
+        as well as on ``requester.user_id``."""
 
 def serialize_events(
     events: list[tuple[Event, str | None]],

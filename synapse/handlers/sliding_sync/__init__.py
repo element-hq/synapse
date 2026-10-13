@@ -107,6 +107,7 @@ class SlidingSyncHandler:
         self.event_sources = hs.get_event_sources()
         self.relations_handler = hs.get_relations_handler()
         self.member_info_handler = hs.get_member_info_handler()
+        self._member_key_handler = hs.get_member_key_handler()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
 
@@ -611,6 +612,11 @@ class SlidingSyncHandler:
             is_dm: Whether the room is a DM room
         """
         user = sync_config.user
+        # The user as this room knows them: their member key, in an MSC4430
+        # member key room. It is what `$ME` and the heroes are about.
+        user_room_identity = await self._member_key_handler.room_identity_for_user(
+            room_id, user.to_string()
+        )
 
         set_tag(
             SynapseTags.FUNC_ARG_PREFIX + "membership",
@@ -1009,7 +1015,7 @@ class SlidingSyncHandler:
                 # TODO: Reverse/rewind back to the `to_token`
 
             hero_user_ids = extract_heroes_from_room_summary(
-                room_membership_summary, me=user.to_string()
+                room_membership_summary, me=user_room_identity
             )
 
         # Fetch the membership counts for rooms we're joined to.
@@ -1180,7 +1186,7 @@ class SlidingSyncHandler:
                             # their user ID.
                             normalized_state_key = state_key
                             if state_key == StateValues.ME:
-                                normalized_state_key = user.to_string()
+                                normalized_state_key = user_room_identity
 
                             if state_type == EventTypes.Member:
                                 # Also track explicitly requested member state for
@@ -1320,7 +1326,7 @@ class SlidingSyncHandler:
                 # Check if there are any changes to the required state config
                 # that we need to handle.
                 changes_return = _required_state_changes(
-                    user.to_string(),
+                    user_room_identity,
                     prev_required_state_map=prev_room_sync_config.required_state_map,
                     request_required_state_map=room_sync_config.required_state_map,
                     previously_returned_lazy_user_ids=previously_returned_user_to_last_seen.keys(),

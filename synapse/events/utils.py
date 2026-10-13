@@ -183,7 +183,8 @@ class EventClientSerializer:
         Helper method that sets the `include_admin_metadata` field based on
         whether the requester is a server admin if it is not explicitly
         provided. Also sets the `msc4354_enabled` and `msc4428_enabled` fields
-        based on the homeserver config.
+        based on the homeserver config, and, with MSC4430 on, the requester's
+        member keys (the senders of their own events in member key rooms).
 
         Args:
             as_client_event: Whether to serialize the events as client events.
@@ -210,6 +211,14 @@ class EventClientSerializer:
             else:
                 include_admin_metadata = False
 
+        requester_member_keys: list[str] | None = None
+        if requester is not None and self._config.experimental.msc4430_enabled:
+            keys_by_room = await self._store.get_local_member_keys_for_user(
+                requester.user.to_string()
+            )
+            if keys_by_room:
+                requester_member_keys = list(keys_by_room.values())
+
         return SerializeEventConfig(
             as_client_event=as_client_event,
             event_format=event_format,
@@ -219,6 +228,7 @@ class EventClientSerializer:
             include_admin_metadata=include_admin_metadata,
             msc4354_enabled=self._config.experimental.msc4354_enabled,
             msc4428_enabled=self._config.experimental.msc4428_enabled,
+            requester_member_keys=requester_member_keys,
         )
 
     async def serialize_event(

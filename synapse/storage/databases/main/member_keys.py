@@ -234,6 +234,44 @@ class MemberKeysWorkerStore(CacheInvalidationWorkerStore):
                     local_users[member_key] = local_key.user_id
         return local_users
 
+    async def get_user_ids_for_identities(
+        self, room_id: str, identities: Iterable[str]
+    ) -> dict[str, str | None]:
+        """The user behind each room member identity: a user ID is its own; a
+        member key we hold in the room maps to our user; any other member key
+        maps to the user its link claims if that link is *verified*, else to
+        `None` (an unverified claim is anyone's to make, so such a key is
+        nobody's). Member keys map to `None` when MSC4430 is off.
+
+        Rooms without member keys query nothing.
+        """
+        users: dict[str, str | None] = {}
+        member_keys: list[str] = []
+        for identity in identities:
+            if is_member_key(identity):
+                users[identity] = None
+                if self._msc4430_enabled:
+                    member_keys.append(identity)
+            else:
+                users[identity] = identity
+        if not member_keys:
+            return users
+
+        local_keys = await self.get_local_member_keys_by_key(room_id, member_keys)
+        remote_keys = []
+        for member_key in member_keys:
+            local_key = local_keys.get(member_key)
+            if local_key is not None:
+                users[member_key] = local_key.user_id
+            else:
+                remote_keys.append(member_key)
+        if remote_keys:
+            links = await self.get_member_links(room_id, remote_keys)
+            for member_key, link in links.items():
+                if link is not None:
+                    users[member_key] = link.verified_user_id
+        return users
+
     async def get_hosts_for_identities(
         self, room_id: str, identities: Iterable[str]
     ) -> dict[str, str]:

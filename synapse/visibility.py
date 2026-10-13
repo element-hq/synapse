@@ -24,6 +24,7 @@ from enum import Enum, auto
 from typing import (
     Collection,
     Final,
+    Mapping,
     Sequence,
 )
 
@@ -36,6 +37,7 @@ from synapse.api.constants import (
     Membership,
 )
 from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4430_member_keys
 from synapse.events.snapshot import EventContext
 from synapse.events.utils import FilteredEvent, prune_event
 from synapse.logging.opentracing import trace
@@ -151,6 +153,31 @@ async def filter_and_transform_events_for_client(
             )
 
     types = [_HISTORY_VIS_KEY, (EventTypes.Member, user_id)]
+
+    # MSC4430: in a member key room the user's membership is under their member
+    # key in that room, and the senders are keys which the checks below (ignored
+    # senders, erased senders) must see as the users behind them.
+    member_key_room_ids = {e.room_id for e in events if supports_msc4430_member_keys(e)}
+    user_room_identities: Mapping[str, str] = {}
+    # (room ID, sender) -> the user behind the sender: a key is only a user in
+    # the room it was looked up in.
+    sender_user_ids: dict[tuple[str, str], str | None] = {}
+    if member_key_room_ids:
+        user_room_identities = await storage.main.get_local_member_keys_for_user(
+            user_id
+        )
+        types.extend(
+            (EventTypes.Member, member_key)
+            for room_id, member_key in user_room_identities.items()
+            if room_id in member_key_room_ids
+        )
+        for room_id in member_key_room_ids:
+            mapped = await storage.main.get_user_ids_for_identities(
+                room_id, {e.sender for e in events if e.room_id == room_id}
+            )
+            for sender, sender_user in mapped.items():
+                sender_user_ids[(room_id, sender)] = sender_user
+
     if found_call_invite:
         # We need to fetch the room's join rules state to determine
         # whether to allow call invites in public rooms.
@@ -165,7 +192,16 @@ async def filter_and_transform_events_for_client(
     # Get the users who are ignored by the requesting user.
     ignore_list = await storage.main.ignored_users(user_id)
 
-    erased_senders = await storage.main.are_users_erased(e.sender for e in events)
+    def sender_user_id(event: EventBase) -> str | None:
+        """The user behind the event's sender, for the per-user checks: the
+        sender itself in rooms without member keys."""
+        if event.room_id in member_key_room_ids:
+            return sender_user_ids.get((event.room_id, event.sender))
+        return event.sender
+
+    erased_senders = await storage.main.are_users_erased(
+        {u for u in (sender_user_id(e) for e in events) if u is not None}
+    )
 
     if filter_send_to_client:
         room_ids = {e.room_id for e in events}
@@ -178,17 +214,27 @@ async def filter_and_transform_events_for_client(
 
     def allowed(event: EventBase) -> FilteredEvent | None:
         state_after_event = event_id_to_state.get(event.event_id)
+        # The user as this room knows them: their member key, in a member key
+        # room where they have one.
+        room_user_id = (
+            user_room_identities.get(event.room_id, user_id)
+            if event.room_id in member_key_room_ids
+            else user_id
+        )
+        sender = sender_user_id(event)
         filtered = _check_client_allowed_to_see_event(
-            user_id=user_id,
+            user_id=room_user_id,
             event=event,
             clock=storage.main.clock,
             filter_send_to_client=filter_send_to_client,
-            sender_ignored=event.sender in ignore_list,
+            # A member key may be ignored as such (it may be the only handle a
+            # client has on it) or as the user behind it.
+            sender_ignored=event.sender in ignore_list or sender in ignore_list,
             always_include_ids=always_include_ids,
             retention_policy=retention_policies[event.room_id],
             state=state_after_event,
             is_peeking=is_peeking,
-            sender_erased=erased_senders.get(event.sender, False),
+            sender_erased=erased_senders.get(sender, False) if sender else False,
         )
         if filtered is None:
             return None
@@ -219,10 +265,12 @@ async def filter_and_transform_events_for_client(
         # user's own membership event, so we can just inspect that.
 
         user_membership_event: EventBase | None
-        if event.type == EventTypes.Member and event.state_key == user_id:
+        if event.type == EventTypes.Member and event.state_key == room_user_id:
             user_membership_event = event
         elif state_after_event is not None:
-            user_membership_event = state_after_event.get((EventTypes.Member, user_id))
+            user_membership_event = state_after_event.get(
+                (EventTypes.Member, room_user_id)
+            )
         else:
             # unreachable!
             raise Exception("Missing state for event that is not user's own membership")
@@ -286,7 +334,14 @@ async def filter_event_for_clients_with_state(
     # see events in the room at that point in the DAG, and that shouldn't be decided
     # on those checks.
     if filter_send_to_client:
-        ignored_by = await store.ignored_by(event.sender)
+        ignored_by = set(await store.ignored_by(event.sender))
+        if supports_msc4430_member_keys(event):
+            # A member key may be ignored as such, or as the user behind it.
+            sender_user_id = (
+                await store.get_user_ids_for_identities(event.room_id, [event.sender])
+            )[event.sender]
+            if sender_user_id is not None:
+                ignored_by.update(await store.ignored_by(sender_user_id))
         retention_policy = await store.get_retention_policy_for_room(event.room_id)
 
         for user_id in user_ids:
@@ -301,13 +356,28 @@ async def filter_event_for_clients_with_state(
             ):
                 allowed_user_ids.discard(user_id)
 
+    # MSC4430: in a member key room each user's membership is under their member
+    # key in that room (a user with no key there is under their user ID, which
+    # the state then does not hold).
+    room_identities: dict[str, str] = {u: u for u in allowed_user_ids}
+    if supports_msc4430_member_keys(event):
+        local_member_keys = await store.get_local_member_keys_in_room(event.room_id)
+        member_key_by_user_id = {
+            local_user_id: member_key
+            for member_key, local_user_id in local_member_keys.items()
+        }
+        for user_id in allowed_user_ids:
+            room_identities[user_id] = member_key_by_user_id.get(user_id, user_id)
+
     if event.internal_metadata.outlier:
         # Normally these can't be seen by clients, but we make an exception for
         # for out-of-band membership events (eg, incoming invites, or rejections of
         # said invite) for the user themselves.
-        if event.type == EventTypes.Member and event.state_key in allowed_user_ids:
-            logger.debug("Returning out-of-band-membership event %s", event)
-            return {event.state_key}
+        if event.type == EventTypes.Member:
+            for user_id in allowed_user_ids:
+                if room_identities[user_id] == event.state_key:
+                    logger.debug("Returning out-of-band-membership event %s", event)
+                    return {user_id}
 
         return set()
 
@@ -329,7 +399,7 @@ async def filter_event_for_clients_with_state(
 
     filter_list = []
     for user_id in allowed_user_ids:
-        filter_list.append((EventTypes.Member, user_id))
+        filter_list.append((EventTypes.Member, room_identities[user_id]))
     filter_list.append((EventTypes.RoomHistoryVisibility, ""))
 
     state_filter = StateFilter.from_types(filter_list)
@@ -339,7 +409,9 @@ async def filter_event_for_clients_with_state(
     return {
         user_id
         for user_id in allowed_user_ids
-        if _check_membership(user_id, event, visibility, state_map, is_peeking).allowed
+        if _check_membership(
+            room_identities[user_id], event, visibility, state_map, is_peeking
+        ).allowed
     }
 
 

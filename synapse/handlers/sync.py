@@ -64,7 +64,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction
-from synapse.storage.invite_rule import InviteRule
+from synapse.storage.invite_rule import InviteRule, InviteRulesConfig
 from synapse.storage.roommember import MemberSummary
 from synapse.types import (
     DeviceListUpdates,
@@ -429,6 +429,8 @@ class SyncHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
         self._member_info_handler = hs.get_member_info_handler()
+        self._member_key_handler = hs.get_member_key_handler()
+        self._msc4430_enabled = hs.config.experimental.msc4430_enabled
         self._device_handler = hs.get_device_handler()
         self._task_scheduler = hs.get_task_scheduler()
 
@@ -1163,7 +1165,10 @@ class SyncHandler:
             for user_id, event_id in details.get(membership, empty_ms).members:
                 member_ids[user_id] = event_id
 
-        me = sync_config.user.to_string()
+        # The user as the room knows them (their member key, in an MSC4430 room).
+        me = await self._member_key_handler.room_identity_for_user(
+            room_id, sync_config.user.to_string()
+        )
         summary["m.heroes"] = extract_heroes_from_room_summary(details, me)
 
         if not sync_config.filter_collection.lazy_load_members():
@@ -1500,7 +1505,15 @@ class SyncHandler:
             # is no guarantee that our membership will be in the auth events of
             # timeline events when the room is partial stated.
             state_filter = StateFilter.from_lazy_load_member_list(
-                members_to_fetch.union((sync_config.user.to_string(),))
+                members_to_fetch.union(
+                    (
+                        # Under the identity the room knows us by (our member
+                        # key, in an MSC4430 room).
+                        await self._member_key_handler.room_identity_for_user(
+                            room_id, sync_config.user.to_string()
+                        ),
+                    )
+                )
             )
 
             # We are happy to use partial state to compute the `/sync` response.
@@ -2060,6 +2073,16 @@ class SyncHandler:
                     newly_joined_or_invited_or_knocked_users,
                     newly_left_users,
                 ) = sync_result_builder.calculate_user_changes()
+                # Those are membership state keys: in an MSC4430 member key
+                # room, keys. Presence and device lists are about users.
+                newly_joined_or_invited_or_knocked_users = (
+                    await self._users_for_member_identities(
+                        sync_result_builder, newly_joined_or_invited_or_knocked_users
+                    )
+                )
+                newly_left_users = await self._users_for_member_identities(
+                    sync_result_builder, newly_left_users
+                )
 
                 if include_presence_data:
                     logger.debug("Fetching presence data")
@@ -2217,8 +2240,15 @@ class SyncHandler:
                 # User joined a room - we have to then check the room state to ensure we
                 # respect any bans if there's a race between the join and ban events.
                 if event.membership == Membership.JOIN:
-                    user_ids_in_room = await self.store.get_users_in_room(room_id)
-                    if user_id in user_ids_in_room:
+                    # (Keyed by user ID, which in an MSC4430 member key room
+                    # the room's own state is not.)
+                    (
+                        current_membership,
+                        _,
+                    ) = await self.store.get_local_current_membership_for_user_in_room(
+                        user_id, room_id
+                    )
+                    if current_membership == Membership.JOIN:
                         mutable_joined_room_ids.add(room_id)
                 # The user left the room, or left and was re-invited but not joined yet
                 else:
@@ -2736,7 +2766,14 @@ class SyncHandler:
         extra_users_ids = set(newly_joined_or_invited_users)
         for room_id in newly_joined_rooms:
             users = await self.store.get_users_in_room(room_id)
-            extra_users_ids.update(users)
+            # (Member keys in an MSC4430 room; presence is about users.)
+            extra_users_ids.update(
+                u
+                for u in (
+                    await self.store.get_user_ids_for_identities(room_id, users)
+                ).values()
+                if u is not None
+            )
         extra_users_ids.discard(user.to_string())
 
         if extra_users_ids:
@@ -2966,6 +3003,67 @@ class SyncHandler:
                 return True
         return False
 
+    async def _users_for_member_identities(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        identities: AbstractSet[str],
+    ) -> AbstractSet[str]:
+        """Map membership state keys found in the joined rooms' timelines (see
+        `SyncResultBuilder.calculate_user_changes`) to users: user IDs are kept,
+        and in MSC4430 member key rooms the keys become the users behind them
+        (dropped if that is nobody)."""
+        if not identities or not self._msc4430_enabled:
+            return identities
+        # Which room each key was seen in, so it can be looked up there.
+        identity_rooms: dict[str, str] = {}
+        for joined_sync in sync_result_builder.joined:
+            for ev in joined_sync.timeline.events:
+                if (
+                    ev.event.type == EventTypes.Member
+                    and ev.event.state_key in identities
+                ):
+                    identity_rooms[ev.event.state_key] = joined_sync.room_id
+        users: set[str] = set()
+        by_room: dict[str, set[str]] = {}
+        for identity in identities:
+            room_id = identity_rooms.get(identity)
+            if room_id is None:
+                users.add(identity)
+            else:
+                by_room.setdefault(room_id, set()).add(identity)
+        for room_id, room_identities in by_room.items():
+            mapped = await self.store.get_user_ids_for_identities(
+                room_id, room_identities
+            )
+            users.update(u for u in mapped.values() if u is not None)
+        return users
+
+    async def _invite_is_ignored(
+        self,
+        room_id: str,
+        inviter: str,
+        ignored_users: AbstractSet[str],
+        invite_config: InviteRulesConfig,
+    ) -> bool:
+        """Whether an invite is hidden from the user because of who sent it: the
+        inviter is on their ignore list, or their invite rules ignore them. In
+        an MSC4430 member key room the inviter is a member key, which the user
+        may have ignored as such, and which maps to a user (if it maps to any)
+        for the user-keyed checks; a key that maps to nobody cannot be matched
+        by the rules and is not ignored by them.
+        """
+        if inviter in ignored_users:
+            return True
+        inviter_user_id = await self._member_key_handler.user_id_for_identity(
+            room_id, inviter
+        )
+        if inviter_user_id is None:
+            return False
+        return (
+            inviter_user_id in ignored_users
+            or invite_config.get_invite_rule(inviter_user_id) == InviteRule.IGNORE
+        )
+
     async def _get_room_changes_for_incremental_sync(
         self,
         sync_result_builder: "SyncResultBuilder",
@@ -2994,6 +3092,13 @@ class SyncHandler:
         """
         user_id = sync_result_builder.sync_config.user.to_string()
         since_token = sync_result_builder.since_token
+        # The user's identities in MSC4430 member key rooms (their keys), under
+        # which their membership is held in those rooms' state.
+        member_keys_by_room: Mapping[str, str] = (
+            await self.store.get_local_member_keys_for_user(user_id)
+            if self._msc4430_enabled
+            else {}
+        )
         now_token = sync_result_builder.now_token
         sync_config = sync_result_builder.sync_config
         membership_change_events = sync_result_builder.membership_change_events
@@ -3040,13 +3145,18 @@ class SyncHandler:
                 # User is in the room so we don't need to do the invite/leave checks
                 continue
 
+            room_user_id = member_keys_by_room.get(room_id, user_id)
             if room_id in sync_result_builder.joined_room_ids or has_join:
                 old_state_ids = await self._state_storage_controller.get_state_ids_at(
                     room_id,
                     since_token,
-                    state_filter=StateFilter.from_types([(EventTypes.Member, user_id)]),
+                    state_filter=StateFilter.from_types(
+                        [(EventTypes.Member, room_user_id)]
+                    ),
                 )
-                old_mem_ev_id = old_state_ids.get((EventTypes.Member, user_id), None)
+                old_mem_ev_id = old_state_ids.get(
+                    (EventTypes.Member, room_user_id), None
+                )
                 old_mem_ev = None
                 if old_mem_ev_id:
                     old_mem_ev = await self.store.get_event(
@@ -3076,12 +3186,12 @@ class SyncHandler:
                                 room_id,
                                 since_token,
                                 state_filter=StateFilter.from_types(
-                                    [(EventTypes.Member, user_id)]
+                                    [(EventTypes.Member, room_user_id)]
                                 ),
                             )
                         )
                         old_mem_ev_id = old_state_ids.get(
-                            (EventTypes.Member, user_id), None
+                            (EventTypes.Member, room_user_id), None
                         )
                         old_mem_ev = None
                         if old_mem_ev_id:
@@ -3094,10 +3204,8 @@ class SyncHandler:
             # Only bother if we're still currently invited
             should_invite = last_non_join.membership == Membership.INVITE
             if should_invite:
-                if (
-                    last_non_join.sender not in ignored_users
-                    and invite_config.get_invite_rule(last_non_join.sender)
-                    != InviteRule.IGNORE
+                if not await self._invite_is_ignored(
+                    room_id, last_non_join.sender, ignored_users, invite_config
                 ):
                     invite_room_sync = InvitedSyncResult(room_id, invite=last_non_join)
                     if invite_room_sync:
@@ -3255,6 +3363,14 @@ class SyncHandler:
         )
         invite_config = await self.store.get_invite_config_for_user(user_id)
 
+        # The user's identities in MSC4430 member key rooms (their keys), to tell
+        # their own leaves from kicks below.
+        member_keys_by_room: Mapping[str, str] = (
+            await self.store.get_local_member_keys_for_user(user_id)
+            if self._msc4430_enabled
+            else {}
+        )
+
         room_entries = []
         invited = []
         knocked = []
@@ -3277,9 +3393,9 @@ class SyncHandler:
                     )
                 )
             elif event.membership == Membership.INVITE:
-                if event.sender in ignored_users:
-                    continue
-                if invite_config.get_invite_rule(event.sender) == InviteRule.IGNORE:
+                if await self._invite_is_ignored(
+                    event.room_id, event.sender, ignored_users, invite_config
+                ):
                     continue
                 invite = await self.store.get_event(event.event_id)
                 invited.append(InvitedSyncResult(room_id=event.room_id, invite=invite))
@@ -3290,7 +3406,10 @@ class SyncHandler:
                 # Always send down rooms we were banned from or kicked from.
                 if not sync_config.filter_collection.include_leave:
                     if event.membership == Membership.LEAVE:
-                        if user_id == event.sender:
+                        if event.sender in (
+                            user_id,
+                            member_keys_by_room.get(event.room_id),
+                        ):
                             continue
 
                 leave_token = now_token.copy_and_replace(

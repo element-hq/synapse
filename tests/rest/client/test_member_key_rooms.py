@@ -23,22 +23,38 @@ client is served (`/sync`, `/event`, `/members`) is a later change, so the room 
 inspected through `/state` and the store.
 """
 
+import json
+import urllib.parse
 from http import HTTPStatus
 from unittest.mock import Mock
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventContentFields, EventTypes, MemberKeys, Membership
+from synapse.api.constants import (
+    EventContentFields,
+    EventTypes,
+    MemberInfo,
+    MemberKeys,
+    Membership,
+)
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.rest import admin
-from synapse.rest.client import login, room, room_upgrade_rest_servlet
+from synapse.rest.client import (
+    account_data,
+    login,
+    room,
+    room_upgrade_rest_servlet,
+    sync,
+)
 from synapse.server import HomeServer
+from synapse.storage.member_keys import MemberLink
 from synapse.types import JsonDict, is_member_key
 from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.test_utils.member_key_rooms import Member
+from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
+from tests.test_utils.member_key_rooms import Member, MemberKeyRoom
 from tests.unittest import override_config
 
 ROOM_VERSION = RoomVersions.MSC4430v12
@@ -422,3 +438,460 @@ class MemberKeyRoomsTestCase(unittest.HomeserverTestCase):
             room_version=ROOM_VERSION.identifier,
             expect_code=HTTPStatus.BAD_REQUEST,
         )
+
+
+class MemberKeyClientViewTestCase(unittest.HomeserverTestCase):
+    """What a client is served from a member key room: events whose senders are
+    keys with `stable_id` set, a `member_info` map resolving the keys, the
+    requester's own events recognised for the transaction ID echo, visibility
+    decided by the requester's key, and `/members` and `/joined_members` keyed
+    by key. These are the local halves of the Complement tests for the stable
+    ID, `member_info` in `/sync`, the member list endpoints, the transaction ID
+    echo and the incremental sync after a join."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        account_data.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {}).setdefault(
+            "msc4430_enabled", True
+        )
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.alice = self.register_user("alice", "pass")
+        self.alice_tok = self.login("alice", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_tok = self.login("bob", "pass")
+        self.room_id = self.helper.create_room_as(
+            self.alice,
+            tok=self.alice_tok,
+            room_version=ROOM_VERSION.identifier,
+            extra_content={"preset": "public_chat"},
+        )
+        self.alice_key = self._key(self.alice)
+
+    def _key(self, user_id: str) -> str:
+        local_key = self.get_success(
+            self.store.get_local_member_key(self.room_id, user_id)
+        )
+        assert local_key is not None
+        return local_key.member_key
+
+    def _sync(self, tok: str, since: str | None = None, **params: str) -> JsonDict:
+        query = {**params}
+        if since is not None:
+            query["since"] = since
+        qs = "&".join(f"{k}={v}" for k, v in query.items())
+        channel = self.make_request(
+            "GET", f"/sync?{qs}" if qs else "/sync", access_token=tok
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        return channel.json_body
+
+    def _joined_room(self, body: JsonDict) -> JsonDict:
+        return body["rooms"]["join"][self.room_id]
+
+    def _stranger_join(self, stranger: Member) -> EventBase:
+        """A join by a key this server does not hold, as federation would bring."""
+        builder = self.get_success(
+            MemberKeyRoom.for_existing_room(self.hs, self.room_id)
+        )
+        return self.get_success(builder.send_member(stranger, "join"))
+
+    def test_initial_sync(self) -> None:
+        """Every event names a key as sender and stable ID; the map resolves
+        every member's key to their user ID."""
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        bob_key = self._key(self.bob)
+        self.helper.send(self.room_id, body="hello", tok=self.bob_tok)
+
+        room_body = self._joined_room(self._sync(self.alice_tok))
+        events = room_body["timeline"]["events"] + room_body["state"]["events"]
+        self.assertTrue(events)
+        for event in events:
+            self.assertTrue(is_member_key(event["sender"]), event)
+            self.assertEqual(
+                event["unsigned"]["org.matrix.msc4428.stable_id"], event["sender"]
+            )
+            if event["type"] == EventTypes.Member:
+                self.assertTrue(is_member_key(event["state_key"]), event)
+        self.assertEqual(
+            room_body[MemberInfo.FIELD],
+            {
+                self.alice_key: {MemberInfo.USER_ID: self.alice},
+                bob_key: {MemberInfo.USER_ID: self.bob},
+            },
+        )
+        # The user's own membership is served as state under their key.
+        memberships = {
+            e["state_key"]: e["content"]["membership"]
+            for e in events
+            if e["type"] == EventTypes.Member
+        }
+        self.assertEqual(memberships, {self.alice_key: "join", bob_key: "join"})
+
+    def test_incremental_sync_after_join_and_leave(self) -> None:
+        """A room joined after the last sync comes down with its create event,
+        and only the new member's entry; leaving puts it under `leave`."""
+        since = self._sync(self.bob_tok)["next_batch"]
+        self.assertNotIn(
+            self.room_id, self._sync(self.bob_tok).get("rooms", {}).get("join", {})
+        )
+
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        bob_key = self._key(self.bob)
+        body = self._sync(self.bob_tok, since=since)
+        room_body = self._joined_room(body)
+        types = {e["type"] for e in room_body["timeline"]["events"]} | {
+            e["type"] for e in room_body["state"]["events"]
+        }
+        self.assertIn(EventTypes.Create, types)
+        self.assertEqual(
+            room_body[MemberInfo.FIELD][bob_key], {MemberInfo.USER_ID: self.bob}
+        )
+
+        # Alice, already synced, learns only of Bob.
+        alice_since = self._sync(self.alice_tok)["next_batch"]
+        self.helper.send(self.room_id, body="hi", tok=self.bob_tok)
+        room_body = self._joined_room(self._sync(self.alice_tok, since=alice_since))
+        self.assertEqual(
+            room_body[MemberInfo.FIELD], {bob_key: {MemberInfo.USER_ID: self.bob}}
+        )
+
+        since = body["next_batch"]
+        self.helper.leave(self.room_id, self.bob, tok=self.bob_tok)
+        body = self._sync(self.bob_tok, since=since)
+        self.assertIn(self.room_id, body["rooms"]["leave"])
+        self.assertNotIn(self.room_id, body["rooms"].get("join", {}))
+
+    def test_transaction_id_echoed_to_the_sending_device_only(self) -> None:
+        other_device_tok = self.login("alice", "pass")
+        event_id = self.helper.send(
+            self.room_id, body="hello", tok=self.alice_tok, txn_id="txn1"
+        )["event_id"]
+
+        def find(body: JsonDict) -> JsonDict:
+            for event in self._joined_room(body)["timeline"]["events"]:
+                if event["event_id"] == event_id:
+                    return event
+            raise AssertionError("event not in timeline")
+
+        self.assertEqual(
+            find(self._sync(self.alice_tok))["unsigned"]["transaction_id"], "txn1"
+        )
+        self.assertNotIn(
+            "transaction_id", find(self._sync(other_device_tok))["unsigned"]
+        )
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        self.assertNotIn("transaction_id", find(self._sync(self.bob_tok))["unsigned"])
+
+    def test_members_and_joined_members(self) -> None:
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        bob_key = self._key(self.bob)
+
+        channel = self.make_request(
+            "GET", f"/rooms/{self.room_id}/members", access_token=self.alice_tok
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(
+            {e["state_key"] for e in channel.json_body["chunk"]},
+            {self.alice_key, bob_key},
+        )
+        self.assertEqual(
+            channel.json_body[MemberInfo.FIELD],
+            {
+                self.alice_key: {MemberInfo.USER_ID: self.alice},
+                bob_key: {MemberInfo.USER_ID: self.bob},
+            },
+        )
+
+        channel = self.make_request(
+            "GET", f"/rooms/{self.room_id}/joined_members", access_token=self.alice_tok
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        joined = channel.json_body["joined"]
+        self.assertEqual(set(joined), {self.alice_key, bob_key})
+        self.assertEqual(joined[bob_key][MemberInfo.USER_ID], self.bob)
+        self.assertEqual(joined[bob_key]["display_name"], "bob")
+
+    def test_event_and_messages_are_visible_to_members_only(self) -> None:
+        """Visibility is decided by the requester's key: with `joined` history,
+        a later joiner sees nothing from before their join."""
+        self.helper.send_state(
+            self.room_id,
+            EventTypes.RoomHistoryVisibility,
+            {"history_visibility": "joined"},
+            tok=self.alice_tok,
+        )
+        before = self.helper.send(self.room_id, body="before", tok=self.alice_tok)[
+            "event_id"
+        ]
+        self.helper.get_event(self.room_id, before, tok=self.alice_tok)
+        self.helper.get_event(
+            self.room_id, before, tok=self.bob_tok, expect_code=HTTPStatus.NOT_FOUND
+        )
+
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        after = self.helper.send(self.room_id, body="after", tok=self.alice_tok)[
+            "event_id"
+        ]
+        self.helper.get_event(
+            self.room_id, before, tok=self.bob_tok, expect_code=HTTPStatus.NOT_FOUND
+        )
+        self.helper.get_event(self.room_id, after, tok=self.bob_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/messages?dir=b",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        bodies = [
+            e["content"]["body"]
+            for e in channel.json_body["chunk"]
+            if e["type"] == EventTypes.Message
+        ]
+        self.assertEqual(bodies, ["after"])
+
+    def test_member_info_for_erased_and_unknown_members(self) -> None:
+        """An erased member maps to null, as does a key nobody vouches for; a
+        verified link names the user it claims."""
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        bob_key = self._key(self.bob)
+        self.get_success(self.store.mark_user_erased(self.bob))
+
+        stranger, linked = Member(), Member()
+        self._stranger_join(stranger)
+        self._stranger_join(linked)
+        self.get_success(
+            self.store.upsert_member_link(
+                MemberLink(
+                    room_id=self.room_id,
+                    member_key=linked.key,
+                    domain="other.example",
+                    localpart="carol",
+                    verified=True,
+                    event_id="$verified",
+                    key_id="ed25519:x",
+                )
+            )
+        )
+
+        channel = self.make_request(
+            "GET", f"/rooms/{self.room_id}/members", access_token=self.alice_tok
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(
+            channel.json_body[MemberInfo.FIELD],
+            {
+                self.alice_key: {MemberInfo.USER_ID: self.alice},
+                bob_key: {MemberInfo.USER_ID: None},
+                stranger.key: {MemberInfo.USER_ID: None},
+                linked.key: {MemberInfo.USER_ID: "@carol:other.example"},
+            },
+        )
+
+    def _ignore(self, tok: str, user_id: str, *ignored: str) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/user/{user_id}/account_data/m.ignored_user_list",
+            {"ignored_users": {i: {} for i in ignored}},
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+    def test_profile_change_is_not_a_rejoin(self) -> None:
+        """Changing one's own membership (a display name) is an ordinary
+        timeline event on the next sync, not the room sent again as newly
+        joined; and the room's own leave is a leave, not a kick."""
+        since = self._sync(self.alice_tok)["next_batch"]
+        self.helper.send_state(
+            self.room_id,
+            EventTypes.Member,
+            {"membership": Membership.JOIN, "displayname": "Alice!"},
+            tok=self.alice_tok,
+            state_key=self.alice,
+        )
+        room_body = self._joined_room(self._sync(self.alice_tok, since=since))
+        self.assertEqual(
+            [e["type"] for e in room_body["timeline"]["events"]], [EventTypes.Member]
+        )
+        self.assertFalse(room_body["timeline"]["limited"])
+        self.assertEqual(room_body["state"]["events"], [])
+
+    def test_device_lists_and_presence_name_users(self) -> None:
+        """Device list changes and presence are about users, not keys."""
+        since = self._sync(self.alice_tok)["next_batch"]
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        body = self._sync(self.alice_tok, since=since)
+        self.assertEqual(body["device_lists"]["changed"], [self.bob])
+        self.assertEqual({e["sender"] for e in body["presence"]["events"]}, {self.bob})
+
+        since = body["next_batch"]
+        self.helper.leave(self.room_id, self.bob, tok=self.bob_tok)
+        body = self._sync(self.alice_tok, since=since)
+        self.assertEqual(body["device_lists"]["left"], [self.bob])
+
+    def test_erasure_changes_the_keys_entry(self) -> None:
+        """Erasure is delivered against the member's key, the stable ID in
+        these rooms, not against their user ID."""
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        bob_key = self._key(self.bob)
+        since = self._sync(self.alice_tok)["next_batch"]
+
+        self.get_success(self.store.mark_user_erased(self.bob))
+        self.get_success(self.hs.get_member_info_handler().on_user_erased(self.bob))
+        room_body = self._joined_room(self._sync(self.alice_tok, since=since))
+        self.assertEqual(
+            room_body[MemberInfo.FIELD], {bob_key: {MemberInfo.USER_ID: None}}
+        )
+
+    def test_ignored_senders_by_user_id_and_by_key(self) -> None:
+        """A member may be ignored as the user behind their key or as the key
+        itself; either way their events and notifications stop."""
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        alice_key = self.alice_key
+
+        for ignored in (self.alice, alice_key):
+            self._ignore(self.bob_tok, self.bob, ignored)
+            since = self._sync(self.bob_tok)["next_batch"]
+            self.helper.send(self.room_id, body="ignored?", tok=self.alice_tok)
+            body = self._sync(self.bob_tok, since=since)
+            room_body = body.get("rooms", {}).get("join", {}).get(self.room_id, {})
+            self.assertEqual(room_body.get("timeline", {}).get("events", []), [])
+            self.assertEqual(
+                room_body.get("unread_notifications", {}).get("notification_count", 0),
+                0,
+            )
+            self._ignore(self.bob_tok, self.bob)
+
+    def test_invite_from_ignored_user_is_hidden(self) -> None:
+        self._ignore(self.bob_tok, self.bob, self.alice)
+        self.helper.invite(
+            self.room_id, src=self.alice, targ=self.bob, tok=self.alice_tok
+        )
+        body = self._sync(self.bob_tok)
+        self.assertNotIn(self.room_id, body.get("rooms", {}).get("invite", {}))
+
+    def test_own_events_are_not_notified(self) -> None:
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        since = self._sync(self.alice_tok)["next_batch"]
+        self.helper.send(self.room_id, body="mine", tok=self.alice_tok)
+        room_body = self._joined_room(self._sync(self.alice_tok, since=since))
+        self.assertEqual(room_body["unread_notifications"]["notification_count"], 0)
+
+    def test_heroes_exclude_the_requester(self) -> None:
+        """A nameless room is summarised by the other members' keys (the
+        summary is sent to clients that lazy-load members)."""
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        bob_key = self._key(self.bob)
+        lazy = urllib.parse.quote(
+            json.dumps({"room": {"state": {"lazy_load_members": True}}})
+        )
+        summary = self._joined_room(self._sync(self.alice_tok, filter=lazy))["summary"]
+        self.assertEqual(summary["m.heroes"], [bob_key])
+        summary = self._joined_room(self._sync(self.bob_tok, filter=lazy))["summary"]
+        self.assertEqual(summary["m.heroes"], [self.alice_key])
+
+    def test_notification_count(self) -> None:
+        """Push evaluation decides who can see the event by their key."""
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        since = self._sync(self.bob_tok)["next_batch"]
+        self.helper.send(self.room_id, body="ping", tok=self.alice_tok)
+        room_body = self._joined_room(self._sync(self.bob_tok, since=since))
+        self.assertEqual(room_body["unread_notifications"]["notification_count"], 1)
+
+
+class MemberKeySlidingSyncTestCase(SlidingSyncBase):
+    """Sliding sync in a member key room: `$ME` is the requester's key, the room
+    list follows joins and leaves, and `member_info` resolves the keys."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        account_data.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"]["msc4430_enabled"] = True
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.store = hs.get_datastores().main
+        self.alice = self.register_user("alice", "pass")
+        self.alice_tok = self.login("alice", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_tok = self.login("bob", "pass")
+        self.room_id = self.helper.create_room_as(
+            self.alice,
+            tok=self.alice_tok,
+            room_version=ROOM_VERSION.identifier,
+            extra_content={"preset": "public_chat"},
+        )
+        self.sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [[EventTypes.Member, "$ME"]],
+                    "timeline_limit": 2,
+                }
+            }
+        }
+
+    def _key(self, user_id: str) -> str:
+        local_key = self.get_success(
+            self.store.get_local_member_key(self.room_id, user_id)
+        )
+        assert local_key is not None
+        return local_key.member_key
+
+    def test_invite_from_ignored_user_is_hidden(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/account_data/m.ignored_user_list",
+            {"ignored_users": {self.alice: {}}},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.helper.invite(
+            self.room_id, src=self.alice, targ=self.bob, tok=self.alice_tok
+        )
+        body, _ = self.do_sync(self.sync_body, tok=self.bob_tok)
+        self.assertNotIn(self.room_id, body["rooms"])
+
+    def test_me_join_and_leave(self) -> None:
+        body, pos = self.do_sync(self.sync_body, tok=self.bob_tok)
+        self.assertNotIn(self.room_id, body["rooms"])
+
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+        bob_key = self._key(self.bob)
+        body, pos = self.do_sync(self.sync_body, since=pos, tok=self.bob_tok)
+        room_body = body["rooms"][self.room_id]
+        self.assertTrue(room_body["initial"])
+        # `$ME` is Bob's key: his own membership, and nobody else's.
+        self.assertEqual(
+            [(e["type"], e["state_key"]) for e in room_body["required_state"]],
+            [(EventTypes.Member, bob_key)],
+        )
+        self.assertEqual(
+            room_body[MemberInfo.FIELD][bob_key], {MemberInfo.USER_ID: self.bob}
+        )
+
+        # Leaving on one's own removes the room from the list (it is not a kick).
+        self.helper.leave(self.room_id, self.bob, tok=self.bob_tok)
+        body, pos = self.do_sync(self.sync_body, since=pos, tok=self.bob_tok)
+        self.assertIn(self.room_id, body["rooms"])  # newly left: delivered once
+        body, pos = self.do_sync(self.sync_body, since=pos, tok=self.bob_tok)
+        self.assertNotIn(self.room_id, body["rooms"])

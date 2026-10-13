@@ -37,7 +37,7 @@ vouch for linkage information that is not ours.
 """
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 
 from prometheus_client import Counter
 from signedjson.key import generate_signing_key
@@ -162,15 +162,14 @@ class MemberKeyHandler:
         behind one of our member keys, or the *verified* link of another
         server's key. `None` for a key we hold no verified link for: such a key
         maps to no user, whatever it claims."""
-        if not is_member_key(identity):
-            return identity
-        local_user_id = await self.local_user_id_for_identity(room_id, identity)
-        if local_user_id is not None:
-            return local_user_id
-        link = await self._store.get_member_link(room_id, identity)
-        if link is None:
-            return None
-        return link.verified_user_id
+        return (await self.user_ids_for_identities(room_id, [identity]))[identity]
+
+    async def user_ids_for_identities(
+        self, room_id: str, identities: Iterable[str]
+    ) -> dict[str, str | None]:
+        """Batched `user_id_for_identity`: every identity given maps to a user ID
+        or to `None`."""
+        return await self._store.get_user_ids_for_identities(room_id, identities)
 
     async def domain_for_identity(self, room_id: str, identity: str) -> str | None:
         """The server a room member identity belongs to, for routing only: the

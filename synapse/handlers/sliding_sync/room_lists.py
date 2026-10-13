@@ -45,7 +45,7 @@ from synapse.storage.databases.main.state import (
     Sentinel as StateSentinel,
 )
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
-from synapse.storage.invite_rule import InviteRule
+from synapse.storage.invite_rule import InviteRule, InviteRulesConfig
 from synapse.storage.roommember import (
     RoomsForUser,
     RoomsForUserSlidingSync,
@@ -189,6 +189,7 @@ def filter_membership_for_sync(
     user_id: str,
     room_membership_for_user: RoomsForUserType,
     newly_left: bool,
+    member_keys_by_room: Mapping[str, str] | None = None,
 ) -> bool:
     """
     Returns True if the membership event should be included in the sync response,
@@ -214,13 +215,20 @@ def filter_membership_for_sync(
     # from the room without a corresponding leave event. We can just remove the rooms
     # since they are no longer relevant to the user but will still appear if they are
     # `newly_left`.
+    # The user as the room knows them: in an MSC4430 member key room, their
+    # member key there (`member_keys_by_room`, from
+    # `get_local_member_keys_for_user`), under which their own leave is sent.
+    own_identities: tuple[str | None, ...] = (user_id, None)
+    if member_keys_by_room:
+        own_identities += (member_keys_by_room.get(room_membership_for_user.room_id),)
+
     return (
         # Anything except leave events
         membership != Membership.LEAVE
         # Unless...
         or newly_left
         # Allow kicks
-        or (membership == Membership.LEAVE and sender not in (user_id, None))
+        or (membership == Membership.LEAVE and sender not in own_identities)
     )
 
 
@@ -234,6 +242,40 @@ class SlidingSyncRoomLists:
         self.is_mine_id = hs.is_mine_id
         self._clock = hs.get_clock()
         self._member_info_handler = hs.get_member_info_handler()
+        self._msc4430_enabled = hs.config.experimental.msc4430_enabled
+
+    async def _invite_is_ignored(
+        self,
+        room_id: str,
+        inviter: str,
+        ignored_users: AbstractSet[str],
+        invite_config: InviteRulesConfig | None,
+    ) -> bool:
+        """Whether an invite is hidden because of who sent it: the inviter is on
+        the user's ignore list, or (when given) the user's invite rules ignore
+        them. In an MSC4430 member key room the inviter is a member key, which
+        may itself be ignored, and which maps to a user (if to anyone) for the
+        user-keyed checks; a key that maps to nobody is not ignored by them."""
+        if inviter in ignored_users:
+            return True
+        inviter_user_id = (
+            await self.store.get_user_ids_for_identities(room_id, [inviter])
+        )[inviter]
+        if inviter_user_id is None:
+            return False
+        if inviter_user_id in ignored_users:
+            return True
+        return (
+            invite_config is not None
+            and invite_config.get_invite_rule(inviter_user_id) == InviteRule.IGNORE
+        )
+
+    async def _member_keys_by_room(self, user_id: str) -> Mapping[str, str]:
+        """The user's member keys per MSC4430 member key room: the identities
+        their own membership events carry there. Empty with the feature off."""
+        if not self._msc4430_enabled:
+            return {}
+        return await self.store.get_local_member_keys_for_user(user_id)
 
     async def compute_interested_rooms(
         self,
@@ -281,6 +323,7 @@ class SlidingSyncRoomLists:
     ) -> SlidingSyncInterestedRooms:
         """Implementation of `compute_interested_rooms` using new sliding sync db tables."""
         user_id = sync_config.user.to_string()
+        member_keys_by_room = await self._member_keys_by_room(user_id)
 
         # Assemble sliding window lists
         lists: dict[str, SlidingSyncResult.SlidingWindowList] = {}
@@ -331,12 +374,11 @@ class SlidingSyncRoomLists:
                 if (
                     room_for_user_sliding_sync.membership == Membership.INVITE
                     and room_for_user_sliding_sync.sender
-                    and (
-                        room_for_user_sliding_sync.sender in ignored_users
-                        or invite_config.get_invite_rule(
-                            room_for_user_sliding_sync.sender
-                        )
-                        == InviteRule.IGNORE
+                    and await self._invite_is_ignored(
+                        room_id,
+                        room_for_user_sliding_sync.sender,
+                        ignored_users,
+                        invite_config,
                     )
                 ):
                     room_membership_for_user_map.pop(room_id, None)
@@ -377,6 +419,7 @@ class SlidingSyncRoomLists:
                         user_id=user_id,
                         room_membership_for_user=room_for_user,
                         newly_left=room_id in newly_left_room_map,
+                        member_keys_by_room=member_keys_by_room,
                     ):
                         room_membership_for_user_map[room_id] = room_for_user
                     else:
@@ -412,6 +455,7 @@ class SlidingSyncRoomLists:
                         user_id=user_id,
                         room_membership_for_user=newly_left_room_for_user_sliding_sync,
                         newly_left=room_id in newly_left_room_map,
+                        member_keys_by_room=member_keys_by_room,
                     ):
                         room_membership_for_user_map[room_id] = (
                             newly_left_room_for_user_sliding_sync
@@ -438,6 +482,7 @@ class SlidingSyncRoomLists:
                             user_id=user_id,
                             room_membership_for_user=room_for_user,
                             newly_left=room_id in newly_left_room_map,
+                            member_keys_by_room=member_keys_by_room,
                         ):
                             room_membership_for_user_map[room_id] = room_for_user
                         else:
@@ -478,6 +523,7 @@ class SlidingSyncRoomLists:
                         user_id=user_id,
                         room_membership_for_user=room_for_user,
                         newly_left=room_id in newly_left_room_map,
+                        member_keys_by_room=member_keys_by_room,
                     ):
                         room_membership_for_user_map[room_id] = room_for_user
                     else:
@@ -1200,14 +1246,20 @@ class SlidingSyncRoomLists:
         # Remove invites from ignored users
         ignored_users = await self.store.ignored_users(user_id)
         if ignored_users:
-            room_for_user_list = [
-                room_for_user
-                for room_for_user in room_for_user_list
-                if not (
+            kept_room_for_user_list = []
+            for room_for_user in room_for_user_list:
+                if (
                     room_for_user.membership == Membership.INVITE
-                    and room_for_user.sender in ignored_users
-                )
-            ]
+                    and await self._invite_is_ignored(
+                        room_for_user.room_id,
+                        room_for_user.sender,
+                        ignored_users,
+                        None,
+                    )
+                ):
+                    continue
+                kept_room_for_user_list.append(room_for_user)
+            room_for_user_list = kept_room_for_user_list
 
         (
             newly_joined_room_ids,
@@ -1502,6 +1554,7 @@ class SlidingSyncRoomLists:
             with membership information in that room at the time of `to_token`.
         """
         user_id = user.to_string()
+        member_keys_by_room = await self._member_keys_by_room(user_id)
 
         # Filter rooms to only what we're interested to sync with
         filtered_sync_room_map = {
@@ -1511,6 +1564,7 @@ class SlidingSyncRoomLists:
                 user_id=user_id,
                 room_membership_for_user=room_membership_for_user,
                 newly_left=room_id in newly_left_room_ids,
+                member_keys_by_room=member_keys_by_room,
             )
         }
 

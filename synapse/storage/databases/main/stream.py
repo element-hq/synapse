@@ -942,6 +942,36 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         return ret, next_key, limited
 
     @trace
+    async def _membership_state_key_clause(
+        self, table_alias: str, user_id: str, column: str = "state_key"
+    ) -> tuple[str, list[str]]:
+        """An SQL clause matching the given user's membership rows in a table
+        whose `column` holds the membership state key as the room knows it.
+
+        In rooms without member keys that is the user ID. In an MSC4430 member
+        key room it is the user's member key for that room, so with MSC4430 on
+        the clause also matches the keys we hold for the user, each scoped to
+        its room (keys are public strings anyone can name as a state key: a key
+        of ours from another room is not this user). The keys come from the
+        cached per-user lookup and are spelled out, so every arm of the clause
+        can use the table's `(room_id, column)` or `column` index; a user with
+        no keys, and the feature being off, give the legacy clause byte for
+        byte.
+
+        The table must have a `room_id` column.
+        """
+        if not self._msc4430_enabled:
+            return f"{table_alias}.{column} = ?", [user_id]
+        member_keys_by_room = await self.get_local_member_keys_for_user(user_id)  # type: ignore[attr-defined]
+        if not member_keys_by_room:
+            return f"{table_alias}.{column} = ?", [user_id]
+        arms = [f"{table_alias}.{column} = ?"]
+        args = [user_id]
+        for room_id, member_key in member_keys_by_room.items():
+            arms.append(f"({table_alias}.room_id = ? AND {table_alias}.{column} = ?)")
+            args.extend((room_id, member_key))
+        return "(" + " OR ".join(arms) + ")", args
+
     async def get_current_state_delta_membership_changes_for_user(
         self,
         user_id: str,
@@ -1002,13 +1032,20 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if not has_changed:
                 return []
 
+        # In an MSC4430 member key room the user's membership is under their
+        # member key, see `_membership_state_key_clause`.
+        state_key_clause, state_key_args = await self._membership_state_key_clause(
+            "s", user_id
+        )
+
         def f(txn: LoggingTransaction) -> list[CurrentStateDeltaMembership]:
             # To handle tokens with a non-empty instance_map we fetch more
             # results than necessary and then filter down
             min_from_id = from_key.stream
             max_to_id = to_key.get_max_stream_pos()
 
-            args: list[Any] = [min_from_id, max_to_id, EventTypes.Member, user_id]
+            args: list[Any] = [min_from_id, max_to_id, EventTypes.Member]
+            args.extend(state_key_args)
 
             # TODO: It would be good to assert that the `from_token`/`to_token` is >=
             # the first row in `current_state_delta_stream` for the rooms we're
@@ -1045,9 +1082,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = s.prev_event_id
                 WHERE s.stream_id > ? AND s.stream_id <= ?
                     AND s.type = ?
-                    AND s.state_key = ?
+                    AND %s
                 ORDER BY s.stream_id ASC
-            """
+            """ % (state_key_clause,)
 
             txn.execute(sql, args)
 
@@ -1192,6 +1229,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         if excluded_room_ids is not None:
             room_ids_to_exclude = excluded_room_ids
 
+        state_key_clause, state_key_args = await self._membership_state_key_clause(
+            "s", user_id
+        )
+
         def f(txn: LoggingTransaction) -> dict[str, RoomsForUserStateReset]:
             # To handle tokens with a non-empty instance_map we fetch more
             # results than necessary and then filter down
@@ -1201,7 +1242,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             # This query looks at membership changes in
             # `sliding_sync_membership_snapshots` which will not include users
             # that were state reset out of rooms; so we need to look for that
-            # case in `current_state_delta_stream`.
+            # case in `current_state_delta_stream`. (The snapshots are keyed by
+            # user ID in every room; the state deltas by the room's state key,
+            # which in an MSC4430 member key room is the user's member key, see
+            # `_membership_state_key_clause`.)
             sql = """
                 SELECT
                     room_id,
@@ -1243,16 +1287,16 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = s.prev_event_id
                     WHERE
                         s.type = ?
-                        AND s.state_key = ?
+                        AND %s
                 ) AS c
                 INNER JOIN rooms USING (room_id)
                 WHERE event_stream_ordering > ? AND event_stream_ordering <= ?
                 ORDER BY event_stream_ordering ASC
-            """
+            """ % (state_key_clause,)
 
             txn.execute(
                 sql,
-                (user_id, EventTypes.Member, user_id, min_from_id, max_to_id),
+                (user_id, EventTypes.Member, *state_key_args, min_from_id, max_to_id),
             )
 
             membership_changes: dict[str, RoomsForUserStateReset] = {}
@@ -1358,30 +1402,20 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if not has_changed:
                 return []
 
+        # In an MSC4430 member key room, `room_memberships.user_id` is the
+        # member's state key, i.e. the user's member key for that room, see
+        # `_membership_state_key_clause`.
+        user_clause, user_args = await self._membership_state_key_clause(
+            "m", user_id, column="user_id"
+        )
+
         def f(txn: LoggingTransaction) -> list[_EventDictReturn]:
             # To handle tokens with a non-empty instance_map we fetch more
             # results than necessary and then filter down
             min_from_id = from_key.stream
             max_to_id = to_key.get_max_stream_pos()
 
-            if self._msc4430_enabled:
-                # In an MSC4430 member key room, `room_memberships.user_id` is the
-                # member's state key, i.e. the user's member key for that room,
-                # so the user's membership events there are the ones under the
-                # keys we hold for them. Scoped to the event's room: a key of
-                # ours from another room appearing as a state key here is not
-                # this user (keys are public strings anyone can name).
-                user_clause = """(
-                        m.user_id = ?
-                        OR m.user_id IN (
-                            SELECT k.member_key FROM msc4430_member_keys AS k
-                            WHERE k.room_id = m.room_id AND k.user_id = ?
-                        )
-                    )"""
-                args: list[Any] = [user_id, user_id, min_from_id, max_to_id]
-            else:
-                user_clause = "m.user_id = ?"
-                args = [user_id, min_from_id, max_to_id]
+            args: list[Any] = [*user_args, min_from_id, max_to_id]
 
             ignore_room_clause = ""
             if excluded_rooms is not None and len(excluded_rooms) > 0:
