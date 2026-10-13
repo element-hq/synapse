@@ -364,6 +364,12 @@ main() {
     export PASS_SYNAPSE_USE_RUST_DRIVER=true
   fi
 
+  if [[ -n "$RUST_STATE_RES" ]]; then
+    # Set `experimental_features.rust_state_res` (off, shadow or on). The Rust
+    # state resolution needs RUST_DRIVER=1.
+    export PASS_SYNAPSE_RUST_STATE_RES="$RUST_STATE_RES"
+  fi
+
   if [[ -n "$UNIX_SOCKETS" ]]; then
     # Enable full on Unix socket mode for Synapse, Redis and Postgresql
     export PASS_SYNAPSE_USE_UNIX_SOCKET=1
