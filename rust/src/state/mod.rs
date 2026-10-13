@@ -433,7 +433,8 @@ impl StateResolutionHandler {
     /// `event_map` holds events that are not persisted yet; everything else
     /// is read from the database. It is not modified.
     ///
-    /// Returns a deferred resolving to `(state, stats)`. Fails with
+    /// Returns a deferred resolving to `(state, stats)`. If nothing
+    /// conflicts, the deferred has already fired. Fails with
     /// `NoChainCoverIndexError` if the room has no chain cover index, in
     /// which case the caller should use the Python implementation.
     #[pyo3(signature = (room_id, room_version, state_sets, event_map=None))]
@@ -465,6 +466,20 @@ impl StateResolutionHandler {
             .iter()
             .map(|set| state_map_from_py(set, &mut interner))
             .collect::<PyResult<Vec<_>>>()?;
+
+        // Without conflicts there is nothing to read or resolve, so answer
+        // straight away rather than on the runtime.
+        let (unconflicted, conflicted) = v2::separate(&state_sets);
+        if conflicted.is_empty() {
+            let output = ResolveOutput {
+                state: unconflicted,
+                stats: StateResStats::default(),
+            };
+            return py
+                .import(intern!(py, "twisted.internet.defer"))?
+                .call_method1(intern!(py, "succeed"), (output,));
+        }
+
         let events = event_map_from_py(event_map.as_ref(), &mut interner)?;
 
         let handle = self.runtime.tokio_handle()?;
@@ -475,11 +490,12 @@ impl StateResolutionHandler {
             let store = PostgresStateResStore::begin(&pool, handle)
                 .await
                 .map_err(resolve_error_to_py)?;
-            let prepared = v2::prepare(
+            let prepared = v2::prepare_separated(
                 &store,
                 &room_id,
                 room_version,
                 &state_sets,
+                (unconflicted, conflicted),
                 events,
                 Some(&cache),
             )

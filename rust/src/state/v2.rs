@@ -199,13 +199,34 @@ pub async fn prepare(
     room_id: &str,
     room_version: &'static RoomVersion,
     state_sets: &[StateMap],
+    event_map: EventMap,
+    conflict_cache: Option<&ConflictCache>,
+) -> anyhow::Result<Prepared> {
+    let separated = separate(state_sets);
+    prepare_separated(
+        store,
+        room_id,
+        room_version,
+        state_sets,
+        separated,
+        event_map,
+        conflict_cache,
+    )
+    .await
+}
+
+/// [`prepare`], with the state already split by [`separate`].
+pub async fn prepare_separated(
+    store: &dyn StateResStore,
+    room_id: &str,
+    room_version: &'static RoomVersion,
+    state_sets: &[StateMap],
+    (unconflicted, conflicted): (StateMap, Conflicted),
     mut event_map: EventMap,
     conflict_cache: Option<&ConflictCache>,
 ) -> anyhow::Result<Prepared> {
     let mut stats = ResolveStats::default();
 
-    // First split up the un/conflicted state.
-    let (unconflicted, conflicted) = separate(state_sets);
     if conflicted.is_empty() {
         return Ok(Prepared::Done(Resolution {
             unconflicted,
@@ -302,15 +323,19 @@ pub async fn prepare(
     })))
 }
 
+/// The conflicted state: each conflicted key to the event IDs the state sets
+/// have for it.
+pub type Conflicted = HashMap<StateKey, HashSet<Arc<str>>>;
+
 /// Split the state into unconflicted and conflicted state. Port of
 /// `_seperate`.
 ///
 /// Unlike the original algorithm, a key is conflicted if one of the state
 /// sets doesn't have it. The conflicted state maps each key to the event IDs
 /// the sets have for it.
-pub fn separate(state_sets: &[StateMap]) -> (StateMap, HashMap<StateKey, HashSet<Arc<str>>>) {
+pub fn separate(state_sets: &[StateMap]) -> (StateMap, Conflicted) {
     let mut unconflicted = StateMap::new();
-    let mut conflicted: HashMap<StateKey, HashSet<Arc<str>>> = HashMap::new();
+    let mut conflicted = Conflicted::new();
 
     let mut seen: HashSet<&StateKey> = HashSet::new();
     for key in state_sets.iter().flat_map(|set| set.keys()) {
