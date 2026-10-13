@@ -42,6 +42,7 @@ from synapse.synapse_rust.events import Event
 from synapse.types import (
     JsonDict,
     StateKey,
+    get_domain_from_id,
 )
 
 if TYPE_CHECKING:
@@ -179,6 +180,22 @@ def is_creator(create: EventBase, user_id: str) -> bool:
         )
         return user_id in additional_creators
     return False
+
+
+def redaction_sender_matches(
+    room_version: RoomVersion, original_sender: str, redaction_sender: str
+) -> bool:
+    """Whether a redaction whose sender lacks the power to redact other people's
+    events may still redact the given event: the "recheck" that
+    `synapse.event_auth.check_redaction` defers until the redacted event is known.
+
+    Allowed when both senders are from the same server; in member key rooms
+    (MSC4430), where senders have no server, only when they are the very same
+    member key.
+    """
+    if room_version.msc4430_member_keys:
+        return original_sender == redaction_sender
+    return get_domain_from_id(original_sender) == get_domain_from_id(redaction_sender)
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)

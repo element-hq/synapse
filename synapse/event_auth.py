@@ -47,6 +47,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     JoinRules,
+    MemberKeys,
     Membership,
 )
 from synapse.api.errors import (
@@ -62,11 +63,15 @@ from synapse.api.room_versions import (
     RoomVersion,
 )
 from synapse.events import is_creator
-from synapse.events.py_protocol import supports_msc4242_state_dag
+from synapse.events.py_protocol import (
+    supports_msc4242_state_dag,
+    supports_msc4430_member_keys,
+)
 from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
     JsonMapping,
+    MemberKey,
     MutableStateMap,
     StateKey,
     StateMap,
@@ -120,6 +125,10 @@ def validate_event_for_room_version(event: "EventBase") -> None:
     if not hasattr(event, "room_id"):
         raise AuthError(500, "Event has no room_id: %s" % event)
 
+    if supports_msc4430_member_keys(event):
+        _validate_member_key_event(event)
+        return
+
     # check that the event has the correct signatures
     sender_domain = get_domain_from_id(event.sender)
 
@@ -158,6 +167,52 @@ def validate_event_for_room_version(event: "EventBase") -> None:
         )
         if authoriser_domain not in event.signatures:
             raise AuthError(403, "Event not signed by authorising server")
+
+
+def _validate_member_key_event(event: "EventBase") -> None:
+    """The MSC4430 counterpart of the identity and signature checks in
+    `validate_event_for_room_version`: the sender (and the target of a membership
+    event) is a member key, and the event is signed by it.
+
+    Only the *presence* of the signatures is checked here; they are verified when
+    the event is received, see `_check_sigs_on_pdu`. The server co-signature on a
+    membership event's linkage information is not an auth requirement: it decides
+    whether the member's link is verified, not whether the event is accepted, so
+    that all servers agree on acceptance without fetching any keys.
+    """
+    if not MemberKey.is_valid(event.sender):
+        raise AuthError(403, "Event sender is not a valid member key")
+
+    if MemberKeys.SIGNATURE_ENTITY not in event.signatures:
+        raise AuthError(403, "Event not signed by its sender's member key")
+
+    if event.type != EventTypes.Member or not event.is_state():
+        return
+
+    if not MemberKey.is_valid(event.state_key):
+        raise AuthError(403, "Membership event state_key is not a valid member key")
+
+    # TODO(MSC4430): third-party invites. `_verify_third_party_invite` is
+    # identity-agnostic (`signed.mxid` must equal the `state_key`, whatever it
+    # is, and the signing key comes from the `m.room.third_party_invite`
+    # event), so an invite whose `signed.mxid` is the member key passes. What is
+    # unspecified is how the identity server learns the member key to sign:
+    # the invitee's server exchanges the token for an invite naming its user ID.
+
+    if (
+        event.room_version.restricted_join_rule
+        and event.content.get(EventContentFields.MEMBERSHIP) == Membership.JOIN
+        and EventContentFields.AUTHORISING_USER in event.content
+    ):
+        # The authorising member signs under the member key string itself (the
+        # `sender` entity belongs to the joining member).
+        authorising_user = event.content[EventContentFields.AUTHORISING_USER]
+        if not isinstance(authorising_user, str) or not MemberKey.is_valid(
+            authorising_user
+        ):
+            raise AuthError(403, "Authorising user is not a valid member key")
+        if authorising_user not in event.signatures:
+            raise AuthError(403, "Event not signed by authorising member key")
 
 
 async def check_state_independent_auth_rules(
@@ -393,11 +448,18 @@ def check_state_dependent_auth_rules(
         )
 
     # additional check for m.federate
-    creating_domain = get_domain_from_id(create_event.sender)
-    originating_domain = get_domain_from_id(event.sender)
-    if creating_domain != originating_domain:
-        if not _can_federate(event, auth_dict):
-            raise AuthError(403, "This room has been marked as unfederatable.")
+    #
+    # Member keys (MSC4430) have no domain, so this rule cannot be evaluated in
+    # rooms that use them. There `m.federate: false` is to mean "no federation
+    # at all", enforced at the federation boundary (inbound traffic rejected,
+    # outbound invites and sends refused) by a later change; until then it is
+    # not enforced in such rooms. TODO(MSC4430)
+    if not supports_msc4430_member_keys(event):
+        creating_domain = get_domain_from_id(create_event.sender)
+        originating_domain = get_domain_from_id(event.sender)
+        if creating_domain != originating_domain:
+            if not _can_federate(event, auth_dict):
+                raise AuthError(403, "This room has been marked as unfederatable.")
 
     # 4. If type is m.room.aliases
     if (
@@ -567,7 +629,7 @@ def _check_create(event: "EventBase") -> None:
         and EventContentFields.ADDITIONAL_CREATORS in event.content
     ):
         check_valid_additional_creators(
-            event.content[EventContentFields.ADDITIONAL_CREATORS]
+            event.content[EventContentFields.ADDITIONAL_CREATORS], event.room_version
         )
 
 
@@ -617,11 +679,13 @@ def _is_membership_change_allowed(
     create_event = auth_events.get((EventTypes.Create, ""))
     if not create_event:
         raise AuthError(403, "Create event missing from auth_events")
-    creating_domain = get_domain_from_id(create_event.sender)
-    target_domain = get_domain_from_id(target_user_id)
-    if creating_domain != target_domain:
-        if not _can_federate(event, auth_events):
-            raise AuthError(403, "This room has been marked as unfederatable.")
+    if not room_version.msc4430_member_keys:
+        # See the corresponding comment in `check_state_dependent_auth_rules`.
+        creating_domain = get_domain_from_id(create_event.sender)
+        target_domain = get_domain_from_id(target_user_id)
+        if creating_domain != target_domain:
+            if not _can_federate(event, auth_events):
+                raise AuthError(403, "This room has been marked as unfederatable.")
 
     # get info about the caller
     key = (EventTypes.Member, event.sender)
@@ -978,10 +1042,15 @@ def _check_power_levels(
     user_list = event.content.get("users", {})
     # Validate users
     for k, v in user_list.items():
-        try:
-            UserID.from_string(k)
-        except Exception:
-            raise SynapseError(400, "Not a valid user_id: %s" % (k,))
+        if room_version_obj.msc4430_member_keys:
+            # MSC4430: power is granted to member keys, not user IDs.
+            if not MemberKey.is_valid(k):
+                raise SynapseError(400, "Not a valid member key: %s" % (k,))
+        else:
+            try:
+                UserID.from_string(k)
+            except Exception:
+                raise SynapseError(400, "Not a valid user_id: %s" % (k,))
 
         try:
             int(v)
@@ -1304,10 +1373,17 @@ def auth_types_for_event(
     return auth_types
 
 
-def check_valid_additional_creators(additional_creators: Any) -> None:
+def check_valid_additional_creators(
+    additional_creators: Any, room_version: RoomVersion
+) -> None:
     """Check if the additional_creators provided is valid according to MSC4289.
 
     The additional_creators can be supplied from an m.room.create event or from an /upgrade request.
+
+    Args:
+        additional_creators: the value to check.
+        room_version: the version of the room the creators are for. In member key
+            rooms (MSC4430) the entries are member keys rather than user IDs.
 
     Raises:
         AuthError if the additional_creators is invalid for some reason.
@@ -1317,6 +1393,12 @@ def check_valid_additional_creators(additional_creators: Any) -> None:
     for entry in additional_creators:
         if type(entry) is not str:
             raise AuthError(400, "entry in additional_creators is not a string")
+        if room_version.msc4430_member_keys:
+            if not MemberKey.is_valid(entry):
+                raise AuthError(
+                    400, "entry in additional_creators is not a valid member key"
+                )
+            continue
         if not UserID.is_valid(entry):
             raise AuthError(400, "entry in additional_creators is not a valid user ID")
         # UserID.is_valid doesn't actually validate everything, so check the rest manually.

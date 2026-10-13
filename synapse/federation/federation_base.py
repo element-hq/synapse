@@ -22,18 +22,26 @@
 import logging
 from typing import TYPE_CHECKING, Awaitable, Callable, Sequence
 
-from synapse.api.constants import MAX_DEPTH, EventContentFields, EventTypes, Membership
+from signedjson.sign import SignatureVerifyException, verify_signed_json
+
+from synapse.api.constants import (
+    MAX_DEPTH,
+    EventContentFields,
+    EventTypes,
+    MemberKeys,
+    Membership,
+)
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
 from synapse.crypto.event_signing import check_event_content_hash
-from synapse.crypto.keyring import Keyring
+from synapse.crypto.keyring import Keyring, VerifyJsonRequest
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.utils import prune_event, validate_canonicaljson
 from synapse.federation.units import filter_pdus_for_valid_depth
 from synapse.handlers.room_policy import RoomPolicyHandler
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.opentracing import log_kv, trace
-from synapse.types import JsonDict, get_domain_from_id
+from synapse.types import JsonDict, MemberKey, get_domain_from_id
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -239,6 +247,15 @@ async def _check_sigs_on_pdu(
     # let's start by getting the domain for each pdu, and flattening the event back
     # to JSON.
 
+    if room_version.msc4430_member_keys:
+        # MSC4430: the sender is a member key and signs the event itself; no server
+        # signature is involved, so no keys need fetching and every server reaches
+        # the same verdict. (The server co-signature on a membership event's
+        # linkage information is not checked here: it decides whether the member's
+        # link is verified, not whether the event is accepted.)
+        _check_member_key_sigs_on_pdu(room_version, pdu)
+        return
+
     # First we check that the sender event is signed by the sender's domain
     # (except if its a 3pid invite, in which case it may be sent by any server)
     sender_domain = get_domain_from_id(pdu.sender)
@@ -296,6 +313,69 @@ async def _check_sigs_on_pdu(
                 f"unable to verify signature for authorising serve {authorising_server}: {e}",
                 pdu.event_id,
             ) from None
+
+
+def _check_member_key_sigs_on_pdu(room_version: RoomVersion, pdu: EventBase) -> None:
+    """The MSC4430 counterpart of `_check_sigs_on_pdu`: check that the event is
+    signed by the member key named in its `sender`, and, for a restricted join, by
+    the member key named in `join_authorised_via_users_server`. No network.
+
+    Raises:
+        InvalidEventSignatureError if the event wasn't correctly signed.
+    """
+    sender_key = _parse_member_key(pdu, pdu.sender, "sender")
+    verify_member_key_signature(pdu, MemberKeys.SIGNATURE_ENTITY, sender_key)
+
+    # A join to a restricted room may have been authorised by another member; that
+    # member signs under the member key string itself (the `sender` entity is the
+    # joining member's).
+    if (
+        room_version.restricted_join_rule
+        and pdu.type == EventTypes.Member
+        and pdu.content.get(EventContentFields.MEMBERSHIP) == Membership.JOIN
+        and EventContentFields.AUTHORISING_USER in pdu.content
+    ):
+        authorising_key = _parse_member_key(
+            pdu, pdu.content[EventContentFields.AUTHORISING_USER], "authorising user"
+        )
+        verify_member_key_signature(pdu, authorising_key.to_string(), authorising_key)
+
+
+def _parse_member_key(pdu: EventBase, value: object, what: str) -> MemberKey:
+    """Strictly parse an identity in a member key room event, so that a
+    non-canonical encoding of a key is rejected rather than verifying as that key
+    under a second name."""
+    try:
+        if not isinstance(value, str):
+            raise SynapseError(400, "not a string", Codes.INVALID_PARAM)
+        return MemberKey.from_string(value)
+    except SynapseError as e:
+        raise InvalidEventSignatureError(
+            f"{what} {value!r} is not a valid member key: {e.msg}", pdu.event_id
+        ) from None
+
+
+def verify_member_key_signature(
+    event: EventBase, entity: str, member_key: MemberKey
+) -> None:
+    """Check that the event carries a valid signature by `member_key` under the
+    given signature entity, over the redacted event (as for server signatures).
+
+    Raises:
+        InvalidEventSignatureError if the signature is missing or invalid.
+    """
+    try:
+        # `from_event` builds the JSON that server signatures are verified over,
+        # and raises if there is no signature under `entity` at all.
+        verify_request = VerifyJsonRequest.from_event(entity, event, 0)
+        verify_signed_json(
+            verify_request.get_json_object(), entity, member_key.verify_key()
+        )
+    except (SynapseError, SignatureVerifyException) as e:
+        raise InvalidEventSignatureError(
+            f"unable to verify member key signature under {entity!r}: {e}",
+            event.event_id,
+        ) from None
 
 
 def _is_invite_via_3pid(event: EventBase) -> bool:

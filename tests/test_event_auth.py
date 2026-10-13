@@ -19,19 +19,33 @@
 #
 #
 
+import string
 import unittest
 from collections import namedtuple
 from typing import Any, Collection, Iterable
 
 from parameterized import parameterized
+from signedjson.key import generate_signing_key, get_verify_key
+from signedjson.sign import sign_json
+from unpaddedbase64 import encode_base64
 
 from synapse import event_auth
-from synapse.api.constants import EventContentFields, RejectedReason
+from synapse.api.constants import EventContentFields, MemberKeys, RejectedReason
 from synapse.api.errors import AuthError, SynapseError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.events import EventBase, event_exists_in_state_dag
+from synapse.crypto.event_signing import (
+    EventSigner,
+    add_hashes_and_signatures,
+    add_hashes_and_signatures_from_signers,
+)
+from synapse.events import (
+    EventBase,
+    event_exists_in_state_dag,
+    make_event_from_dict,
+    redaction_sender_matches,
+)
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
-from synapse.types import JsonDict, get_domain_from_id
+from synapse.types import JsonDict, MemberKey, get_domain_from_id
 
 from tests.test_utils import get_awaitable_result
 from tests.test_utils.event_builders import make_test_event
@@ -1213,3 +1227,525 @@ def _maybe_get_event_id_dict_for_room_version(room_version: RoomVersion) -> dict
     c = event_count
     event_count += 1
     return {"event_id": "!%i:example.com" % (c,)}
+
+
+MEMBER_KEY_ROOM_VERSION = RoomVersions.MSC4430v12
+
+
+class _Member:
+    """An identity in a member key room: a signing key and its public form."""
+
+    def __init__(self) -> None:
+        self.signing_key = generate_signing_key(MemberKeys.KEY_VERSION)
+        self.key = MemberKey.from_signing_key(self.signing_key).to_string()
+
+    @property
+    def signer(self) -> EventSigner:
+        """Signs as the event's sender."""
+        return (MemberKeys.SIGNATURE_ENTITY, self.signing_key)
+
+    @property
+    def authorising_signer(self) -> EventSigner:
+        """Signs as the authorising member of a restricted join."""
+        return (self.key, self.signing_key)
+
+
+def _member_key_event(event_dict: JsonDict, *signers: EventSigner) -> EventBase:
+    """Build a signed event in a member key room. `room_id` must be given except
+    for create events."""
+    event_dict = {
+        "depth": 1,
+        "origin_server_ts": 1,
+        "prev_events": [],
+        "prev_state_events": [],
+        **event_dict,
+    }
+    add_hashes_and_signatures_from_signers(
+        MEMBER_KEY_ROOM_VERSION, event_dict, signers, server_name=TEST_DOMAIN
+    )
+    return make_event_from_dict(event_dict, MEMBER_KEY_ROOM_VERSION)
+
+
+class MemberKeyRoomAuthTestCase(unittest.TestCase):
+    """MSC4430: the auth rules in a room whose members are member keys. Every
+    event is hand built and signed; nothing here touches storage or network."""
+
+    def setUp(self) -> None:
+        self.creator = _Member()
+        self.member = _Member()
+        self.other = _Member()
+        self.create = _member_key_event(
+            {
+                "type": "m.room.create",
+                "state_key": "",
+                "sender": self.creator.key,
+                "content": {"room_version": MEMBER_KEY_ROOM_VERSION.identifier},
+            },
+            self.creator.signer,
+        )
+        self.room_id = self.create.room_id
+        self.creator_join = self._member_event(
+            self.creator, "join", prev_events=[self.create.event_id]
+        )
+        self.public = self._event(
+            {
+                "type": "m.room.join_rules",
+                "state_key": "",
+                "sender": self.creator.key,
+                "content": {"join_rule": "public"},
+            },
+            self.creator.signer,
+        )
+
+    def _event(self, event_dict: JsonDict, *signers: EventSigner) -> EventBase:
+        return _member_key_event({"room_id": self.room_id, **event_dict}, *signers)
+
+    def _member_event(
+        self,
+        target: _Member,
+        membership: str,
+        sender: _Member | None = None,
+        content: JsonDict | None = None,
+        prev_events: list[str] | None = None,
+        *extra_signers: EventSigner,
+    ) -> EventBase:
+        sender = sender or target
+        return self._event(
+            {
+                "type": "m.room.member",
+                "state_key": target.key,
+                "sender": sender.key,
+                "content": {"membership": membership, **(content or {})},
+                "prev_events": prev_events or [],
+            },
+            sender.signer,
+            *extra_signers,
+        )
+
+    def _assert_rejected(self, event: EventBase, reason: str) -> None:
+        with self.assertRaises(AuthError) as cm:
+            event_auth.validate_event_for_room_version(event)
+        self.assertEqual(cm.exception.code, 403)
+        self.assertIn(reason, cm.exception.msg)
+
+    def test_validate_sender_and_signature(self) -> None:
+        """An event's sender is a canonical member key, and the event is signed by
+        it under the `sender` entity."""
+        message = self._event(
+            {"type": "m.room.message", "sender": self.member.key, "content": {}},
+            self.member.signer,
+        )
+        event_auth.validate_event_for_room_version(message)
+
+        # A user ID, signed by its server as in every other room version.
+        legacy_dict = {
+            "room_id": self.room_id,
+            "type": "m.room.message",
+            "sender": f"@alice:{TEST_DOMAIN}",
+            "content": {},
+            "depth": 1,
+            "origin_server_ts": 1,
+            "prev_events": [],
+            "prev_state_events": [],
+        }
+        add_hashes_and_signatures(
+            MEMBER_KEY_ROOM_VERSION, legacy_dict, TEST_DOMAIN, generate_signing_key("x")
+        )
+        self._assert_rejected(
+            make_event_from_dict(legacy_dict, MEMBER_KEY_ROOM_VERSION),
+            "not a valid member key",
+        )
+
+        # A non-canonical encoding of the member's key (the same bytes with a
+        # spare bit of the last character set) is not the member.
+        alphabet = (
+            string.ascii_uppercase + string.ascii_lowercase + string.digits + "-_"
+        )
+        non_canonical = message.get_pdu_json()
+        non_canonical["sender"] = (
+            self.member.key[:-1] + alphabet[alphabet.index(self.member.key[-1]) + 1]
+        )
+        self._assert_rejected(
+            make_event_from_dict(non_canonical, MEMBER_KEY_ROOM_VERSION),
+            "not a valid member key",
+        )
+
+        # No signature by the sender (a template, or a server-only signature).
+        unsigned = self._event(
+            {"type": "m.room.message", "sender": self.member.key, "content": {}}
+        )
+        self._assert_rejected(unsigned, "not signed by its sender's member key")
+
+    def test_validate_membership_state_key(self) -> None:
+        invite = self._member_event(self.other, "invite", sender=self.creator)
+        event_auth.validate_event_for_room_version(invite)
+
+        bad = invite.get_pdu_json()
+        bad["state_key"] = f"@bob:{TEST_DOMAIN}"
+        self._assert_rejected(
+            make_event_from_dict(bad, MEMBER_KEY_ROOM_VERSION),
+            "state_key is not a valid member key",
+        )
+
+    def test_validate_restricted_join_authoriser(self) -> None:
+        """A restricted join names the authorising member key, which signs under
+        the member key string itself."""
+        authorised = {EventContentFields.AUTHORISING_USER: self.member.key}
+        join = self._member_event(
+            self.other,
+            "join",
+            None,
+            authorised,
+            None,
+            self.member.authorising_signer,
+        )
+        event_auth.validate_event_for_room_version(join)
+        self.assertEqual(
+            set(join.get_pdu_json()["signatures"]),
+            {MemberKeys.SIGNATURE_ENTITY, self.member.key},
+        )
+
+        # Signed by the joiner only.
+        self._assert_rejected(
+            self._member_event(self.other, "join", None, authorised),
+            "not signed by authorising member key",
+        )
+
+        # The authoriser is not a member key, or not even a string.
+        for not_a_key in (f"@mod:{TEST_DOMAIN}", 42):
+            bad = join.get_pdu_json()
+            bad["content"][EventContentFields.AUTHORISING_USER] = not_a_key
+            self._assert_rejected(
+                make_event_from_dict(bad, MEMBER_KEY_ROOM_VERSION),
+                "Authorising user is not a valid member key",
+            )
+
+    def test_state_dependent_rules(self) -> None:
+        """The state-dependent rules work on member keys: membership, power levels
+        and sender checks compare keys, and the `m.federate` domain rule, which
+        has nothing to compare, is not applied."""
+        auth_events = [self.create, self.creator_join, self.public]
+
+        # The creator's first join, and a join to a public room.
+        event_auth.check_state_dependent_auth_rules(self.creator_join, [self.create])
+        member_join = self._member_event(self.member, "join")
+        event_auth.check_state_dependent_auth_rules(member_join, auth_events)
+        auth_events.append(member_join)
+
+        # Members can send; non-members cannot.
+        event_auth.check_state_dependent_auth_rules(
+            self._event(
+                {"type": "m.room.message", "sender": self.member.key, "content": {}},
+                self.member.signer,
+            ),
+            auth_events,
+        )
+        with self.assertRaises(AuthError) as cm:
+            event_auth.check_state_dependent_auth_rules(
+                self._event(
+                    {"type": "m.room.message", "sender": self.other.key, "content": {}},
+                    self.other.signer,
+                ),
+                auth_events,
+            )
+        self.assertIn("not in room", cm.exception.msg)
+
+        # The creator (creator power) can invite and kick by key.
+        invite = self._member_event(self.other, "invite", sender=self.creator)
+        event_auth.check_state_dependent_auth_rules(invite, auth_events)
+        kick = self._member_event(self.member, "leave", sender=self.creator)
+        event_auth.check_state_dependent_auth_rules(kick, auth_events)
+        with self.assertRaises(AuthError) as cm:
+            event_auth.check_state_dependent_auth_rules(
+                self._member_event(self.creator, "leave", sender=self.member),
+                auth_events,
+            )
+        self.assertIn("cannot kick", cm.exception.msg)
+
+        # Power levels grant power to member keys, never to user IDs.
+        def power_levels(users: JsonDict) -> EventBase:
+            return self._event(
+                {
+                    "type": "m.room.power_levels",
+                    "state_key": "",
+                    "sender": self.creator.key,
+                    "content": {"users": users},
+                },
+                self.creator.signer,
+            )
+
+        event_auth.check_state_dependent_auth_rules(
+            power_levels({self.member.key: 50}), auth_events
+        )
+        with self.assertRaises(SynapseError) as bad_users:
+            event_auth.check_state_dependent_auth_rules(
+                power_levels({f"@alice:{TEST_DOMAIN}": 50}), auth_events
+            )
+        self.assertEqual(bad_users.exception.code, 400)
+        self.assertIn("Not a valid member key", bad_users.exception.msg)
+
+    def test_restricted_join_rules(self) -> None:
+        """A join to a restricted room is authorised by a member key: that member
+        must be in the room with invite power."""
+        restricted = self._event(
+            {
+                "type": "m.room.join_rules",
+                "state_key": "",
+                "sender": self.creator.key,
+                "content": {"join_rule": "restricted", "allow": []},
+            },
+            self.creator.signer,
+        )
+        member_join = self._member_event(self.member, "join")
+        join = self._member_event(
+            self.other,
+            "join",
+            None,
+            {EventContentFields.AUTHORISING_USER: self.member.key},
+            None,
+            self.member.authorising_signer,
+        )
+
+        event_auth.check_state_dependent_auth_rules(
+            join, [self.create, self.creator_join, restricted, member_join]
+        )
+
+        # No authoriser named.
+        with self.assertRaises(AuthError) as cm:
+            event_auth.check_state_dependent_auth_rules(
+                self._member_event(self.other, "join"),
+                [self.create, self.creator_join, restricted, member_join],
+            )
+        self.assertIn("missing authorising user", cm.exception.msg)
+
+        # The authoriser is not in the room.
+        with self.assertRaises(AuthError) as cm:
+            event_auth.check_state_dependent_auth_rules(
+                join, [self.create, self.creator_join, restricted]
+            )
+        self.assertIn("not in room", cm.exception.msg)
+
+        # The authoriser lacks invite power.
+        invite_level = self._event(
+            {
+                "type": "m.room.power_levels",
+                "state_key": "",
+                "sender": self.creator.key,
+                "content": {"invite": 50, "users": {}},
+            },
+            self.creator.signer,
+        )
+        with self.assertRaises(AuthError) as cm:
+            event_auth.check_state_dependent_auth_rules(
+                join,
+                [self.create, self.creator_join, restricted, member_join, invite_level],
+            )
+        self.assertIn("authorised by invalid server", cm.exception.msg)
+
+    def test_federate_rule_not_applied(self) -> None:
+        """`m.federate: false` cannot be evaluated against member keys (no domain),
+        so a join by any key is allowed; the same room in the underlying version
+        rejects a join from another server."""
+        unfederatable = _member_key_event(
+            {
+                "type": "m.room.create",
+                "state_key": "",
+                "sender": self.creator.key,
+                "content": {
+                    "room_version": MEMBER_KEY_ROOM_VERSION.identifier,
+                    EventContentFields.FEDERATE: False,
+                },
+            },
+            self.creator.signer,
+        )
+        room_id = unfederatable.room_id
+        creator_join = _member_key_event(
+            {
+                "room_id": room_id,
+                "type": "m.room.member",
+                "state_key": self.creator.key,
+                "sender": self.creator.key,
+                "content": {"membership": "join"},
+                "prev_events": [unfederatable.event_id],
+            },
+            self.creator.signer,
+        )
+        public = _member_key_event(
+            {
+                "room_id": room_id,
+                "type": "m.room.join_rules",
+                "state_key": "",
+                "sender": self.creator.key,
+                "content": {"join_rule": "public"},
+            },
+            self.creator.signer,
+        )
+        join = _member_key_event(
+            {
+                "room_id": room_id,
+                "type": "m.room.member",
+                "state_key": self.member.key,
+                "sender": self.member.key,
+                "content": {"membership": "join"},
+            },
+            self.member.signer,
+        )
+        event_auth.check_state_dependent_auth_rules(
+            join, [unfederatable, creator_join, public]
+        )
+
+        # Contrast: in the underlying room version the rule applies to user IDs.
+        legacy = RoomVersions.MSC4242v12
+        legacy_create = make_test_event(
+            {
+                "type": "m.room.create",
+                "state_key": "",
+                "sender": "@creator:one.example",
+                "content": {EventContentFields.FEDERATE: False},
+                "prev_events": [],
+                "prev_state_events": [],
+            },
+            legacy,
+        )
+        legacy_room_id = legacy_create.room_id
+        legacy_auth = [
+            legacy_create,
+            make_test_event(
+                {
+                    "room_id": legacy_room_id,
+                    "type": "m.room.member",
+                    "state_key": "@creator:one.example",
+                    "sender": "@creator:one.example",
+                    "content": {"membership": "join"},
+                },
+                legacy,
+            ),
+            make_test_event(
+                {
+                    "room_id": legacy_room_id,
+                    "type": "m.room.join_rules",
+                    "state_key": "",
+                    "sender": "@creator:one.example",
+                    "content": {"join_rule": "public"},
+                },
+                legacy,
+            ),
+        ]
+        with self.assertRaises(AuthError) as cm:
+            event_auth.check_state_dependent_auth_rules(
+                make_test_event(
+                    {
+                        "room_id": legacy_room_id,
+                        "type": "m.room.member",
+                        "state_key": "@other:two.example",
+                        "sender": "@other:two.example",
+                        "content": {"membership": "join"},
+                    },
+                    legacy,
+                ),
+                legacy_auth,
+            )
+        self.assertIn("unfederatable", cm.exception.msg)
+
+    def test_additional_creators(self) -> None:
+        """`additional_creators` in the create event are member keys."""
+        store = _StubEventSourceStore()
+
+        def create(additional_creators: list) -> EventBase:
+            # `content.room_version` is left out: the create rules require it to
+            # name a registered version, and the member key version is not
+            # registered yet. The event itself is still in a member key room.
+            return _member_key_event(
+                {
+                    "type": "m.room.create",
+                    "state_key": "",
+                    "sender": self.creator.key,
+                    "content": {
+                        EventContentFields.ADDITIONAL_CREATORS: additional_creators,
+                    },
+                },
+                self.creator.signer,
+            )
+
+        get_awaitable_result(
+            event_auth.check_state_independent_auth_rules(
+                store, create([self.member.key])
+            )
+        )
+        with self.assertRaises(AuthError) as cm:
+            get_awaitable_result(
+                event_auth.check_state_independent_auth_rules(
+                    store, create([f"@alice:{TEST_DOMAIN}"])
+                )
+            )
+        self.assertIn("not a valid member key", cm.exception.msg)
+
+        # The underlying room version wants user IDs.
+        event_auth.check_valid_additional_creators(
+            [f"@alice:{TEST_DOMAIN}"], RoomVersions.MSC4242v12
+        )
+        with self.assertRaises(AuthError):
+            event_auth.check_valid_additional_creators(
+                [self.member.key], RoomVersions.MSC4242v12
+            )
+
+    def test_third_party_invite(self) -> None:
+        """The third-party invite rule is identity-agnostic: the key that signs
+        `signed` comes from the inviter's `m.room.third_party_invite` event, and
+        `signed.mxid` must equal the `state_key`. So an invite whose signed mxid is
+        the member key is accepted, and one naming a user ID is not. (How an
+        identity server comes to sign a member key is a separate question.)"""
+        id_signing_key = generate_signing_key("0")
+        token = "token"
+        third_party_invite = self._event(
+            {
+                "type": "m.room.third_party_invite",
+                "state_key": token,
+                "sender": self.creator.key,
+                "content": {
+                    "display_name": "bob",
+                    "key_validity_url": "https://id.example/_matrix/identity/v2/pubkey/isvalid",
+                    "public_key": encode_base64(
+                        get_verify_key(id_signing_key).encode()
+                    ),
+                },
+            },
+            self.creator.signer,
+        )
+        auth_events = [self.create, self.creator_join, self.public, third_party_invite]
+
+        def invite(mxid: str) -> EventBase:
+            signed = sign_json(
+                {"mxid": mxid, "token": token}, "id.example", id_signing_key
+            )
+            return self._member_event(
+                self.other,
+                "invite",
+                self.creator,
+                {"third_party_invite": {"display_name": "bob", "signed": signed}},
+            )
+
+        event_auth.check_state_dependent_auth_rules(invite(self.other.key), auth_events)
+
+        with self.assertRaises(AuthError) as cm:
+            event_auth.check_state_dependent_auth_rules(
+                invite(f"@bob:{TEST_DOMAIN}"), auth_events
+            )
+        self.assertIn("not invited", cm.exception.msg)
+
+
+class RedactionSenderMatchesTestCase(unittest.TestCase):
+    def test_servers_match(self) -> None:
+        self.assertTrue(
+            redaction_sender_matches(RoomVersions.V12, "@a:x.example", "@b:x.example")
+        )
+        self.assertFalse(
+            redaction_sender_matches(RoomVersions.V12, "@a:x.example", "@a:y.example")
+        )
+
+    def test_member_keys_match(self) -> None:
+        a, b = _Member(), _Member()
+        self.assertTrue(redaction_sender_matches(MEMBER_KEY_ROOM_VERSION, a.key, a.key))
+        self.assertFalse(
+            redaction_sender_matches(MEMBER_KEY_ROOM_VERSION, a.key, b.key)
+        )

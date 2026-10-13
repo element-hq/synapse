@@ -49,7 +49,7 @@ from synapse.api.room_versions import (
     RoomVersion,
     RoomVersions,
 )
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase, make_event_from_dict, redaction_sender_matches
 from synapse.events.snapshot import EventContext
 from synapse.events.utils import prune_event, strip_event
 from synapse.logging.context import (
@@ -89,7 +89,7 @@ from synapse.storage.util.id_generators import (
     MultiWriterIdGenerator,
 )
 from synapse.storage.util.sequence import build_sequence_generator
-from synapse.types import JsonDict, get_domain_from_id
+from synapse.types import JsonDict
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
 from synapse.util import unwrapFirstError
@@ -767,17 +767,19 @@ class EventsWorkerStore(SQLBaseStore):
                     continue
 
                 if entry.event.internal_metadata.need_to_check_redaction():
-                    original_domain = get_domain_from_id(original_event.sender)
-                    redaction_domain = get_domain_from_id(entry.event.sender)
-                    if original_domain != redaction_domain:
+                    if not redaction_sender_matches(
+                        entry.event.room_version,
+                        original_event.sender,
+                        entry.event.sender,
+                    ):
                         # the senders don't match, so this is forbidden
                         logger.info(
-                            "Withholding redaction %s whose sender domain %s doesn't "
+                            "Withholding redaction %s whose sender %s doesn't "
                             "match that of redacted event %s %s",
                             event_id,
-                            redaction_domain,
+                            entry.event.sender,
                             redacted_event_id,
-                            original_domain,
+                            original_event.sender,
                         )
                         continue
 
@@ -1812,8 +1814,11 @@ class EventsWorkerStore(SQLBaseStore):
             # time, so we recheck on read instead.
             # NOTE: If this logic changes, need to update `_apply_existing_redaction_txn`
             if redaction_event.internal_metadata.need_to_check_redaction():
-                expected_domain = get_domain_from_id(original_ev.sender)
-                if get_domain_from_id(redaction_event.sender) == expected_domain:
+                if redaction_sender_matches(
+                    redaction_event.room_version,
+                    original_ev.sender,
+                    redaction_event.sender,
+                ):
                     # This redaction event is allowed. Mark as not needing a recheck.
                     redaction_event.internal_metadata.recheck_redaction = False
                 else:

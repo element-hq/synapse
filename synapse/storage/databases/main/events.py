@@ -53,6 +53,7 @@ from synapse.events import (
     StrippedStateEvent,
     event_exists_in_state_dag,
     is_creator,
+    redaction_sender_matches,
     relation_from_event,
 )
 from synapse.events.py_protocol import (
@@ -84,7 +85,6 @@ from synapse.types import (
     StateMap,
     StrCollection,
     UserID,
-    get_domain_from_id,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -3013,12 +3013,12 @@ class PersistEventsStore:
                 and room_version.event_format != EventFormatVersions.ROOM_V1_V2
             ):
                 # Apply the same logic as `_maybe_redact_event_row`
-                if get_domain_from_id(redaction_event_sender) != get_domain_from_id(
-                    event.sender
+                if not redaction_sender_matches(
+                    room_version, event.sender, redaction_event_sender
                 ):
-                    # Sender servers don't match, so the event isn't actually redacted
+                    # Senders don't match, so the event isn't actually redacted
                     logger.debug(
-                        "redaction of %s by %s skipped as it required a v3 recheck and sender servers differ: %r != %r",
+                        "redaction of %s by %s skipped as it required a v3 recheck and senders differ: %r != %r",
                         redaction_redacts_event_id,
                         redaction_event_id,
                         redaction_event_sender,

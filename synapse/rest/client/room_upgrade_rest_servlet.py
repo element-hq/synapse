@@ -90,7 +90,7 @@ class RoomUpgradeRestServlet(RestServlet):
         if new_version.msc4289_creator_power_enabled:
             additional_creators = content.get("additional_creators")
             if additional_creators is not None:
-                check_valid_additional_creators(additional_creators)
+                check_valid_additional_creators(additional_creators, new_version)
 
         try:
             async with self._worker_lock_handler.acquire_read_write_lock(
