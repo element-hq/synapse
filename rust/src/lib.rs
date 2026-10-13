@@ -1,11 +1,15 @@
-use std::convert::Infallible;
+use std::{
+    convert::Infallible,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use lazy_static::lazy_static;
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyRuntimeError, prelude::*};
 use pyo3_log::ResetHandle;
 
 pub mod acl;
 pub mod canonical_json;
+pub mod clock;
 pub mod config;
 pub mod deferred;
 pub mod duration;
@@ -68,6 +72,14 @@ fn reset_logging_config() {
 /// The entry point for defining the Python module.
 #[pymodule]
 fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // We expect that system clock is set for after the Unix epoch, 1970. We'll
+    // panic later if it is not, so we check here and fail early.
+    if SystemTime::now().duration_since(UNIX_EPOCH).is_err() {
+        return Err(PyRuntimeError::new_err(
+            "system clock was set before the Unix epoch, 1970",
+        ));
+    }
+
     m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     m.add_function(wrap_pyfunction!(get_rust_file_digest, m)?)?;
     m.add_function(wrap_pyfunction!(get_rustc_version, m)?)?;

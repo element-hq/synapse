@@ -24,7 +24,13 @@ from typing import TYPE_CHECKING, Any
 import attr
 from signedjson.types import SigningKey
 
-from synapse.api.constants import MAX_DEPTH, EventTypes, StickyEvent, StickyEventField
+from synapse.api.constants import (
+    MAX_DEPTH,
+    EventTypes,
+    StateDag,
+    StickyEvent,
+    StickyEventField,
+)
 from synapse.api.room_versions import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     EventFormatVersions,
@@ -158,6 +164,10 @@ class EventBuilder:
         if self.room_version.msc4242_state_dags:
             assert prev_state_events is not None
             calculated_auth_event_ids: list[str] = []
+            # FIXME: choose more intelligently
+            prev_state_events = sorted(prev_state_events)[
+                : StateDag.MAX_PREV_STATE_EVENTS
+            ]
             # We can't use internal_metadata.out_of_band_membership as it isn't set pre-build time,
             # only the .outlier is.
             if self.internal_metadata.outlier:

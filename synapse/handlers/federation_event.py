@@ -41,6 +41,7 @@ from synapse.api.constants import (
     Membership,
     RejectedReason,
     RoomEncryptionAlgorithms,
+    StateDag,
 )
 from synapse.api.errors import (
     AuthError,
@@ -557,19 +558,23 @@ class FederationEventHandler:
         if room_version.identifier != room_version_id:
             raise SynapseError(400, "Room version mismatch")
 
-        if room_version.msc4242_state_dags and not is_state_dag_connected(
-            [
-                ev
-                for ev in itertools.chain(state, [event])
-                if supports_msc4242_state_dag(ev)
-            ]
-        ):
-            # We should have been given a connected state DAG. If there is a gap in it we
-            # cannot calculate the state, so the response is invalid and we refuse the join.
-            raise SynapseError(
-                502,
-                "Unable to join because the remote server passed back a state DAG that is not connected (invalid)",
-            )
+        # Additional validation is performed on the returned events prior to persisting in MSC4242 rooms.
+        if room_version.msc4242_state_dags:
+            # The join event was built by the remote server, not us. We need to make sure it is valid.
+            self._sanity_check_event(event)
+            if not is_state_dag_connected(
+                [
+                    ev
+                    for ev in itertools.chain(state, [event])
+                    if supports_msc4242_state_dag(ev)
+                ]
+            ):
+                # We should have been given a connected state DAG. If there is a gap in it we
+                # cannot calculate the state, so the response is invalid and we refuse the join.
+                raise SynapseError(
+                    502,
+                    "Unable to join because the remote server passed back a state DAG that is not connected (invalid)",
+                )
 
         # persist the auth chain and state events.
         #
@@ -3346,7 +3351,10 @@ class FederationEventHandler:
             )
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many prev_events")
 
-        if supports_msc4242_state_dag(ev) and len(ev.prev_state_events) > 20:
+        if (
+            supports_msc4242_state_dag(ev)
+            and len(ev.prev_state_events) > StateDag.MAX_PREV_STATE_EVENTS
+        ):
             logger.warning(
                 "Rejecting event %s which has %i prev_state_events",
                 ev.event_id,
