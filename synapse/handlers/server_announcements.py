@@ -18,6 +18,7 @@ from synapse.api.constants import EventTypes, HistoryVisibility, JoinRules, Memb
 from synapse.api.room_versions import RoomVersion
 from synapse.config import ConfigError
 from synapse.config.server_announcements import ServerAnnouncementRoom
+from synapse.handlers.server_announcement_avatar import ServerAnnouncementAvatarManager
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.types.state import StateFilter
 from synapse.util.duration import Duration
@@ -40,6 +41,7 @@ class ServerAnnouncementsHandler:
         self._room_member = hs.get_room_member_handler()
         self._event_creation = hs.get_event_creation_handler()
         self._locks = hs.get_worker_locks_handler()
+        self._avatars = ServerAnnouncementAvatarManager(hs)
         self._creator = self._config.server_announcements_mxid
         self._requester = create_requester(
             self._creator, authenticated_entity=hs.hostname
@@ -230,10 +232,11 @@ class ServerAnnouncementsHandler:
             EventTypes.Topic,
             {"topic": room.room_topic or ""},
         )
+        avatar_url = await self._avatars.get_avatar_url(room)
         await self._update_state(
             room_id,
             EventTypes.RoomAvatar,
-            {"url": room.room_avatar_url} if room.room_avatar_url is not None else {},
+            {"url": avatar_url} if avatar_url is not None else {},
         )
 
         # Revoke both membership and outstanding invitations. The internal creator
