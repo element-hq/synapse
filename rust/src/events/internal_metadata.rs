@@ -735,7 +735,7 @@ impl EventInternalMetadata {
         )
     }
     #[setter]
-    fn set_recheck_redaction(&self, obj: bool) -> PyResult<()> {
+    pub fn set_recheck_redaction(&self, obj: bool) -> PyResult<()> {
         self.write_inner()?.set_recheck_redaction(obj);
         Ok(())
     }

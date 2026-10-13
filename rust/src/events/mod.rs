@@ -327,13 +327,13 @@ impl Event {
     }
 
     #[getter]
-    fn rejected_reason(&self) -> Option<&str> {
+    pub fn rejected_reason(&self) -> Option<&str> {
         self.rejected_reason.as_deref()
     }
 
     /// Returns the list of prev event IDs. The order matches the order
     /// specified in the event, though there is no meaning to it.
-    fn prev_event_ids(&self) -> Vec<String> {
+    pub fn prev_event_ids(&self) -> Vec<String> {
         match &*self.parsed_event.specific_fields {
             EventFormatEnum::V1(format) => format.prev_event_ids(),
             EventFormatEnum::V2V3(format) => format.prev_events.clone(),
@@ -344,7 +344,7 @@ impl Event {
 
     /// Returns the list of auth event IDs. The order matches the order
     /// specified in the event, though there is no meaning to it.
-    fn auth_event_ids(&self) -> PyResult<Vec<String>> {
+    pub fn auth_event_ids(&self) -> PyResult<Vec<String>> {
         match &*self.parsed_event.specific_fields {
             EventFormatEnum::V1(format) => Ok(format.auth_event_ids()),
             EventFormatEnum::V2V3(format) => Ok(format.auth_event_ids()),
@@ -357,20 +357,19 @@ impl Event {
 
     #[getter]
     fn membership<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let content = self.content();
-        let value = content.get_field(MEMBERSHIP);
+        let value = self.content().get_field(MEMBERSHIP);
         match value {
             Some(value) => Ok(pythonize(py, value)?),
             None => Err(PyKeyError::new_err(MEMBERSHIP)),
         }
     }
 
-    fn is_state(&self) -> bool {
+    pub fn is_state(&self) -> bool {
         self.parsed_event.common_fields.state_key.is_some()
     }
 
     /// Get the state key of this event, or None if it's not a state event.
-    fn get_state_key(&self) -> Option<&str> {
+    pub fn get_state_key(&self) -> Option<&str> {
         self.parsed_event.common_fields.state_key.as_deref_opt()
     }
 
@@ -575,12 +574,12 @@ impl Event {
     // Below are the getters for the top-level fields on Matrix events.
 
     #[getter]
-    fn event_id(&self) -> &str {
+    pub fn event_id(&self) -> &str {
         &self.event_id
     }
 
     #[getter]
-    fn room_id(&self) -> &str {
+    pub fn room_id(&self) -> &str {
         &self.room_id
     }
 
@@ -589,13 +588,13 @@ impl Event {
         self.parsed_event.signatures.clone()
     }
 
-    #[getter]
-    fn content(&self) -> JsonObject {
+    #[getter(content)]
+    fn content_py(&self) -> JsonObject {
         self.parsed_event.common_fields.content.clone()
     }
 
     #[getter]
-    fn depth(&self) -> i64 {
+    pub fn depth(&self) -> i64 {
         self.parsed_event.common_fields.depth
     }
 
@@ -609,12 +608,12 @@ impl Event {
     }
 
     #[getter]
-    fn origin_server_ts(&self) -> i64 {
+    pub fn origin_server_ts(&self) -> i64 {
         self.parsed_event.common_fields.origin_server_ts
     }
 
     #[getter]
-    fn sender(&self) -> &str {
+    pub fn sender(&self) -> &str {
         &self.parsed_event.common_fields.sender
     }
 
@@ -637,7 +636,7 @@ impl Event {
     }
 
     #[getter]
-    fn r#type(&self) -> &str {
+    pub fn r#type(&self) -> &str {
         &self.parsed_event.common_fields.type_
     }
 
@@ -670,6 +669,31 @@ impl Event {
 }
 
 impl Event {
+    /// The event's `type`.
+    pub fn type_(&self) -> &str {
+        &self.parsed_event.common_fields.type_
+    }
+
+    /// The event's `state_key`, or `None` if it is not a state event.
+    pub fn state_key(&self) -> Option<&str> {
+        self.parsed_event.common_fields.state_key.as_deref_opt()
+    }
+
+    /// The event's `content`.
+    pub fn content(&self) -> &JsonObject {
+        &self.parsed_event.common_fields.content
+    }
+
+    /// The room version this event was parsed for.
+    pub fn room_version(&self) -> &'static RoomVersion {
+        self.room_version
+    }
+
+    /// Synapse's internal metadata for this event.
+    pub fn internal_metadata(&self) -> &EventInternalMetadata {
+        &self.internal_metadata
+    }
+
     /// Returns the `redacts` field of this event, if it has one.
     pub fn redacts(&self) -> Option<&Value> {
         let common = &self.parsed_event.common_fields;
