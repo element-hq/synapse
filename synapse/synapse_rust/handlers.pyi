@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.defer import Deferred
 
+from synapse.synapse_rust.state import StateResolutionHandler
 from synapse.types import JsonDict
 
 if TYPE_CHECKING:
@@ -33,3 +34,7 @@ class RustHandlers:
     def __init__(self, homeserver: "HomeServer") -> None: ...
     @property
     def versions(self) -> VersionsHandler: ...
+    @property
+    def state_resolution(self) -> StateResolutionHandler | None:
+        """The Rust state resolution, or None if the main database does not use
+        the native Rust Postgres driver."""

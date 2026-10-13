@@ -167,6 +167,27 @@ To run Synapse's unit tests against the native driver, set
 `SYNAPSE_TEST_RUST_DRIVER=1` alongside `SYNAPSE_POSTGRES=1`; for Complement,
 pass `RUST_DRIVER=1` to `scripts-dev/complement.sh`.
 
+### State resolution in Rust
+
+With the native driver, Synapse can also resolve state in Rust for rooms that
+use state resolution v2 or v2.1 (room versions 2 and later). This is an
+experimental feature, set with `rust_state_res` under `experimental_features`:
+
+```yaml
+experimental_features:
+  rust_state_res: shadow
+```
+
+* `off` (the default) resolves state in Python.
+* `shadow` resolves state in Python, then again in Rust, and logs a warning
+  if the two disagree. The `synapse_state_res_rust_shadow_total` metric counts
+  the comparisons by result.
+* `on` resolves state in Rust.
+
+Rooms without a chain cover index are always resolved in Python. To run the
+unit tests with it, set `SYNAPSE_TEST_RUST_STATE_RES` to `shadow` or `on`
+alongside `SYNAPSE_TEST_RUST_DRIVER=1`.
+
 ## Postgresql major version upgrades
 
 Postgres uses separate directories for database locations between major versions (typically `/var/lib/postgresql/<version>/main`).

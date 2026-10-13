@@ -35,7 +35,11 @@ import attr
 from prometheus_client import Counter, Histogram
 
 from synapse.api.constants import EventTypes
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, StateResolutionVersions
+from synapse.api.room_versions import (
+    KNOWN_ROOM_VERSIONS,
+    RoomVersion,
+    StateResolutionVersions,
+)
 from synapse.events import EventBase
 from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.snapshot import (
@@ -50,6 +54,11 @@ from synapse.replication.http.state import ReplicationUpdateCurrentStateRestServ
 from synapse.state import v1, v2
 from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
+from synapse.synapse_rust.state import (
+    NoChainCoverIndexError,
+    StateResolutionHandler as RustStateResolutionHandler,
+    StateResStats,
+)
 from synapse.types import StateMap, StrCollection
 from synapse.types.state import StateFilter
 from synapse.util import MutableOverlayMapping
@@ -616,6 +625,13 @@ _db_times = Histogram(
     labelnames=[SERVER_NAME_LABEL],
 )
 
+_rust_shadow_counter = Counter(
+    "synapse_state_res_rust_shadow_total",
+    "Resolutions run by both the Python and the Rust state resolution in "
+    "`rust_state_res: shadow` mode, by whether the results matched",
+    labelnames=["result", SERVER_NAME_LABEL],
+)
+
 
 class StateResolutionHandler:
     """Responsible for doing state conflict resolution.
@@ -681,6 +697,20 @@ class StateResolutionHandler:
         )
 
         self.clock.looping_call(self._report_metrics, Duration(minutes=2))
+
+        # The Rust state resolution, used for v2 and v2.1 rooms when the
+        # `rust_state_res` experimental option is "on" or "shadow". It needs
+        # the native Rust Postgres driver.
+        self._rust_state_res_mode = hs.config.experimental.rust_state_res
+        self._rust_state_res: RustStateResolutionHandler | None = None
+        if self._rust_state_res_mode != "off":
+            self._rust_state_res = hs.get_rust_handlers().state_resolution
+            if self._rust_state_res is None:
+                logger.warning(
+                    "rust_state_res is %r but the main database does not use the "
+                    "native Rust driver: using the Python state resolution",
+                    self._rust_state_res_mode,
+                )
 
     async def resolve_state_groups(
         self,
@@ -812,6 +842,7 @@ class StateResolutionHandler:
         Returns:
             a map from (type, state_key) to event_id.
         """
+        rust_stats: StateResStats | None = None
         try:
             with Measure(
                 self.clock, name="state._resolve_events", server_name=self.server_name
@@ -825,33 +856,135 @@ class StateResolutionHandler:
                         event_map,
                         state_res_store.get_events,
                     )
-                else:
-                    return await v2.resolve_events_with_store(
-                        self.clock,
-                        room_id,
-                        room_version_obj,
-                        state_sets,
-                        event_map,
-                        state_res_store,
-                        conflict_cache=self._conflict_resolution_cache,
-                    )
+
+                if self._rust_state_res is not None:
+                    if self._rust_state_res_mode == "on":
+                        result = await self._resolve_with_rust(
+                            room_id, room_version, state_sets, event_map
+                        )
+                        if result is not None:
+                            state, rust_stats = result
+                            logger.debug(
+                                "Resolved state for %s in Rust: %r", room_id, rust_stats
+                            )
+                            return state
+                    elif self._rust_state_res_mode == "shadow":
+                        return await self._resolve_in_shadow_mode(
+                            room_id,
+                            room_version_obj,
+                            state_sets,
+                            event_map,
+                            state_res_store,
+                        )
+
+                return await v2.resolve_events_with_store(
+                    self.clock,
+                    room_id,
+                    room_version_obj,
+                    state_sets,
+                    event_map,
+                    state_res_store,
+                    conflict_cache=self._conflict_resolution_cache,
+                )
         finally:
-            self._record_state_res_metrics(room_id, m.get_resource_usage())
+            self._record_state_res_metrics(room_id, m.get_resource_usage(), rust_stats)
+
+    async def _resolve_with_rust(
+        self,
+        room_id: str,
+        room_version: str,
+        state_sets: Sequence[StateMap[str]],
+        event_map: dict[str, EventBase] | None,
+    ) -> tuple[StateMap[str], StateResStats] | None:
+        """Resolve with the Rust state resolution.
+
+        Returns None if the room has no chain cover index, which the Rust
+        implementation needs: the caller should use the Python one.
+        """
+        assert self._rust_state_res is not None
+        try:
+            return await self._rust_state_res.resolve(
+                room_id, room_version, list(state_sets), event_map
+            )
+        except NoChainCoverIndexError as e:
+            logger.info("Falling back to Python state res for %s: %s", room_id, e)
+            return None
+
+    async def _resolve_in_shadow_mode(
+        self,
+        room_id: str,
+        room_version: RoomVersion,
+        state_sets: Sequence[StateMap[str]],
+        event_map: dict[str, EventBase] | None,
+        state_res_store: "StateResolutionStore",
+    ) -> StateMap[str]:
+        """Resolve with the Python state resolution, then with the Rust one, and
+        compare the results. Returns the Python result.
+
+        The Python resolution adds the events it fetches to `event_map`, so the
+        Rust resolution gets a copy taken before it runs.
+        """
+        rust_event_map = dict(event_map) if event_map is not None else None
+
+        state = await v2.resolve_events_with_store(
+            self.clock,
+            room_id,
+            room_version,
+            state_sets,
+            event_map,
+            state_res_store,
+            conflict_cache=self._conflict_resolution_cache,
+        )
+
+        try:
+            rust = await self._resolve_with_rust(
+                room_id, room_version.identifier, state_sets, rust_event_map
+            )
+        except Exception:
+            logger.exception("Rust state res failed for %s in shadow mode", room_id)
+            result = "error"
+        else:
+            if rust is None:
+                result = "unsupported"
+            elif dict(state) == rust[0]:
+                result = "match"
+            else:
+                result = "mismatch"
+                _log_state_diff(room_id, state, rust[0])
+
+        _rust_shadow_counter.labels(
+            result=result, **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
+        return state
 
     def _record_state_res_metrics(
-        self, room_id: str, rusage: ContextResourceUsage
+        self,
+        room_id: str,
+        rusage: ContextResourceUsage,
+        rust_stats: StateResStats | None = None,
     ) -> None:
-        room_metrics = self._state_res_metrics[room_id]
-        room_metrics.cpu_time += rusage.ru_utime + rusage.ru_stime
-        room_metrics.db_time += rusage.db_txn_duration_sec
-        room_metrics.db_events += rusage.evt_db_fetch_count
+        """Record the work a resolution did.
 
-        _cpu_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(
-            rusage.ru_utime + rusage.ru_stime
-        )
-        _db_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(
-            rusage.db_txn_duration_sec
-        )
+        When the Rust state resolution did the work, the log context's resource
+        usage does not see it, so the CPU and database figures come from the
+        stats it returned.
+        """
+        if rust_stats is not None:
+            cpu_time = rust_stats.cpu_time
+            db_time = rust_stats.db_time
+            db_events = rust_stats.db_events
+        else:
+            cpu_time = rusage.ru_utime + rusage.ru_stime
+            db_time = rusage.db_txn_duration_sec
+            db_events = rusage.evt_db_fetch_count
+
+        room_metrics = self._state_res_metrics[room_id]
+        room_metrics.cpu_time += cpu_time
+        room_metrics.db_time += db_time
+        room_metrics.db_events += db_events
+
+        _cpu_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(cpu_time)
+        _db_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(db_time)
 
     def _report_metrics(self) -> None:
         if not self._state_res_metrics:
@@ -911,6 +1044,23 @@ class StateResolutionHandler:
         prometheus_counter_metric.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
             extract_key(biggest_metrics)
         )
+
+
+def _log_state_diff(
+    room_id: str, python_state: StateMap[str], rust_state: StateMap[str]
+) -> None:
+    """Log where the Python and Rust state resolutions disagree."""
+    diff = {
+        key: (python_state.get(key), rust_state.get(key))
+        for key in python_state.keys() | rust_state.keys()
+        if python_state.get(key) != rust_state.get(key)
+    }
+    logger.warning(
+        "Rust state res disagrees with Python for %s on %d keys (python, rust): %s",
+        room_id,
+        len(diff),
+        shortstr(f"{k}: {v}" for k, v in diff.items()),
+    )
 
 
 def _make_state_cache_entry(

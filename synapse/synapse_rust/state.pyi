@@ -12,8 +12,52 @@
 
 from typing import Collection, Mapping, Sequence
 
+from twisted.internet.defer import Deferred
+
 from synapse.synapse_rust.database.postgres import ConnectionPool
 from synapse.synapse_rust.events import Event
+from synapse.types import StateKey, StateMap
+
+class NoChainCoverIndexError(Exception):
+    """The room has no chain cover index, so the Rust state resolution cannot
+    resolve it. Fall back to the Python implementation."""
+
+class StateResStats:
+    """Timings and counts for one resolution. Times are in seconds."""
+
+    total_time: float
+    db_time: float
+    cpu_time: float
+    sort_time: float
+    auth_time: float
+    mainline_time: float
+    db_queries: int
+    db_rows: int
+    db_events: int
+    conflicted_events: int
+    cache_hit: bool
+
+class StateResolutionHandler:
+    """State resolution v2 and v2.1 in Rust, reading the database through the
+    native Rust Postgres driver."""
+
+    def resolve(
+        self,
+        room_id: str,
+        room_version: str,
+        state_sets: Sequence[StateMap[str]],
+        event_map: Mapping[str, Event] | None = None,
+    ) -> Deferred[tuple[dict[StateKey, str], StateResStats]]:
+        """Resolve the state sets.
+
+        `event_map` holds events that are not persisted yet. It is not
+        modified.
+
+        Raises:
+            NoChainCoverIndexError: the room has no chain cover index; use the
+                Python implementation.
+            SynapseError: an event in the conflicted set is malformed.
+        """
 
 def get_auth_chain_difference_for_test(
     pool: ConnectionPool,

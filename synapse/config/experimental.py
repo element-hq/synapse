@@ -21,7 +21,7 @@
 #
 
 from functools import cache
-from typing import Any
+from typing import Any, Literal
 
 import attr
 
@@ -316,3 +316,19 @@ class ExperimentalConfig(Config):
 
         # MSC4512: Delegating parts of the C-S and S-S API to application services
         self.msc4512_enabled: bool = experimental.get("msc4512_enabled", False)
+
+        # Resolve state for v2 and v2.1 rooms with the Rust implementation.
+        # Needs the main database to use the native Rust Postgres driver
+        # (`use_rust_driver`).
+        #  - "off": use the Python implementation.
+        #  - "shadow": use the Python implementation, then also run the Rust
+        #    one and log any difference (`synapse_state_res_rust_shadow_total`).
+        #  - "on": use the Rust implementation.
+        rust_state_res = experimental.get("rust_state_res", "off")
+        if rust_state_res not in ("off", "shadow", "on"):
+            raise ConfigError(
+                "experimental_features.rust_state_res must be one of "
+                "'off', 'shadow' or 'on'",
+                ("experimental", "rust_state_res"),
+            )
+        self.rust_state_res: Literal["off", "shadow", "on"] = rust_state_res

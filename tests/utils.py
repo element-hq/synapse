@@ -54,6 +54,10 @@ USE_POSTGRES_FOR_TESTS = os.environ.get("SYNAPSE_POSTGRES", False)
 # Run the Postgres tests against the native Rust driver instead of psycopg2.
 # Only meaningful together with SYNAPSE_POSTGRES.
 USE_RUST_DRIVER_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_DRIVER", False)
+# Set `experimental_features.rust_state_res` ("off", "shadow" or "on") for every
+# test homeserver, overriding the test's own config. The Rust state resolution
+# only runs on the native Rust driver (SYNAPSE_TEST_RUST_DRIVER).
+RUST_STATE_RES_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_STATE_RES")
 LEAVE_DB = os.environ.get("SYNAPSE_LEAVE_DB", False)
 POSTGRES_USER = os.environ.get("SYNAPSE_POSTGRES_USER", None)
 POSTGRES_HOST = os.environ.get("SYNAPSE_POSTGRES_HOST", None)

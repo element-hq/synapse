@@ -37,6 +37,7 @@ from typing import (
     Awaitable,
     Callable,
     Iterable,
+    Literal,
     MutableMapping,
     Optional,
     Sequence,
@@ -118,6 +119,7 @@ from tests.utils import (
     POSTGRES_PASSWORD,
     POSTGRES_PORT,
     POSTGRES_USER,
+    RUST_STATE_RES_FOR_TESTS,
     SQLITE_PERSIST_DB,
     USE_POSTGRES_FOR_TESTS,
     USE_RUST_DRIVER_FOR_TESTS,
@@ -1304,6 +1306,13 @@ def setup_test_homeserver(
         extra_homeserver_attributes["clock"] = Clock(reactor, server_name=server_name)  # type: ignore[multiple-internal-clocks]
 
     config.caches.resize_all_caches()
+
+    if RUST_STATE_RES_FOR_TESTS:
+        if RUST_STATE_RES_FOR_TESTS not in ("off", "shadow", "on"):
+            raise ValueError("SYNAPSE_TEST_RUST_STATE_RES must be off, shadow or on")
+        config.experimental.rust_state_res = cast(
+            Literal["off", "shadow", "on"], RUST_STATE_RES_FOR_TESTS
+        )
 
     if USE_POSTGRES_FOR_TESTS:
         test_db = "synapse_test_%s" % uuid.uuid4().hex
