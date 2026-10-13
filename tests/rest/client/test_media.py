@@ -1002,6 +1002,54 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             self.url_previewer._cache.pop("http://matrix.org")
 
     @override_config({"experimental_features": {"msc4448_enabled": True}})
+    def test_site_logo_deduplicated(self) -> None:
+        """MSC4448: pages sharing a favicon share one copy of the site logo."""
+        logos = []
+        # The fake reactor only ever opens one connection per host, so each page
+        # uses hosts of its own. The favicon URLs differ too: only the bytes matter.
+        for i, host in enumerate(["matrix.org", "blog.matrix.org"]):
+            self.lookups[host] = [(IPv4Address, f"10.1.{i}.3")]
+            self.lookups[f"cdn.{host}"] = [(IPv4Address, f"10.1.{i}.4")]
+            self.lookups[f"icons.{host}"] = [(IPv4Address, f"10.1.{i}.5")]
+            html = (
+                f"""<html><head><link rel="icon" href="//icons.{host}/favicon.png">"""
+                f"""</head><body><img src="http://cdn.{host}/foo.png"></body></html>"""
+            ).encode()
+
+            channel = self.make_request(
+                "GET",
+                f"/_matrix/client/v1/media/preview_url?url=http://{host}"
+                "&msc4448_include=msc4448:site_logo",
+                shorthand=False,
+                await_result=False,
+            )
+            self.pump()
+
+            self._respond(3 * i, b'text/html; charset="utf8"', html)
+            self._respond(3 * i + 1, b"image/png", SMALL_PNG)
+            # Different bytes from the preview image, so only logos can match.
+            self._respond(3 * i + 2, b"image/png", SMALL_PNG + b"logo")
+
+            self.assertEqual(channel.code, 200)
+            logos.append(channel.json_body["msc4448:site_logo"])
+
+        # Both pages point at the same logo.
+        self.assertEqual(logos[0], logos[1])
+
+        # Only that one copy of it is left.
+        media_id = logos[0].rsplit("/", 1)[1]
+        media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert media is not None and media.sha256 is not None
+        rows = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_list(
+                "local_media_repository", {"sha256": media.sha256}, ["media_id"]
+            )
+        )
+        self.assertEqual(rows, [(media_id,)])
+
+    @override_config({"experimental_features": {"msc4448_enabled": True}})
     def test_site_logo_replaces_favicon_as_image(self) -> None:
         """MSC4448: a favicon standing in for a missing image is fetched once and
         returned as the logo, or as the image for clients not asking for a logo."""

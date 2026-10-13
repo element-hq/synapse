@@ -128,6 +128,8 @@ class MediaInfo:
     # on disk.
     filesystem_id: str
     filename: str
+    # The SHA-256 hash of the downloaded media, hex-encoded.
+    sha256: str
     # The URI being previewed.
     uri: str
     # The HTTP response code.
@@ -770,6 +772,7 @@ class UrlPreviewer:
             created_ts_ms=time_now_ms,
             filesystem_id=file_id,
             filename=fname,
+            sha256=sha256,
             uri=download_result.uri,
             response_code=download_result.response_code,
             expires=download_result.expires,
@@ -886,6 +889,24 @@ class UrlPreviewer:
             # can't safely display.
             if not _is_site_logo_type(image_info.media_type):
                 return
+            # Favicons are shared by every page of a site: reuse an identical
+            # copy rather than keeping one per page. Only media young enough to
+            # outlive this preview's cache entry is reused, and never the
+            # preview's own image, which would then be dropped as a duplicate.
+            exclude_media_ids = [image_info.filesystem_id]
+            preview_image = og.get("og:image")
+            if isinstance(preview_image, str) and preview_image.startswith("mxc://"):
+                exclude_media_ids.append(preview_image.rsplit("/", 1)[-1])
+            existing_media_id = await self.store.get_url_cache_media_by_sha256(
+                image_info.sha256,
+                created_after_ts=self.clock.time_msec()
+                - (IMAGE_CACHE_EXPIRY_MS - ONE_DAY),
+                exclude_media_ids=exclude_media_ids,
+            )
+            if existing_media_id:
+                self._delete_url_cache_file(image_info.filesystem_id)
+                await self.store.delete_url_cache_media([image_info.filesystem_id])
+                mxc = f"mxc://{self.server_name}/{existing_media_id}"
             # MSC4448 only defines the URI and the size of the logo.
             og[key] = mxc
             og["msc4448:site_logo:size"] = image_info.media_length
