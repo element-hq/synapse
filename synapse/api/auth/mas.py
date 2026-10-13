@@ -67,7 +67,6 @@ STABLE_SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:client:device:"
 class ServerMetadata(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    issuer: StrictStr
     account_management_uri: StrictStr
 
 
@@ -160,10 +159,6 @@ class MasDelegatedAuth(BaseAuth):
         response = await self._http_client.get_json(self._metadata_url)
         metadata = ServerMetadata(**response)
         return metadata
-
-    async def issuer(self) -> str:
-        metadata = await self._server_metadata.get()
-        return metadata.issuer
 
     async def account_management_url(self) -> str:
         metadata = await self._server_metadata.get()

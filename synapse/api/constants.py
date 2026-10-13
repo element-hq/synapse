@@ -477,13 +477,16 @@ class StickyEventField(TypedDict):
 
 
 class StickyEvent:
-    QUERY_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
+    REQUEST_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
     """
-    Query parameter used by clients for setting the sticky duration of an event they are sending.
+    Parameter used by clients for setting the sticky duration of an event they are sending.
 
-    Applies to:
+    Used as a query parameter for:
         - /rooms/.../send/...
         - /rooms/.../state/...
+
+    Used as a request body field for:
+        - /rooms/.../delayed_event/...
     """
 
     EVENT_FIELD_NAME: Final = "msc4354_sticky"
