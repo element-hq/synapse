@@ -10,7 +10,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Collection, Sequence
+from typing import Collection, Mapping, Sequence
 
 from synapse.synapse_rust.database.postgres import ConnectionPool
 from synapse.synapse_rust.events import Event
@@ -30,3 +30,14 @@ def load_events_for_test(
     pool: ConnectionPool, event_ids: Sequence[str]
 ) -> dict[str, Event]:
     """Events loaded by the Rust store. For tests."""
+
+def resolve_in_memory_for_test(
+    room_id: str,
+    room_version: str,
+    state_sets: Sequence[Mapping[tuple[str, str], str]],
+    persisted_events: Mapping[str, Event],
+    unpersisted_events: Mapping[str, Event] | None = None,
+) -> dict[tuple[str, str], str]:
+    """Resolve state with the Rust implementation over an in-memory store of
+    `persisted_events`, treating `unpersisted_events` as the caller's event
+    map. For tests."""

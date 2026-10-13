@@ -19,6 +19,7 @@
 #
 
 import itertools
+import random
 from typing import (
     Collection,
     Iterable,
@@ -44,6 +45,7 @@ from synapse.state.v2 import (
     resolve_events_with_store,
 )
 from synapse.storage.databases.main.event_federation import StateDifference
+from synapse.synapse_rust.state import resolve_in_memory_for_test
 from synapse.types import EventID, StateMap
 from synapse.util.duration import Duration
 
@@ -532,7 +534,7 @@ class StateTestCase(unittest.TestCase):
         state_sets: Sequence[StateMap[str]],
         conflict_cache: ConflictCache,
     ) -> StateMap[str]:
-        return self.successResultOf(
+        state = self.successResultOf(
             defer.ensureDeferred(
                 resolve_events_with_store(
                     FakeClock(),
@@ -545,6 +547,90 @@ class StateTestCase(unittest.TestCase):
                 )
             )
         )
+
+        # The Rust implementation, without a cache, agrees.
+        rust_state = resolve_in_memory_for_test(
+            ROOM_ID, room_version.identifier, state_sets, dict(self.event_map)
+        )
+        self.assertEqual(dict(state), rust_state)
+
+        return state
+
+    @parameterized.expand([(seed,) for seed in range(40)])
+    def test_random_graphs_match_rust(self, seed: int) -> None:
+        """Build a random DAG of power level, membership, join rule and topic
+        events by several users, and check that the Rust state resolution
+        agrees with the Python one at every fork (see `build_event_graph`).
+
+        Many of the events fail auth, which exercises the rejection paths.
+        """
+        rng = random.Random(seed)
+        users = [ALICE, BOB, CHARLIE, ZARA, EVELYN]
+        events: list[FakeEvent] = []
+        edges: list[list[str]] = []
+        nodes = ["START"]
+
+        for i in range(25):
+            node_id = f"R{i}"
+            sender = rng.choice(users)
+            kind = rng.choice(["topic", "power", "member", "member", "join_rules"])
+            if kind == "topic":
+                event = FakeEvent(
+                    id=node_id,
+                    sender=sender,
+                    type=EventTypes.Topic,
+                    state_key="",
+                    content={"topic": node_id},
+                )
+            elif kind == "power":
+                levels = {u: rng.choice([0, 50, 75, 100]) for u in users}
+                levels[ALICE] = 100
+                event = FakeEvent(
+                    id=node_id,
+                    sender=sender,
+                    type=EventTypes.PowerLevels,
+                    state_key="",
+                    content={
+                        "users": levels,
+                        "state_default": rng.choice([0, 50]),
+                        "ban": rng.choice([0, 50]),
+                        "kick": rng.choice([0, 50]),
+                    },
+                )
+            elif kind == "member":
+                membership = rng.choice(
+                    [
+                        Membership.JOIN,
+                        Membership.LEAVE,
+                        Membership.BAN,
+                        Membership.INVITE,
+                    ]
+                )
+                target = sender if membership == Membership.JOIN else rng.choice(users)
+                event = FakeEvent(
+                    id=node_id,
+                    sender=sender,
+                    type=EventTypes.Member,
+                    state_key=target,
+                    content={"membership": membership},
+                )
+            else:
+                event = FakeEvent(
+                    id=node_id,
+                    sender=sender,
+                    type=EventTypes.JoinRules,
+                    state_key="",
+                    content={
+                        "join_rule": rng.choice([JoinRules.PUBLIC, JoinRules.INVITE])
+                    },
+                )
+
+            events.append(event)
+            for prev in rng.sample(nodes, k=min(len(nodes), rng.choice([1, 2, 2, 3]))):
+                edges.append([node_id, prev])
+            nodes.append(node_id)
+
+        self.build_event_graph(events, edges)
 
     @parameterized.expand((V2_ROOM, V21_ROOM))
     def test_conflict_cache_shared_across_unconflicted_state(
@@ -675,16 +761,28 @@ class StateTestCase(unittest.TestCase):
             elif len(prev_events) == 1:
                 state_before = dict(state_at_event[prev_events[0]])
             else:
+                state_sets = [state_at_event[n] for n in prev_events]
+                rust_state = resolve_in_memory_for_test(
+                    ROOM_ID,
+                    RoomVersions.V2.identifier,
+                    state_sets,
+                    persisted_events=dict(event_map),
+                    unpersisted_events=dict(event_map),
+                )
+
                 state_d = resolve_events_with_store(
                     FakeClock(),
                     ROOM_ID,
                     RoomVersions.V2,
-                    [state_at_event[n] for n in prev_events],
+                    state_sets,
                     event_map=event_map,
                     state_res_store=TestStateResolutionStore(event_map),
                 )
 
                 state_before = self.successResultOf(defer.ensureDeferred(state_d))
+
+                # The Rust implementation agrees.
+                self.assertEqual(dict(state_before), rust_state, f"at {node_id}")
 
             state_after = dict(state_before)
             if fake_event.state_key is not None:
