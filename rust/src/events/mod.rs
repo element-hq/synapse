@@ -48,7 +48,7 @@
 //!   string describing why auth rejected the event.
 //!
 
-use std::sync::Arc;
+use std::{cmp::min, sync::Arc};
 
 use anyhow::Error;
 use pyo3::{
@@ -396,10 +396,30 @@ impl Event {
         Ok(new_event)
     }
 
-    /// If this event has the `msc4354_sticky` top-level field, returns a
-    /// `SynapseDuration` representing the sticky duration. Otherwise returns
-    /// `None`.
-    fn sticky_duration(&self) -> Option<SynapseDuration> {
+    /// If this event has the `msc4354_sticky` top-level field and is eligible
+    /// to be sticky, returns a `SynapseDuration` representing the sticky duration.
+    /// Otherwise returns `None`.
+    ///
+    /// The duration is capped at 1 hour according to MSC4354.
+    /// Spammy events (according to spam checkers and policy servers) are not eligible to be sticky
+    /// so we return `None` for those.
+    ///
+    /// See [`Self::locally_sticky_until_ts`] to get the effective stickiness expiry timestamp.
+    fn sticky_duration(&self) -> PyResult<Option<SynapseDuration>> {
+        if self.internal_metadata.policy_server_spammy()?
+            || self.internal_metadata.spam_checker_spammy()?
+            || self.rejected_reason.is_some()
+        {
+            // Spammy and rejected events are not sticky.
+            //
+            // As per MSC4354:
+            // > Policy servers and similar homeserver-specific anti-spam techniques (e.g. custom spam checker modules) still apply to these events,
+            // > including events received over federation. If the anti-spam technique classifies a sticky event as spam,
+            // > it is treated as a regular non-sticky event and does not enjoy the properties that an unexpired sticky event does.
+            // > — https://github.com/matrix-org/matrix-spec-proposals/blob/35bf5589c313c81b74c60969701f4657acb9ccb6/proposals/4354-sticky-events.md?plain=1#L107
+            return Ok(None);
+        }
+
         const MAX_DURATION: SynapseDuration = SynapseDuration::from_hours(1);
 
         let sticky_obj = self
@@ -410,19 +430,50 @@ impl Event {
 
         let sticky_obj = match sticky_obj {
             Some(serde_json::Value::Object(obj)) => obj,
-            _ => return None,
+            _ => return Ok(None),
         };
 
         // Check for a valid duration field. The MSC requires `duration_ms` to
         // be a non-negative integer. If it's missing or invalid, we treat the
         // event as non-sticky by returning `None`.
-        let duration_ms = sticky_obj.get("duration_ms")?.as_u64()?;
+        let Some(duration_ms) = sticky_obj.get("duration_ms").and_then(|v| v.as_u64()) else {
+            return Ok(None);
+        };
 
         let duration = SynapseDuration::from_milliseconds(duration_ms);
 
         let duration = std::cmp::min(duration, MAX_DURATION);
 
-        Some(duration)
+        Ok(Some(duration))
+    }
+
+    /// If this event has the `msc4354_sticky` top-level field and is eligible
+    /// to be sticky (isn't spammy), returns a timestamp (in milliseconds since the epoch) of
+    /// the expiry of the event's stickiness, as seen locally on this homeserver.
+    ///
+    /// It is the caller's responsibility to check this time is not in the past.
+    fn locally_sticky_until_ts(&self) -> PyResult<Option<i64>> {
+        let Some(sticky_duration) = self.sticky_duration()? else {
+            return Ok(None);
+        };
+        let Some(received_ts) = self.internal_metadata.get_received_ts()? else {
+            // Either this event hasn't been persisted or this event is from before Synapse v0.16.0
+            // If before v0.16.0, we don't want this event to be sticky (even if someone was prescient
+            // enough to create a Sticky Event with a forged `origin_server_ts` far into the future...)
+            return Ok(None);
+        };
+
+        // Clamp to when it was received so a forged origin timestamp can't produce
+        // an event that is sticky beyond the 1 hour cap.
+        let start_ts = min(
+            self.parsed_event.common_fields.origin_server_ts,
+            received_ts,
+        );
+
+        // From this, calculate the stickiness expiry time.
+        // The `as i64` cast is safe as sticky durations are capped to an
+        // hour, which is well within the i64 range.
+        Ok(Some(start_ts + sticky_duration.as_millis() as i64))
     }
 
     fn __str__(&self) -> PyResult<String> {

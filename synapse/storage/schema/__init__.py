@@ -175,9 +175,13 @@ Changes in SCHEMA_VERSION = 93
 Changes in SCHEMA_VERSION = 94
     - Add `recheck` column (boolean, default true) to the `redactions` table.
     - MSC4242: Add state DAG tables.
-    - MSC4429: Track updates to user profile fields via a new stream.
+    - MSC4429/MSC4262: Track updates to user profile fields via a new stream.
+    - Add an `inserted_ts` column to the `state_groups_persisting` table.
 
 Changes in SCHEMA_VERSION = 95
+    - MSC4140: Stop using the `delayed_events_stream_pos` table, now that
+      delayed state events are no longer canceled by more recent state events
+      sent from a different user.
     - `event_edges.is_state` is no longer read from (it has not been written to since SCHEMA_VERSION 72).
 """
 

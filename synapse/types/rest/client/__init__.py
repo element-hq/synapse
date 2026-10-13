@@ -19,13 +19,14 @@
 #
 #
 import re
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import pydantic_core.core_schema
 from pydantic import (
     ConfigDict,
     Field,
     GetCoreSchemaHandler,
+    GetPydanticSchema,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -33,12 +34,21 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import CoreSchema, PydanticCustomError
+from pydantic_core import CoreSchema
 from typing_extensions import Annotated, Self
 
-from synapse.types import Absent, AbsentType, NonNegativeStrictInt
+from synapse.types import (
+    Absent,
+    AbsentType,
+    MultiWriterStreamToken,
+    NonNegativeStrictInt,
+    UnresolvedMultiWriterStreamToken,
+)
 from synapse.types.rest import RequestBodyModel
 from synapse.util.threepids import validate_email
+
+if TYPE_CHECKING:
+    from synapse.storage.databases.main import DataStore
 
 
 class AuthenticationData(RequestBodyModel):
@@ -57,11 +67,22 @@ class AuthenticationData(RequestBodyModel):
     type: StrictStr | None = None
 
 
+class UserInteractiveAuthBody(RequestBodyModel):
+    """
+    A request body that may carry user-interactive authentication data. Other keys
+    are endpoint-specific and are left for the endpoint to handle.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    auth: AuthenticationData | None = None
+
+
 # See also assert_valid_client_secret()
 ClientSecretStr = Annotated[
     str,
     StringConstraints(
-        pattern="[0-9a-zA-Z.=_-]",
+        pattern="^[0-9a-zA-Z.=_-]+$",
         min_length=1,
         max_length=255,
         strict=True,
@@ -91,25 +112,33 @@ class EmailRequestTokenBody(ThreepidRequestTokenBody):
     # know the exact spelling (eg. upper and lower case) of address in the database.
     # Without this, an email stored in the database as "foo@bar.com" would cause
     # user requests for "FOO@bar.com" to raise a Not Found error.
+    #
+    # A ValueError produces a Pydantic error of type "value_error", which
+    # validate_json_object translates to M_INVALID_PARAM, the errcode the spec
+    # lists for an invalid address on /account/3pid/email/requestToken:
+    # https://spec.matrix.org/v1.19/client-server-api/#post_matrixclientv3account3pidemailrequesttoken
     @field_validator("email")
     @classmethod
     def _email_validator(cls, email: StrictStr) -> StrictStr:
-        try:
-            return validate_email(email)
-        except ValueError as e:
-            # To ensure backward compatibility of HTTP error codes, we return a
-            # Pydantic error with the custom, unrecognized error type
-            # "email_custom_err_type" instead of the default error type
-            # "value_error". This results in the more generic BAD_JSON HTTP
-            # error instead of the more specific INVALID_PARAM one.
-            raise PydanticCustomError("email_custom_err_type", str(e), None) from e
+        return validate_email(email)
 
 
-ISO3116_1_Alpha_2 = Annotated[str, StringConstraints(pattern="[A-Z]{2}", strict=True)]
+ISO3166_1_Alpha_2 = Annotated[
+    str,
+    GetPydanticSchema(
+        lambda source, handler: pydantic_core.core_schema.custom_error_schema(
+            pydantic_core.core_schema.str_schema(pattern="[A-Z]{2}", strict=True),
+            custom_error_type="value_error",
+            custom_error_context={
+                "error": "Not a valid ISO 3166-1 alpha-2 country code"
+            },
+        )
+    ),
+]
 
 
 class MsisdnRequestTokenBody(ThreepidRequestTokenBody):
-    country: ISO3116_1_Alpha_2
+    country: ISO3166_1_Alpha_2
     phone_number: StrictStr
 
 
@@ -119,20 +148,37 @@ class SlidingSyncStickyEventsToken:
     and then accepted as the `since` parameter in the requests of the same extension.
 
     Current format:
-        SlidingSyncStickyEventsToken ::= 'sticky_' DIGIT+
-        DIGIT ::= '0'-'9'
+        SlidingSyncStickyEventsToken ::= 'sticky_' UnresolvedMultiWriterStreamToken
+
+    where `MultiWriterStreamToken` is the serialised form of a (potentially sharded)
+    `MultiWriterStreamToken` for the sticky events stream, e.g. `42` or `m42~1.45`.
 
     The `sticky_` prefix allows us to make sure it's not swapped for another token
     or to evolve the type of token accepted with backwards compatibility in the future.
+
+    Note that the inner stream token can only be interpreted with access to the
+    database (to resolve instance IDs to instance names), so this class holds the
+    serialised form and converts on demand.
     """
 
-    PATTERN = re.compile(r"^sticky_([0-9]+)$")
+    PATTERN = re.compile(r"^sticky_([0-9]+|m[0-9]+(~[0-9]+\.[0-9]+)*)$")
     START: ClassVar["SlidingSyncStickyEventsToken"]
 
-    def __init__(self, *, sticky_events_stream_id: int) -> None:
-        # FIXME: We should use MultiWriterStreamToken here
-        # Track: https://github.com/element-hq/synapse/issues/19661
-        self.sticky_events_stream_id = sticky_events_stream_id
+    def __init__(
+        self, *, unresolved_stream_token: UnresolvedMultiWriterStreamToken
+    ) -> None:
+        self._unresolved_stream_token = unresolved_stream_token
+
+    @classmethod
+    async def from_stream_token(
+        cls, store: "DataStore", token: MultiWriterStreamToken
+    ) -> "SlidingSyncStickyEventsToken":
+        return cls(unresolved_stream_token=await token.to_unresolved(store))
+
+    async def to_stream_token(self, store: "DataStore") -> MultiWriterStreamToken:
+        return await MultiWriterStreamToken.from_unresolved(
+            store, self._unresolved_stream_token
+        )
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -167,7 +213,12 @@ class SlidingSyncStickyEventsToken:
             match = cls.PATTERN.match(v)
             if match is None:
                 raise ValueError(f"Invalid SlidingSyncStickyEventsToken format: {v!r}")
-            return cls(sticky_events_stream_id=int(match.group(1)))
+
+            return cls(
+                unresolved_stream_token=UnresolvedMultiWriterStreamToken.parse(
+                    match.group(1)
+                )
+            )
         raise ValueError(f"Cannot parse SlidingSyncStickyEventsToken from {type(v)}")
 
     def serialise(self) -> str:
@@ -176,7 +227,7 @@ class SlidingSyncStickyEventsToken:
 
         The inverse of `_validate`.
         """
-        return f"sticky_{self.sticky_events_stream_id}"
+        return f"sticky_{self._unresolved_stream_token.to_string()}"
 
     def __repr__(self) -> str:
         # Use the serialised form as debug output.
@@ -185,7 +236,7 @@ class SlidingSyncStickyEventsToken:
 
 # Starting reading a stream at 0 ensures all stream fact rows will be read
 SlidingSyncStickyEventsToken.START = SlidingSyncStickyEventsToken(
-    sticky_events_stream_id=0
+    unresolved_stream_token=UnresolvedMultiWriterStreamToken(stream=0)
 )
 
 
@@ -478,6 +529,18 @@ class SlidingSyncBody(RequestBodyModel):
             limit: NonNegativeStrictInt = 100
             since: SlidingSyncStickyEventsToken | AbsentType = Absent
 
+        class ProfilesExtension(RequestBodyModel):
+            """The Profile Updates extension (MSC4262)
+
+            Attributes:
+                enabled
+                fields: List of fields to filter upon (optional)
+            """
+
+            enabled: StrictBool = False
+            # Optionally filter on specific fields
+            fields: list[StrictStr] | AbsentType = Absent
+
         to_device: ToDeviceExtension | None = None
         e2ee: E2eeExtension | None = None
         account_data: AccountDataExtension | None = None
@@ -488,6 +551,9 @@ class SlidingSyncBody(RequestBodyModel):
         )
         sticky_events: StickyEventsExtension | AbsentType = Field(
             Absent, alias="org.matrix.msc4354.sticky_events"
+        )
+        profiles: ProfilesExtension | AbsentType = Field(
+            Absent, alias="org.matrix.msc4262.profiles"
         )
 
     conn_id: StrictStr | None = None

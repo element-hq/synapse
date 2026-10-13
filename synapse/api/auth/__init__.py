@@ -24,7 +24,7 @@ from prometheus_client import Histogram
 
 from twisted.web.server import Request
 
-from synapse.appservice import ApplicationService
+from synapse.appservice import ApplicationService, Scopes
 from synapse.http.site import SynapseRequest
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import Requester
@@ -96,6 +96,20 @@ class Auth(Protocol):
             InvalidClientCredentialsError if no user by that token exists or the token
                 is invalid.
             AuthError if access is denied for the user in the access token
+        """
+
+    async def get_optional_user_by_req(
+        self,
+        request: SynapseRequest,
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester | None:
+        """Like `get_user_by_req`, except returns None when the request carries
+        no access token at all. A token that is present but invalid still
+        raises, as with `get_user_by_req`.
+
+        For endpoints where authentication is optional.
         """
 
     async def get_user_by_req_experimental_feature(
@@ -204,4 +218,10 @@ class Auth(Protocol):
             Resolves to the current membership of the user in the room and the
             membership event ID of the user. If the user is not in the room and
             never has been, then `(Membership.JOIN, None)` is returned.
+        """
+
+    def assert_requester_has_scope(self, requester: Requester, scope: Scopes) -> None:
+        """Asserts that the requester has the given scope, either directly
+        (e.g. via an OAuth token) or via the scopes registered against the
+        application service.
         """

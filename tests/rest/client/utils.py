@@ -636,6 +636,34 @@ class RestHelper:
             room_id, event_type, body, tok, expect_code, state_key, method="PUT"
         )
 
+    @staticmethod
+    def build_delayed_event_request_path(
+        *,
+        room_id: str,
+        event_type: str,
+        txn_id: str | None = None,
+    ) -> str:
+        """Build the request path for scheduling a delayed event via the dedicated endpoint."""
+        if txn_id is None:
+            txn_id = "m%s" % (str(time.time()))
+        return f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}/{txn_id}"
+
+    @staticmethod
+    def build_delayed_event_request_body(
+        *,
+        delay: Duration,
+        content: JsonDict,
+        state_key: str | None = None,
+    ) -> JsonDict:
+        """Build the request body for scheduling a delayed event via the dedicated endpoint."""
+        body = {
+            "delay_ms": delay.as_millis(),
+            "content": content,
+        }
+        if state_key is not None:
+            body["state_key"] = state_key
+        return body
+
     def upload_media(
         self,
         image_data: bytes,

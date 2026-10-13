@@ -345,21 +345,9 @@ class MediaRepository:
         if media_id is None:
             media_id = random_string(24)
 
-        file_info = FileInfo(server_name=None, file_id=media_id)
-        sha256reader = SHA256TransparentIOReader(content)
-        # This implements all of IO as it has a passthrough
-        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
-        sha256 = sha256reader.hexdigest()
-        should_quarantine = await self.store.get_is_hash_quarantined(sha256)
-
-        logger.info("Stored local media in file %r", fname)
-
-        if should_quarantine:
-            logger.warning(
-                "Media has been automatically quarantined as it matched existing quarantined media"
-            )
-
         # Check that the user has not exceeded any of the media upload limits.
+        # This is done before storing the file so that a rejected upload
+        # doesn't leave an orphaned file behind.
 
         # Use limits from module API if provided
         media_upload_limits = (
@@ -416,6 +404,20 @@ class MediaRepository:
                     info_uri=info_uri,
                     can_upgrade=limit.can_upgrade,
                 )
+
+        file_info = FileInfo(server_name=None, file_id=media_id)
+        sha256reader = SHA256TransparentIOReader(content)
+        # This implements all of IO as it has a passthrough
+        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
+        sha256 = sha256reader.hexdigest()
+        should_quarantine = await self.store.get_is_hash_quarantined(sha256)
+
+        logger.info("Stored local media in file %r", fname)
+
+        if should_quarantine:
+            logger.warning(
+                "Media has been automatically quarantined as it matched existing quarantined media"
+            )
 
         if is_new_media:
             await self.store.store_local_media(
@@ -1387,17 +1389,23 @@ class MediaRepository:
                         self.hs.get_reactor(), thumbnailer.transpose
                     )
 
+                # JPEG has no alpha channel, so it would flatten a transparent
+                # image onto a solid color background.
+                needs_alpha = await defer_to_thread(
+                    self.hs.get_reactor(), lambda: thumbnailer.has_transparency
+                )
+
                 # We deduplicate the thumbnail sizes by ignoring the cropped versions if
                 # they have the same dimensions of a scaled one.
                 thumbnails: dict[tuple[int, int, str], str] = {}
                 for requirement in requirements:
+                    t_type = requirement.media_type
+                    if needs_alpha and t_type == "image/jpeg":
+                        t_type = "image/png"
+
                     if requirement.method == "crop":
                         thumbnails.setdefault(
-                            (
-                                requirement.width,
-                                requirement.height,
-                                requirement.media_type,
-                            ),
+                            (requirement.width, requirement.height, t_type),
                             requirement.method,
                         )
                     elif requirement.method == "scale":
@@ -1406,9 +1414,7 @@ class MediaRepository:
                         )
                         t_width = min(m_width, t_width)
                         t_height = min(m_height, t_height)
-                        thumbnails[(t_width, t_height, requirement.media_type)] = (
-                            requirement.method
-                        )
+                        thumbnails[(t_width, t_height, t_type)] = requirement.method
 
                 # Now we generate the thumbnails for each dimension, store it
                 #

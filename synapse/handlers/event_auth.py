@@ -234,11 +234,21 @@ class EventAuthHandler:
 
         # Get the rooms which allow access to this room and check if the user is
         # in any of them.
-        allowed_rooms = await self.get_rooms_that_allow_join(state_ids)
+        allowed_rooms, has_unknown_rules = await self.get_rooms_that_allow_join(
+            state_ids
+        )
         if not await self.is_user_in_rooms(allowed_rooms, user_id):
-            # If this is a remote request, the user might be in an allowed room
-            # that we do not know about.
-            if not self._is_mine_id(user_id):
+            # If there are unknown allow rules, there could be other servers
+            # that are able to authorise the join. Alternatively, if this is
+            # a remote request, the user might be in an allowed room that we
+            # do not know about.
+            if has_unknown_rules:
+                raise SynapseError(
+                    400,
+                    "Unrecognized restricted join rules found.",
+                    Codes.UNABLE_AUTHORISE_JOIN,
+                )
+            elif not self._is_mine_id(user_id):
                 for room_id in allowed_rooms:
                     if not await self._store.is_host_joined(room_id, self._server_name):
                         raise SynapseError(
@@ -289,7 +299,7 @@ class EventAuthHandler:
 
     async def get_rooms_that_allow_join(
         self, state_ids: StateMap[str]
-    ) -> StrCollection:
+    ) -> tuple[StrCollection, bool]:
         """
         Generate a list of rooms in which membership allows access to a room.
 
@@ -297,12 +307,16 @@ class EventAuthHandler:
             state_ids: The current state of the room the user wishes to join
 
         Returns:
-            A collection of room IDs. Membership in any of the rooms in the list grants the ability to join the target room.
+            A tuple of a collection of room IDs and a boolean indicating whether
+            there are any unknown allow rules. Membership in any of the rooms in
+            the list grants the ability to join the target room. If unknown rules
+            are present, failure to authorise the join should not be treated as
+            a permanent error.
         """
         # If there's no join rule, then it defaults to invite (so this doesn't apply).
         join_rules_event_id = state_ids.get((EventTypes.JoinRules, ""), None)
         if not join_rules_event_id:
-            return ()
+            return (), False
 
         # If the join rule is not restricted, this doesn't apply.
         join_rules_event = await self._store.get_event(join_rules_event_id)
@@ -310,16 +324,18 @@ class EventAuthHandler:
         # If allowed is of the wrong form, then only allow invited users.
         allow_list = join_rules_event.content.get("allow", [])
         if not isinstance(allow_list, list):
-            return ()
+            return (), False
 
         # Pull out the other room IDs, invalid data gets filtered.
         result = []
+        has_unknown_rules = False
         for allow in allow_list:
             if not isinstance(allow, dict):
                 continue
 
             # If the type is unexpected, skip it.
             if allow.get("type") != RestrictedJoinRuleTypes.ROOM_MEMBERSHIP:
+                has_unknown_rules = True
                 continue
 
             room_id = allow.get("room_id")
@@ -328,7 +344,7 @@ class EventAuthHandler:
 
             result.append(room_id)
 
-        return result
+        return result, has_unknown_rules
 
     async def is_user_in_rooms(self, room_ids: StrCollection, user_id: str) -> bool:
         """

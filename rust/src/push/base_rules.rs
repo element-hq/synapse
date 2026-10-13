@@ -146,6 +146,45 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
         default_enabled: true,
     },
     PushRule {
+        rule_id: Cow::Borrowed("global/override/.org.matrix.msc4075.rule.rtc.invite_for_me"),
+        priority_class: 5,
+        conditions: Cow::Borrowed(&[
+            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("org.matrix.msc4075.rtc.notification"),
+            })),
+            Condition::Known(KnownCondition::ExactEventPropertyContainsType(
+                EventPropertyIsTypeCondition {
+                    key: Cow::Borrowed(r"content.m\.mentions.user_ids"),
+                    value_type: Cow::Borrowed(&EventMatchPatternType::UserId),
+                },
+            )),
+        ]),
+        actions: Cow::Borrowed(&[Action::Notify, RING_ACTION]),
+        default: true,
+        default_enabled: true,
+    },
+    PushRule {
+        rule_id: Cow::Borrowed("global/override/.org.matrix.msc4075.rule.rtc.invite_for_room"),
+        priority_class: 5,
+        conditions: Cow::Borrowed(&[
+            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("org.matrix.msc4075.rtc.notification"),
+            })),
+            Condition::Known(KnownCondition::EventPropertyIs(EventPropertyIsCondition {
+                key: Cow::Borrowed(r"content.m\.mentions.room"),
+                value: Cow::Owned(SimpleJsonValue::Bool(true)),
+            })),
+            Condition::Known(KnownCondition::SenderNotificationPermission {
+                key: Cow::Borrowed("room"),
+            }),
+        ]),
+        actions: Cow::Borrowed(&[Action::Notify, RING_ACTION]),
+        default: true,
+        default_enabled: true,
+    },
+    PushRule {
         rule_id: Cow::Borrowed("global/override/.m.rule.is_user_mention"),
         priority_class: 5,
         conditions: Cow::Borrowed(&[Condition::Known(
@@ -733,4 +772,136 @@ lazy_static! {
             .chain(BASE_APPEND_UNDERRIDE_RULES.iter())
             .map(|rule| { (&*rule.rule_id, rule) })
             .collect();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+    use std::collections::BTreeMap;
+
+    use super::RING_ACTION;
+    use crate::push::evaluator::PushRuleEvaluator;
+    use crate::push::{Action, FilteredPushRules, JsonValue, PushRules, SimpleJsonValue};
+
+    const RTC_NOTIFICATION_TYPE: &str = "org.matrix.msc4075.rtc.notification";
+    const ALICE: &str = "@alice:example.org";
+    const BOB: &str = "@bob:example.org";
+
+    /// The default push rules with no user-defined rules.
+    ///
+    /// The generic mention rules are disabled so that they cannot mask the
+    /// MSC4075 rules, which have identical actions and come immediately
+    /// before them in the override list.
+    fn push_rules(msc4075_enabled: bool) -> FilteredPushRules {
+        let mut enabled_map = BTreeMap::new();
+        enabled_map.insert("global/override/.m.rule.is_user_mention".to_string(), false);
+        enabled_map.insert("global/override/.m.rule.is_room_mention".to_string(), false);
+
+        FilteredPushRules::py_new(
+            PushRules::new(vec![]),
+            enabled_map,
+            false, // msc1767_enabled
+            false, // msc3381_polls_enabled
+            false, // msc3664_enabled
+            false, // msc4028_push_encrypted_events
+            msc4075_enabled,
+            false, // msc4210_enabled
+            false, // msc4306_enabled
+        )
+    }
+
+    /// Builds an evaluator for an event of the given type whose `m.mentions`
+    /// lists the given user IDs and optionally mentions the room, sent by a
+    /// user with the given power level.
+    fn build_evaluator(
+        event_type: &'static str,
+        mentioned_user_ids: &[&'static str],
+        mentions_room: bool,
+        sender_power_level: i64,
+    ) -> PushRuleEvaluator {
+        let mut flattened_keys = BTreeMap::new();
+        flattened_keys.insert(
+            "type".to_string(),
+            JsonValue::Value(SimpleJsonValue::Str(Cow::Borrowed(event_type))),
+        );
+        flattened_keys.insert(
+            r"content.m\.mentions.user_ids".to_string(),
+            JsonValue::Array(
+                mentioned_user_ids
+                    .iter()
+                    .map(|&user_id| SimpleJsonValue::Str(Cow::Borrowed(user_id)))
+                    .collect(),
+            ),
+        );
+        if mentions_room {
+            flattened_keys.insert(
+                r"content.m\.mentions.room".to_string(),
+                JsonValue::Value(SimpleJsonValue::Bool(true)),
+            );
+        }
+
+        PushRuleEvaluator::py_new(
+            flattened_keys,
+            true,
+            10,
+            Some(sender_power_level),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            false,
+            vec![],
+            false,
+            false,
+            false,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_rtc_invite_for_me_notifies_mentioned_user() {
+        let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[ALICE], false, 0);
+
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        assert_eq!(actions, vec![Action::Notify, RING_ACTION]);
+    }
+
+    #[test]
+    fn test_rtc_invite_for_me_ignores_other_users() {
+        let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[BOB], false, 0);
+
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        assert_eq!(actions, vec![]);
+    }
+
+    #[test]
+    fn test_rtc_invite_for_room_notifies_with_permission() {
+        // The default `notifications.room` power level is 50.
+        let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[], true, 50);
+
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        assert_eq!(actions, vec![Action::Notify, RING_ACTION]);
+    }
+
+    #[test]
+    fn test_rtc_invite_for_room_requires_permission() {
+        let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[], true, 0);
+
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        assert_eq!(actions, vec![]);
+    }
+
+    #[test]
+    fn test_rtc_rules_ignore_other_event_types() {
+        let evaluator = build_evaluator("org.example.other", &[ALICE], true, 50);
+
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        assert_eq!(actions, vec![]);
+    }
+
+    #[test]
+    fn test_rtc_rules_are_omitted_when_msc4075_is_disabled() {
+        let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[ALICE], true, 50);
+
+        let actions = evaluator.run(&push_rules(false), Some(ALICE), None, None);
+        assert_eq!(actions, vec![]);
+    }
 }

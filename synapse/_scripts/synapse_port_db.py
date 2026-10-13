@@ -834,6 +834,10 @@ class Porter:
                 [("un_partial_stated_event_stream", "stream_id")],
             )
             await self._setup_sequence(
+                "un_partial_stated_room_stream_sequence",
+                [("un_partial_stated_room_stream", "stream_id")],
+            )
+            await self._setup_sequence(
                 "device_inbox_sequence",
                 [
                     ("device_inbox", "stream_id"),

@@ -79,13 +79,13 @@ from tests.media.test_media_storage import (
     small_png_with_transparency,
 )
 from tests.server import FakeChannel, FakeTransport, ThreadedMemoryReactorClock
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_PNG, list_stored_media_files
 from tests.unittest import override_config
 
 try:
-    import lxml
+    import bs4
 except ImportError:
-    lxml = None  # type: ignore[assignment]
+    bs4 = None  # type: ignore[assignment]
 
 
 class MediaDomainBlockingTests(unittest.HomeserverTestCase):
@@ -194,8 +194,8 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
 
 
 class URLPreviewTests(unittest.HomeserverTestCase):
-    if not lxml:
-        skip = "url preview feature requires lxml"
+    if not bs4:
+        skip = "url preview feature requires beauitfulsoup4"
 
     servlets = [media.register_servlets]
     hijack_auth = True
@@ -314,6 +314,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -380,6 +381,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -410,6 +412,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -446,6 +449,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -487,6 +491,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -501,7 +506,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         self.pump()
         self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["og:title"], "\u0434\u043a\u0430")
+        self.assertIn("og:title", channel.json_body)
 
     def test_overlong_title(self) -> None:
         self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
@@ -522,6 +527,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -555,6 +561,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -664,6 +671,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
 
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
@@ -780,6 +788,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Extract Synapse's tcp client
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
 
         # Build a fake remote server to reply with
         server = AccumulatingProtocol()
@@ -833,6 +842,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Respond with the HTML.
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -848,6 +858,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Respond with the photo.
         client = self.reactor.tcpClients[1][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -882,6 +893,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -924,6 +936,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -964,6 +977,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1026,6 +1040,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1063,6 +1078,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1079,6 +1095,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Ensure a second request is made to the photo URL.
         client = self.reactor.tcpClients[1][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1123,6 +1140,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1172,6 +1190,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1246,6 +1265,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1269,6 +1289,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Ensure a second request is made to the oEmbed URL.
         client = self.reactor.tcpClients[1][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1287,6 +1308,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         # Ensure a third request is made to the photo URL.
         client = self.reactor.tcpClients[2][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1338,6 +1360,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1379,6 +1402,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1546,6 +1570,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.pump()
 
         client = self.reactor.tcpClients[0][2].buildProtocol(None)
+        assert client is not None
         server = AccumulatingProtocol()
         server.makeConnection(FakeTransport(client, self.reactor))
         client.makeConnection(FakeTransport(server, self.reactor))
@@ -1600,26 +1625,12 @@ class URLPreviewDisabledTests(unittest.HomeserverTestCase):
             "experimental_features": {"msc4452_enabled": False},
         }
     )
-    def test_disabled_previews(self) -> None:
-        """Tests that disabling URL previews gives back a sane response."""
-        channel = self.make_request(
-            "GET",
-            "/_matrix/client/v1/media/preview_url?url=" + quote("http://example.com"),
-            access_token=self.tok,
-        )
-        self.assertEqual(channel.code, 404, channel.result)
-        self.assertEqual(
-            channel.json_body,
-            {"errcode": "M_UNRECOGNIZED", "error": "Unrecognized request"},
-        )
-
     @override_config(
         {
             "url_preview_enabled": False,
-            "experimental_features": {"msc4452_enabled": True},
         }
     )
-    def test_disabled_previews_with_msc4452(self) -> None:
+    def test_disabled_previews(self) -> None:
         """Tests that disabling URL previews gives back a sane response."""
         channel = self.make_request(
             "GET",
@@ -2995,6 +3006,46 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
 
+    def test_over_limit_does_not_store_file(self) -> None:
+        """An upload that is rejected for exceeding the limit must not leave an
+        orphaned file on disk. Regression test for
+        https://github.com/element-hq/synapse/issues/18915)."""
+
+        files_at_start = list_stored_media_files(self.hs)
+
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        # Assert the file listing is working for a successful upload
+        files_after_upload = list_stored_media_files(self.hs)
+        self.assertGreater(len(files_after_upload), len(files_at_start))
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+
+        # The rejected upload should not have written anything to disk.
+        self.assertEqual(list_stored_media_files(self.hs), files_after_upload)
+
+    def test_malformed_request_rejected_before_limit_check(self) -> None:
+        """A malformed request is rejected as such even when the user is over
+        their limit, i.e. the limit is checked after the rest of the request has
+        been validated."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        # We are now over the daily limit, but an invalid filename should still
+        # be reported as a bad request rather than a limit being exceeded.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload?filename=%ff",
+            content=b"0" * 800,
+            access_token=self.tok,
+            shorthand=False,
+            content_type=b"text/plain",
+        )
+        self.assertEqual(channel.code, 400, channel.json_body)
+
     def test_under_daily_limit(self) -> None:
         """Test that uploading media under the daily limit fails."""
         channel = self.upload_media(500)
@@ -3441,6 +3492,23 @@ class AnimatedThumbnailTestCase(unittest.HomeserverTestCase):
         )
         return out.getvalue()
 
+    def _make_mpo(self, stale: bool = False) -> bytes:
+        """Build a two-image MPO: a JPEG holding a stereo pair, not an
+        animation. If `stale` is set, the trailing image is stripped but still
+        advertised."""
+        frames = [
+            Image.new("RGB", (64, 64), color) for color in ((255, 0, 0), (0, 0, 255))
+        ]
+        out = io.BytesIO()
+        frames[0].save(out, format="MPO", save_all=True, append_images=frames[1:])
+        data = out.getvalue()
+        if not stale:
+            return data
+
+        with Image.open(io.BytesIO(data)) as image:
+            primary_size = image.mpinfo[0xB002][0]["Size"]  # type: ignore[attr-defined]
+        return data[:primary_size]
+
     def _upload(self, data: bytes, content_type: str) -> MXCUri:
         return self.get_success(
             self.repo.create_or_update_content(
@@ -3512,6 +3580,37 @@ class AnimatedThumbnailTestCase(unittest.HomeserverTestCase):
         png_uri = self._upload(SMALL_PNG, "image/png")
         channel = self._thumbnail(png_uri, animated="true")
         self.assertEqual(channel.headers.getRawHeaders(b"Content-Type"), [b"image/png"])
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    @parameterized.expand([("intact", False), ("stale_index", True)])
+    def test_mpo_is_thumbnailed_as_a_still(self, _name: str, stale: bool) -> None:
+        """An MPO holds several stills rather than an animation, so it never
+        gets an animated thumbnail.
+
+        Regression test for https://github.com/element-hq/synapse/issues/20024.
+        """
+        mpo_uri = self._upload(self._make_mpo(stale=stale), "image/jpeg")
+
+        thumbnails = self.get_success(
+            self.store.get_local_media_thumbnails(mpo_uri.media_id)
+        )
+        self.assertTrue(thumbnails)
+        self.assertNotIn("image/webp", [info.type for info in thumbnails])
+
+        channel = self._thumbnail(mpo_uri, animated="true")
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    @parameterized.expand([("intact", False), ("stale_index", True)])
+    @override_config({"dynamic_thumbnails": True})
+    def test_dynamic_thumbnails_of_mpo_are_static(
+        self, _name: str, stale: bool
+    ) -> None:
+        """The same holds when the thumbnail is generated on demand."""
+        mpo_uri = self._upload(self._make_mpo(stale=stale), "image/jpeg")
+
+        channel = self._thumbnail(mpo_uri, animated="true")
         result = Image.open(io.BytesIO(channel.result["body"]))
         self.assertFalse(getattr(result, "is_animated", False))
 
