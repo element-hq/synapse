@@ -32,6 +32,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.databases.main.member_info import MemberInfoWorkerStore
 from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
 from synapse.storage.databases.main.stats import UserSortOrder
 from synapse.storage.databases.main.sticky_events import StickyEventsWorkerStore
@@ -146,6 +147,7 @@ class DataStore(
     AccountDataStore,
     ThreadSubscriptionsWorkerStore,
     StickyEventsWorkerStore,
+    MemberInfoWorkerStore,
     PushRulesWorkerStore,
     StreamWorkerStore,
     OpenIdStore,

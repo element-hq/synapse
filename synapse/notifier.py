@@ -533,7 +533,7 @@ class Notifier:
     @overload
     def on_new_event(
         self,
-        stream_key: Literal[StreamKeyType.RECEIPT],
+        stream_key: Literal[StreamKeyType.RECEIPT, StreamKeyType.MEMBER_INFO],
         new_token: MultiWriterStreamToken,
         users: Collection[str | UserID] | None = None,
         rooms: StrCollection | None = None,

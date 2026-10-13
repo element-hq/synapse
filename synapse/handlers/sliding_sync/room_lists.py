@@ -18,6 +18,7 @@ from itertools import chain
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
+    Collection,
     Literal,
     Mapping,
     MutableMapping,
@@ -161,6 +162,14 @@ class SlidingSyncInterestedRooms:
     The set of rooms the user consider as direct-message (DM) rooms
     """
 
+    member_info_changes_by_room: Mapping[str, Collection[str]] | None = None
+    """
+    MSC4428: for an incremental sync, the stable IDs whose `member_info` entry
+    changed with no event anchor since `from_token`, per room in
+    `relevant_room_map` (rooms with changes only). None if the token predates
+    the retained changes, in which case every room needs the full map.
+    """
+
     @staticmethod
     def empty() -> "SlidingSyncInterestedRooms":
         return SlidingSyncInterestedRooms(
@@ -224,6 +233,7 @@ class SlidingSyncRoomLists:
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
         self._clock = hs.get_clock()
+        self._member_info_handler = hs.get_member_info_handler()
 
     async def compute_interested_rooms(
         self,
@@ -645,9 +655,12 @@ class SlidingSyncRoomLists:
                     relevant_room_map[room_id] = room_sync_config
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
-        # (in the event stream)
-        relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
-            previous_connection_state, from_token, relevant_room_map
+        # (in the event stream, or MSC4428 `member_info` changes)
+        (
+            relevant_rooms_to_send_map,
+            member_info_changes_by_room,
+        ) = await self._filter_relevant_rooms_to_send(
+            previous_connection_state, from_token, to_token, relevant_room_map
         )
 
         return SlidingSyncInterestedRooms(
@@ -659,6 +672,7 @@ class SlidingSyncRoomLists:
             newly_joined_rooms=newly_joined_room_ids,
             newly_left_rooms=set(newly_left_room_map),
             dm_room_ids=dm_room_ids,
+            member_info_changes_by_room=member_info_changes_by_room,
         )
 
     async def _compute_interested_rooms_fallback(
@@ -833,9 +847,12 @@ class SlidingSyncRoomLists:
                     relevant_room_map[room_id] = room_sync_config
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
-        # (in the event stream)
-        relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
-            previous_connection_state, from_token, relevant_room_map
+        # (in the event stream, or MSC4428 `member_info` changes)
+        (
+            relevant_rooms_to_send_map,
+            member_info_changes_by_room,
+        ) = await self._filter_relevant_rooms_to_send(
+            previous_connection_state, from_token, to_token, relevant_room_map
         )
 
         return SlidingSyncInterestedRooms(
@@ -847,20 +864,29 @@ class SlidingSyncRoomLists:
             newly_joined_rooms=newly_joined_room_ids,
             newly_left_rooms=newly_left_room_ids,
             dm_room_ids=dm_room_ids,
+            member_info_changes_by_room=member_info_changes_by_room,
         )
 
     async def _filter_relevant_rooms_to_send(
         self,
         previous_connection_state: PerConnectionState,
         from_token: StreamToken | None,
+        to_token: StreamToken,
         relevant_room_map: dict[str, RoomSyncConfig],
-    ) -> dict[str, RoomSyncConfig]:
+    ) -> tuple[dict[str, RoomSyncConfig], Mapping[str, Collection[str]] | None]:
         """Filters the `relevant_room_map` down to those rooms that may have
-        updates we need to fetch and return."""
+        updates we need to fetch and return.
+
+        Returns:
+            The filtered map, and the MSC4428 `member_info` changes per room
+            that were looked up to produce it (see
+            `SlidingSyncInterestedRooms.member_info_changes_by_room`).
+        """
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
         relevant_rooms_to_send_map: dict[str, RoomSyncConfig] = relevant_room_map
+        member_info_changes_by_room: Mapping[str, Collection[str]] | None = {}
         if relevant_room_map:
             with start_active_span("filter_relevant_rooms_to_send"):
                 if from_token:
@@ -945,13 +971,28 @@ class SlidingSyncRoomLists:
                             raise SlidingSyncUnknownPosition()
 
                     rooms_should_send.update(rooms_that_have_updates)
+
+                    # MSC4428: `member_info` changes with no event anchor are
+                    # not in the event stream, so check their own stream too.
+                    member_info_changes_by_room = (
+                        await self._member_info_handler.get_changes_in_rooms(
+                            relevant_room_map.keys(), from_token, to_token
+                        )
+                    )
+                    if member_info_changes_by_room is None:
+                        # The token predates the retained changes: every room
+                        # may need the full map.
+                        rooms_should_send.update(relevant_room_map.keys())
+                    else:
+                        rooms_should_send.update(member_info_changes_by_room.keys())
+
                     relevant_rooms_to_send_map = {
                         room_id: room_sync_config
                         for room_id, room_sync_config in relevant_room_map.items()
                         if room_id in rooms_should_send
                     }
 
-        return relevant_rooms_to_send_map
+        return relevant_rooms_to_send_map, member_info_changes_by_room
 
     @trace
     async def _get_rewind_changes_to_current_membership_to_token(

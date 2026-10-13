@@ -911,6 +911,48 @@ class StickyEventsStream(_StreamFromIdGen):
         return rows, rows[-1][0], len(updates) == limit
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class MemberInfoChangesStreamRow:
+    """MSC4428: a room member's `member_info` entry changed without an event
+    in the room to anchor the change (e.g. the user was erased)."""
+
+    room_id: str
+    stable_id: str
+
+
+class MemberInfoChangesStream(_StreamFromIdGen):
+    NAME = "member_info_changes"
+    ROW_TYPE = MemberInfoChangesStreamRow
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        super().__init__(
+            hs.get_instance_name(),
+            self._update_function,
+            self.store._member_info_changes_id_gen,
+        )
+
+    async def _update_function(
+        self, instance_name: str, from_token: int, to_token: int, limit: int
+    ) -> StreamUpdateResult:
+        updates = await self.store.get_updated_member_info_changes(
+            from_id=from_token, to_id=to_token, limit=limit
+        )
+        rows = [
+            (
+                update.stream_id,
+                # These are the args to `MemberInfoChangesStreamRow`
+                (update.room_id, update.stable_id),
+            )
+            for update in updates
+        ]
+
+        if not rows:
+            return [], to_token, False
+
+        return rows, rows[-1][0], len(updates) == limit
+
+
 @attr.s(slots=True, auto_attribs=True)
 class QuarantinedMediaStreamRow:
     """Row for QuarantinedMediaStream"""

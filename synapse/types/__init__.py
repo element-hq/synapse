@@ -1139,6 +1139,7 @@ class StreamKeyType(Enum):
     STICKY_EVENTS = "sticky_events_key"
     QUARANTINED_MEDIA = "quarantined_media_key"
     PROFILE_UPDATES = "profile_updates_key"
+    MEMBER_INFO = "member_info_key"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1163,6 +1164,7 @@ class StreamToken:
         12. `sticky_events_key`: 4141
         13. `quarantined_media_key`: 4343
         14. `profile_updates_key`: 4444
+        15. `member_info_key`: 4545 (MSC4428; a `MultiWriterStreamToken`)
 
     You can see how many of these keys correspond to the various
     fields in a "/sync" response:
@@ -1227,6 +1229,9 @@ class StreamToken:
         validator=attr.validators.instance_of(MultiWriterStreamToken)
     )
     profile_updates_key: int
+    member_info_key: MultiWriterStreamToken = attr.ib(
+        validator=attr.validators.instance_of(MultiWriterStreamToken)
+    )
 
     _SEPARATOR = "_"
     START: ClassVar["StreamToken"]
@@ -1258,6 +1263,7 @@ class StreamToken:
                 sticky_events_key,
                 quarantined_media_key,
                 profile_updates_key,
+                member_info_key,
             ) = keys
 
             return cls(
@@ -1279,6 +1285,9 @@ class StreamToken:
                     store, quarantined_media_key
                 ),
                 profile_updates_key=int(profile_updates_key),
+                member_info_key=await MultiWriterStreamToken.parse(
+                    store, member_info_key
+                ),
             )
         except CancelledError:
             raise
@@ -1305,6 +1314,7 @@ class StreamToken:
                 str(self.sticky_events_key),
                 await self.quarantined_media_key.to_string(store),
                 str(self.profile_updates_key),
+                await self.member_info_key.to_string(store),
             ]
         )
 
@@ -1340,6 +1350,12 @@ class StreamToken:
                 self.quarantined_media_key.copy_and_advance(new_value),
             )
             return new_token
+        elif key == StreamKeyType.MEMBER_INFO:
+            new_token = self.copy_and_replace(
+                StreamKeyType.MEMBER_INFO,
+                self.member_info_key.copy_and_advance(new_value),
+            )
+            return new_token
 
         new_token = self.copy_and_replace(key, new_value)
         new_id = new_token.get_field(key)
@@ -1363,6 +1379,7 @@ class StreamToken:
             StreamKeyType.RECEIPT,
             StreamKeyType.DEVICE_LIST,
             StreamKeyType.QUARANTINED_MEDIA,
+            StreamKeyType.MEMBER_INFO,
         ],
     ) -> MultiWriterStreamToken: ...
 
@@ -1456,7 +1473,8 @@ class StreamToken:
             f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key}, "
             f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key}, "
             f"quarantined_media: {self.quarantined_media_key}, "
-            f"profile_updates: {self.profile_updates_key})"
+            f"profile_updates: {self.profile_updates_key}, "
+            f"member_info: {self.member_info_key})"
         )
 
 
@@ -1475,6 +1493,7 @@ StreamToken.START = StreamToken(
     sticky_events_key=0,
     quarantined_media_key=MultiWriterStreamToken(stream=0),
     profile_updates_key=0,
+    member_info_key=MultiWriterStreamToken(stream=0),
 )
 
 

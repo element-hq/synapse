@@ -82,6 +82,7 @@ from synapse.storage.databases.main.filtering import FilteringWorkerStore
 from synapse.storage.databases.main.keys import KeyStore
 from synapse.storage.databases.main.lock import LockStore
 from synapse.storage.databases.main.media_repository import MediaRepositoryStore
+from synapse.storage.databases.main.member_info import MemberInfoWorkerStore
 from synapse.storage.databases.main.metrics import ServerMetricsStore
 from synapse.storage.databases.main.monthly_active_users import (
     MonthlyActiveUsersWorkerStore,
@@ -140,6 +141,7 @@ class GenericWorkerStore(
     DirectoryWorkerStore,
     ThreadSubscriptionsWorkerStore,
     StickyEventsWorkerStore,
+    MemberInfoWorkerStore,
     PushRulesWorkerStore,
     ApplicationServiceTransactionWorkerStore,
     ApplicationServiceWorkerStore,

@@ -2827,6 +2827,22 @@ class SyncHandler:
                 sync_result_builder, sync_result_builder.now_token, since_token
             )
 
+        # MSC4428: `member_info` changes with no event anchor since the last
+        # sync, per joined room. `member_info_full` means the since token is
+        # older than the retained changes, so every room gets the full map.
+        member_info_changes_by_room: Mapping[str, Collection[str]] = {}
+        member_info_full = False
+        if since_token and self._member_info_handler.enabled:
+            changes = await self._member_info_handler.get_changes_in_rooms(
+                sync_result_builder.joined_room_ids,
+                since_token,
+                sync_result_builder.now_token,
+            )
+            if changes is None:
+                member_info_full = True
+            else:
+                member_info_changes_by_room = changes
+
         # 2. We check up front if anything has changed, if it hasn't then there is
         # no point in going further.
         #
@@ -2840,6 +2856,7 @@ class SyncHandler:
         # - are there any per-room EDUs;
         # - is there any Room Account Data; or
         # - are there any sticky events in the rooms; or
+        # - are there any `member_info` changes in the rooms; or
         # - might the rooms have changed
         #   (using in-memory event stream change caches, which can
         #   only answer either 'Not changed' or 'Possibly changed')
@@ -2854,6 +2871,8 @@ class SyncHandler:
                 and not ephemeral_by_room
                 and not account_data_by_room
                 and not sticky_by_room
+                and not member_info_changes_by_room
+                and not member_info_full
             ):
                 # This is also a cheap check, but we log the answer
                 have_changed = self._may_have_rooms_changed(sync_result_builder)
@@ -2911,6 +2930,10 @@ class SyncHandler:
                 tags=tags_by_room.get(room_entry.room_id),
                 account_data=account_data_by_room.get(room_entry.room_id, {}),
                 sticky_event_ids=sticky_by_room.get(room_entry.room_id, []),
+                member_info_changes=member_info_changes_by_room.get(
+                    room_entry.room_id, ()
+                ),
+                member_info_full=member_info_full,
                 always_include=sync_result_builder.full_state,
             )
             logger.debug("Generated room entry for %s", room_entry.room_id)
@@ -3296,6 +3319,8 @@ class SyncHandler:
         tags: Mapping[str, JsonMapping] | None,
         account_data: Mapping[str, JsonMapping],
         sticky_event_ids: list[str],
+        member_info_changes: Collection[str] = (),
+        member_info_full: bool = False,
         always_include: bool = False,
     ) -> None:
         """Populates the `joined` and `archived` section of `sync_result_builder`
@@ -3327,6 +3352,10 @@ class SyncHandler:
             account_data: List of new account data for room
             sticky_event_ids: MSC4354 sticky events in the room, if any.
                 In sticky event stream order.
+            member_info_changes: MSC4428: stable IDs whose `member_info` entry
+                changed in this room with no event to anchor the change.
+            member_info_full: MSC4428: send the full `member_info` map for the
+                room (the since token predates the retained changes).
             always_include: Always include this room in the sync response,
                 even if empty.
         """
@@ -3343,6 +3372,8 @@ class SyncHandler:
             or ephemeral
             or full_state
             or sticky_event_ids
+            or member_info_changes
+            or member_info_full
         ):
             if events == [] and tags is None:
                 return
@@ -3436,6 +3467,8 @@ class SyncHandler:
                 or ephemeral
                 or full_state
                 or sticky_event_ids
+                or member_info_changes
+                or member_info_full
             ):
                 return
 
@@ -3518,6 +3551,8 @@ class SyncHandler:
                         (ev.event for ev in sticky_events),
                     ),
                     heroes=summary.get("m.heroes", ()) if summary else (),
+                    changed=member_info_changes,
+                    full=member_info_full,
                 )
 
                 room_sync = JoinedSyncResult(

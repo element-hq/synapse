@@ -304,8 +304,10 @@ class MemberInfoTestCase(unittest.HomeserverTestCase):
         self.helper.send(self.room_id, body="hi", tok=self.bob_tok)
 
     def _erase(self, user_id: str) -> None:
-        """Mark a user erased without deactivating them, so they stay joined."""
+        """Erase a user without deactivating them, so they stay joined: mark
+        them erased and record the change, as deactivation does."""
         self.get_success(self.store.mark_user_erased(user_id))
+        self.get_success(self.hs.get_member_info_handler().on_user_erased(user_id))
 
     def _sync(self, since: str | None = None, **params: str) -> JsonDict:
         query = {**params}
@@ -336,20 +338,74 @@ class MemberInfoTestCase(unittest.HomeserverTestCase):
 
     def test_sync_incremental_only_for_mentioned_members(self) -> None:
         """An incremental sync carries entries only for the stable IDs the
-        response mentions. A change with no event to anchor it (the erasure
-        itself) waits for the next event from, or about, that member."""
+        response mentions, plus any whose entry changed with no event anchor."""
         since = self._sync()["next_batch"]
-        self._erase(self.bob)
 
         # Alice's own message mentions nobody but Alice.
         self.helper.send(self.room_id, body="alice", tok=self.alice_tok)
         body = self._sync(since)
-        room = body["rooms"]["join"][self.room_id]
-        self.assertNotIn(MemberInfo.FIELD, room)
+        self.assertNotIn(MemberInfo.FIELD, body["rooms"]["join"][self.room_id])
         since = body["next_batch"]
 
-        # Bob's next message is the anchor.
+        # Bob's message mentions Bob, but there is nothing to say about him yet.
         self.helper.send(self.room_id, body="bob", tok=self.bob_tok)
+        body = self._sync(since)
+        self.assertNotIn(MemberInfo.FIELD, body["rooms"]["join"][self.room_id])
+        since = body["next_batch"]
+
+        # The erasure has no event anchor: the room comes down with an empty
+        # timeline and the entry.
+        self._erase(self.bob)
+        body = self._sync(since)
+        room = body["rooms"]["join"][self.room_id]
+        self.assertEqual(room["timeline"]["events"], [])
+        self.assertEqual(room[MemberInfo.FIELD], {self.bob: {MemberInfo.USER_ID: None}})
+        since = body["next_batch"]
+
+        # Delivered once: the next sync has nothing to say.
+        self.helper.send(self.room_id, body="alice", tok=self.alice_tok)
+        room = self._sync(since)["rooms"]["join"][self.room_id]
+        self.assertNotIn(MemberInfo.FIELD, room)
+
+    def test_sync_erasure_wakes_long_poll(self) -> None:
+        """A waiting `/sync` returns when a member is erased."""
+        since = self._sync()["next_batch"]
+        channel = self.make_request(
+            "GET",
+            f"/sync?since={since}&timeout=30000",
+            access_token=self.alice_tok,
+            await_result=False,
+        )
+        self.assertFalse(channel.is_finished())
+
+        self._erase(self.bob)
+
+        channel.await_result()
+        self.assertEqual(channel.code, 200, channel.json_body)
+        room = channel.json_body["rooms"]["join"][self.room_id]
+        self.assertEqual(room[MemberInfo.FIELD], {self.bob: {MemberInfo.USER_ID: None}})
+
+    def test_sync_erasure_in_room_member_had_left(self) -> None:
+        """Erasure reaches rooms the user had already left, where no parting
+        leave will ever anchor it (MSC-Q §15: any membership state)."""
+        self.helper.leave(self.room_id, self.bob, tok=self.bob_tok)
+        since = self._sync()["next_batch"]
+
+        self._erase(self.bob)
+
+        room = self._sync(since)["rooms"]["join"][self.room_id]
+        self.assertEqual(room[MemberInfo.FIELD], {self.bob: {MemberInfo.USER_ID: None}})
+
+    def test_sync_token_older_than_retained_changes(self) -> None:
+        """A since token from before the change table was pruned gets the
+        full map rather than (unknowable) deltas."""
+        since = self._sync()["next_batch"]
+        self._erase(self.bob)
+        # Prune everything, as the hourly job would after the retention period.
+        self.get_success(
+            self.store.prune_member_info_changes_before(self.clock.time_msec() + 1)
+        )
+
         room = self._sync(since)["rooms"]["join"][self.room_id]
         self.assertEqual(room[MemberInfo.FIELD], {self.bob: {MemberInfo.USER_ID: None}})
 
@@ -478,13 +534,24 @@ class MemberInfoSlidingSyncTestCase(SlidingSyncBase):
         self.assertTrue(body["rooms"][self.room_id]["initial"])
         self.assertNotIn(MemberInfo.FIELD, body["rooms"][self.room_id])
 
+        # Incrementally: the erasure has no event anchor, but the room comes
+        # down with the entry all the same.
         self.get_success(self.store.mark_user_erased(self.bob))
+        self.get_success(self.hs.get_member_info_handler().on_user_erased(self.bob))
+        body, pos = self.do_sync(self.sync_body, since=pos, tok=self.alice_tok)
+        self.assertNotIn("initial", body["rooms"][self.room_id])
+        self.assertNotIn("timeline", body["rooms"][self.room_id])
+        self.assertEqual(
+            body["rooms"][self.room_id][MemberInfo.FIELD],
+            {self.bob: {MemberInfo.USER_ID: None}},
+        )
 
-        # Incrementally: only once Bob is mentioned again.
+        # Delivered once.
         self.helper.send(self.room_id, body="alice", tok=self.alice_tok)
         body, pos = self.do_sync(self.sync_body, since=pos, tok=self.alice_tok)
         self.assertNotIn(MemberInfo.FIELD, body["rooms"][self.room_id])
 
+        # Mentioning Bob again repeats his entry, as on sync v2.
         self.helper.send(self.room_id, body="bob", tok=self.bob_tok)
         body, pos = self.do_sync(self.sync_body, since=pos, tok=self.alice_tok)
         self.assertEqual(

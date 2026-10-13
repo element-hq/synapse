@@ -34,6 +34,8 @@ from synapse.types import (
     NonNegativeStrictInt,
     RoomAlias,
     RoomStreamToken,
+    StreamKeyType,
+    StreamToken,
     UserID,
     get_domain_from_id,
     get_localpart_from_id,
@@ -350,3 +352,31 @@ class NonNegativeStrictIntTestCase(unittest.TestCase):
 
         self.assertEqual(MyModel.model_validate_json('{"limit": 0}'), MyModel(limit=0))
         self.assertEqual(MyModel.model_validate({"limit": 42}), MyModel(limit=42))
+
+
+class StreamTokenTestCase(unittest.HomeserverTestCase):
+    """Serialisation of the composite `StreamToken`."""
+
+    def test_round_trip(self) -> None:
+        store = self.hs.get_datastores().main
+
+        token = StreamToken.START.copy_and_replace(
+            StreamKeyType.MEMBER_INFO, MultiWriterStreamToken(stream=7)
+        )
+        string_token = self.get_success(token.to_string(store))
+        # One component per stream, the member info stream last.
+        self.assertEqual(string_token, "s0_0_0_0_0_0_0_0_0_0_0_0_0_0_7")
+
+        parsed = self.get_success(StreamToken.from_string(store, string_token))
+        self.assertEqual(parsed, token)
+
+    def test_parse_without_trailing_components(self) -> None:
+        """Tokens issued before a stream existed parse with that stream at its
+        start position."""
+        store = self.hs.get_datastores().main
+
+        parsed = self.get_success(
+            StreamToken.from_string(store, "s5_0_0_0_0_0_0_0_0_0_0_0_0_0")
+        )
+        self.assertEqual(parsed.room_key, RoomStreamToken(stream=5))
+        self.assertEqual(parsed.member_info_key, MultiWriterStreamToken(stream=0))

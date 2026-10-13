@@ -860,6 +860,12 @@ class Porter:
                     ("presence_stream", "stream_id"),
                 ],
             )
+            await self._setup_sequence(
+                "msc4428_member_info_changes_sequence",
+                [
+                    ("msc4428_member_info_changes", "stream_id"),
+                ],
+            )
             await self._setup_auth_chain_sequence()
             await self._setup_sequence(
                 "application_services_txn_id_seq",

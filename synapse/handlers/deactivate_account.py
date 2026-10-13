@@ -53,6 +53,7 @@ class DeactivateAccountHandler:
         self._room_member_handler = hs.get_room_member_handler()
         self._identity_handler = hs.get_identity_handler()
         self._profile_handler = hs.get_profile_handler()
+        self._member_info_handler = hs.get_member_info_handler()
         self._delayed_events_handler = hs.get_delayed_events_handler()
         self._pusher_pool = hs.get_pusherpool()
         self.user_directory_handler = hs.get_user_directory_handler()
@@ -193,6 +194,9 @@ class DeactivateAccountHandler:
 
             logger.info("Marking %s as erased", user_id)
             await self.store.mark_user_erased(user_id)
+            # MSC4428: tell the members of the user's rooms that the user ID
+            # behind this stable ID is gone.
+            await self._member_info_handler.on_user_erased(user_id)
 
         # Reject all pending invites and knocks for the user, so that the
         # user doesn't show up in the "invited" section of rooms' members list.

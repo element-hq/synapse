@@ -15,7 +15,7 @@
 import itertools
 import logging
 from itertools import chain
-from typing import TYPE_CHECKING, AbstractSet, Mapping
+from typing import TYPE_CHECKING, AbstractSet, Collection, Mapping
 
 import attr
 from prometheus_client import Histogram
@@ -314,6 +314,7 @@ class SlidingSyncHandler:
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
                 newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
+                member_info_changes_by_room=interested_rooms.member_info_changes_by_room,
             )
 
             # Filter out empty room results during incremental sync
@@ -587,6 +588,7 @@ class SlidingSyncHandler:
         newly_joined: bool,
         newly_left: bool,
         is_dm: bool,
+        member_info_changes_by_room: Mapping[str, Collection[str]] | None = None,
     ) -> SlidingSyncResult.RoomResult:
         """
         Fetch room data for the sync response.
@@ -598,6 +600,8 @@ class SlidingSyncHandler:
             room_id: The room ID to fetch data for
             room_sync_config: Config for what data we should fetch for a room in the
                 sync response.
+            member_info_changes_by_room: MSC4428, see
+                `SlidingSyncInterestedRooms.member_info_changes_by_room`.
             room_membership_for_user_at_to_token: Membership information for the user
                 in the room at the time of `to_token`.
             from_token: The point in the stream to sync from.
@@ -668,15 +672,27 @@ class SlidingSyncHandler:
         from_bound = None
         initial = True
         ignore_timeline_bound = False
+        # MSC4428: which `member_info` entries to send beyond those the events
+        # in the response mention (see `member_info_for_response`).
+        member_info_changed: Collection[str] = ()
+        member_info_full = False
         if from_token and not newly_joined and not state_reset_out_of_room:
             room_status = previous_connection_state.rooms.have_sent_room(room_id)
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
                 initial = False
+                if member_info_changes_by_room is None:
+                    # The token predates the retained changes.
+                    member_info_full = True
+                else:
+                    member_info_changed = member_info_changes_by_room.get(room_id, ())
             elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
                 assert room_status.last_token is not None
                 from_bound = room_status.last_token
                 initial = False
+                # We only know the room's events-stream position from when it
+                # was last sent, not its member info position: resend the map.
+                member_info_full = True
             elif room_status.status == HaveSentRoomFlag.NEVER:
                 from_bound = None
                 initial = True
@@ -1506,6 +1522,8 @@ class SlidingSyncHandler:
                 (ev.event for ev in timeline_events), required_room_state.values()
             ),
             heroes=(hero.user_id for hero in heroes),
+            changed=member_info_changed,
+            full=member_info_full,
         )
 
         return SlidingSyncResult.RoomResult(
