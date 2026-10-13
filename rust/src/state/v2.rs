@@ -16,9 +16,9 @@
 //!
 //! The work is split in two:
 //!
-//! - [`prepare`] separates the conflicted state, computes the auth chain
-//!   difference, and loads every event the algorithm can touch (the
-//!   "prefetch closure", see [`prefetch`]).
+//! - [`separate`] splits the state into unconflicted and conflicted keys, and
+//!   [`prepare`] computes the auth chain difference and loads every event the
+//!   algorithm can touch (the "prefetch closure", see [`prefetch`]).
 //! - [`PendingResolution::run`] does no I/O. It runs the power sort, the
 //!   iterative auth checks and the mainline sort over the loaded events (see
 //!   [`Core::resolve_conflicted_set`]).
@@ -84,7 +84,8 @@ impl Resolution {
     }
 }
 
-/// Where the time went in a resolution.
+/// Where the time went in a resolution. The times are wall time in each stage
+/// of the core, including time yielded to other tasks.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ResolveStats {
     /// The resolution of the conflicted set came from the cache.
@@ -104,9 +105,9 @@ pub struct ResolveStats {
 /// `event_map` holds events that are not yet persisted (e.g. those being
 /// persisted now). Everything else is read from `store`.
 ///
-/// This is [`prepare`] followed by [`PendingResolution::run`]. Callers that
-/// hold a database connection for the store should call those separately and
-/// release the connection in between, as `run` does no I/O.
+/// This is [`separate`], [`prepare`] and [`PendingResolution::run`]. Callers
+/// that hold a database connection for the store should call those separately
+/// and release the connection in between, as `run` does no I/O.
 pub async fn resolve(
     store: &dyn StateResStore,
     room_id: &str,
@@ -120,6 +121,7 @@ pub async fn resolve(
         room_id,
         room_version,
         state_sets,
+        separate(state_sets),
         event_map,
         conflict_cache,
     )
@@ -170,13 +172,9 @@ impl PendingResolution {
             room_version,
             events: &event_map,
         };
-        let (resolved, cpu) = core
-            .resolve_conflicted_set(&full_conflicted_set, base_state)
+        let resolved = core
+            .resolve_conflicted_set(&full_conflicted_set, base_state, &mut stats)
             .await?;
-
-        stats.sort_time = cpu.sort_time;
-        stats.auth_time = cpu.auth_time;
-        stats.mainline_time = cpu.mainline_time;
 
         let resolved = Arc::new(resolved);
         if let (Some(cache), Some(key)) = (conflict_cache, cache_key) {
@@ -191,32 +189,11 @@ impl PendingResolution {
     }
 }
 
-/// Everything in a resolution that reads the database: separate the
-/// conflicted state, compute the auth chain difference, check the conflict
-/// cache and load the events the algorithm can read (see [`prefetch`]).
+/// Everything in a resolution that reads the database: compute the auth chain
+/// difference, check the conflict cache and load the events the algorithm can
+/// read (see [`prefetch`]). Takes the state already split by [`separate`], so
+/// a caller can answer a conflict-free resolution without a store.
 pub async fn prepare(
-    store: &dyn StateResStore,
-    room_id: &str,
-    room_version: &'static RoomVersion,
-    state_sets: &[StateMap],
-    event_map: EventMap,
-    conflict_cache: Option<&ConflictCache>,
-) -> anyhow::Result<Prepared> {
-    let separated = separate(state_sets);
-    prepare_separated(
-        store,
-        room_id,
-        room_version,
-        state_sets,
-        separated,
-        event_map,
-        conflict_cache,
-    )
-    .await
-}
-
-/// [`prepare`], with the state already split by [`separate`].
-pub async fn prepare_separated(
     store: &dyn StateResStore,
     room_id: &str,
     room_version: &'static RoomVersion,
@@ -743,15 +720,6 @@ impl Yielder {
     }
 }
 
-/// Time spent in each stage of the core, including time yielded to other
-/// tasks.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct CpuStats {
-    pub sort_time: Duration,
-    pub auth_time: Duration,
-    pub mainline_time: Duration,
-}
-
 /// The part of the algorithm that runs over a fully loaded event map.
 pub struct Core<'a> {
     pub room_id: &'a str,
@@ -787,14 +755,13 @@ impl<'a> Core<'a> {
     /// `_resolve_conflicted_set`.
     ///
     /// Returns the base state with the conflicted events that pass auth
-    /// applied over it.
+    /// applied over it, recording the time each stage took in `stats`.
     pub async fn resolve_conflicted_set(
         &self,
         full_conflicted_set: &HashSet<Arc<str>>,
         base_state: StateMap,
-    ) -> anyhow::Result<(StateMap, CpuStats)> {
-        let mut cpu = CpuStats::default();
-
+        stats: &mut ResolveStats,
+    ) -> anyhow::Result<StateMap> {
         // Sort the power events (kicks, bans, etc).
         let start = Instant::now();
         let mut yielder = Yielder::default();
@@ -808,7 +775,7 @@ impl<'a> Core<'a> {
         let sorted_power_events = self
             .reverse_topological_power_sort(&power_events, full_conflicted_set)
             .await?;
-        cpu.sort_time = start.elapsed();
+        stats.sort_time = start.elapsed();
         debug!("sorted {} power events", sorted_power_events.len());
 
         // Auth each one in turn.
@@ -816,7 +783,7 @@ impl<'a> Core<'a> {
         let resolved_state = self
             .iterative_auth_checks(&sorted_power_events, base_state)
             .await?;
-        cpu.auth_time = start.elapsed();
+        stats.auth_time = start.elapsed();
 
         // Sort the remaining events by the mainline of the resolved power
         // levels.
@@ -830,15 +797,15 @@ impl<'a> Core<'a> {
         debug!("sorting {} remaining events", leftover_events.len());
         let pl = lookup(&resolved_state, POWER_LEVELS_KEY).cloned();
         let leftover_events = self.mainline_sort(leftover_events, pl.as_deref()).await?;
-        cpu.mainline_time = start.elapsed();
+        stats.mainline_time = start.elapsed();
 
         let start = Instant::now();
         let resolved_state = self
             .iterative_auth_checks(&leftover_events, resolved_state)
             .await?;
-        cpu.auth_time += start.elapsed();
+        stats.auth_time += start.elapsed();
 
-        Ok((resolved_state, cpu))
+        Ok(resolved_state)
     }
 
     /// Port of `_reverse_topological_power_sort`: the events and their auth

@@ -20,10 +20,7 @@
 
 use std::{
     collections::HashSet,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -118,11 +115,7 @@ pub struct DbStats {
 pub struct PostgresStateResStore {
     conn: Option<PooledConnection>,
     handle: Handle,
-    queries: AtomicU64,
-    rows: AtomicU64,
-    events_fetched: AtomicU64,
-    db_nanos: AtomicU64,
-    parse_nanos: AtomicU64,
+    db_stats: Mutex<DbStats>,
 }
 
 /// How many event IDs to send per event-loading statement.
@@ -148,11 +141,7 @@ impl PostgresStateResStore {
         let store = PostgresStateResStore {
             conn: Some(conn),
             handle,
-            queries: AtomicU64::new(0),
-            rows: AtomicU64::new(0),
-            events_fetched: AtomicU64::new(0),
-            db_nanos: AtomicU64::new(0),
-            parse_nanos: AtomicU64::new(0),
+            db_stats: Mutex::default(),
         };
         // If this fails, dropping the store sends a ROLLBACK, which is
         // harmless outside a transaction.
@@ -176,24 +165,19 @@ impl PostgresStateResStore {
     }
 
     pub fn stats(&self) -> DbStats {
-        DbStats {
-            queries: self.queries.load(Ordering::Relaxed),
-            rows: self.rows.load(Ordering::Relaxed),
-            events_fetched: self.events_fetched.load(Ordering::Relaxed),
-            db_time: Duration::from_nanos(self.db_nanos.load(Ordering::Relaxed)),
-            parse_time: Duration::from_nanos(self.parse_nanos.load(Ordering::Relaxed)),
-        }
+        *self.db_stats.lock().expect("not poisoned")
     }
 
     fn client(&self) -> &PooledConnection {
         self.conn.as_ref().expect("connection is held until finish")
     }
 
+    /// Record a statement started at `start` that returned `rows` rows.
     fn record(&self, start: Instant, rows: usize) {
-        self.queries.fetch_add(1, Ordering::Relaxed);
-        self.rows.fetch_add(rows as u64, Ordering::Relaxed);
-        self.db_nanos
-            .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        let mut stats = self.db_stats.lock().expect("not poisoned");
+        stats.queries += 1;
+        stats.rows += rows as u64;
+        stats.db_time += start.elapsed();
     }
 
     /// Run a statement through the connection's prepared statement cache.
@@ -242,14 +226,12 @@ impl StateResStore for PostgresStateResStore {
             let start = Instant::now();
             for row in rows {
                 if let Some((event_id, event)) = event_from_row(&row)? {
-                    events.insert(event_id, StateResEvent::from_rust(event)?);
+                    events.insert(event_id, StateResEvent::new(event)?);
                 }
             }
-            self.parse_nanos
-                .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            self.db_stats.lock().expect("not poisoned").parse_time += start.elapsed();
         }
-        self.events_fetched
-            .fetch_add(events.len() as u64, Ordering::Relaxed);
+        self.db_stats.lock().expect("not poisoned").events_fetched += events.len() as u64;
         Ok(events)
     }
 

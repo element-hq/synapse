@@ -136,59 +136,37 @@ pub type StateMap = HashMap<StateKey, Arc<str>>;
 
 /// An event taking part in state resolution.
 ///
-/// Either an event handed in from Python (shared with the Python object, read
-/// without the GIL as `Event` is frozen) or one loaded from the database by
-/// Rust. The auth event IDs are computed once, as the algorithm reads them
-/// many times.
+/// An event handed in from Python is a shallow copy sharing the Python
+/// object's data, including its internal metadata. The auth event IDs are
+/// computed once, as the algorithm reads them many times.
 #[derive(Clone)]
 pub struct StateResEvent(Arc<StateResEventInner>);
 
 struct StateResEventInner {
-    source: EventSource,
+    event: Event,
     auth_event_ids: Box<[Arc<str>]>,
 }
 
-enum EventSource {
-    Python(Py<Event>),
-    Rust(Event),
-}
-
 impl StateResEvent {
-    /// Wrap an event from Python.
-    pub fn from_py(event: Py<Event>) -> anyhow::Result<Self> {
-        let auth_event_ids = auth_event_ids_of(event.get())?;
-        Ok(StateResEvent(Arc::new(StateResEventInner {
-            source: EventSource::Python(event),
-            auth_event_ids,
-        })))
-    }
-
-    /// Wrap an event loaded by Rust.
-    pub fn from_rust(event: Event) -> anyhow::Result<Self> {
+    pub fn new(event: Event) -> anyhow::Result<Self> {
         let auth_event_ids = auth_event_ids_of(&event)?;
         Ok(StateResEvent(Arc::new(StateResEventInner {
-            source: EventSource::Rust(event),
+            event,
             auth_event_ids,
         })))
     }
 
     pub fn event(&self) -> &Event {
-        match &self.0.source {
-            EventSource::Python(event) => event.get(),
-            EventSource::Rust(event) => event,
-        }
+        &self.0.event
     }
 
     pub fn auth_event_ids(&self) -> &[Arc<str>] {
         &self.0.auth_event_ids
     }
 
-    /// The event as a Python object, creating one for an event loaded by Rust.
+    /// The event as a new Python object sharing this event's data.
     pub fn to_py(&self, py: Python<'_>) -> PyResult<Py<Event>> {
-        match &self.0.source {
-            EventSource::Python(event) => Ok(event.clone_ref(py)),
-            EventSource::Rust(event) => Py::new(py, event.shallow_clone()),
-        }
+        Py::new(py, self.0.event.shallow_clone())
     }
 }
 
@@ -277,10 +255,10 @@ fn event_map_from_py(
 ) -> PyResult<EventMap> {
     let mut map = EventMap::new();
     for (event_id, event) in events.into_iter().flat_map(|m| m.iter()) {
-        let event = event.cast_into::<Event>()?.unbind();
+        let event = event.cast::<Event>()?.get().shallow_clone();
         map.insert(
             interner.intern(event_id.extract()?),
-            StateResEvent::from_py(event).map_err(|e| PyValueError::new_err(format!("{e:#}")))?,
+            StateResEvent::new(event).map_err(|e| PyValueError::new_err(format!("{e:#}")))?,
         );
     }
     Ok(map)
@@ -478,7 +456,7 @@ impl StateResolutionHandler {
             let store = PostgresStateResStore::begin(&pool, handle)
                 .await
                 .map_err(resolve_error_to_py)?;
-            let prepared = v2::prepare_separated(
+            let prepared = v2::prepare(
                 &store,
                 &room_id,
                 room_version,
