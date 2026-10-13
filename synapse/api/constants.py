@@ -297,8 +297,15 @@ class EventContentFields:
     # Used in m.room.guest_access events.
     GUEST_ACCESS: Final = "guest_access"
 
-    # The authorising user for joining a restricted room.
+    # The authorising user for joining a restricted room. In MSC4430 rooms this is
+    # the authorising member's member key rather than a user ID.
     AUTHORISING_USER: Final = "join_authorised_via_users_server"
+
+    # MSC4430: linkage information in `m.room.member` events, i.e. the user ID the
+    # member key claims to belong to. The claimed localpart is redactable; the
+    # claimed domain is not (it is routing information).
+    MSC4430_LOCALPART: Final = "localpart"
+    MSC4430_DOMAIN: Final = "domain"
 
     # Use for mentioning users.
     MENTIONS: Final = "m.mentions"
@@ -340,6 +347,23 @@ class MemberInfo:
 
     USER_ID: Final = "user_id"
     """The user ID an entry maps to; `null` once the user is erased."""
+
+
+class MemberKeys:
+    """MSC4430: Member Keys. The wire-format constants; the `MemberKey` type itself
+    is in `synapse.types`."""
+
+    SIGNATURE_ENTITY: Final = "sender"
+    """The entity name under which the sender's member key signs an event. (The
+    authorising member key of a restricted join signs under the member key string
+    itself, and a server co-signing linkage information signs under its name.)"""
+
+    KEY_ALGORITHM: Final = "ed25519"
+    KEY_VERSION: Final = "1"
+    """The (constant) version of every member key."""
+
+    KEY_ID: Final = "ed25519:1"
+    """The (constant) key ID of every member key signature."""
 
 
 class MTextFields:

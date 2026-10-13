@@ -20,8 +20,10 @@ from synapse.events import EventBase
 from synapse.events.py_protocol import (
     EventProtocol,
     MSC4242Event,
+    MSC4430Event,
     all_supports_msc4242_state_dag,
     supports_msc4242_state_dag,
+    supports_msc4430_member_keys,
 )
 
 from tests.test_utils.event_builders import make_test_event
@@ -53,6 +55,9 @@ class TestMetaClass(TestCase):
             isinstance(object(), MSC4242Event)
 
         with self.assertRaises(NotImplementedError):
+            isinstance(object(), MSC4430Event)
+
+        with self.assertRaises(NotImplementedError):
             isinstance(object(), EventProtocol)
 
 
@@ -79,3 +84,16 @@ class SupportsMSC4242StateDagTestCase(TestCase):
             (_make_event(RoomVersions.V11), Mock()),
         ]
         self.assertFalse(all_supports_msc4242_state_dag(pairs))
+
+
+class SupportsMSC4430MemberKeysTestCase(TestCase):
+    def test_member_key_room(self) -> None:
+        event = _make_event(RoomVersions.MSC4430v12)
+        self.assertTrue(supports_msc4430_member_keys(event))
+        # A member key room is also a state DAG room.
+        self.assertTrue(supports_msc4242_state_dag(event))
+
+    def test_other_rooms(self) -> None:
+        for room_version in (RoomVersions.V12, RoomVersions.MSC4242v12):
+            event = _make_event(room_version)
+            self.assertFalse(supports_msc4430_member_keys(event), room_version)

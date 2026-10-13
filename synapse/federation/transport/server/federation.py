@@ -48,7 +48,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -321,6 +321,10 @@ class FederationMakeJoinServlet(BaseFederationServerServlet):
         if supported_versions is None:
             supported_versions = ["1"]
 
+        # The path parameter is a user ID; anything else (such as an MSC4430 member
+        # key) is a 400 here rather than a server error further in.
+        UserID.from_string(user_id)
+
         result = await self.handler.on_make_join_request(
             origin, room_id, user_id, supported_versions=supported_versions
         )
@@ -339,6 +343,7 @@ class FederationMakeLeaveServlet(BaseFederationServerServlet):
         room_id: str,
         user_id: str,
     ) -> tuple[int, JsonDict]:
+        UserID.from_string(user_id)
         result = await self.handler.on_make_leave_request(origin, room_id, user_id)
         return 200, result
 
@@ -394,6 +399,7 @@ class FederationMakeKnockServlet(BaseFederationServerServlet):
             query, "ver", required=True, encoding="utf-8"
         )
 
+        UserID.from_string(user_id)
         result = await self.handler.on_make_knock_request(
             origin, room_id, user_id, supported_versions=supported_versions
         )

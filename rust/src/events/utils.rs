@@ -158,6 +158,12 @@ pub fn redact(event: &Value, room_version: &RoomVersion) -> anyhow::Result<Value
             if room_version.restricted_join_rule_fix {
                 add_content_field(membership_field::JOIN_AUTHORISED_VIA_USERS_SERVER);
             }
+            if room_version.msc4430_member_keys {
+                // MSC4430: the claimed `domain` is routing information and survives
+                // redaction (and so is covered by the reference hash / event ID). The
+                // claimed `localpart` is redactable and is deliberately not preserved.
+                add_content_field(membership_field::DOMAIN);
+            }
             if room_version.updated_redaction_rules {
                 // Preserve the signed field under third_party_invite.
                 if let Some(third_party_invite) =
@@ -793,11 +799,78 @@ mod tests {
             );
         }
 
-        let versions = [RoomVersion::V11, RoomVersion::V12];
+        let versions = [
+            RoomVersion::V11,
+            RoomVersion::V12,
+            RoomVersion::MSC4242V12,
+            RoomVersion::MSC4430V12,
+        ];
         for version in versions {
             let redacted = redact(&original, &version).unwrap();
             assert_eq!(
                 expected_updated_redaction_rules, redacted,
+                "Room Version {version}"
+            );
+        }
+    }
+
+    /// MSC4430: `m.room.member` events carry linkage information, of which the claimed
+    /// `domain` survives redaction (routing) while the `localpart` does not (erasure,
+    /// moderation). Room versions without member keys drop both.
+    #[test]
+    fn test_redact_m_room_member_msc4430() {
+        let original = json!(
+            {
+                "type":"m.room.member",
+                "content":{
+                    "unknown_key":"unknown_value",
+                    "membership":"join",
+                    "localpart":"alice",
+                    "domain":"example.com",
+                    "displayname":"Alice",
+                    "join_authorised_via_users_server":"@authoriser",
+                    "third_party_invite":{
+                        "signed":{},
+                    },
+                },
+            }
+        );
+
+        // The pre-existing rules (restricted joins, third-party invites) still apply
+        // alongside the new one.
+        let expected_msc4430 = json!(
+            {
+                "type":"m.room.member",
+                "content":{
+                    "membership":"join",
+                    "domain":"example.com",
+                    "join_authorised_via_users_server":"@authoriser",
+                    "third_party_invite":{
+                        "signed":{},
+                    },
+                },
+            }
+        );
+        let expected_without_member_keys = json!(
+            {
+                "type":"m.room.member",
+                "content":{
+                    "membership":"join",
+                    "join_authorised_via_users_server":"@authoriser",
+                    "third_party_invite":{
+                        "signed":{},
+                    },
+                },
+            }
+        );
+
+        let redacted = redact(&original, &RoomVersion::MSC4430V12).unwrap();
+        assert_eq!(expected_msc4430, redacted);
+
+        for version in [RoomVersion::V11, RoomVersion::V12, RoomVersion::MSC4242V12] {
+            let redacted = redact(&original, &version).unwrap();
+            assert_eq!(
+                expected_without_member_keys, redacted,
                 "Room Version {version}"
             );
         }

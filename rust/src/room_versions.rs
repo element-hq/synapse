@@ -181,6 +181,15 @@ pub struct RoomVersion {
     /// 2. Use full PDU's in the `invite_room_state`/`knock_room_state` in the federation
     ///    API. The client API still uses stripped state.
     msc4311_stripped_state: bool,
+    /// MSC4430: Member Keys. Room members are identified by per-user, per-room Ed25519
+    /// "member keys" (`@<unpadded urlsafe base64 public key>`) rather than by user IDs:
+    /// `sender` and the `state_key` of `m.room.member` events are member keys, and
+    /// events are signed by the member key (signature entity `sender`, key ID
+    /// `ed25519:1`) instead of by the sender's server. `m.room.member` events carry
+    /// linkage information (`content.localpart`, `content.domain`) which is co-signed by
+    /// the claimed domain's server signing key; `domain` survives redaction (it is
+    /// routing information) while `localpart` does not (GDPR erasure, moderation).
+    pub msc4430_member_keys: bool,
 }
 
 impl RoomVersion {
@@ -208,6 +217,7 @@ impl RoomVersion {
         strict_event_byte_limits_room_versions: false,
         msc4242_state_dags: false,
         msc4311_stripped_state: false,
+        msc4430_member_keys: false,
     };
 
     pub const V2: RoomVersion = RoomVersion {
@@ -336,6 +346,19 @@ impl RoomVersion {
         msc4242_state_dags: true,
         ..Self::V12
     };
+
+    /// MSC4430 (Member Keys) layered on MSC4242 (State DAGs). The event format is that
+    /// of MSC4242; only the identifier type of `sender` / `m.room.member` `state_key`,
+    /// the signatures and the `m.room.member` redaction rules differ.
+    ///
+    /// Note: this version is deliberately *not* in `KNOWN_ROOM_VERSIONS`, and is not
+    /// registered there when `msc4430_enabled` is set either, until the server can
+    /// actually create and join such rooms.
+    pub const MSC4430V12: RoomVersion = RoomVersion {
+        identifier: "org.matrix.msc4430.12",
+        msc4430_member_keys: true,
+        ..Self::MSC4242V12
+    };
 }
 
 impl Display for RoomVersion {
@@ -367,6 +390,7 @@ impl FromStr for &'static RoomVersion {
             "org.matrix.msc3757.11" => Ok(&RoomVersion::MSC3757V11),
             "org.matrix.hydra.11" => Ok(&RoomVersion::HYDRA_V11),
             "org.matrix.msc4242.12" => Ok(&RoomVersion::MSC4242V12),
+            "org.matrix.msc4430.12" => Ok(&RoomVersion::MSC4430V12),
             _ => Err(anyhow::anyhow!("Unknown room version: {}", s)),
         }
     }
@@ -630,6 +654,10 @@ impl RoomVersions {
     #[classattr]
     fn MSC4242v12(py: Python<'_>) -> PyResult<Py<PyAny>> {
         RoomVersion::MSC4242V12.into_py_any(py)
+    }
+    #[classattr]
+    fn MSC4430v12(py: Python<'_>) -> PyResult<Py<PyAny>> {
+        RoomVersion::MSC4430V12.into_py_any(py)
     }
 }
 

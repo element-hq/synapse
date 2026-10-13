@@ -145,6 +145,14 @@ class RoomVersion:
      2. Use full PDU's in the `invite_room_state`/`knock_room_state` in the federation
         API. The client API still uses stripped state.
     """
+    msc4430_member_keys: bool
+    """MSC4430: Member Keys. Room members are identified by per-user, per-room Ed25519
+    "member keys" (`@<unpadded urlsafe base64 public key>`) rather than by user IDs:
+    `sender` and the `state_key` of `m.room.member` events are member keys, and events
+    are signed by the member key (signature entity `sender`, key ID `ed25519:1`) instead
+    of by the sender's server. `m.room.member` events carry linkage information
+    (`content.localpart`, `content.domain`) co-signed by the claimed domain's server
+    signing key; `domain` survives redaction, `localpart` does not."""
 
 class RoomVersions:
     V1: RoomVersion
@@ -165,6 +173,7 @@ class RoomVersions:
     HydraV11: RoomVersion
     V12: RoomVersion
     MSC4242v12: RoomVersion
+    MSC4430v12: RoomVersion
 
 class KnownRoomVersionsMapping(Mapping[str, RoomVersion]):
     def add_room_version(self, room_version: RoomVersion) -> None: ...

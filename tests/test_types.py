@@ -24,12 +24,14 @@ from unittest import skipUnless
 from immutabledict import immutabledict
 from parameterized import parameterized_class
 from pydantic import BaseModel, PydanticInvalidForJsonSchema, ValidationError
+from signedjson.key import generate_signing_key, get_verify_key
 
-from synapse.api.errors import SynapseError
+from synapse.api.errors import MemberKeyHasNoDomainError, SynapseError
 from synapse.types import (
     Absent,
     AbsentType,
     AbstractMultiWriterStreamToken,
+    MemberKey,
     MultiWriterStreamToken,
     NonNegativeStrictInt,
     RoomAlias,
@@ -39,6 +41,7 @@ from synapse.types import (
     UserID,
     get_domain_from_id,
     get_localpart_from_id,
+    is_member_key,
     map_username_to_mxid_localpart,
 )
 
@@ -62,6 +65,29 @@ class IsMineIDTests(unittest.HomeserverTestCase):
         self.assertFalse(self.hs.is_mine_id("@user:test:test"))
         self.assertEqual("user", get_localpart_from_id("@user:test:test"))
         self.assertEqual("test:test", get_domain_from_id("@user:test:test"))
+
+    def test_member_key_is_loud(self) -> None:
+        """An MSC4430 member key has no domain. Code which parses one as a user ID
+        is not member-key aware, so it must fail with a distinct 500 rather than
+        "Invalid ID"."""
+        for fn in (get_domain_from_id, get_localpart_from_id):
+            with self.assertRaises(MemberKeyHasNoDomainError) as cm:
+                fn(EXAMPLE_MEMBER_KEY)
+            self.assertEqual(cm.exception.code, 500)
+            self.assertEqual(cm.exception.member_key, EXAMPLE_MEMBER_KEY)
+
+        # Other malformed IDs are unchanged: a 400.
+        for fn in (get_domain_from_id, get_localpart_from_id):
+            with self.assertRaises(SynapseError) as cm:
+                fn("@user")
+            self.assertEqual(cm.exception.code, 400)
+            self.assertNotIsInstance(cm.exception, MemberKeyHasNoDomainError)
+
+        # `is_mine_id` keeps its "False if malformed" contract: clients can put
+        # arbitrary strings where a user ID is expected (a state key, a report).
+        # Room identities go through `is_mine_identity`.
+        self.assertFalse(self.hs.is_mine_id(EXAMPLE_MEMBER_KEY))
+        self.assertFalse(self.hs.is_mine_id("@user"))
 
 
 class UserIDTestCase(unittest.HomeserverTestCase):
@@ -99,6 +125,89 @@ class UserIDTestCase(unittest.HomeserverTestCase):
 
         self.assertTrue(userA == userAagain)
         self.assertTrue(userA != userB)
+
+
+# The example member key from MSC4430.
+EXAMPLE_MEMBER_KEY = "@l8Hft5qXKn1vfHrg3p4-W8gELQVo8N13JkluMfmn2sQ"
+
+
+class MemberKeyTestCase(unittest.TestCase):
+    def test_is_member_key(self) -> None:
+        self.assertTrue(is_member_key(EXAMPLE_MEMBER_KEY))
+        # Anything with a colon is a user ID.
+        self.assertFalse(is_member_key("@alice:example.com"))
+        self.assertFalse(is_member_key("@l8Hft5qXKn1vfHrg3p4-W8gELQVo8N13JkluMfmn2:Q"))
+        # Room IDs and event IDs of the same shape have a different sigil.
+        self.assertFalse(is_member_key("!l8Hft5qXKn1vfHrg3p4-W8gELQVo8N13JkluMfmn2sQ"))
+        self.assertFalse(is_member_key("$l8Hft5qXKn1vfHrg3p4-W8gELQVo8N13JkluMfmn2sQ"))
+        # Wrong length, padding, or the standard (non-urlsafe) alphabet.
+        self.assertFalse(is_member_key(EXAMPLE_MEMBER_KEY[:-1]))
+        self.assertFalse(is_member_key(EXAMPLE_MEMBER_KEY + "A"))
+        self.assertFalse(is_member_key(EXAMPLE_MEMBER_KEY + "="))
+        self.assertFalse(is_member_key(EXAMPLE_MEMBER_KEY + "\n"))
+        self.assertFalse(is_member_key("@l8Hft5qXKn1vfHrg3p4/W8gELQVo8N13JkluMfmn2sQ"))
+        self.assertFalse(is_member_key("@l8Hft5qXKn1vfHrg3p4+W8gELQVo8N13JkluMfmn2sQ"))
+        self.assertFalse(is_member_key(""))
+        self.assertFalse(is_member_key("@"))
+
+    def test_parse(self) -> None:
+        member_key = MemberKey.from_string(EXAMPLE_MEMBER_KEY)
+        self.assertEqual(member_key.key, EXAMPLE_MEMBER_KEY[1:])
+        self.assertEqual(member_key.to_string(), EXAMPLE_MEMBER_KEY)
+        self.assertEqual(str(member_key), EXAMPLE_MEMBER_KEY)
+        self.assertTrue(MemberKey.is_valid(EXAMPLE_MEMBER_KEY))
+
+    def test_parse_rejects_user_ids(self) -> None:
+        with self.assertRaises(SynapseError) as cm:
+            MemberKey.from_string("@alice:example.com")
+        self.assertEqual(cm.exception.code, 400)
+        self.assertFalse(MemberKey.is_valid("@alice:example.com"))
+        # ... and `UserID` rejects member keys.
+        with self.assertRaises(SynapseError):
+            UserID.from_string(EXAMPLE_MEMBER_KEY)
+        self.assertFalse(UserID.is_valid(EXAMPLE_MEMBER_KEY))
+
+    def test_parse_rejects_non_canonical_encoding(self) -> None:
+        """43 base64 characters carry 258 bits; the spare two must be zero so that
+        each public key has exactly one member key string."""
+        # The last character of the example is `Q` (0b010000): its low two bits are
+        # clear. `R` (0b010001) decodes to the same 32 bytes.
+        non_canonical = EXAMPLE_MEMBER_KEY[:-1] + "R"
+        self.assertTrue(is_member_key(non_canonical))
+        with self.assertRaises(SynapseError) as cm:
+            MemberKey.from_string(non_canonical)
+        self.assertEqual(cm.exception.code, 400)
+        self.assertFalse(MemberKey.is_valid(non_canonical))
+
+    def test_from_keys_round_trip(self) -> None:
+        signing_key = generate_signing_key("1")
+        verify_key = get_verify_key(signing_key)
+
+        member_key = MemberKey.from_verify_key(verify_key)
+        self.assertEqual(MemberKey.from_signing_key(signing_key), member_key)
+        self.assertTrue(is_member_key(member_key.to_string()))
+        self.assertEqual(MemberKey.from_string(member_key.to_string()), member_key)
+
+        # `verify_key()` yields the same public key, with the MSC's constant key ID.
+        decoded = member_key.verify_key()
+        self.assertEqual(decoded.encode(), verify_key.encode())
+        self.assertEqual(decoded.alg, "ed25519")
+        self.assertEqual(decoded.version, "1")
+
+    def test_compare(self) -> None:
+        self.assertEqual(
+            MemberKey.from_string(EXAMPLE_MEMBER_KEY),
+            MemberKey.from_string(EXAMPLE_MEMBER_KEY),
+        )
+        self.assertNotEqual(
+            MemberKey.from_string(EXAMPLE_MEMBER_KEY),
+            MemberKey.from_signing_key(generate_signing_key("1")),
+        )
+
+    def test_copy(self) -> None:
+        member_key = MemberKey.from_string(EXAMPLE_MEMBER_KEY)
+        self.assertIs(copy.copy(member_key), member_key)
+        self.assertIs(copy.deepcopy(member_key), member_key)
 
 
 class RoomAliasTestCase(unittest.HomeserverTestCase):

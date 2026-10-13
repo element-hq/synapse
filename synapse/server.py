@@ -98,6 +98,7 @@ from synapse.handlers.federation_event import FederationEventHandler
 from synapse.handlers.identity import IdentityHandler
 from synapse.handlers.initial_sync import InitialSyncHandler
 from synapse.handlers.member_info import MemberInfoHandler
+from synapse.handlers.member_keys import MemberKeyHandler
 from synapse.handlers.message import EventCreationHandler, MessageHandler
 from synapse.handlers.pagination import PaginationHandler
 from synapse.handlers.password_policy import PasswordPolicyHandler
@@ -689,11 +690,26 @@ class HomeServer(metaclass=abc.ABCMeta):
             `True` if the hostname part of the user ID or room alias matches this
             homeserver.
             `False` otherwise, or if the user ID or room alias is malformed.
+
+        Note that this is a question about user IDs: an MSC4430 member key is
+        malformed as far as this method is concerned. Whether a *room identity*
+        is ours is `is_mine_identity`'s question.
         """
         localpart_hostname = user_id.split(":", 1)
         if len(localpart_hostname) < 2:
             return False
         return localpart_hostname[1] == self.hostname
+
+    async def is_mine_identity(self, room_id: str, identity: str) -> bool:
+        """Determines whether a room member identity (a user ID or, in MSC4430
+        rooms, a member key) belongs to this homeserver.
+
+        This is the only sanctioned way to ask "is this ours" about a room identity:
+        member keys are per room and have no domain, so for them the answer is a
+        lookup of the keys we hold rather than a string comparison (and
+        `is_mine_id` would silently answer `False`).
+        """
+        return await self.get_member_key_handler().is_local_identity(room_id, identity)
 
     def is_mine_server_name(self, server_name: str) -> bool:
         """Determines whether a server name refers to this homeserver."""
@@ -872,6 +888,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_member_info_handler(self) -> MemberInfoHandler:
         return MemberInfoHandler(self)
+
+    @cache_in_self
+    def get_member_key_handler(self) -> MemberKeyHandler:
+        return MemberKeyHandler(self)
 
     @cache_in_self
     def get_room_list_handler(self) -> RoomListHandler:

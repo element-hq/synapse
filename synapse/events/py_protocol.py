@@ -96,6 +96,12 @@ class MSC4242Event(EventProtocol):
     prev_state_events: StrCollection
 
 
+class MSC4430Event(MSC4242Event):
+    """Marker protocol for events in MSC4430 (member key) rooms, whose `sender` and
+    `m.room.member` `state_key` are member keys rather than user IDs. Every such room
+    is also an MSC4242 room, so this narrows to the state DAG fields too."""
+
+
 def supports_msc4242_state_dag(event: EventBase) -> TypeIs[MSC4242Event]:
     """Returns true if the given event is in a room that supports state DAGs
     (MSC4242)"""
@@ -110,6 +116,14 @@ def all_supports_msc4242_state_dag(
     supports state DAGs (MSC4242)"""
 
     return all(event.room_version.msc4242_state_dags for event, _ in obj)
+
+
+def supports_msc4430_member_keys(event: EventBase) -> TypeIs[MSC4430Event]:
+    """Returns true if the given event is in a room that uses member keys
+    (MSC4430), i.e. its `sender` (and, for `m.room.member` events, its `state_key`)
+    is a member key rather than a user ID."""
+
+    return event.room_version.msc4430_member_keys
 
 
 def is_out_of_band_state_dag_event(event: EventBase) -> bool:

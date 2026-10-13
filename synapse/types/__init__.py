@@ -20,6 +20,7 @@
 #
 #
 import abc
+import base64
 import logging
 import re
 import string
@@ -51,8 +52,8 @@ import pydantic_core.core_schema
 from immutabledict import immutabledict
 from pydantic import GetCoreSchemaHandler, StrictInt
 from pydantic_core import CoreSchema
-from signedjson.key import decode_verify_key_bytes
-from signedjson.types import VerifyKey
+from signedjson.key import decode_verify_key_bytes, get_verify_key
+from signedjson.types import SigningKey, VerifyKey
 from typing_extensions import Self
 from unpaddedbase64 import decode_base64
 from zope.interface import Interface
@@ -68,7 +69,7 @@ from twisted.internet.interfaces import (
     IReactorUNIX,
 )
 
-from synapse.api.errors import Codes, SynapseError
+from synapse.api.errors import Codes, MemberKeyHasNoDomainError, SynapseError
 from synapse.synapse_rust.types import Requester
 from synapse.util.cancellation import cancellable
 from synapse.util.stringutils import parse_and_validate_server_name
@@ -343,6 +344,8 @@ def create_requester(
 def get_domain_from_id(string: str) -> str:
     idx = string.find(":")
     if idx == -1:
+        if is_member_key(string):
+            raise MemberKeyHasNoDomainError(string)
         raise SynapseError(400, "Invalid ID: %r" % (string,))
     return string[idx + 1 :]
 
@@ -350,6 +353,8 @@ def get_domain_from_id(string: str) -> str:
 def get_localpart_from_id(string: str) -> str:
     idx = string.find(":")
     if idx == -1:
+        if is_member_key(string):
+            raise MemberKeyHasNoDomainError(string, "has no localpart")
         raise SynapseError(400, "Invalid ID: %r" % (string,))
     return string[1:idx]
 
@@ -542,6 +547,111 @@ class EventID(DomainSpecificString):
     Room versions 3 and above are not supported by this grammar."""
 
     SIGIL = "$"
+
+
+# MSC4430 member keys: `@` followed by the unpadded urlsafe base64 encoding of a 32
+# byte Ed25519 public key, which is always exactly 43 characters. Anything containing
+# a `:` is a user ID, so the two can be told apart without knowing the room version.
+MEMBER_KEY_PATTERN = re.compile(r"^@[A-Za-z0-9_-]{43}$")
+
+
+def is_member_key(s: str) -> bool:
+    """Whether the given identity is shaped like an MSC4430 member key.
+
+    Purely syntactic (a regex match), so cheap enough for hot paths. It accepts
+    non-canonical base64 encodings; use `MemberKey.from_string` where the key
+    material matters.
+    """
+    return MEMBER_KEY_PATTERN.fullmatch(s) is not None
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True, repr=False)
+class MemberKey:
+    """An MSC4430 member key: the identity of a room member in a room version with
+    `msc4430_member_keys`.
+
+    Member keys look like `@l8Hft5qXKn1vfHrg3p4-W8gELQVo8N13JkluMfmn2sQ`: the `@`
+    sigil followed by the unpadded urlsafe base64 encoding of an Ed25519 public key.
+    They are per-user *and* per-room, so one user has a different member key in every
+    room, and they have no domain or localpart: the user ID (if any) behind a member
+    key is a lookup, see `synapse.handlers.member_keys`.
+
+    Only canonical encodings are accepted, so that each public key has exactly one
+    member key string.
+
+    Has the fields:
+        'key': the base64 public key, without the leading sigil
+    """
+
+    SIGIL: ClassVar[str] = "@"
+
+    key: str
+
+    @classmethod
+    def from_string(cls, s: str) -> "MemberKey":
+        """Parse the string given by 's' into a `MemberKey`, checking that it is the
+        canonical encoding of a 32 byte public key."""
+        if not is_member_key(s):
+            raise SynapseError(
+                400,
+                "Expected %s string of the form '%s<43 chars of urlsafe base64>'"
+                % (cls.__name__, cls.SIGIL),
+                Codes.INVALID_PARAM,
+            )
+        key = s[1:]
+        # 43 characters of the urlsafe alphabet always decode to 32 bytes, but the two
+        # spare bits of the last character must be zero for the encoding to be
+        # canonical.
+        raw = base64.urlsafe_b64decode(key + "=")
+        if _encode_urlsafe_base64_unpadded(raw) != key:
+            raise SynapseError(
+                400, "Member key is not canonical base64", Codes.INVALID_PARAM
+            )
+        return cls(key=key)
+
+    @classmethod
+    def from_verify_key(cls, verify_key: VerifyKey) -> "MemberKey":
+        """The member key for the given Ed25519 public key."""
+        return cls(key=_encode_urlsafe_base64_unpadded(verify_key.encode()))
+
+    @classmethod
+    def from_signing_key(cls, signing_key: SigningKey) -> "MemberKey":
+        """The member key for the given Ed25519 private key."""
+        return cls.from_verify_key(get_verify_key(signing_key))
+
+    @classmethod
+    def is_valid(cls, s: str) -> bool:
+        """Parses the input string and attempts to ensure it is valid."""
+        try:
+            cls.from_string(s)
+            return True
+        except SynapseError:
+            return False
+
+    def to_string(self) -> str:
+        """Return a string encoding the fields of the structure object."""
+        return self.SIGIL + self.key
+
+    def verify_key(self) -> VerifyKey:
+        """The `VerifyKey` which verifies signatures made by this member key, with
+        the MSC's constant key ID `ed25519:1`."""
+        return decode_verify_key_bytes(
+            "ed25519:1", base64.urlsafe_b64decode(self.key + "=")
+        )
+
+    # Because this is a frozen class, it is deeply immutable.
+    def __copy__(self) -> "MemberKey":
+        return self
+
+    def __deepcopy__(self, memo: dict[str, object]) -> "MemberKey":
+        return self
+
+    __repr__ = to_string
+    __str__ = to_string
+
+
+def _encode_urlsafe_base64_unpadded(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
 MXID_LOCALPART_ALLOWED_CHARACTERS = set(

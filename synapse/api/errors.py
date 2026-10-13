@@ -384,6 +384,56 @@ class InteractiveAuthIncompleteError(Exception):
         self.result = result
 
 
+class MemberKeyHasNoDomainError(SynapseError):
+    """An MSC4430 member key reached code that expects a `@localpart:domain` user ID.
+
+    Member keys (`@<43 chars of urlsafe base64>`) identify room members in room
+    versions with `msc4430_member_keys`. They have no domain and no localpart: the
+    user (if any) behind one has to be looked up, see `synapse.handlers.member_keys`.
+    Code which parses a member key as a user ID has not been made member-key aware,
+    which is a server bug, hence the 500 (rather than the 400 that a malformed user
+    ID gets). The distinct type and name are deliberate so that such misses are
+    loud and greppable instead of degrading into "Invalid ID" or `is_mine_id() ==
+    False`.
+    """
+
+    def __init__(self, member_key: str, what: str = "has no domain"):
+        msg = "MSC4430 member key %r %s: this code path is not member-key aware" % (
+            member_key,
+            what,
+        )
+        super().__init__(500, msg, Codes.UNKNOWN)
+        self.member_key = member_key
+        _log_server_bug(msg)
+
+
+def _log_server_bug(msg: str) -> None:
+    """Log, with the stack, at the point a server bug is detected.
+
+    `SynapseError`s are logged at INFO without a traceback when they reach the HTTP
+    layer, and may be caught and handled before that; neither identifies the code
+    path that raised. The MSC4430 errors below exist to find such code paths, so
+    they log themselves at ERROR with the stack of the raise site.
+    """
+    logger.error(msg, stack_info=True)
+
+
+class MemberKeySigningRefusedError(SynapseError):
+    """We were asked to sign an event in an MSC4430 member key room in a way the
+    MSC does not allow (as a key that is not the event's sender, co-signing linkage
+    information that is not ours, ...). The signers for an event are chosen by the
+    server, so this is a server bug, hence the 500. See
+    `synapse.crypto.event_signing.add_hashes_and_signatures_from_signers`.
+    """
+
+    def __init__(self, entity: str, reason: str):
+        msg = "Refusing to sign event as %r: %s" % (entity, reason)
+        super().__init__(500, msg, Codes.UNKNOWN)
+        self.entity = entity
+        self.reason = reason
+        _log_server_bug(msg)
+
+
 class UnrecognizedRequestError(SynapseError):
     """An error indicating we don't understand the request you're trying to make"""
 

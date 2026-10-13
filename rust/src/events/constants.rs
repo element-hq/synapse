@@ -123,6 +123,12 @@ pub mod membership_field {
     pub const THIRD_PARTY_INVITE: &str = "third_party_invite";
     /// Membership event field: signed
     pub const SIGNED: &str = "signed";
+    /// Membership event field: domain (MSC4430 linkage information; routing
+    /// information, so it survives redaction)
+    pub const DOMAIN: &str = "domain";
+    /// Membership event field: localpart (MSC4430 linkage information; redactable
+    /// for GDPR erasure and moderation)
+    pub const LOCALPART: &str = "localpart";
 }
 
 /// Create Event Fields

@@ -171,9 +171,18 @@ class ExperimentalConfig(Config):
             # Enable the room version
             KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC4242v12)
 
+        # MSC4430: Member keys. Clients learn which user is behind a member key
+        # through MSC4428's `member_info`, so enabling MSC4430 implies MSC4428.
+        #
+        # The room version (`RoomVersions.MSC4430v12`) is deliberately not added to
+        # `KNOWN_ROOM_VERSIONS` yet: today the flag only advertises the feature.
+        self.msc4430_enabled: bool = experimental.get("msc4430_enabled", False)
+
         # MSC4428: Stable identifiers for room members. Adds
         # `unsigned.org.matrix.msc4428.stable_id` to every event served to clients.
-        self.msc4428_enabled: bool = experimental.get("msc4428_enabled", False)
+        self.msc4428_enabled: bool = (
+            experimental.get("msc4428_enabled", False) or self.msc4430_enabled
+        )
 
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)

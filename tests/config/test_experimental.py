@@ -15,6 +15,7 @@
 import yaml
 from parameterized import parameterized
 
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config._base import RootConfig
 from synapse.config.experimental import ExperimentalConfig
 from synapse.config.homeserver import HomeServerConfig
@@ -56,9 +57,44 @@ class ExperimentalConfigTestCase(unittest.TestCase):
 
         _read_config(config_values)
 
+    def test_msc4430_implies_msc4428(self) -> None:
+        """Clients learn the user behind a member key through MSC4428's
+        `member_info`, so MSC4430 cannot be enabled without it."""
+        config = _read_config({"experimental_features": {"msc4430_enabled": True}})
+        self.assertTrue(config.msc4430_enabled)
+        self.assertTrue(config.msc4428_enabled)
 
-def _read_config(config_values: JsonDict) -> None:
-    ExperimentalConfig(RootConfig()).read_config(
+        config = _read_config({"experimental_features": {"msc4428_enabled": True}})
+        self.assertFalse(config.msc4430_enabled)
+        self.assertTrue(config.msc4428_enabled)
+
+        # An explicit `false` for MSC4428 is overridden, not rejected.
+        config = _read_config(
+            {
+                "experimental_features": {
+                    "msc4428_enabled": False,
+                    "msc4430_enabled": True,
+                }
+            }
+        )
+        self.assertTrue(config.msc4430_enabled)
+        self.assertTrue(config.msc4428_enabled)
+
+        config = _read_config({"experimental_features": {}})
+        self.assertFalse(config.msc4430_enabled)
+        self.assertFalse(config.msc4428_enabled)
+
+    def test_msc4430_room_version_not_registered(self) -> None:
+        """The member key room version is defined but cannot yet be used: enabling
+        the flag must not add it to the known room versions."""
+        _read_config({"experimental_features": {"msc4430_enabled": True}})
+        self.assertNotIn(RoomVersions.MSC4430v12.identifier, KNOWN_ROOM_VERSIONS)
+        self.assertNotIn("org.matrix.msc4430.12", KNOWN_ROOM_VERSIONS)
+
+
+def _read_config(config_values: JsonDict) -> ExperimentalConfig:
+    config = ExperimentalConfig(RootConfig())
+    config.read_config(
         yaml.safe_load(
             HomeServerConfig().generate_config(
                 config_dir_path="CONFDIR",
@@ -69,3 +105,4 @@ def _read_config(config_values: JsonDict) -> None:
         | config_values,
         allow_secrets_in_config=False,
     )
+    return config
