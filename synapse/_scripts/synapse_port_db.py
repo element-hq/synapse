@@ -117,6 +117,7 @@ BOOLEAN_COLUMNS = {
     "event_edges": ["is_state"],
     "events": ["processed", "outlier", "contains_url"],
     "local_media_repository": ["safe_from_quarantine", "authenticated"],
+    "msc4430_member_links": ["verified"],
     "per_user_experimental_features": ["enabled"],
     "presence_list": ["accepted"],
     "presence_stream": ["currently_active"],

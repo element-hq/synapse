@@ -768,8 +768,9 @@ IMMUTABLE_VALUE_TYPES = {
 IMMUTABLE_CUSTOM_TYPES = {
     "synapse.synapse_rust.acl.ServerAclEvaluator",
     "synapse.synapse_rust.push.FilteredPushRules",
-    # This is technically not immutable, but close enough.
+    # These are technically not immutable, but close enough.
     "signedjson.types.VerifyKey",
+    "signedjson.types.SigningKey",
     "synapse.types.StrCollection",
 }
 

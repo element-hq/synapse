@@ -178,6 +178,7 @@ Changes in SCHEMA_VERSION = 94
     - MSC4429/MSC4262: Track updates to user profile fields via a new stream.
     - Add an `inserted_ts` column to the `state_groups_persisting` table.
     - MSC4428: Add the `msc4428_member_info_changes` stream table.
+    - MSC4430: Add the `msc4430_member_keys` and `msc4430_member_links` tables.
 """
 
 

@@ -14,8 +14,9 @@
 """Tests for the MSC4430 identity module (`synapse.handlers.member_keys`)."""
 
 from prometheus_client import REGISTRY
+from signedjson.key import generate_signing_key
 
-from synapse.api.errors import MemberKeyHasNoDomainError
+from synapse.api.constants import MemberKeys
 from synapse.handlers import member_keys
 from synapse.handlers.member_keys import record_unsupported_path
 from synapse.metrics import SERVER_NAME_LABEL
@@ -35,15 +36,26 @@ class IsMineIdentityTestCase(unittest.HomeserverTestCase):
             self.get_success(self.hs.is_mine_identity("!room:test", "@bob:other"))
         )
 
-    def test_member_key_is_loud(self) -> None:
-        """Nothing records which member keys are ours yet, so asking must fail
-        rather than answer `False`."""
-        failure = self.get_failure(
-            self.hs.is_mine_identity("!room:test", EXAMPLE_MEMBER_KEY),
-            MemberKeyHasNoDomainError,
+    def test_member_keys(self) -> None:
+        """A member key is ours in the room we hold it for, and nowhere else."""
+        store = self.hs.get_datastores().main
+        self.assertFalse(
+            self.get_success(self.hs.is_mine_identity("!room:test", EXAMPLE_MEMBER_KEY))
         )
-        self.assertEqual(failure.value.code, 500)
-        self.assertEqual(failure.value.member_key, EXAMPLE_MEMBER_KEY)
+
+        ours = self.get_success(
+            store.create_local_member_key(
+                "!room:test",
+                "@alice:test",
+                generate_signing_key(MemberKeys.KEY_VERSION),
+            )
+        )
+        self.assertTrue(
+            self.get_success(self.hs.is_mine_identity("!room:test", ours.member_key))
+        )
+        self.assertFalse(
+            self.get_success(self.hs.is_mine_identity("!other:test", ours.member_key))
+        )
 
 
 class RecordUnsupportedPathTestCase(unittest.TestCase):

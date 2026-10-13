@@ -75,6 +75,10 @@ purge_room_tables_with_room_id_column = (
     # so must be deleted first.
     "msc4242_state_dag_forward_extremities",
     "msc4242_state_dag_edges",
+    # MSC4430: what we learned about other servers' member keys in the room. The
+    # keys we hold for our own users (`msc4430_member_keys`) are deliberately
+    # kept: a user's key in a room must not change if the room is re-joined.
+    "msc4430_member_links",
     "events",
     "federation_inbound_events_staging",
     "receipts_graph",

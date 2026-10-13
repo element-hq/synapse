@@ -33,7 +33,6 @@ from typing import TYPE_CHECKING
 
 from prometheus_client import Counter
 
-from synapse.api.errors import MemberKeyHasNoDomainError
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import is_member_key
 
@@ -85,19 +84,18 @@ class MemberKeyHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
+        self._store = hs.get_datastores().main
         self._is_mine_id = hs.is_mine_id
 
     async def is_local_identity(self, room_id: str, identity: str) -> bool:
         """Whether the given room member identity belongs to this server.
 
         For a user ID this is `is_mine_id`. For a member key it is whether we hold
-        the signing key for it in this room, which is not yet stored anywhere, so
-        for now such a call is a loud failure rather than a wrong `False`.
+        the signing key for it in this room: a key of ours from another room is
+        not ours here.
         """
         if not is_member_key(identity):
             return self._is_mine_id(identity)
 
-        raise MemberKeyHasNoDomainError(
-            identity,
-            "cannot be looked up yet (no member key store, room %s)" % (room_id,),
-        )
+        local_key = await self._store.get_local_member_key_by_key(room_id, identity)
+        return local_key is not None

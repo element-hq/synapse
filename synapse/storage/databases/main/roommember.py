@@ -47,6 +47,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
+from synapse.storage.databases.main.member_keys import MemberKeysWorkerStore
 from synapse.storage.databases.main.stream import _filter_results_by_stream
 from synapse.storage.engines import Sqlite3Engine
 from synapse.storage.roommember import (
@@ -94,7 +95,7 @@ class EventIdMembership:
     membership: str
 
 
-class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
+class RoomMemberWorkerStore(EventsWorkerStore, MemberKeysWorkerStore):
     def __init__(
         self,
         database: DatabasePool,
