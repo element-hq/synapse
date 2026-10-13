@@ -948,6 +948,7 @@ class StateResolutionHandler:
                 result = "unsupported"
             elif dict(state) == rust[0]:
                 result = "match"
+                logger.debug("Rust state res agrees with Python for %s", room_id)
             else:
                 result = "mismatch"
                 _log_state_diff(room_id, state, rust[0])
