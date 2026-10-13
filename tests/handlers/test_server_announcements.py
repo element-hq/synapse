@@ -11,7 +11,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import attr
 from parameterized import parameterized
@@ -29,6 +29,7 @@ from synapse.rest.client import login, register, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.unittest import override_config
@@ -408,6 +409,39 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
             self.get_success(self.store.get_server_announcement_room("updates")),
             room_id,
         )
+
+    def test_start_retries_until_writer_is_available(self) -> None:
+        with patch.object(
+            self.handler,
+            "reconcile_rooms",
+            side_effect=[RuntimeError("writer starting"), None],
+        ) as reconcile:
+            self.handler.start()
+            self.pump()
+            self.assertEqual(reconcile.call_count, 1)
+            self.reactor.advance(60)
+            self.pump()
+            self.assertEqual(reconcile.call_count, 2)
+            self.reactor.advance(60)
+            self.pump()
+            self.assertEqual(reconcile.call_count, 2)
+
+    def test_retries_stop_after_five_attempts(self) -> None:
+        with (
+            patch.object(
+                self.handler, "reconcile_rooms", side_effect=RuntimeError("unavailable")
+            ) as reconcile,
+            patch.object(self.hs.get_clock(), "sleep") as sleep,
+            patch("synapse.handlers.server_announcements.logger") as logger,
+        ):
+            self.get_success(self.handler._reconcile_with_retries())
+            self.assertEqual(reconcile.await_count, 5)
+            self.assertEqual(sleep.await_args_list, [call(Duration(seconds=60))] * 4)
+            self.assertEqual(logger.exception.call_count, 5)
+            for attempt, log_call in enumerate(logger.exception.call_args_list, 1):
+                self.assertEqual(log_call.args[1:], (attempt, 5))
+                self.assertIn("all workers have not yet started", log_call.args[0])
+            logger.error.assert_called_once()
 
     def test_reconcile_does_nothing_when_disabled(self) -> None:
         self.config.rooms = []

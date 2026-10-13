@@ -735,7 +735,6 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
     # traffic or announcing readiness. This check does not depend on event writers.
     if not hs.config.worker.worker_app and hs.config.serverannouncements.rooms:
         await hs.get_server_announcements_handler().validate_configuration()
-        await hs.get_server_announcements_handler().reconcile_rooms()
 
     # It is now safe to start your Synapse.
     hs.start_listening()
@@ -755,6 +754,11 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
 
     setup_sentry(hs)
     setup_sdnotify(hs)
+
+    # Workers may wait for the main process's readiness notification before
+    # starting, so do not await reconciliation (which may need an event writer).
+    if not hs.config.worker.worker_app and hs.config.serverannouncements.rooms:
+        hs.get_server_announcements_handler().start()
 
     # Register background tasks required by this server. This must be done
     # somewhat manually due to the background tasks not being registered

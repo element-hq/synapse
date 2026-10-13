@@ -20,6 +20,7 @@ from synapse.config import ConfigError
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.types.state import StateFilter
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -42,6 +43,43 @@ class ServerAnnouncementsHandler:
         self._creator = self._config.server_announcements_mxid
         self._requester = create_requester(
             self._creator, authenticated_entity=hs.hostname
+        )
+
+    def start(self) -> None:
+        """Start after readiness so event writers can finish starting up too."""
+        self._hs.run_as_background_process(
+            "reconcile_server_announcements", self._reconcile_with_retries
+        )
+
+    async def _reconcile_with_retries(self) -> None:
+        # Event writers may start only after the main process announces readiness.
+        # Also retry transient failures rather than leaving partially configured
+        # rooms until the next homeserver restart. Reconciliation is idempotent.
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            logger.info(
+                "Reconciling server announcement rooms (attempt %s of %s)",
+                attempt,
+                max_attempts,
+            )
+            try:
+                await self.reconcile_rooms()
+                return
+            except Exception:
+                logger.exception(
+                    "Server announcement reconciliation failed (attempt %s of %s); "
+                    "this can sometimes happen if all workers have not yet started",
+                    attempt,
+                    max_attempts,
+                )
+            if attempt < max_attempts:
+                logger.info("Retrying server announcement reconciliation in 60 seconds")
+                await self._hs.get_clock().sleep(Duration(seconds=60))
+
+        logger.error(
+            "Server announcement reconciliation stopped after %s failed attempts; "
+            "check the errors above and restart Synapse to try again",
+            max_attempts,
         )
 
     async def validate_configuration(self) -> None:
