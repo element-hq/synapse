@@ -56,14 +56,19 @@ trial_sqlite_tests = [
 if not IS_PR:
     # Otherwise, check all supported Python versions.
     #
-    # Avoiding running all of these versions on every PR saves on CI time.
     trial_sqlite_tests.extend(
         {
             "python-version": version,
             "database": "sqlite",
             "extras": "all",
         }
-        for version in ("3.11", "3.12", "3.13")
+        for version in (
+            "3.11",
+            "3.12",
+            "3.13",
+            # Avoiding running all of these versions on every PR saves on CI time.
+            # "3.14",
+        )
     )
 
 # Only test postgres against the earliest and latest Python versions that we
