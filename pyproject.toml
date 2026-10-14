@@ -199,7 +199,8 @@ all = [
     # redis
     "txredisapi>=1.4.12,<1.6.0", "hiredis>=0.3",
     # cache-memory
-    # 1.0 added support for python 3.10, our current minimum supported python version
+    # 1.0 added support for python 3.10 (previous minimum Python version but we've since
+    # moved past that and haven't had another reason to update this)
     "pympler>=1.0",
     # omitted:
     #   - test: it's useful to have this separate from dev deps in the olddeps job
