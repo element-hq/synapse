@@ -653,7 +653,7 @@ impl EventInternalMetadata {
         Ok(self.read_inner()?.is_outlier())
     }
 
-    fn is_out_of_band_membership(&self) -> PyResult<bool> {
+    pub fn is_out_of_band_membership(&self) -> PyResult<bool> {
         Ok(self.read_inner()?.is_out_of_band_membership())
     }
 

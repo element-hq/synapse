@@ -12,10 +12,10 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-//! The types that cross the Python boundary for one room's entry: the
-//! request-wide [`SyncRequest`], the per-room [`RoomSyncInput`] and the
-//! [`RoomSyncResult`] Python turns into a `JoinedSyncResult` or
-//! `ArchivedSyncResult`.
+//! The types that cross the Python boundary for a room's entry: the
+//! request-wide [`SyncRequest`], and the [`RoomSyncResult`] Python turns
+//! into a `JoinedSyncResult` or `ArchivedSyncResult`. A room's input,
+//! [`RoomSyncInputData`], is built in Rust by [`crate::sync::rooms`].
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -24,7 +24,7 @@ use pyo3::{
     prelude::*,
     types::{PyDict, PyList, PyTuple},
 };
-use pythonize::{depythonize, pythonize};
+use pythonize::pythonize;
 use serde_json::Value;
 
 use crate::events::Event;
@@ -103,6 +103,14 @@ pub enum RoomType {
     Archived,
 }
 
+/// The `rtype` of a `RoomSyncResultBuilder`.
+pub fn rtype_str(rtype: RoomType) -> &'static str {
+    match rtype {
+        RoomType::Joined => "joined",
+        RoomType::Archived => "archived",
+    }
+}
+
 /// One room's `RoomSyncResultBuilder`, plus what `handle_room_entries`
 /// passes alongside it.
 pub struct RoomSyncInputData {
@@ -124,84 +132,6 @@ pub struct RoomSyncInputData {
     pub account_data: Vec<(String, Value)>,
     pub sticky_event_ids: Vec<Arc<str>>,
     pub always_include: bool,
-    /// `get_room_max_token()` when Python dispatched the room.
-    pub room_max_token: RoomStreamToken,
-}
-
-/// See [`RoomSyncInputData`].
-#[pyclass(frozen, skip_from_py_object)]
-pub struct RoomSyncInput {
-    pub(crate) data: Arc<RoomSyncInputData>,
-}
-
-#[pymethods]
-impl RoomSyncInput {
-    #[new]
-    #[pyo3(signature = (*, room_id, rtype, events, newly_joined, full_state, since, upto, end, out_of_band, ephemeral, tags, account_data, sticky_event_ids, always_include, room_max_token))]
-    #[allow(clippy::too_many_arguments)]
-    fn py_new(
-        room_id: &str,
-        rtype: &str,
-        events: Option<Vec<Bound<'_, Event>>>,
-        newly_joined: bool,
-        full_state: bool,
-        since: Option<RoomStreamToken>,
-        upto: RoomStreamToken,
-        end: RoomStreamToken,
-        out_of_band: bool,
-        ephemeral: Vec<Bound<'_, PyAny>>,
-        tags: Option<Bound<'_, PyAny>>,
-        account_data: &Bound<'_, PyAny>,
-        sticky_event_ids: Vec<String>,
-        always_include: bool,
-        room_max_token: RoomStreamToken,
-    ) -> PyResult<Self> {
-        let rtype = match rtype {
-            "joined" => RoomType::Joined,
-            "archived" => RoomType::Archived,
-            other => {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Unrecognized rtype: {other:?}"
-                )))
-            }
-        };
-        let py = account_data.py();
-        let mut account_data_items = Vec::new();
-        for item in account_data
-            .call_method0(pyo3::intern!(py, "items"))?
-            .try_iter()?
-        {
-            let (account_data_type, content): (String, Bound<'_, PyAny>) = item?.extract()?;
-            account_data_items.push((account_data_type, depythonize(&content)?));
-        }
-        Ok(RoomSyncInput {
-            data: Arc::new(RoomSyncInputData {
-                room_id: Arc::from(room_id),
-                rtype,
-                events: events.map(|events| {
-                    events
-                        .iter()
-                        .map(|event| Arc::new(event.get().shallow_clone()))
-                        .collect()
-                }),
-                newly_joined,
-                full_state,
-                since,
-                upto,
-                end,
-                out_of_band,
-                ephemeral: ephemeral
-                    .iter()
-                    .map(|event| depythonize(event))
-                    .collect::<Result<_, _>>()?,
-                tags: tags.map(|tags| depythonize(&tags)).transpose()?,
-                account_data: account_data_items,
-                sticky_event_ids: sticky_event_ids.into_iter().map(Arc::from).collect(),
-                always_include,
-                room_max_token,
-            }),
-        })
-    }
 }
 
 /// Where the timeline's `prev_batch` token comes from: the room's upto
@@ -268,10 +198,7 @@ impl RoomSyncResult {
 
     #[getter]
     fn rtype(&self) -> &'static str {
-        match self.data.rtype {
-            RoomType::Joined => "joined",
-            RoomType::Archived => "archived",
-        }
+        rtype_str(self.data.rtype)
     }
 
     /// The timeline as `(event, membership)` pairs, oldest first.

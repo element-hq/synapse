@@ -215,10 +215,12 @@ async fn state_for_full_sync(
     if request.use_state_after {
         if joined {
             // The current state, rolled back to the end of the timeline.
+            // The deltas are read with no upper bound, after the current
+            // state, so that they cover every change the current state may
+            // hold. Rolling back a change made after it was read is still
+            // right: it is after the end of the timeline too.
             let mut state_ids = reader.current_state_ids(room_id, &state_filter).await?;
-            let deltas = reader
-                .state_deltas(room_id, Some(&room.end), Some(&room.room_max_token))
-                .await?;
+            let deltas = reader.state_deltas(room_id, Some(&room.end), None).await?;
             if !deltas.is_empty() {
                 roll_back_state(&mut state_ids, &to_deltas(deltas));
             }

@@ -987,6 +987,30 @@ impl<'a> SyncReader<'a> {
             .await
     }
 
+    /// `get_position_for_event`: where the event was persisted, or `None`
+    /// if it is not in the database.
+    pub async fn event_position(
+        &self,
+        event_id: &str,
+    ) -> anyhow::Result<Option<PersistedEventPosition>> {
+        let rows = self
+            .query_one_shot(
+                "SELECT instance_name, stream_ordering FROM events WHERE event_id = $1",
+                &[&event_id],
+            )
+            .await?;
+        let Some(row) = rows.first() else {
+            return Ok(None);
+        };
+        let instance_name: Option<String> = row.try_get(0)?;
+        let stream: i64 = row.try_get(1)?;
+        Ok(Some(PersistedEventPosition {
+            // A null instance name is a row from before sharded persisters.
+            instance_name: Arc::from(instance_name.as_deref().unwrap_or("master")),
+            stream,
+        }))
+    }
+
     /// `get_last_event_pos_in_room_before_stream_ordering`: the last event
     /// in the room at or before `end_token`, and where it was persisted.
     pub async fn last_event_before(

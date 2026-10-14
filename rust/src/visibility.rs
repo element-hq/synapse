@@ -100,7 +100,7 @@ pub struct FilteredEvent {
 }
 
 /// The `membership` of a membership event's content.
-fn membership_of(event: &Event) -> Option<&str> {
+pub(crate) fn membership_of(event: &Event) -> Option<&str> {
     event
         .content()
         .get_field(MEMBERSHIP)

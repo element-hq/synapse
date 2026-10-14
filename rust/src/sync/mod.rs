@@ -16,9 +16,9 @@
 //!
 //! [`SyncHandler`] is the Python entry point, used by
 //! `synapse.handlers.sync.SyncHandler` when `rust_sync` is on. It computes
-//! the per-room part of a sync response, one room at a time, and raises
-//! [`RustSyncFallback`] for a room it cannot handle, which Python then
-//! computes itself.
+//! the `rooms` section of a sync response ([`rooms`]): which rooms to
+//! report, then each joined or archived room's entry ([`room`]). It leaves
+//! a room it cannot handle to Python, which computes it itself.
 //!
 //! The pure parts of the per-room loop are each a port of the Python they
 //! are named after, checked against it by the tests in `tests/sync/`:
@@ -28,22 +28,14 @@
 //! [`crate::visibility`] and [`crate::types::stream_token`] are shared with
 //! later ports.
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use pyo3::{
-    create_exception,
-    exceptions::{PyException, PyRuntimeError},
-    intern,
-    prelude::*,
-    types::PyModule,
-};
+use futures::future::BoxFuture;
+use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyModule};
 
 use crate::caches::lock_ignoring_poison;
-use crate::clock::Clock;
 use crate::config::SynapseHomeServerConfig;
-use crate::database::postgres::pool::PyConnectionPool;
+use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
 use crate::deferred::{create_deferred_with, OnCancel};
 use crate::runtime::RustRuntime;
 use crate::storage::store::Store;
@@ -56,22 +48,14 @@ pub mod ll_members;
 pub mod request;
 pub mod room;
 pub mod room_state;
+pub mod rooms;
 pub mod state_delta;
 pub mod summary;
 pub mod timeline;
 
-use client_events::ClientFilterContext;
 use ll_members::LazyLoadedMembersCaches;
-use request::{RoomSyncInput, RoomSyncResult, SyncRequest};
-use room::{Fallback, RoomContext};
-
-create_exception!(
-    synapse.synapse_rust.sync,
-    RustSyncFallback,
-    PyException,
-    "The Rust sync handler cannot compute this room's entry. Compute it with \
-     the Python implementation."
-);
+use request::{RoomSyncResult, SyncRequest};
+use rooms::{RoomChanges, RoomsInput, RoomsResult};
 
 /// Computes sync responses with the Rust implementation, reading the
 /// database through the native Postgres driver.
@@ -88,9 +72,6 @@ pub struct SyncHandler {
     /// them.
     ll_members: Arc<Mutex<LazyLoadedMembersCaches>>,
 }
-
-/// One room's entry, started. See [`SyncHandler::start_room`].
-type RoomFuture = Pin<Box<dyn Future<Output = PyResult<Option<RoomSyncResult>>> + Send>>;
 
 impl SyncHandler {
     pub fn new(
@@ -115,60 +96,97 @@ impl SyncHandler {
         &self.store
     }
 
-    /// Start computing `room`'s entry: read what it needs from Python, and
-    /// return the future that computes it off the GIL.
-    fn start_room(
-        &self,
-        py: Python<'_>,
-        request: &Bound<'_, SyncRequest>,
-        room: &Bound<'_, RoomSyncInput>,
-    ) -> PyResult<RoomFuture> {
+    /// The connection pool to read through, or an error if it is closed.
+    fn pool(&self, py: Python<'_>) -> PyResult<ConnectionPool> {
         let pool = self.db_pool.bind(py).getattr(intern!(py, "_pool"))?;
         if pool.is_none() {
             return Err(PyRuntimeError::new_err("the database pool is closed"));
         }
-        let pool = pool.cast::<PyConnectionPool>()?.get().pool.clone();
+        Ok(pool.cast::<PyConnectionPool>()?.get().pool.clone())
+    }
 
+    /// Start working out the request's room changes: read what it needs
+    /// from Python, and return the future that does it off the GIL.
+    fn start_room_changes(
+        &self,
+        py: Python<'_>,
+        request: &Bound<'_, SyncRequest>,
+        input: &Bound<'_, RoomsInput>,
+    ) -> PyResult<BoxFuture<'static, PyResult<RoomChanges>>> {
+        let pool = self.pool(py)?;
         let request = Arc::clone(&request.get().data);
-        let room = Arc::clone(&room.get().data);
+        let input = input.get().take()?;
         let store = Arc::clone(&self.store);
-        let ll_members = Arc::clone(&self.ll_members);
-
         Ok(Box::pin(async move {
             let reader = store.reader(pool);
-            let context = RoomContext {
-                reader: &reader,
-                request: &request,
-                client_filter: ClientFilterContext {
-                    user_id: Arc::clone(&request.user_id),
-                    ignored_users: Arc::clone(&request.ignored_users),
-                    admin_policy: request.admin_policy,
-                    msc4354_enabled: request.msc4354_enabled,
-                },
-                ll_members: &ll_members,
-                ll_pending: Mutex::default(),
-                clock: Clock::new(),
-            };
-            match room::generate_room_entry(&context, &room).await {
-                Ok(result) => {
-                    context.commit_ll_members();
-                    Ok(result.map(|data| RoomSyncResult { data }))
-                }
-                Err(err) => Err(room_error_to_py(err, &room.room_id)),
-            }
+            let data = rooms::room_changes(&reader, &request, input)
+                .await
+                .map_err(anyhow_to_py)?;
+            Ok(RoomChanges {
+                data: Arc::new(data),
+            })
         }))
+    }
+
+    /// Start computing the entries of `changes`' rooms: read each room's
+    /// extras from Python, and return the future that computes them off the
+    /// GIL.
+    #[allow(clippy::too_many_arguments)]
+    fn start_room_entries(
+        &self,
+        py: Python<'_>,
+        request: &Bound<'_, SyncRequest>,
+        changes: &Bound<'_, RoomChanges>,
+        ephemeral_by_room: &Bound<'_, PyAny>,
+        tags_by_room: &Bound<'_, PyAny>,
+        account_data_by_room: &Bound<'_, PyAny>,
+        sticky_by_room: &Bound<'_, PyAny>,
+    ) -> PyResult<BoxFuture<'static, PyResult<RoomsResult>>> {
+        let pool = self.pool(py)?;
+        let request = Arc::clone(&request.get().data);
+        let changes = Arc::clone(&changes.get().data);
+        let rooms = changes
+            .entries
+            .iter()
+            .map(|plan| {
+                let extras = rooms::RoomExtras::from_py(
+                    &plan.room_id,
+                    ephemeral_by_room,
+                    tags_by_room,
+                    account_data_by_room,
+                    sticky_by_room,
+                )?;
+                Ok(rooms::room_input(&changes, plan, extras))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let store = Arc::clone(&self.store);
+        let ll_members = Arc::clone(&self.ll_members);
+        Ok(Box::pin(async move {
+            let reader = store.reader(pool);
+            let outcomes =
+                rooms::generate_room_entries(&reader, &request, &ll_members, rooms).await;
+            Ok(RoomsResult::new(&changes, outcomes))
+        }))
+    }
+
+    /// Run `future` to completion on the runtime, releasing the GIL. For the
+    /// `_blocking` entry points.
+    fn block_on<T: Send>(
+        &self,
+        py: Python<'_>,
+        future: BoxFuture<'static, PyResult<T>>,
+    ) -> PyResult<T> {
+        let handle = self.runtime.tokio_handle()?;
+        py.detach(|| handle.block_on(future))
     }
 }
 
-/// A failed room as Python sees it: [`RustSyncFallback`] for a room it
-/// should compute itself, an error otherwise.
-fn room_error_to_py(err: anyhow::Error, room_id: &str) -> PyErr {
-    match err.downcast::<Fallback>() {
-        Ok(fallback) => RustSyncFallback::new_err(fallback.0),
-        Err(err) => match err.downcast::<PyErr>() {
-            Ok(err) => err,
-            Err(err) => PyRuntimeError::new_err(format!("syncing room {room_id}: {err:#}")),
-        },
+/// An error as Python sees it: the Python exception it wraps, or a
+/// `RuntimeError`.
+fn anyhow_to_py(err: anyhow::Error) -> PyErr {
+    match err.downcast::<PyErr>() {
+        Ok(err) => err,
+        Err(err) => PyRuntimeError::new_err(format!("{err:#}")),
     }
 }
 
@@ -225,34 +243,83 @@ impl SyncHandler {
             .mark_sent(member, event_id, &next_batch);
     }
 
-    /// `_generate_room_entry` for one joined or archived room.
-    ///
-    /// Returns a deferred resolving to a `RoomSyncResult`, or to `None`
-    /// when the room has nothing to send. Fails with `RustSyncFallback` for
-    /// a room the Python implementation must compute. Cancelling the
-    /// deferred stops the computation.
-    fn generate_room_entry<'py>(
+    /// `_get_room_changes_for_incremental_sync` or
+    /// `_get_room_changes_for_initial_sync`: a deferred resolving to a
+    /// `RoomChanges`. Consumes `input`. Cancelling the deferred stops the
+    /// computation.
+    fn room_changes<'py>(
         &self,
         py: Python<'py>,
         request: &Bound<'py, SyncRequest>,
-        room: &Bound<'py, RoomSyncInput>,
+        input: &Bound<'py, RoomsInput>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let future = self.start_room(py, request, room)?;
+        let future = self.start_room_changes(py, request, input)?;
         create_deferred_with(py, &self.runtime, future, OnCancel::Abort)
     }
 
-    /// As [`Self::generate_room_entry`], but blocks (releasing the GIL) and
-    /// returns the result directly. For tests: see
+    /// As [`Self::room_changes`], but blocks. For tests: see
     /// `_BlockingRustSyncHandler`.
-    fn generate_room_entry_blocking(
+    fn room_changes_blocking(
         &self,
         py: Python<'_>,
         request: &Bound<'_, SyncRequest>,
-        room: &Bound<'_, RoomSyncInput>,
-    ) -> PyResult<Option<RoomSyncResult>> {
-        let future = self.start_room(py, request, room)?;
-        let handle = self.runtime.tokio_handle()?;
-        py.detach(|| handle.block_on(future))
+        input: &Bound<'_, RoomsInput>,
+    ) -> PyResult<RoomChanges> {
+        let future = self.start_room_changes(py, request, input)?;
+        self.block_on(py, future)
+    }
+
+    /// The entries of the joined and archived rooms of `changes`, ten at a
+    /// time: a deferred resolving to a `RoomsResult`. The `*_by_room`
+    /// mappings are what `handle_room_entries` reads for each room.
+    /// Cancelling the deferred stops the computation.
+    #[pyo3(signature = (request, changes, *, ephemeral_by_room, tags_by_room, account_data_by_room, sticky_by_room))]
+    #[allow(clippy::too_many_arguments)]
+    fn generate_room_entries<'py>(
+        &self,
+        py: Python<'py>,
+        request: &Bound<'py, SyncRequest>,
+        changes: &Bound<'py, RoomChanges>,
+        ephemeral_by_room: &Bound<'py, PyAny>,
+        tags_by_room: &Bound<'py, PyAny>,
+        account_data_by_room: &Bound<'py, PyAny>,
+        sticky_by_room: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let future = self.start_room_entries(
+            py,
+            request,
+            changes,
+            ephemeral_by_room,
+            tags_by_room,
+            account_data_by_room,
+            sticky_by_room,
+        )?;
+        create_deferred_with(py, &self.runtime, future, OnCancel::Abort)
+    }
+
+    /// As [`Self::generate_room_entries`], but blocks.
+    #[pyo3(signature = (request, changes, *, ephemeral_by_room, tags_by_room, account_data_by_room, sticky_by_room))]
+    #[allow(clippy::too_many_arguments)]
+    fn generate_room_entries_blocking(
+        &self,
+        py: Python<'_>,
+        request: &Bound<'_, SyncRequest>,
+        changes: &Bound<'_, RoomChanges>,
+        ephemeral_by_room: &Bound<'_, PyAny>,
+        tags_by_room: &Bound<'_, PyAny>,
+        account_data_by_room: &Bound<'_, PyAny>,
+        sticky_by_room: &Bound<'_, PyAny>,
+    ) -> PyResult<RoomsResult> {
+        let future = self.start_room_entries(
+            py,
+            request,
+            changes,
+            ephemeral_by_room,
+            tags_by_room,
+            account_data_by_room,
+            sticky_by_room,
+        )?;
+        self.block_on(py, future)
     }
 }
 
@@ -263,12 +330,13 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<filter::FilterCollection>()?;
     child_module.add_class::<ll_members::LazyLoadedMembersCache>()?;
     child_module.add_class::<SyncRequest>()?;
-    child_module.add_class::<RoomSyncInput>()?;
     child_module.add_class::<RoomSyncResult>()?;
+    child_module.add_class::<RoomsInput>()?;
+    child_module.add_class::<RoomChanges>()?;
+    child_module.add_class::<RoomsResult>()?;
     state_delta::register_test_functions(py, &child_module)?;
     summary::register_test_functions(py, &child_module)?;
     crate::storage::sync_store::register_test_classes(&child_module)?;
-    child_module.add("RustSyncFallback", py.get_type::<RustSyncFallback>())?;
 
     m.add_submodule(&child_module)?;
 

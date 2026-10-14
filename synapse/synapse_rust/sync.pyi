@@ -10,7 +10,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 from twisted.internet.defer import Deferred
 
@@ -18,10 +18,6 @@ from synapse.synapse_rust.database.postgres import ConnectionPool
 from synapse.synapse_rust.events import Event
 from synapse.types import JsonDict, JsonMapping, RoomStreamToken
 from synapse.types.state import StateFilter
-
-class RustSyncFallback(Exception):
-    """The Rust sync handler cannot compute this room's entry. Compute it
-    with the Python implementation."""
 
 class SyncHandler:
     """Computes sync responses with the Rust implementation, reading the
@@ -55,18 +51,43 @@ class SyncHandler:
         """Record that `event_id` is being sent to the device as the membership
         of `member`, in the response ending at `next_batch`."""
 
-    def generate_room_entry(
-        self, request: "SyncRequest", room: "RoomSyncInput"
-    ) -> "Deferred[RoomSyncResult | None]":
-        """`_generate_room_entry` for one joined or archived room. Resolves to
-        None when the room has nothing to send. Fails with `RustSyncFallback`
-        for a room the Python implementation must compute. Cancelling the
+    def room_changes(
+        self, request: "SyncRequest", input: "RoomsInput"
+    ) -> "Deferred[RoomChanges]":
+        """`_get_room_changes_for_incremental_sync` or
+        `_get_room_changes_for_initial_sync`. Consumes `input`. Cancelling the
         deferred stops the computation."""
 
-    def generate_room_entry_blocking(
-        self, request: "SyncRequest", room: "RoomSyncInput"
-    ) -> "RoomSyncResult | None":
-        """As `generate_room_entry`, but blocks. For tests."""
+    def room_changes_blocking(
+        self, request: "SyncRequest", input: "RoomsInput"
+    ) -> "RoomChanges":
+        """As `room_changes`, but blocks. For tests."""
+
+    def generate_room_entries(
+        self,
+        request: "SyncRequest",
+        changes: "RoomChanges",
+        *,
+        ephemeral_by_room: Mapping[str, Sequence[JsonMapping]],
+        tags_by_room: Mapping[str, Mapping[str, JsonMapping]],
+        account_data_by_room: Mapping[str, Mapping[str, JsonMapping]],
+        sticky_by_room: Mapping[str, Sequence[str]],
+    ) -> "Deferred[RoomsResult]":
+        """The entries of the joined and archived rooms of `changes`, ten at
+        a time. The `*_by_room` mappings are what `handle_room_entries` reads
+        for each room. Cancelling the deferred stops the computation."""
+
+    def generate_room_entries_blocking(
+        self,
+        request: "SyncRequest",
+        changes: "RoomChanges",
+        *,
+        ephemeral_by_room: Mapping[str, Sequence[JsonMapping]],
+        tags_by_room: Mapping[str, Mapping[str, JsonMapping]],
+        account_data_by_room: Mapping[str, Mapping[str, JsonMapping]],
+        sticky_by_room: Mapping[str, Sequence[str]],
+    ) -> "RoomsResult":
+        """As `generate_room_entries`, but blocks. For tests."""
 
 class SyncRequest:
     """One `/sync` request, as the per-room computation sees it."""
@@ -87,29 +108,79 @@ class SyncRequest:
         msc4354_enabled: bool,
     ) -> None: ...
 
-class RoomSyncInput:
-    """One room's `RoomSyncResultBuilder`, plus what `handle_room_entries`
-    passes alongside it."""
+class RoomsInput:
+    """What `room_changes` reads besides the request, from the
+    `SyncResultBuilder`."""
 
     def __init__(
         self,
         *,
-        room_id: str,
-        rtype: str,
-        events: Sequence[Event] | None,
-        newly_joined: bool,
-        full_state: bool,
         since: RoomStreamToken | None,
-        upto: RoomStreamToken,
-        end: RoomStreamToken,
-        out_of_band: bool,
-        ephemeral: Sequence[JsonMapping],
-        tags: Mapping[str, JsonMapping] | None,
-        account_data: Mapping[str, JsonMapping],
-        sticky_event_ids: Sequence[str],
-        always_include: bool,
-        room_max_token: RoomStreamToken,
-    ) -> None: ...
+        full_state: bool,
+        joined_room_ids: Sequence[str],
+        changed_room_ids: Collection[str],
+        forced_newly_joined_room_ids: Sequence[str],
+        membership_change_events: Sequence[Event],
+        initial_rooms: Sequence[tuple[str, str, str, str, int]],
+    ) -> None:
+        """`changed_room_ids` are the joined rooms that may have events after
+        `since`. `initial_rooms` are `(room_id, sender, membership, event_id,
+        stream)` for each of the user's rooms in a known room version, for an
+        initial sync."""
+
+class RoomChanges:
+    """A `_RoomChanges`, with every invite: Python drops those of ignored
+    users and those the invite rules ignore."""
+
+    @property
+    def newly_joined_rooms(self) -> list[str]: ...
+    @property
+    def newly_left_rooms(self) -> list[str]: ...
+    @property
+    def invited(self) -> list[tuple[str, Event]]: ...
+    @property
+    def knocked(self) -> list[tuple[str, Event]]: ...
+    def __len__(self) -> int:
+        """The number of joined and archived rooms to compute."""
+
+    def room_entry(
+        self, room_id: str
+    ) -> tuple[
+        str,
+        list[Event] | None,
+        bool,
+        bool,
+        bool,
+        bool,
+        RoomStreamToken,
+        bool,
+        RoomStreamToken,
+        bool,
+    ]:
+        """The `RoomSyncResultBuilder` fields of a room, for Python to compute
+        it: `(rtype, events, newly_joined, full_state, has_since,
+        upto_from_now, upto_room_key, end_from_now, end_room_key,
+        out_of_band)`."""
+
+class RoomsResult:
+    """What `generate_room_entries` made of the rooms."""
+
+    def take_entries(self) -> list[tuple["RoomSyncResult", bool, RoomStreamToken]]:
+        """The entries as `(entry, upto_from_now, upto_room_key)`: the room's
+        upto token is the request's now or since token with that room key. A
+        second call returns an empty list."""
+
+    @property
+    def empty(self) -> list[str]:
+        """The rooms computed with nothing to send."""
+
+    @property
+    def fallbacks(self) -> list[tuple[str, str]]:
+        """`(room_id, reason)` for each room Python must compute."""
+
+    @property
+    def errors(self) -> list[tuple[str, str]]:
+        """`(room_id, error)` for each room the Rust handler failed on."""
 
 class RoomSyncResult:
     """A room's entry, less the bundled aggregations."""
