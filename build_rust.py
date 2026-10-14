@@ -29,7 +29,7 @@ def build(setup_kwargs: dict[str, Any]) -> None:
     # We look up the minimum supported Python version with
     # `python_requires` (e.g. ">=3.11.0,<4.0.0") and finding the first Python
     # version that matches. We then convert that into the `py_limited_api` form,
-    # e.g. cp310 for Python 3.11.
+    # e.g. cp311 for Python 3.11.
     py_limited_api: str
     python_bounds = SpecifierSet(setup_kwargs["python_requires"])
     for minor_version in itertools.count(start=11):
