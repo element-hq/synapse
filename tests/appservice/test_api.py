@@ -192,6 +192,40 @@ class ApplicationServiceApiTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self.request_url, URL_LOCATION)
         self.assertEqual(result, SUCCESS_RESULT_LOCATION)
 
+    def test_get_3pe_protocol_does_not_cache_failures(self) -> None:
+        """
+        A request to the appservice that fails must not be cached as "no
+        protocol metadata": the next query should ask the appservice again.
+        """
+        PROTOCOL_META = {
+            "user_fields": ["a"],
+            "location_fields": ["b"],
+            "icon": "",
+            "field_types": {},
+            "instances": [],
+        }
+        calls = 0
+
+        async def get_json(
+            url: str,
+            args: Mapping[Any, Any],
+            headers: Mapping[str | bytes, Sequence[str | bytes]],
+        ) -> JsonDict:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise Exception("appservice unreachable")
+            return PROTOCOL_META
+
+        self.api.get_json = Mock(side_effect=get_json)  # type: ignore[method-assign]
+
+        result = self.get_success(self.api.get_3pe_protocol(self.service, PROTOCOL))
+        self.assertIsNone(result)
+
+        result = self.get_success(self.api.get_3pe_protocol(self.service, PROTOCOL))
+        self.assertEqual(result, PROTOCOL_META)
+        self.assertEqual(calls, 2)
+
     def test_claim_keys(self) -> None:
         """
         Tests that the /keys/claim response is properly parsed for missing
