@@ -1,0 +1,1 @@
+Fix Synapse failing to start with Redis enabled when installed using pip (avoid incompatible breaking changes in `txredisapi@1.6.0`).
