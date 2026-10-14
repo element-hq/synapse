@@ -63,6 +63,7 @@ from synapse.logging.opentracing import (
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
+from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import MemberSummary
@@ -1558,20 +1559,7 @@ class SyncHandler:
                     to_token=self.store.get_room_max_token(),
                 )
                 if deltas:
-                    mutable_state_ids = dict(state_ids)
-
-                    # We iterate over the deltas backwards so that if there are
-                    # multiple changes of the same type/state_key we'll
-                    # correctly pick the earliest delta.
-                    for delta in reversed(deltas):
-                        if delta.prev_event_id:
-                            mutable_state_ids[(delta.event_type, delta.state_key)] = (
-                                delta.prev_event_id
-                            )
-                        elif (delta.event_type, delta.state_key) in mutable_state_ids:
-                            mutable_state_ids.pop((delta.event_type, delta.state_key))
-
-                    state_ids = mutable_state_ids
+                    state_ids = _roll_back_state_over_deltas(state_ids, deltas)
 
                 return state_ids
 
@@ -1721,46 +1709,13 @@ class SyncHandler:
                     to_token=end_token.room_key,
                 )
             )
-            # A delta with `event_id=None` means the key was removed from the
-            # current state. Two things cause this:
-            #  - A state reset removed the key. With `/sync`, there is no way to tell the client a
-            #    key was removed, so there is nothing to send for it.
-            #  - The server left the room (its last local user left). It then
-            #    copies the room state from **before the batch** that contains the
-            #    leave into `current_state_delta_stream`, as deltas with
-            #    `event_id=None`. No delta refers to the events in that batch: the
-            #    leaving user's membership only gets an `event_id=None` delta, with
-            #    their membership before the leave as `prev_event_id`. So a key
-            #    that batch changed:
-            #     - only has the `event_id=None` delta if it already existed, and
-            #       any earlier delta for it is stale. That batch ends the
-            #       timeline, so we look up the keys in the timeline in state
-            #       groups, which still have the state at `end_token`.
-            #     - has no delta at all if it is new.
-            #       TODO: Recover it.
-            #    Keys that only changed earlier keep their earlier delta, and
-            #    other keys need no update.
-            cleared_state_keys: set[tuple[str, str]] = set()
-            for delta in deltas:
-                key = (delta.event_type, delta.state_key)
-                if delta.event_id is None:
-                    # Look up the key if:
-                    #  - it is in the timeline (see above).
-                    #  - OR it is the user's own membership, in case a filter
-                    #    removed their leave from the timeline.
-                    if key in timeline_state or key == (
-                        EventTypes.Member,
-                        sync_config.user.to_string(),
-                    ):
-                        cleared_state_keys.add(key)
-                    continue
-
-                # Note that deltas are in stream ordering, so if there are
-                # multiple deltas for a given type/state_key we'll always pick
-                # the latest one.
-                delta_state_ids[key] = delta.event_id
-                changed_keys.add(key)
-                cleared_state_keys.discard(key)
+            cleared_state_keys = _apply_current_state_deltas(
+                delta_state_ids,
+                changed_keys,
+                deltas,
+                timeline_state,
+                sync_config.user.to_string(),
+            )
 
             if cleared_state_keys:
                 state_at_end = await self._state_storage_controller.get_state_ids_at(
@@ -3644,6 +3599,76 @@ def _action_has_highlight(actions: list[JsonDict]) -> bool:
             pass
 
     return False
+
+
+def _roll_back_state_over_deltas(
+    state_ids: StateMap[str], deltas: Sequence[StateDelta]
+) -> StateMap[str]:
+    """Roll `state_ids` back over `deltas`, which run forwards from the point
+    the state is wanted at to the point it was read at.
+
+    The deltas are walked backwards so that if there are multiple changes of
+    the same type/state_key we correctly pick the earliest delta.
+    """
+    mutable_state_ids = dict(state_ids)
+    for delta in reversed(deltas):
+        if delta.prev_event_id:
+            mutable_state_ids[(delta.event_type, delta.state_key)] = delta.prev_event_id
+        elif (delta.event_type, delta.state_key) in mutable_state_ids:
+            mutable_state_ids.pop((delta.event_type, delta.state_key))
+    return mutable_state_ids
+
+
+def _apply_current_state_deltas(
+    delta_state_ids: MutableStateMap[str],
+    changed_keys: set[StateKey],
+    deltas: Sequence[StateDelta],
+    timeline_state: StateMap[str],
+    user_id: str,
+) -> set[StateKey]:
+    """Apply `deltas`, in stream order, to `delta_state_ids`, recording the
+    keys they change in `changed_keys`. Returns the keys removed from the
+    current state that the caller has to look up at the end of the timeline.
+
+    A delta with `event_id=None` means the key was removed from the
+    current state. Two things cause this:
+     - A state reset removed the key. With `/sync`, there is no way to tell the client a
+       key was removed, so there is nothing to send for it.
+     - The server left the room (its last local user left). It then
+       copies the room state from **before the batch** that contains the
+       leave into `current_state_delta_stream`, as deltas with
+       `event_id=None`. No delta refers to the events in that batch: the
+       leaving user's membership only gets an `event_id=None` delta, with
+       their membership before the leave as `prev_event_id`. So a key
+       that batch changed:
+        - only has the `event_id=None` delta if it already existed, and
+          any earlier delta for it is stale. That batch ends the
+          timeline, so we look up the keys in the timeline in state
+          groups, which still have the state at `end_token`.
+        - has no delta at all if it is new.
+          TODO: Recover it.
+       Keys that only changed earlier keep their earlier delta, and
+       other keys need no update.
+    """
+    cleared_state_keys: set[StateKey] = set()
+    for delta in deltas:
+        key = (delta.event_type, delta.state_key)
+        if delta.event_id is None:
+            # Look up the key if:
+            #  - it is in the timeline (see above).
+            #  - OR it is the user's own membership, in case a filter
+            #    removed their leave from the timeline.
+            if key in timeline_state or key == (EventTypes.Member, user_id):
+                cleared_state_keys.add(key)
+            continue
+
+        # Note that deltas are in stream ordering, so if there are
+        # multiple deltas for a given type/state_key we'll always pick
+        # the latest one.
+        delta_state_ids[key] = delta.event_id
+        changed_keys.add(key)
+        cleared_state_keys.discard(key)
+    return cleared_state_keys
 
 
 def _calculate_state(

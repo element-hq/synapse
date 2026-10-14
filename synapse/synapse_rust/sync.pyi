@@ -10,6 +10,8 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+from collections.abc import Mapping
+
 from synapse.synapse_rust.events import Event
 from synapse.types import JsonDict, JsonMapping
 
@@ -71,3 +73,30 @@ class FilterCollection:
     def check_room_account_data(self, event: JsonDict) -> bool: ...
     def check_presence(self, user_id: str) -> bool: ...
     def check_global_account_data(self, event: JsonDict) -> bool: ...
+
+# The Rust ports of the state delta arithmetic in `synapse.handlers.sync`.
+# Deltas are `(event_type, state_key, event_id, prev_event_id)` in stream
+# order.
+
+def calculate_state_for_test(
+    timeline_contains: Mapping[tuple[str, str], str],
+    timeline_start: Mapping[tuple[str, str], str],
+    timeline_end: Mapping[tuple[str, str], str],
+    previous_timeline_end: Mapping[tuple[str, str], str],
+    lazy_load_members: bool,
+) -> dict[tuple[str, str], str]:
+    """`_calculate_state`."""
+
+def roll_back_state_for_test(
+    state: Mapping[tuple[str, str], str],
+    deltas: list[tuple[str, str, str | None, str | None]],
+) -> dict[tuple[str, str], str]:
+    """`_roll_back_state_over_deltas`."""
+
+def apply_state_deltas_for_test(
+    initial: Mapping[tuple[str, str], str],
+    deltas: list[tuple[str, str, str | None, str | None]],
+    timeline_state: Mapping[tuple[str, str], str],
+    user_id: str,
+) -> tuple[dict[tuple[str, str], str], set[tuple[str, str]], set[tuple[str, str]]]:
+    """`_apply_current_state_deltas`."""

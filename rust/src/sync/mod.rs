@@ -22,7 +22,8 @@
 //!
 //! The pure parts of the per-room loop are each a port of the Python they
 //! are named after, checked against it by the tests in `tests/sync/`:
-//! [`filter`] ports `synapse.api.filtering`.
+//! [`filter`] ports `synapse.api.filtering`, and [`state_delta`] the state
+//! delta arithmetic of the sync handler.
 //! [`crate::visibility`] and [`crate::types::stream_token`] are shared with
 //! later ports.
 
@@ -34,6 +35,7 @@ use crate::runtime::RustRuntime;
 use crate::storage::store::Store;
 
 pub mod filter;
+pub mod state_delta;
 
 create_exception!(
     synapse.synapse_rust.sync,
@@ -74,6 +76,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     let child_module = PyModule::new(py, "sync")?;
     child_module.add_class::<SyncHandler>()?;
     child_module.add_class::<filter::FilterCollection>()?;
+    state_delta::register_test_functions(py, &child_module)?;
     child_module.add("RustSyncFallback", py.get_type::<RustSyncFallback>())?;
 
     m.add_submodule(&child_module)?;
