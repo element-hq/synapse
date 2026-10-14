@@ -1,0 +1,1 @@
+Add `contrib/synth-db`, a standalone tool that profiles a Synapse Postgres database into a small anonymised dataset and rebuilds a synthetic database from it for sync load testing.

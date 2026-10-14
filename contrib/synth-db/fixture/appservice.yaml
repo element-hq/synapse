@@ -1,0 +1,12 @@
+# Appservice registration used by populate.py to backdate messages.
+id: fixture-as
+url: null
+as_token: "as_token_fixture"
+hs_token: "hs_token_fixture"
+sender_localpart: "asbot"
+namespaces:
+  users:
+    - exclusive: true
+      regex: "@as_.*"
+  rooms: []
+  aliases: []

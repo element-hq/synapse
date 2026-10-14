@@ -1,0 +1,36 @@
+[package]
+name = "synth-db"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82.0"
+description = "Profile a Synapse Postgres database into a small anonymised dataset, and rebuild a synthetic database from it"
+license = "AGPL-3.0-only OR LicenseRef-Element-Commercial"
+publish = false
+
+# This crate lives inside the Synapse checkout but is deliberately not a
+# member of the `rust/` workspace: it is a standalone tool with its own
+# dependency tree and lockfile.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+deadpool-postgres = "0.14"
+hmac = "0.12"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync"] }
+tokio-postgres = "0.7"
+futures-util = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+zstd = "0.13"
+hex = "0.4"
+base64 = "0.22"
+bcrypt = "0.15"
+bytes = "1"
+
+[profile.release]
+debug = 1
