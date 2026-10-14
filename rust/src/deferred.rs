@@ -15,13 +15,21 @@
 
 use std::{
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
 };
 
 use once_cell::sync::OnceCell;
 use pyo3::{
-    create_exception, exceptions::PyException, exceptions::PyRuntimeError, intern, prelude::*,
-    types::PyCFunction,
+    create_exception,
+    exceptions::PyException,
+    exceptions::PyRuntimeError,
+    intern,
+    prelude::*,
+    types::{PyCFunction, PyModule, PyModuleMethods},
 };
 use tokio::sync::oneshot;
 
@@ -77,16 +85,36 @@ pub(crate) fn succeed<'py, V: IntoPyObject<'py>>(
     defer(py)?.call_method1("succeed", (value,))
 }
 
+/// What cancelling a deferred from [`create_deferred_with`] does to the
+/// tokio task behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OnCancel {
+    /// The task runs on and its result is discarded. The deferred fails with
+    /// `CancelledError` at once, as `stop_cancellation` arranges for a Python
+    /// awaitable.
+    ///
+    /// This is right for work that other callers share, such as a cache
+    /// load: one caller giving up must not take the load away from the rest.
+    RunOn,
+    /// The task is aborted: its future is dropped where it stands, on a tokio
+    /// thread, and never polled again. Anything the future holds is released
+    /// by its `Drop`, which is where a pooled database connection goes back.
+    ///
+    /// This is right for work only this caller wants, such as a `/sync`
+    /// request's per-room loop once the client has gone.
+    Abort,
+}
+
 /// Creates a twisted deferred from the given future, spawning the task on the
 /// tokio runtime.
 ///
 /// Does not handle contextvars.
 ///
-/// TODO: propagate deferred cancellation to the tokio task (via
-/// `JoinHandle::abort`). Until then a cancelled request leaves its task
-/// running, so the task can outlive the request's logcontext —
-/// `run_python_awaitable` defends against the resulting finished-context case,
-/// but the work itself is wasted.
+/// Cancelling the deferred leaves the task running ([`OnCancel::RunOn`]), so
+/// the task can outlive the request's logcontext (`run_python_awaitable`
+/// defends against the resulting finished-context case). Use
+/// [`create_deferred_with`] and [`OnCancel::Abort`] for work that should stop
+/// with its caller.
 pub fn create_deferred<'py, F, O>(
     py: Python<'py>,
     runtime: &RustRuntime,
@@ -96,10 +124,21 @@ where
     F: Future<Output = PyResult<O>> + Send + 'static,
     for<'a> O: IntoPyObject<'a> + Send + 'static,
 {
-    let deferred = defer(py)?.call_method0("Deferred")?;
-    let deferred_callback = deferred.getattr("callback")?.unbind();
-    let deferred_errback = deferred.getattr("errback")?.unbind();
+    create_deferred_with(py, runtime, fut, OnCancel::RunOn)
+}
 
+/// As [`create_deferred`], choosing what cancelling the deferred does to the
+/// task.
+pub fn create_deferred_with<'py, F, O>(
+    py: Python<'py>,
+    runtime: &RustRuntime,
+    fut: F,
+    on_cancel: OnCancel,
+) -> PyResult<Bound<'py, PyAny>>
+where
+    F: Future<Output = PyResult<O>> + Send + 'static,
+    for<'a> O: IntoPyObject<'a> + Send + 'static,
+{
     // Capture the caller's logcontext here (on the reactor thread) and record
     // it in the spawned task. Log records emitted while the future is polled
     // (on the tokio threads) are then attributed to the context that was
@@ -108,6 +147,29 @@ where
 
     let handle = runtime.tokio_handle()?;
     let task = handle.spawn(logcontext.scope(fut));
+
+    let deferred = match on_cancel {
+        OnCancel::RunOn => defer(py)?.call_method0("Deferred")?,
+        OnCancel::Abort => {
+            // Twisted calls the canceller before it fails the deferred, so
+            // the abort is requested before the caller sees `CancelledError`.
+            // The task's own completion then finds the deferred already
+            // failed, below, and leaves it alone.
+            let abort = task.abort_handle();
+            let canceller = PyCFunction::new_closure(
+                py,
+                None,
+                None,
+                move |args, _kwargs| -> PyResult<Py<PyAny>> {
+                    abort.abort();
+                    Ok(args.py().None())
+                },
+            )?;
+            defer(py)?.call_method1("Deferred", (canceller,))?
+        }
+    };
+    let deferred_callback = deferred.getattr("callback")?.unbind();
+    let deferred_errback = deferred.getattr("errback")?.unbind();
 
     // Keep the runtime state (and, through it, the reactor) alive while the
     // task is in flight.
@@ -122,7 +184,13 @@ where
                 Ok(r) => r,
                 Err(join_err) => match join_err.try_into_panic() {
                     Ok(panic_err) => Err(RustPanicError::from_panic(&panic_err)),
-                    Err(err) => Err(PyException::new_err(format!("Task cancelled: {err}"))),
+                    // The only way the task is cancelled is through the
+                    // canceller above, by which point Twisted has already
+                    // failed the deferred with `CancelledError`. (If the task
+                    // finished first, firing the deferred here is harmless:
+                    // Twisted swallows the one late result of a cancelled
+                    // deferred.)
+                    Err(_) => return,
                 },
             };
 
@@ -335,12 +403,71 @@ fn make_deferred_yieldable<'py>(
         .map_err(Into::into)
 }
 
+/// How many [`sleep_for_test`] futures have been dropped, finished or not.
+static DROPPED_SLEEPS: AtomicU64 = AtomicU64::new(0);
+
+/// Counts its drop in [`DROPPED_SLEEPS`], so a test can see a future being
+/// dropped on abort.
+struct CountDrop;
+
+impl Drop for CountDrop {
+    fn drop(&mut self) {
+        DROPPED_SLEEPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// A deferred that fires with `"slept"` after `seconds`, with the task
+/// aborted on cancellation if `abort_on_cancel`. For tests of
+/// [`create_deferred_with`].
+#[pyfunction]
+fn sleep_for_test<'py>(
+    py: Python<'py>,
+    runtime: &RustRuntime,
+    seconds: f64,
+    abort_on_cancel: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    let on_cancel = if abort_on_cancel {
+        OnCancel::Abort
+    } else {
+        OnCancel::RunOn
+    };
+    let guard = CountDrop;
+    create_deferred_with(
+        py,
+        runtime,
+        async move {
+            tokio::time::sleep(Duration::from_secs_f64(seconds)).await;
+            drop(guard);
+            Ok("slept")
+        },
+        on_cancel,
+    )
+}
+
+/// How many [`sleep_for_test`] futures have been dropped so far, whether
+/// they ran to the end or were aborted.
+#[pyfunction]
+fn dropped_sleeps_for_test() -> u64 {
+    DROPPED_SLEEPS.load(Ordering::SeqCst)
+}
+
 /// Called when registering modules with python.
-pub fn register_module(py: Python<'_>, _m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Make sure we fail early if we can't load some modules
     defer(py)?;
     // We can't check this here because of circular import issues
     // logging_context_module(py)?;
+
+    let child_module = PyModule::new(py, "deferred")?;
+    child_module.add_function(wrap_pyfunction!(sleep_for_test, &child_module)?)?;
+    child_module.add_function(wrap_pyfunction!(dropped_sleeps_for_test, &child_module)?)?;
+    m.add_submodule(&child_module)?;
+
+    // We need to manually add the module to sys.modules to make `from
+    // synapse.synapse_rust import deferred` work.
+    py.import("sys")?
+        .getattr("modules")?
+        .set_item("synapse.synapse_rust.deferred", child_module)?;
 
     Ok(())
 }
