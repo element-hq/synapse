@@ -15,5 +15,6 @@
 
 pub mod caches;
 pub mod db;
+pub mod events;
 pub mod python;
 pub mod store;

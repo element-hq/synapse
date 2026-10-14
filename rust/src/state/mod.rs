@@ -164,57 +164,10 @@ pub fn lookup<'m, V>(map: &'m HashMap<StateKey, V>, key: (&str, &str)) -> Option
 /// A map from `(type, state_key)` to event ID.
 pub type StateMap = HashMap<StateKey, Arc<str>>;
 
-/// An event taking part in state resolution.
-///
-/// An event handed in from Python is a shallow copy sharing the Python
-/// object's data, including its internal metadata. The auth event IDs are
-/// computed once, as the algorithm reads them many times.
-#[derive(Clone)]
-pub struct StateResEvent(Arc<StateResEventInner>);
-
-struct StateResEventInner {
-    event: Event,
-    auth_event_ids: Box<[Arc<str>]>,
-}
-
-impl StateResEvent {
-    pub fn new(event: Event) -> anyhow::Result<Self> {
-        let auth_event_ids = auth_event_ids_of(&event)?;
-        Ok(StateResEvent(Arc::new(StateResEventInner {
-            event,
-            auth_event_ids,
-        })))
-    }
-
-    pub fn event(&self) -> &Event {
-        &self.0.event
-    }
-
-    pub fn auth_event_ids(&self) -> &[Arc<str>] {
-        &self.0.auth_event_ids
-    }
-
-    /// The event as a new Python object sharing this event's data.
-    pub fn to_py(&self, py: Python<'_>) -> PyResult<Py<Event>> {
-        Py::new(py, self.0.event.shallow_clone())
-    }
-}
-
-impl std::ops::Deref for StateResEvent {
-    type Target = Event;
-
-    fn deref(&self) -> &Event {
-        self.event()
-    }
-}
-
-fn auth_event_ids_of(event: &Event) -> anyhow::Result<Box<[Arc<str>]>> {
-    let ids = event
-        .auth_event_ids()
-        .map_err(|e| anyhow::anyhow!("{e}"))
-        .with_context(|| format!("auth event IDs of {}", event.event_id()))?;
-    Ok(ids.into_iter().map(Arc::from).collect())
-}
+/// An event taking part in state resolution: a [`CachedEvent`], which
+/// computes the auth event IDs once, as the algorithm reads them many
+/// times. One handed in from Python shares the Python object's data.
+pub use crate::storage::events::CachedEvent as StateResEvent;
 
 /// Events by ID.
 pub type EventMap = HashMap<Arc<str>, StateResEvent>;

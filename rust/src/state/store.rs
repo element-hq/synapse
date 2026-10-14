@@ -26,7 +26,7 @@ use std::{
 
 use anyhow::{bail, Context};
 use async_trait::async_trait;
-use log::{debug, error, warn};
+use log::{debug, warn};
 use pyo3::{
     prelude::*,
     types::{PyDict, PyModule, PySet},
@@ -34,13 +34,10 @@ use pyo3::{
 use tokio::runtime::Handle;
 use tokio_postgres::{types::ToSql, Row};
 
-use super::{auth_chain, EventMap, StateResEvent};
+use super::{auth_chain, EventMap};
 use crate::database::postgres::pool::{ConnectionPool, PooledConnection, PyConnectionPool};
-use crate::events::{
-    constants::event_type::M_ROOM_MEMBER, internal_metadata::EventInternalMetadata, Event,
-};
-use crate::room_versions::{EventFormatVersions, RoomVersion};
 use crate::storage::caches::StoreCaches;
+use crate::storage::events::{EventLoadStats, EventLoader, Querier};
 
 /// The result of an auth chain difference calculation.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -127,19 +124,6 @@ pub struct PostgresStateResStore {
     caches: Option<Arc<StoreCaches>>,
     db_stats: Mutex<DbStats>,
 }
-
-/// How many event IDs to send per event-loading statement.
-const EVENT_BATCH_SIZE: usize = 500;
-
-const LOAD_EVENTS_SQL: &str = "
-    SELECT e.event_id, ej.internal_metadata, ej.json, ej.format_version,
-        r.room_version, rej.reason, e.outlier
-    FROM events AS e
-    JOIN event_json AS ej USING (event_id)
-    LEFT JOIN rooms AS r ON r.room_id = e.room_id
-    LEFT JOIN rejections AS rej USING (event_id)
-    WHERE e.event_id = ANY($1)
-";
 
 impl PostgresStateResStore {
     /// Check a connection out of `pool` and open the read-only transaction.
@@ -253,47 +237,25 @@ impl Drop for PostgresStateResStore {
 }
 
 #[async_trait]
+impl Querier for PostgresStateResStore {
+    async fn query(&self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> anyhow::Result<Vec<Row>> {
+        PostgresStateResStore::query(self, sql, params).await
+    }
+}
+
+#[async_trait]
 impl StateResStore for PostgresStateResStore {
     async fn get_events(&self, ids: &[Arc<str>]) -> anyhow::Result<EventMap> {
-        let mut events = EventMap::with_capacity(ids.len());
-
-        let event_cache = self.caches.as_ref().map(|caches| &caches.events);
-        let missing: Vec<Arc<str>> = match event_cache {
-            Some(cache) => {
-                let mut missing = Vec::new();
-                for id in ids {
-                    match cache.get(id) {
-                        Some(event) => {
-                            events.insert(Arc::clone(id), event);
-                        }
-                        None => missing.push(Arc::clone(id)),
-                    }
-                }
-                missing
-            }
-            None => ids.to_vec(),
-        };
-        let cached = events.len() as u64;
-
-        for batch in missing.chunks(EVENT_BATCH_SIZE) {
-            let batch: Vec<&str> = batch.iter().map(|id| &**id).collect();
-            let rows = self.query(LOAD_EVENTS_SQL, &[&batch]).await?;
-            let start = Instant::now();
-            for row in rows {
-                if let Some((event_id, event)) = event_from_row(&row)? {
-                    let event = StateResEvent::new(event)?;
-                    if let Some(cache) = event_cache {
-                        drop(cache.insert(Arc::clone(&event_id), event.clone()));
-                    }
-                    events.insert(event_id, event);
-                }
-            }
-            self.db_stats.lock().expect("not poisoned").parse_time += start.elapsed();
-        }
+        let event_cache = self.caches.as_ref().map(|caches| &*caches.events);
+        let mut load_stats = EventLoadStats::default();
+        let events = EventLoader::new(self, event_cache)
+            .load(ids, &mut load_stats)
+            .await?;
 
         let mut stats = self.db_stats.lock().expect("not poisoned");
-        stats.events_cached += cached;
-        stats.events_fetched += events.len() as u64 - cached;
+        stats.events_cached += load_stats.cached;
+        stats.events_fetched += load_stats.fetched;
+        stats.parse_time += load_stats.parse_time;
         Ok(events)
     }
 
@@ -327,85 +289,6 @@ impl StateResStore for PostgresStateResStore {
         )
         .await
     }
-}
-
-/// Build an [`Event`] from a row of [`LOAD_EVENTS_SQL`], the way
-/// `EventsWorkerStore._fetch_event_rows` and `_get_events_from_db` do.
-///
-/// Returns `None` for rows the Python skips: an unknown room version, an
-/// event in the wrong format for its room, or JSON that does not parse.
-fn event_from_row(row: &Row) -> anyhow::Result<Option<(Arc<str>, Event)>> {
-    let event_id: String = row.try_get(0)?;
-    let internal_metadata: String = row.try_get(1)?;
-    let json: String = row.try_get(2)?;
-    let format_version: Option<i32> = row.try_get(3)?;
-    let room_version_id: Option<String> = row.try_get(4)?;
-    let rejected_reason: Option<String> = row.try_get(5)?;
-    let outlier: bool = row.try_get(6)?;
-
-    // Events stored before Synapse had event format versions are v1.
-    let format_version = format_version.unwrap_or(EventFormatVersions::ROOM_V1_V2);
-
-    let room_version_id = room_version_id.filter(|id| !id.is_empty());
-    let room_version: &'static RoomVersion = match room_version_id.as_deref() {
-        // Only out-of-band membership events from before
-        // matrix-org/synapse#6983 have no `rooms` entry. Those rooms are v5 or
-        // earlier, which all redact the same way.
-        None => match format_version {
-            EventFormatVersions::ROOM_V1_V2 => &RoomVersion::V1,
-            EventFormatVersions::ROOM_V3 => &RoomVersion::V3,
-            _ => &RoomVersion::V5,
-        },
-        Some(id) => match id.parse::<&'static RoomVersion>() {
-            Ok(room_version) => room_version,
-            Err(_) => {
-                warn!("Event {event_id} has unknown room version {id}");
-                return Ok(None);
-            }
-        },
-    };
-    if room_version_id.is_some() && room_version.event_format != format_version {
-        error!(
-            "Event {event_id} with room version {room_version} has wrong format: expected {}, was {format_version}",
-            room_version.event_format
-        );
-        return Ok(None);
-    }
-
-    let metadata = EventInternalMetadata::from_json_str(&internal_metadata)
-        .with_context(|| format!("internal metadata of {event_id}"))?;
-    metadata
-        .set_outlier_flag(outlier)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let event = match Event::from_json_str(
-        &json,
-        room_version,
-        metadata,
-        rejected_reason.map(String::into_boxed_str),
-    ) {
-        Ok(event) => event,
-        Err(e) => {
-            error!("Unable to parse event from database {event_id}: {e:#}");
-            return Ok(None);
-        }
-    };
-
-    if room_version_id.is_none() && event.type_() != M_ROOM_MEMBER {
-        bail!("Room for event {event_id} is unknown");
-    }
-
-    // If the content was modified in the database, the computed event ID
-    // will not match.
-    if event.event_id() != event_id {
-        bail!(
-            "Database corruption: event {event_id} in room {} has event ID {}",
-            event.room_id(),
-            event.event_id()
-        );
-    }
-
-    Ok(Some((Arc::from(event_id), event)))
 }
 
 /// A [`StateResStore`] over an in-memory map of persisted events, with the

@@ -303,6 +303,31 @@ impl Unsigned {
     pub fn prev_content(&self) -> PyResult<Option<Box<serde_json::Value>>> {
         Ok(self.py_read()?.prev_content.clone())
     }
+
+    /// The `replaces_state` field: the ID of the state event this one
+    /// replaced, for a state event that replaced one.
+    pub fn replaces_state(&self) -> PyResult<Option<String>> {
+        Ok(self.py_read()?.persisted_fields.replaces_state.clone())
+    }
+
+    /// Whether both `prev_content` and `prev_sender` are set.
+    pub fn has_prev_content_and_sender(&self) -> PyResult<bool> {
+        let unsigned = self.py_read()?;
+        Ok(unsigned.prev_content.is_some() && unsigned.prev_sender.is_some())
+    }
+
+    /// Set `prev_content` and `prev_sender`: what `get_events_as_list` adds
+    /// with `get_prev_content`.
+    pub fn set_prev_content_and_sender(
+        &self,
+        prev_content: serde_json::Value,
+        prev_sender: &str,
+    ) -> PyResult<()> {
+        let mut unsigned = self.py_write()?;
+        unsigned.prev_content = Some(Box::new(prev_content));
+        unsigned.prev_sender = Some(prev_sender.to_owned());
+        Ok(())
+    }
 }
 
 fn room_state_to_py<'py>(

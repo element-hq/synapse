@@ -21,11 +21,12 @@
 //! keys in one statement.
 //!
 //! - [`EventCache`]: events loaded from the database, keyed on event ID and
-//!   sized by count. The state resolution reads events as they are
-//!   (unredacted, rejected ones included), so a cached event only goes stale
-//!   when its rejection status or internal metadata changes.
-//!   `EventsWorkerStore` invalidates it alongside its own event cache, by
-//!   event ID and on a room purge, so the two stay in step.
+//!   sized by count. An entry holds the event as persisted, rejected or
+//!   not, and its redacted form if it had a valid redaction when loaded,
+//!   so it goes stale when the event is redacted, its rejection status
+//!   changes, or its internal metadata does. `EventsWorkerStore`
+//!   invalidates it alongside its own event cache, by event ID and on a
+//!   room purge, so the two stay in step.
 //! - [`ChainPositionCache`]: the chain cover position of an event, which is
 //!   fixed once assigned. Invalidated with the event.
 //! - [`ChainLinkCache`]: the links out of a chain, which only grow as events
@@ -41,9 +42,10 @@
 use std::sync::Arc;
 
 use crate::caches::{registry::CacheRegistry, Cache};
-use crate::state::{StateMap, StateResEvent};
+use crate::state::StateMap;
+use crate::storage::events::CachedEvent;
 
-pub type EventCache = Cache<Arc<str>, StateResEvent>;
+pub type EventCache = Cache<Arc<str>, CachedEvent>;
 
 /// An event's position in the chain cover index: `(chain_id, sequence_number)`.
 pub type ChainPosition = (i64, i64);

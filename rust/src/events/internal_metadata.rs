@@ -560,6 +560,29 @@ impl EventInternalMetadata {
         self.write_inner()?.outlier = outlier;
         Ok(())
     }
+
+    /// Record where the event sits in the stream: the `events` columns that
+    /// `_get_events_from_db` copies onto the metadata. A stream ordering of
+    /// zero is unset, as the Python attribute is `None` then.
+    pub fn set_persisted_position(
+        &self,
+        stream_ordering: Option<i64>,
+        received_ts: Option<i64>,
+        instance_name: Option<String>,
+    ) -> PyResult<()> {
+        let mut inner = self.write_inner()?;
+        inner.stream_ordering = stream_ordering.and_then(NonZeroI64::new);
+        inner.received_ts = received_ts;
+        inner.instance_name = instance_name;
+        Ok(())
+    }
+
+    /// The event's stream ordering, if known.
+    pub fn stream_ordering(&self) -> Option<NonZeroI64> {
+        self.read_inner()
+            .ok()
+            .and_then(|inner| inner.stream_ordering)
+    }
 }
 
 /// Helper to convert `None` to an `AttributeError` for a property getter.
@@ -696,7 +719,7 @@ impl EventInternalMetadata {
         Ok(self.read_inner()?.redacted_by.clone())
     }
     #[setter]
-    fn set_redacted_by(&self, val: Option<String>) -> PyResult<()> {
+    pub fn set_redacted_by(&self, val: Option<String>) -> PyResult<()> {
         self.write_inner()?.redacted_by = val;
         Ok(())
     }
