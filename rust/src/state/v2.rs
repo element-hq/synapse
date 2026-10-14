@@ -47,9 +47,8 @@ use sha2::{Digest, Sha256};
 
 use super::{
     lookup,
-    lru::ConflictCache,
     store::{StateDifference, StateResStore},
-    EventMap, StateKey, StateMap, StateResEvent,
+    ConflictCache, EventMap, StateKey, StateMap, StateResEvent,
 };
 use crate::event_auth::{
     self, auth_types_for_event, check_state_dependent_auth_rules_with_map, is_creator,
@@ -182,7 +181,7 @@ impl PendingResolution {
 
         let resolved = Arc::new(resolved);
         if let (Some(cache), Some(key)) = (conflict_cache, cache_key) {
-            cache.insert_state(key, Arc::clone(&resolved));
+            drop(cache.insert(key, Arc::clone(&resolved)));
         }
 
         Ok(Resolution {

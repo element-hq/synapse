@@ -22,6 +22,7 @@ use pyo3::{
 };
 
 use crate::caches::{python::PyCacheKey, registry::CacheRegistry, Cache};
+use crate::storage::caches::StoreCaches;
 use crate::storage::db::{DatabasePool, DatabasePoolExt, DbRowExt};
 
 /// Currently supported per-user features.
@@ -86,6 +87,11 @@ impl PyCacheKey for IsFeatureEnabledKey {
 pub struct Store {
     pub db_pool: Box<dyn DatabasePool>,
 
+    /// The event, chain cover and state group caches, which the Rust
+    /// handlers' readers consult before the database. See
+    /// [`crate::storage::caches`].
+    pub caches: Arc<StoreCaches>,
+
     /// Caches [`Store::is_feature_enabled_for_user`]. Python reads through it
     /// too, and invalidates it, as
     /// [`crate::storage::python::IsFeatureEnabledForUser`]. Sized to match the
@@ -99,6 +105,7 @@ impl Store {
     pub fn new(db_pool: Box<dyn DatabasePool>, registry: &CacheRegistry) -> Store {
         Store {
             db_pool,
+            caches: Arc::new(StoreCaches::new(registry)),
             is_feature_enabled_for_user_cache: registry
                 .new_cache("is_feature_enabled_for_user", 1000),
         }

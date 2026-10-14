@@ -73,7 +73,7 @@ impl RustHandlers {
         let state_resolution = if connection_pool.is_instance(&rust_connection_pool_class)? {
             Some(Py::new(
                 py,
-                StateResolutionHandler::new(connection_pool.unbind(), runtime.clone()),
+                StateResolutionHandler::new(connection_pool.unbind(), runtime.clone(), store),
             )?)
         } else {
             None

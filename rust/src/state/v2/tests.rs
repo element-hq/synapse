@@ -20,7 +20,7 @@ use serde_json::json;
 
 use super::*;
 use crate::event_auth::{auth_types_for, tests::make_event};
-use crate::state::store::MemoryStateResStore;
+use crate::state::{conflict_cache_for_test, store::MemoryStateResStore};
 
 const ALICE: &str = "@alice:example.com";
 const BOB: &str = "@bob:example.com";
@@ -638,8 +638,8 @@ fn cache_graph() -> Graph {
     Graph::build(&events, edges)
 }
 
-fn new_cache() -> ConflictCache {
-    ConflictCache::new(100_000, Duration::from_secs(3600))
+fn new_cache() -> Arc<ConflictCache> {
+    conflict_cache_for_test(100_000)
 }
 
 #[test]
@@ -720,7 +720,7 @@ fn conflict_cache_key_repartitioned() {
 
     // The second call gets the winner from the cached resolution, the same
     // one it computes from cold.
-    cache.clear();
+    cache.invalidate_all();
     let cold = graph.resolve_with_cache(V21_ROOM, &conflicting, &cache);
     assert_ne!(warm[&zara_key], agreed_result[&zara_key]);
     assert_eq!(warm, cold);

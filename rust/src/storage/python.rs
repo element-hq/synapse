@@ -26,6 +26,12 @@
 //! `@cached` function it replaces, and Synapse's invalidation machinery finds
 //! it by that name exactly as it would a `@cached` function. See
 //! [`crate::caches::python`].
+//!
+//! The store's event and related caches ([`crate::storage::caches`]) are not
+//! invalidated by name: `EventsWorkerStore` empties them through
+//! [`RustStore::invalidate_event`] and [`RustStore::clear_event_cache`]
+//! whenever it empties its own event cache. They reach `register_cache`
+//! through [`RustStore::caches`], for metrics and cache factors.
 
 use std::sync::Arc;
 
@@ -51,6 +57,8 @@ use crate::{
 pub struct RustStore {
     store: Arc<Store>,
     is_feature_enabled_for_user: Py<IsFeatureEnabledForUser>,
+    /// The store's event and related caches, as Python sees them.
+    caches: Vec<Py<RustCache>>,
 }
 
 impl RustStore {
@@ -79,10 +87,43 @@ impl RustStore {
             }),
         )?;
 
+        let store_caches = &store.caches;
+        let caches = vec![
+            Py::new(py, RustCache::new(store_caches.events.clone()))?,
+            Py::new(py, RustCache::new(store_caches.chain_positions.clone()))?,
+            Py::new(py, RustCache::new(store_caches.chain_links.clone()))?,
+            Py::new(py, RustCache::new(store_caches.state_groups.clone()))?,
+        ];
+
         Ok(RustStore {
             store,
             is_feature_enabled_for_user,
+            caches,
         })
+    }
+
+    /// The event, chain cover and state group caches, for the datastore to
+    /// register for metrics and cache factors. Nothing invalidates them by
+    /// name.
+    #[getter]
+    fn caches(&self, py: Python<'_>) -> Vec<Py<RustCache>> {
+        self.caches
+            .iter()
+            .map(|cache| cache.clone_ref(py))
+            .collect()
+    }
+
+    /// Drop an event from the event and chain position caches. Called
+    /// whenever the Python event cache drops it, so a change to its rejection
+    /// status or internal metadata reaches the next reader.
+    fn invalidate_event(&self, event_id: &str) {
+        self.store.caches.invalidate_event(event_id);
+    }
+
+    /// Empty the event, chain cover and state group caches. Called when a
+    /// room is purged.
+    fn clear_event_cache(&self) {
+        self.store.caches.clear();
     }
 
     /// `Store::is_feature_enabled_for_user` as a callable cache, for the

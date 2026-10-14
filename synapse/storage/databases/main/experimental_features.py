@@ -56,6 +56,12 @@ class ExperimentalFeaturesStore(CacheInvalidationWorkerStore):
         self.is_feature_enabled_for_user = self.rust_store.is_feature_enabled_for_user
         register_rust_cache(self.is_feature_enabled_for_user, server_name=hs.hostname)
 
+        # The store's event and related caches are emptied through the store
+        # itself, by `EventsWorkerStore`, so they are registered for metrics
+        # and cache factors only.
+        for cache in self.rust_store.caches:
+            register_rust_cache(cache, server_name=hs.hostname)
+
     @cached()
     async def list_enabled_features(self, user_id: str) -> frozenset[str]:
         """

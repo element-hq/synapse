@@ -13,6 +13,7 @@
  *
  */
 
+pub mod caches;
 pub mod db;
 pub mod python;
 pub mod store;

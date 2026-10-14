@@ -116,22 +116,20 @@ class StateResolutionHandler:
         tests."""
 
     def state_map_cache_len(self) -> int:
-        """The number of state groups in the state map cache."""
+        """The number of state groups in the Rust store's state group cache."""
 
     def clear_conflict_cache_for_test(self) -> None:
-        """Empty the conflict cache, keeping the event and chain caches."""
+        """Empty the conflict cache, keeping the Rust store's caches."""
 
     def event_cache_len(self) -> int:
-        """The number of events in the event cache."""
+        """The number of events in the Rust store's event cache."""
 
     def chain_link_cache_len(self) -> int:
-        """The number of chains in the chain link cache."""
-
-    def invalidate_event(self, event_id: str) -> None:
-        """Drop an event from the event and chain position caches."""
+        """The number of chains in the Rust store's chain link cache."""
 
     def clear_event_cache(self) -> None:
-        """Empty the event, chain and state map caches."""
+        """Empty the Rust store's event, chain and state group caches. For
+        tests: `RustStore.clear_event_cache` is the production path."""
 
 def get_auth_chain_difference_for_test(
     pool: ConnectionPool,

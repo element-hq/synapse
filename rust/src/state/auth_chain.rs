@@ -27,8 +27,8 @@ use anyhow::bail;
 use log::{debug, error};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::lru::{CachedChainLinks, ChainLink, ChainLinkCache, ChainPosition};
 use super::store::{NoChainCoverIndex, PostgresStateResStore, StateDifference};
+use crate::storage::caches::{CachedChainLinks, ChainLink, ChainLinkCache, ChainPosition};
 
 /// Matches `MAX_CHAIN_LENGTH` in `event_federation.py`.
 const MAX_CHAIN_LENGTH: i64 = (1 << 53) - 1;
@@ -134,7 +134,7 @@ impl ChainInfo {
                 // A position never changes once assigned, so it can be
                 // cached before the transaction commits.
                 if let Some(cache) = cache {
-                    cache.insert(Arc::clone(&event_id), position, 1);
+                    drop(cache.insert(Arc::clone(&event_id), position));
                 }
                 self.add(event_id, position);
             }
@@ -422,7 +422,7 @@ async fn gather_links(
     gathered: &mut GatheredLinks,
     needed: &FxHashMap<i64, i64>,
 ) -> anyhow::Result<()> {
-    let cache = store.caches().map(|caches| &caches.chain_links);
+    let cache = store.caches().map(|caches| &*caches.chain_links);
     let (to_fetch, hits) = gather_links_from_cache(cache, gathered, needed);
     store.record_cached(0, hits);
 
@@ -466,7 +466,7 @@ async fn gather_links(
                 links: links.remove(&chain_id).unwrap_or_default().into(),
             };
             if let Some(cache) = cache {
-                cache.insert(chain_id, entry.clone(), entry.links.len());
+                drop(cache.insert(chain_id, entry.clone()));
             }
             gathered.add(chain_id, entry);
         }
@@ -847,9 +847,9 @@ mod tests {
     fn gathers_from_the_cache_as_far_as_a_walk_goes() {
         // Chain 1 links to chain 2 at seq 3, chain 2 to chain 3 at seq 2.
         // Chain 3 is not cached.
-        let cache = ChainLinkCache::new(100, std::time::Duration::from_secs(60));
-        cache.insert(1, cached(5, &[(3, 2, 2)]), 1);
-        cache.insert(2, cached(2, &[(2, 3, 7)]), 1);
+        let cache: Arc<ChainLinkCache> = crate::caches::Cache::new("test", 100);
+        cache.insert(1, cached(5, &[(3, 2, 2)]));
+        cache.insert(2, cached(2, &[(2, 3, 7)]));
 
         // From (1, 4) the walk crosses to chain 2 and then needs chain 3.
         let mut gathered = GatheredLinks::default();

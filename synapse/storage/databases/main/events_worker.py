@@ -1018,7 +1018,7 @@ class EventsWorkerStore(SQLBaseStore):
     def _invalidate_local_get_event_cache(self, event_id: str) -> None:
         """
         Invalidates an event in local in-memory get event caches, including
-        the Rust state resolution's.
+        the Rust store's.
 
         Arguments:
             event_id: the event ID to invalidate
@@ -1028,9 +1028,7 @@ class EventsWorkerStore(SQLBaseStore):
         self._event_ref.pop(event_id, None)
         self._current_event_fetches.pop(event_id, None)
 
-        rust_state_res = self.hs.get_rust_handlers().state_resolution
-        if rust_state_res is not None:
-            rust_state_res.invalidate_event(event_id)
+        self.hs.get_rust_store().invalidate_event(event_id)
 
     def _invalidate_local_get_event_cache_room_id(self, room_id: str) -> None:
         """Clears the in-memory get event caches for a room.
@@ -1041,9 +1039,7 @@ class EventsWorkerStore(SQLBaseStore):
         self._event_ref.clear()
         self._current_event_fetches.clear()
 
-        rust_state_res = self.hs.get_rust_handlers().state_resolution
-        if rust_state_res is not None:
-            rust_state_res.clear_event_cache()
+        self.hs.get_rust_store().clear_event_cache()
 
     def _invalidate_async_get_event_cache_room_id(self, room_id: str) -> None:
         """

@@ -19,7 +19,10 @@
 //!   with a Postgres implementation and an in-memory one for tests.
 //! - [`auth_chain`]: the chain cover auth chain difference.
 //! - [`v2`]: the algorithm.
-//! - [`lru`]: the conflict, event and chain cover caches.
+//!
+//! The event, chain cover and state group caches live on the Rust store
+//! ([`crate::storage::caches`]), shared with the other Rust handlers. The
+//! conflict cache is this handler's own.
 //!
 //! [`StateResolutionHandler`] is the Python entry point, used by
 //! `synapse.state.StateResolutionHandler` when `rust_state_res` is enabled.
@@ -31,7 +34,7 @@ use std::{
     hash::{Hash, Hasher},
     pin::Pin,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use anyhow::Context;
@@ -43,20 +46,47 @@ use pyo3::{
     types::{PyDict, PyModule, PyTuple},
 };
 
+use crate::caches::{python::PyCacheKey, Cache};
 use crate::database::postgres::pool::PyConnectionPool;
 use crate::deferred::create_deferred;
 use crate::event_auth::AuthFailure;
 use crate::events::Event;
 use crate::room_versions::{RoomVersion, StateResolutionVersions};
 use crate::runtime::RustRuntime;
+use crate::storage::{caches::StoreCaches, store::Store};
 
 pub mod auth_chain;
-pub mod lru;
 pub mod store;
 pub mod v2;
 
-use lru::{ConflictCache, StateMapCache, StateResCaches};
 use store::{NoChainCoverIndex, PostgresStateResStore};
+
+/// A conflict cache key: the sha256 digest of the conflicted set and base
+/// state. See [`v2::resolve`].
+pub type CacheKey = [u8; 32];
+
+/// Never invalidated from Python: nothing it caches can go stale.
+impl PyCacheKey for CacheKey {
+    fn from_py_key(_key: &Bound<'_, PyTuple>) -> Option<Self> {
+        None
+    }
+}
+
+/// Resolved conflicted sets, the Rust counterpart of
+/// `StateResolutionHandler._conflict_resolution_cache`, weighed by the
+/// number of state entries in each cached map as `_state_map_size` does.
+pub type ConflictCache = Cache<CacheKey, Arc<StateMap>>;
+
+/// A conflict cache bounded by `max_size` state entries, outside any
+/// registry. For tests.
+#[cfg(test)]
+pub fn conflict_cache_for_test(max_size: usize) -> Arc<ConflictCache> {
+    Cache::new_weighted(
+        "rust_state_res_conflicts",
+        max_size,
+        |state: &Arc<StateMap>| state.len(),
+    )
+}
 
 create_exception!(
     synapse.synapse_rust.state,
@@ -314,33 +344,6 @@ fn resolve_in_memory_for_test<'py>(
 /// Matches `_conflict_resolution_cache` in Python.
 const CONFLICT_CACHE_MAX_SIZE: usize = 100_000;
 
-/// How long an unused conflict cache entry lives. Matches
-/// `EVICTION_TIMEOUT_SECONDS`.
-const CONFLICT_CACHE_EXPIRY: Duration = Duration::from_secs(60 * 60);
-
-/// The bound on the event cache, in events.
-/// TODO: size this from `event_cache_size`, as the Python event cache is.
-const EVENT_CACHE_MAX_SIZE: usize = 10_000;
-
-/// The bound on the chain position cache, in events. A resolution needs the
-/// position of every event in its state sets, so this holds more than the
-/// event cache, whose events are only the conflicted ones and their auth
-/// difference.
-/// TODO: size from the cache factor.
-const CHAIN_POSITION_CACHE_MAX_SIZE: usize = 100_000;
-
-/// The bound on the chain link cache, in links.
-/// TODO: size from the cache factor.
-const CHAIN_LINK_CACHE_MAX_SIZE: usize = 1_000_000;
-
-/// How long an unused event, chain position or chain link cache entry lives.
-const STORE_CACHE_EXPIRY: Duration = Duration::from_secs(60 * 60);
-
-/// The bound on the converted state map cache, in state entries. The Python
-/// state group caches hold 50,000 non-member and 500,000 member entries.
-/// TODO: size from the cache factor.
-const STATE_MAP_CACHE_MAX_SIZE: usize = 500_000;
-
 /// Timings and counts for one resolution, for metrics. Times are in seconds.
 #[pyclass(frozen, get_all, skip_from_py_object)]
 #[derive(Debug, Default, Clone)]
@@ -544,37 +547,28 @@ pub struct StateResolutionHandler {
     /// `close()`/`start()` replace it.
     db_pool: Py<PyAny>,
     runtime: RustRuntime,
+    /// The Rust store, for its event, chain cover and state group caches.
+    store: Arc<Store>,
     cache: Arc<ConflictCache>,
-    /// The event, chain position and chain link caches the store reads.
-    caches: Arc<StateResCaches>,
-    /// State groups' state as already converted from Python.
-    state_maps: Arc<StateMapCache>,
 }
 
 impl StateResolutionHandler {
-    pub fn new(db_pool: Py<PyAny>, runtime: RustRuntime) -> Self {
+    pub fn new(db_pool: Py<PyAny>, runtime: RustRuntime, store: Arc<Store>) -> Self {
+        let cache = runtime.caches().new_weighted_cache(
+            "rust_state_res_conflicts",
+            CONFLICT_CACHE_MAX_SIZE,
+            |state: &Arc<StateMap>| state.len(),
+        );
         StateResolutionHandler {
             db_pool,
             runtime,
-            cache: Arc::new(ConflictCache::new(
-                CONFLICT_CACHE_MAX_SIZE,
-                CONFLICT_CACHE_EXPIRY,
-            )),
-            caches: Arc::new(StateResCaches::new(
-                EVENT_CACHE_MAX_SIZE,
-                CHAIN_POSITION_CACHE_MAX_SIZE,
-                CHAIN_LINK_CACHE_MAX_SIZE,
-                STORE_CACHE_EXPIRY,
-            )),
-            state_maps: Arc::new(StateMapCache::new(
-                STATE_MAP_CACHE_MAX_SIZE,
-                STORE_CACHE_EXPIRY,
-            )),
+            store,
+            cache,
         }
     }
 
-    pub(crate) fn caches(&self) -> Arc<StateResCaches> {
-        Arc::clone(&self.caches)
+    pub(crate) fn caches(&self) -> Arc<StoreCaches> {
+        Arc::clone(&self.store.caches)
     }
 
     /// Convert the state sets under the GIL and start a resolution: either
@@ -630,7 +624,8 @@ impl StateResolutionHandler {
             // callers pass. A smaller map is a filtered one: it is converted
             // for this call only, and does not replace what is cached.
             let given = state.len()?;
-            let cached = self.state_maps.get(&group);
+            let state_groups = &self.store.caches.state_groups;
+            let cached = state_groups.get(&group);
             let map = match cached {
                 Some(map) if map.len() == given => {
                     hits += 1;
@@ -639,7 +634,7 @@ impl StateResolutionHandler {
                 cached => {
                     let map = Arc::new(state_map_from_py(&state, &mut interner)?);
                     if cached.is_none_or(|cached| cached.len() < given) {
-                        self.state_maps.insert(group, Arc::clone(&map), map.len());
+                        drop(state_groups.insert(group, Arc::clone(&map)));
                     }
                     map
                 }
@@ -702,7 +697,7 @@ impl StateResolutionHandler {
 
         let handle = self.runtime.tokio_handle()?;
         let cache = Arc::clone(&self.cache);
-        let caches = Arc::clone(&self.caches);
+        let caches = self.caches();
 
         Ok(Started::Pending(Box::pin(async move {
             let start = Instant::now();
@@ -892,40 +887,31 @@ impl StateResolutionHandler {
         StateGroupsOutput::new(output, &groups).into_pyobject(py)
     }
 
-    /// The number of state groups in the state map cache.
+    /// The number of state groups in the store's state group cache.
     fn state_map_cache_len(&self) -> usize {
-        self.state_maps.len()
+        self.store.caches.state_groups.len()
     }
 
-    /// Empty the conflict cache, keeping the event and chain caches. For
-    /// benchmarks and tests that want to time the algorithm again on loaded
-    /// events.
+    /// Empty the conflict cache, keeping the store's caches. For benchmarks
+    /// and tests that want to time the algorithm again on loaded events.
     fn clear_conflict_cache_for_test(&self) {
-        self.cache.clear();
+        drop(self.cache.invalidate_all());
     }
 
-    /// The number of events in the event cache.
+    /// The number of events in the store's event cache.
     fn event_cache_len(&self) -> usize {
-        self.caches.events.len()
+        self.store.caches.events.len()
     }
 
-    /// The number of chains in the chain link cache.
+    /// The number of chains in the store's chain link cache.
     fn chain_link_cache_len(&self) -> usize {
-        self.caches.chain_links.len()
+        self.store.caches.chain_links.len()
     }
 
-    /// Drop an event from the event and chain position caches. Called
-    /// whenever the Python event cache drops it, so a change to its rejection
-    /// status or internal metadata reaches the next resolution.
-    fn invalidate_event(&self, event_id: &str) {
-        self.caches.invalidate_event(event_id);
-    }
-
-    /// Empty the event, chain and state map caches. Called when a room is
-    /// purged.
+    /// Empty the store's event, chain and state group caches. For tests:
+    /// `RustStore.clear_event_cache` is the production path.
     fn clear_event_cache(&self) {
-        self.caches.clear();
-        self.state_maps.clear();
+        self.store.caches.clear();
     }
 }
 

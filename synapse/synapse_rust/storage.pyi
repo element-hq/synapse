@@ -42,3 +42,15 @@ class RustStore:
     def __init__(self, runtime: RustRuntime, db_pool: DatabasePool) -> None: ...
     @property
     def is_feature_enabled_for_user(self) -> IsFeatureEnabledForUser: ...
+    @property
+    def caches(self) -> list[RustCache]:
+        """The event, chain cover and state group caches, to register for
+        metrics and cache factors. Nothing invalidates them by name."""
+
+    def invalidate_event(self, event_id: str) -> None:
+        """Drop an event from the event and chain position caches. Called
+        whenever the Python event cache drops it."""
+
+    def clear_event_cache(self) -> None:
+        """Empty the event, chain cover and state group caches. Called when a
+        room is purged."""

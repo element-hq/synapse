@@ -34,12 +34,13 @@ use pyo3::{
 use tokio::runtime::Handle;
 use tokio_postgres::{types::ToSql, Row};
 
-use super::{auth_chain, lru::StateResCaches, EventMap, StateResEvent};
+use super::{auth_chain, EventMap, StateResEvent};
 use crate::database::postgres::pool::{ConnectionPool, PooledConnection, PyConnectionPool};
 use crate::events::{
     constants::event_type::M_ROOM_MEMBER, internal_metadata::EventInternalMetadata, Event,
 };
 use crate::room_versions::{EventFormatVersions, RoomVersion};
+use crate::storage::caches::StoreCaches;
 
 /// The result of an auth chain difference calculation.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -123,7 +124,7 @@ pub struct PostgresStateResStore {
     handle: Handle,
     /// Events, chain positions and chain links loaded earlier, consulted
     /// before the database.
-    caches: Option<Arc<StateResCaches>>,
+    caches: Option<Arc<StoreCaches>>,
     db_stats: Mutex<DbStats>,
 }
 
@@ -147,7 +148,7 @@ impl PostgresStateResStore {
     pub async fn begin(
         pool: &ConnectionPool,
         handle: Handle,
-        caches: Option<Arc<StateResCaches>>,
+        caches: Option<Arc<StoreCaches>>,
     ) -> anyhow::Result<Self> {
         let conn = pool
             .get()
@@ -184,7 +185,7 @@ impl PostgresStateResStore {
         *self.db_stats.lock().expect("not poisoned")
     }
 
-    pub(super) fn caches(&self) -> Option<&StateResCaches> {
+    pub(super) fn caches(&self) -> Option<&StoreCaches> {
         self.caches.as_deref()
     }
 
@@ -282,7 +283,7 @@ impl StateResStore for PostgresStateResStore {
                 if let Some((event_id, event)) = event_from_row(&row)? {
                     let event = StateResEvent::new(event)?;
                     if let Some(cache) = event_cache {
-                        cache.insert(Arc::clone(&event_id), event.clone(), 1);
+                        drop(cache.insert(Arc::clone(&event_id), event.clone()));
                     }
                     events.insert(event_id, event);
                 }
