@@ -53,9 +53,9 @@ trial_sqlite_tests = [
     },
 ]
 
+# Avoiding running all of the in-between Python versions on every PR as it saves on CI time.
 if not IS_PR:
     # Otherwise, check all supported Python versions.
-    #
     trial_sqlite_tests.extend(
         {
             "python-version": version,
@@ -63,10 +63,12 @@ if not IS_PR:
             "extras": "all",
         }
         for version in (
-            "3.11",
+            # (the first/last supported versions are commented out here as they're
+            # already added above)
+            #
+            # "3.11",
             "3.12",
             "3.13",
-            # Avoiding running all of these versions on every PR saves on CI time.
             # "3.14",
         )
     )
