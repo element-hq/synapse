@@ -353,6 +353,28 @@ class StatsStore(StateDeltasStore):
             "bulk_update_stats_delta", _bulk_update_stats_delta_txn
         )
 
+    async def get_room_stats(self) -> tuple[int, int]:
+        """
+        Retrieve the total number of rooms and locally joined rooms.
+        This is a full-table count and can be slow on large servers. Callers
+        should only invoke it when room counts may have changed (e.g. after
+        processing m.room.create / m.room.member events, or after a room purge),
+        not on every event.
+        """
+
+        def _get_room_stats_txn(txn: LoggingTransaction) -> tuple[int, int]:
+            sql = """
+                SELECT
+                    count(*) AS total,
+                    count(CASE WHEN local_users_in_room > 0 THEN 1 END) AS locally_joined
+                FROM room_stats_current;
+                """
+            txn.execute(sql)
+            row = cast(tuple[int, int], txn.fetchone())
+            return row[0], row[1]
+
+        return await self.db_pool.runInteraction("get_room_stats", _get_room_stats_txn)
+
     async def update_stats_delta(
         self,
         ts: int,
