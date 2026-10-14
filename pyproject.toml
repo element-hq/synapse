@@ -128,7 +128,6 @@ postgres = [
 ]
 saml2 = [
     "pysaml2>=4.5.0",
-    "lxml-stubs>=0.4.0",
 
     # Transitive dependencies from pysaml2
     # These dependencies aren't directly required by Synapse.
@@ -180,7 +179,6 @@ all = [
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
     # saml2
     "pysaml2>=4.5.0",
-    "lxml-stubs>=0.4.0",
     # oidc and jwt
     "authlib>=0.15.1",
     # url-preview
