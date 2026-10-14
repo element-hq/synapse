@@ -1,0 +1,1 @@
+Require authentication for the [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140) delayed event management endpoints, restrict them to the requesting user's own delayed events, and allow guests to use them.

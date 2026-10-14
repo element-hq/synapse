@@ -31,6 +31,7 @@ from typing import (
     Any,
     ClassVar,
     Final,
+    Iterator,
     Literal,
     Mapping,
     Match,
@@ -435,7 +436,7 @@ class UserID(DomainSpecificString):
     def is_valid_strict(cls, s: str) -> bool:
         """
         Parses the input string and attempts to ensure it is a valid and compliant user
-        ID according to https://spec.matrix.org/v1.17/appendices/#historical-user-ids.
+        ID according to https://spec.matrix.org/v1.19/appendices/#historical-user-ids.
 
         This should be used with care: there are existing non-compliant user IDs in the
         wild with empty or non-ASCII localparts, which will be rejected by this method.
@@ -574,7 +575,7 @@ def is_compliant_user_id_localpart(localpart: str) -> bool:
     """
     Validates that the given user ID localpart is within the "compliant" range,
     i.e. not empty and all characters are between U+0021 and U+007E inclusive.
-    See https://spec.matrix.org/v1.17/appendices/#historical-user-ids
+    See https://spec.matrix.org/v1.19/appendices/#historical-user-ids
 
     To check if a localpart is non-historical, use contains_invalid_mxid_characters instead.
 
@@ -590,6 +591,26 @@ def is_compliant_user_id_localpart(localpart: str) -> bool:
     if not localpart:
         return False
     return all(0x21 <= ord(c) <= 0x7E for c in localpart)
+
+
+def is_compliant_user_id(user_id: str) -> bool:
+    """
+    Validates that the localpart of the given user ID is within the "compliant"
+    range. See `is_compliant_user_id_localpart`.
+
+    Unlike parsing the user ID with `UserID.from_string`, this never raises on a
+    malformed user ID.
+
+    Args:
+        user_id: the user ID to be checked
+
+    Returns:
+        True if the localpart of the user ID is compliant, False otherwise
+    """
+    if not user_id.startswith(UserID.SIGIL):
+        return False
+    localpart, _, _ = user_id[1:].partition(":")
+    return is_compliant_user_id_localpart(localpart)
 
 
 UPPER_CASE_PATTERN = re.compile(b"[A-Z_]")
@@ -1019,65 +1040,74 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
 @attr.s(frozen=True, slots=True, order=False)
 class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
-    """A basic stream token class for streams that supports multiple writers."""
+    """
+    A basic stream token class for streams that supports multiple writers.
+
+    Serialised as either:
+        - the bare `stream` position (e.g. `42`); or
+        - if any writer is ahead of that position,
+          as `m{stream}~{id}.{pos}~{id}.{pos}...`, where:
+          each `id` is the writer's ID from the `instance_map` table
+          (see `DataStore.get_id_for_instance`)
+
+    For the latter (`m{}~{}.{}~...`) form, it is necessary to check the writer of a
+    given row to determine how it compares to the token.
+
+    See:
+        - `is_stream_position_in_range` for a single row
+        - `is_before_or_eq` for comparing two tokens
+        - `make_multiwriter_sharded_token_bounds_sql` for SQL
+            - and its companion `advance_multiwriter_sharded_token_after_partial_read`
+    """
 
     @classmethod
-    async def parse(cls, store: "DataStore", string: str) -> "MultiWriterStreamToken":
+    async def parse(cls, store: "DataStore", string: str) -> Self:
+        unresolved = UnresolvedMultiWriterStreamToken.parse(string)
+        return await cls.from_unresolved(store, unresolved)
+
+    @classmethod
+    async def from_unresolved(
+        cls, store: "DataStore", unresolved: "UnresolvedMultiWriterStreamToken"
+    ) -> Self:
         try:
-            if string[0].isdigit():
-                return cls(stream=int(string))
-            if string[0] == "m":
-                parts = string[1:].split("~")
-                stream = int(parts[0])
-
-                instance_map = {}
-                for part in parts[1:]:
-                    if not part:
-                        # Handle tokens of the form `m5~`, which were created by
-                        # a bug
-                        continue
-
-                    key, value = part.split(".")
-                    instance_id = int(key)
-                    pos = int(value)
-
-                    instance_name = await store.get_name_from_instance_id(instance_id)
-                    instance_map[instance_name] = pos
-
-                return cls(
-                    stream=stream,
-                    instance_map=immutabledict(instance_map),
-                )
+            return cls(
+                stream=unresolved.stream,
+                instance_map=immutabledict(
+                    {
+                        (await store.get_name_from_instance_id(instance_id)): pos
+                        for instance_id, pos in unresolved.instance_id_to_stream_pos.items()
+                    }
+                ),
+            )
         except CancelledError:
             raise
         except Exception:
             # We log an exception here as even though this *might* be a client
             # handing a bad token, its more likely that Synapse returned a bad
             # token (and we really want to catch those!).
+            # TODO(2026): reivilibre: I'm less convinced this makes sense nowadays.
             logger.exception("Failed to parse stream token: %r", string)
         raise SynapseError(400, "Invalid stream token %r" % (string,))
 
     async def to_string(self, store: "DataStore") -> str:
         """See class level docstring for information about the format."""
+        return (await self.to_unresolved(store)).to_string()
 
-        if self.instance_map:
-            entries = []
-            for name, pos in self.instance_map.items():
-                if pos <= self.stream:
-                    # Ignore instances who are below the minimum stream position
-                    # (we might know they've advanced without seeing a recent
-                    # write from them).
-                    continue
-
-                instance_id = await store.get_id_for_instance(name)
-                entries.append(f"{instance_id}.{pos}")
-
-            if entries:
-                encoded_map = "~".join(entries)
-                return f"m{self.stream}~{encoded_map}"
-            return str(self.stream)
-        else:
-            return str(self.stream)
+    async def to_unresolved(
+        self, store: "DataStore"
+    ) -> "UnresolvedMultiWriterStreamToken":
+        """
+        Converts this token to its unresolved form, so that it can be used without database access.
+        """
+        return UnresolvedMultiWriterStreamToken(
+            stream=self.stream,
+            instance_id_to_stream_pos=immutabledict(
+                {
+                    (await store.get_id_for_instance(instance_name)): pos
+                    for instance_name, pos in self.instance_map.items()
+                }
+            ),
+        )
 
     @staticmethod
     def is_stream_position_in_range(
@@ -1086,7 +1116,10 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
         instance_name: str | None,
         pos: int,
     ) -> bool:
-        """Checks if a given persisted position is between the two given tokens.
+        """
+        Checks if a given persisted position is between the two given tokens.
+
+        Bounds: low < (instance_name, pos) <= high
 
         If `instance_name` is None then the row was persisted before multi
         writer support.
@@ -1117,6 +1150,91 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
         return (
             f"MultiWriterStreamToken(stream: {self.stream}, instances: {{{instances}}})"
         )
+
+
+@attr.s(auto_attribs=True, frozen=True, slots=True, order=False)
+class UnresolvedMultiWriterStreamToken:
+    """
+    `MultiWriterStreamToken`, but unresolved raw form where the instance names are not available.
+    This unresolved form is suitable for (de)serialising without database access.
+    Converting to or from a `MultiWriterStreamToken` requires database access to resolve instance (worker) names.
+
+    Serialised as either:
+        - the bare `stream` position (e.g. `42`); or
+        - if any writer is ahead of that position,
+            as `m{stream}~{id}.{pos}~{id}.{pos}...`, where:
+            each `id` is the writer's ID from the `instance_map` table
+            (see `DataStore.get_id_for_instance`)
+    """
+
+    stream: int
+    """
+    The baseline stream position.
+
+    All stream facts with stream ID numerically lower than this are unconditionally before this token.
+    """
+
+    instance_id_to_stream_pos: Mapping[int, int] = immutabledict()
+    """
+    Positions by writing instance that are ahead of the baseline (`stream`) position.
+    """
+
+    @classmethod
+    def parse(cls, string: str) -> Self:
+        try:
+            if string[0].isdigit():
+                return cls(stream=int(string))
+            if string[0] == "m":
+                parts = string[1:].split("~")
+                stream = int(parts[0])
+                instance_id_to_stream_pos = {}
+
+                for part in parts[1:]:
+                    if not part:
+                        # Handle tokens of the form `m5~`, which were created by
+                        # a bug
+                        continue
+
+                    key, value = part.split(".")
+                    instance_id = int(key)
+                    pos = int(value)
+
+                    instance_id_to_stream_pos[instance_id] = pos
+
+                return cls(
+                    stream=stream,
+                    instance_id_to_stream_pos=immutabledict(instance_id_to_stream_pos),
+                )
+        except CancelledError:
+            raise
+        except Exception:
+            # We log an exception here as even though this *might* be a client
+            # handing a bad token, its more likely that Synapse returned a bad
+            # token (and we really want to catch those!).
+            # TODO(2026): reivilibre: I'm less convinced this makes sense nowadays.
+            logger.exception("Failed to parse stream token: %r", string)
+        raise SynapseError(400, "Invalid stream token %r" % (string,))
+
+    def to_string(self) -> str:
+        """See class level docstring for information about the format."""
+
+        if self.instance_id_to_stream_pos:
+            entries = []
+            for instance_id, pos in self.instance_id_to_stream_pos.items():
+                if pos <= self.stream:
+                    # Ignore instances who are below the minimum stream position
+                    # (we might know they've advanced without seeing a recent
+                    # write from them).
+                    continue
+
+                entries.append(f"{instance_id}.{pos}")
+
+            if entries:
+                encoded_map = "~".join(entries)
+                return f"m{self.stream}~{encoded_map}"
+            return str(self.stream)
+        else:
+            return str(self.stream)
 
 
 class StreamKeyType(Enum):
@@ -1221,7 +1339,9 @@ class StreamToken:
     groups_key: int
     un_partial_stated_rooms_key: int
     thread_subscriptions_key: int
-    sticky_events_key: int
+    sticky_events_key: MultiWriterStreamToken = attr.ib(
+        validator=attr.validators.instance_of(MultiWriterStreamToken)
+    )
     quarantined_media_key: MultiWriterStreamToken = attr.ib(
         validator=attr.validators.instance_of(MultiWriterStreamToken)
     )
@@ -1273,7 +1393,9 @@ class StreamToken:
                 groups_key=int(groups_key),
                 un_partial_stated_rooms_key=int(un_partial_stated_rooms_key),
                 thread_subscriptions_key=int(thread_subscriptions_key),
-                sticky_events_key=int(sticky_events_key),
+                sticky_events_key=await MultiWriterStreamToken.parse(
+                    store, sticky_events_key
+                ),
                 quarantined_media_key=await MultiWriterStreamToken.parse(
                     store, quarantined_media_key
                 ),
@@ -1301,7 +1423,7 @@ class StreamToken:
                 str(self.groups_key),
                 str(self.un_partial_stated_rooms_key),
                 str(self.thread_subscriptions_key),
-                str(self.sticky_events_key),
+                await self.sticky_events_key.to_string(store),
                 await self.quarantined_media_key.to_string(store),
                 str(self.profile_updates_key),
             ]
@@ -1339,6 +1461,12 @@ class StreamToken:
                 self.quarantined_media_key.copy_and_advance(new_value),
             )
             return new_token
+        elif key == StreamKeyType.STICKY_EVENTS:
+            new_token = self.copy_and_replace(
+                StreamKeyType.STICKY_EVENTS,
+                self.sticky_events_key.copy_and_advance(new_value),
+            )
+            return new_token
 
         new_token = self.copy_and_replace(key, new_value)
         new_id = new_token.get_field(key)
@@ -1362,6 +1490,7 @@ class StreamToken:
             StreamKeyType.RECEIPT,
             StreamKeyType.DEVICE_LIST,
             StreamKeyType.QUARANTINED_MEDIA,
+            StreamKeyType.STICKY_EVENTS,
         ],
     ) -> MultiWriterStreamToken: ...
 
@@ -1376,7 +1505,6 @@ class StreamToken:
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
-            StreamKeyType.STICKY_EVENTS,
             StreamKeyType.PROFILE_UPDATES,
         ],
     ) -> int: ...
@@ -1392,20 +1520,22 @@ class StreamToken:
         """Returns the stream ID for the given key."""
         return getattr(self, key.value)
 
-    def is_before_or_eq(self, other_token: "StreamToken") -> bool:
-        """Wether this token is before the other token, i.e. every constituent
-        part is before the other.
+    def _iter_fields_strictly_after_token(
+        self, other_token: "StreamToken"
+    ) -> Iterator[StreamKeyType]:
+        """The keys where `other_token` is behind this token.
 
-        Essentially it is `self <= other`.
+        A generator so that `is_before_or_eq` can stop at the first one.
 
-        Note: if `self.is_before_or_eq(other_token) is False` then that does not
-        imply that the reverse is True.
+        The typing key is never yielded. That stream is allowed to "reset", and
+        so comparisons don't really make sense as is.
+        TODO: Figure out a better way of tracking resets.
         """
 
         for _, key in StreamKeyType.__members__.items():
             if key == StreamKeyType.TYPING:
-                # Typing stream is allowed to "reset", and so comparisons don't
-                # really make sense as is.
+                # The typing key is never yielded. That stream is allowed to
+                # "reset", and so comparisons don't really make sense as is.
                 # TODO: Figure out a better way of tracking resets.
                 continue
 
@@ -1415,17 +1545,34 @@ class StreamToken:
             if isinstance(self_value, RoomStreamToken):
                 assert isinstance(other_value, RoomStreamToken)
                 if not self_value.is_before_or_eq(other_value):
-                    return False
+                    yield key
             elif isinstance(self_value, MultiWriterStreamToken):
                 assert isinstance(other_value, MultiWriterStreamToken)
                 if not self_value.is_before_or_eq(other_value):
-                    return False
+                    yield key
             else:
                 assert isinstance(other_value, int)
                 if self_value > other_value:
-                    return False
+                    yield key
 
-        return True
+    def fields_strictly_after_token(
+        self, other_token: "StreamToken"
+    ) -> list[StreamKeyType]:
+        """The keys where `other_token` is behind this token, i.e. the keys that
+        stop `self.is_before_or_eq(other_token)` from being True.
+        """
+        return list(self._iter_fields_strictly_after_token(other_token))
+
+    def is_before_or_eq(self, other_token: "StreamToken") -> bool:
+        """Whether this token is before the other token, i.e. every constituent
+        part is before the other.
+
+        Essentially it is `self <= other`.
+
+        Note: if `self.is_before_or_eq(other_token) is False` then that does not
+        imply that the reverse is True.
+        """
+        return next(self._iter_fields_strictly_after_token(other_token), None) is None
 
     def __str__(self) -> str:
         return (
@@ -1452,7 +1599,7 @@ StreamToken.START = StreamToken(
     groups_key=0,
     un_partial_stated_rooms_key=0,
     thread_subscriptions_key=0,
-    sticky_events_key=0,
+    sticky_events_key=MultiWriterStreamToken(stream=0),
     quarantined_media_key=MultiWriterStreamToken(stream=0),
     profile_updates_key=0,
 )
@@ -1765,3 +1912,17 @@ class EventOrderings:
         stream = event.internal_metadata.stream_ordering
         assert stream is not None
         return EventOrderings(stream, event.depth)
+
+
+def unwrap(val: T | None) -> T:
+    """
+    Assert that a value is non-None.
+
+    Analogous to `Option<T>.unwrap` in Rust.
+
+    Useful as an inline alternative to `assert val is not None`,
+    e.g. in set comprehensions.
+    """
+
+    assert val is not None
+    return val

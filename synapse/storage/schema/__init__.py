@@ -19,7 +19,7 @@
 #
 #
 
-SCHEMA_VERSION = 94  # remember to update the list below when updating
+SCHEMA_VERSION = 95  # remember to update the list below when updating
 """Represents the expectations made by the codebase about the database schema
 
 This should be incremented whenever the codebase changes its requirements on the
@@ -177,9 +177,15 @@ Changes in SCHEMA_VERSION = 94
     - MSC4242: Add state DAG tables.
     - MSC4429/MSC4262: Track updates to user profile fields via a new stream.
     - Add an `inserted_ts` column to the `state_groups_persisting` table.
+
+Changes in SCHEMA_VERSION = 95
+    - MSC4140: Stop using the `delayed_events_stream_pos` table, now that
+      delayed state events are no longer canceled by more recent state events
+      sent from a different user.
     - MSC4140: Add columns to the `delayed_events` table to keep track of delayed events
       that have been sent, cancelled, or failed to be sent due to an error.
     - MSC4140: Add an index on `delayed_events` to rank finalised delayed events per user.
+    - `event_edges.is_state` is no longer read from (it has not been written to since SCHEMA_VERSION 72).
 """
 
 

@@ -975,23 +975,22 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     Ok(())
 }
 
+/// Helpers for Rust unit tests elsewhere in the crate that need a logcontext.
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
+pub(crate) mod testing {
     use pyo3::types::PyString;
 
     use super::*;
 
     /// A minimal `LoggingContext` for these tests, built directly (bypassing
     /// `__init__`, which would capture the current context and thread id).
-    fn test_context(py: Python<'_>, name: &str) -> Py<LoggingContext> {
+    pub(crate) fn test_context(py: Python<'_>, name: &str) -> Py<LoggingContext> {
         Py::new(
             py,
             LoggingContext {
                 name: PyString::new(py, name).unbind(),
                 server_name: PyString::new(py, "test_server").unbind(),
-                main_thread: 0,
+                main_thread: get_thread_id(),
                 finished: false,
                 usage_start: None,
                 tag: Some(String::new()),
@@ -1005,6 +1004,14 @@ mod tests {
         )
         .expect("failed to allocate LoggingContext")
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::testing::test_context;
+    use super::*;
 
     #[test]
     fn thread_local_defaults_to_sentinel() {
