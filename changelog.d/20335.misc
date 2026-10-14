@@ -1,0 +1,1 @@
+Add the Rust sync store: the queries of the per-room sync loop on the native Postgres driver, each checked against the Python store method it ports.

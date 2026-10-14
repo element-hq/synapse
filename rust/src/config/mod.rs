@@ -34,6 +34,7 @@ pub struct SynapseHomeServerConfig {
     pub auth: AuthConfig,
     pub server: ServerConfig,
     pub experimental: ExperimentalConfig,
+    pub retention: RetentionConfig,
 }
 
 #[derive(FromPyObject, Clone)]
@@ -50,6 +51,14 @@ pub struct ServerConfig {
     pub msc4140_enabled: bool,
     pub public_baseurl: String,
     pub include_profile_updates_in_sync: bool,
+}
+
+/// `config.retention`: the message retention policy settings.
+#[derive(FromPyObject, Clone)]
+pub struct RetentionConfig {
+    pub retention_enabled: bool,
+    pub retention_default_min_lifetime: Option<i64>,
+    pub retention_default_max_lifetime: Option<i64>,
 }
 
 #[derive(FromPyObject, Clone)]

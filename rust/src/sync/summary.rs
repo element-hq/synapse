@@ -21,14 +21,7 @@ use pyo3::{
     types::{PyModule, PyModuleMethods},
 };
 
-/// The users of one membership in a room, as `get_room_summary` returns
-/// them: a truncated list of `(user_id, event_id)` in stream order, and
-/// the total.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MemberSummary {
-    pub members: Vec<(Arc<str>, Arc<str>)>,
-    pub count: i64,
-}
+pub use crate::storage::sync_store::MemberSummary;
 
 /// `extract_heroes_from_room_summary`: up to five users to represent the
 /// room from `me`'s point of view, as the spec's room summary section says:

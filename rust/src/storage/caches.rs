@@ -38,12 +38,20 @@
 //!
 //! [`StoreCaches`] bundles them, as `EventsWorkerStore` invalidates them
 //! together.
+//!
+//! The rest mirror a `@cached` function of the Python datastore, which is
+//! what invalidates them: the datastore adds each as a mirror of the
+//! Python cache it names, so every invalidation of that cache reaches it,
+//! whichever path it arrives by. See [`StoreCaches::mirrored`] and
+//! `synapse.util.caches.mirror_rust_cache`. They are filled by the sync
+//! store's readers.
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
-use crate::caches::{registry::CacheRegistry, Cache};
+use crate::caches::{python::CacheHandle, registry::CacheRegistry, Cache};
 use crate::state::StateMap;
 use crate::storage::events::CachedEvent;
+use crate::storage::sync_store::{RetentionRow, RoomNotifCounts, RoomSummary};
 
 pub type EventCache = Cache<Arc<str>, CachedEvent>;
 
@@ -101,6 +109,37 @@ pub struct StoreCaches {
     pub chain_positions: Arc<ChainPositionCache>,
     pub chain_links: Arc<ChainLinkCache>,
     pub state_groups: Arc<StateGroupCache>,
+
+    // Mirrors of Python caches. Each is bounded as the Python one is.
+    /// `get_rooms_for_user`, weighed by rooms.
+    pub rooms_for_user: Arc<RoomsForUserCache>,
+    /// `get_room_summary`.
+    pub room_summary: Arc<Cache<Arc<str>, Arc<RoomSummary>>>,
+    /// `is_partial_state_room`.
+    pub partial_state_rooms: Arc<Cache<Arc<str>, bool>>,
+    /// `is_user_erased`.
+    pub erased_users: Arc<Cache<Arc<str>, bool>>,
+    /// `get_retention_policy_for_room`, holding the room's row rather than
+    /// the policy, so that the configured defaults are applied on read.
+    pub retention_policies: Arc<Cache<Arc<str>, RetentionRow>>,
+    /// `_get_state_group_for_event`.
+    pub event_to_state_group: Arc<Cache<Arc<str>, i64>>,
+    /// `get_unread_event_push_actions_by_room_for_user`, keyed on room and
+    /// user, weighed by threads, and invalidated by room alone as well,
+    /// which the Python cache does as a `tree=True` cache.
+    pub unread_counts: Arc<UnreadCountsCache>,
+}
+
+/// User ID to the rooms they are joined to.
+pub type RoomsForUserCache = Cache<Arc<str>, Arc<HashSet<Arc<str>>>>;
+
+/// `(room_id, user_id)` to the user's unread counts in the room.
+pub type UnreadCountsCache = Cache<(Arc<str>, Arc<str>), Arc<RoomNotifCounts>>;
+
+/// A cache that mirrors a Python one, with the Python cache's name.
+pub(crate) struct MirroredCache {
+    pub(crate) python_name: &'static str,
+    pub(crate) cache: Arc<dyn CacheHandle>,
 }
 
 impl StoreCaches {
@@ -121,7 +160,51 @@ impl StoreCaches {
                 STATE_GROUP_CACHE_MAX_SIZE,
                 |state| state.len(),
             ),
+            rooms_for_user: registry.new_weighted_cache(
+                "rust_get_rooms_for_user",
+                500_000,
+                |rooms| rooms.len(),
+            ),
+            room_summary: registry.new_cache("rust_get_room_summary", 100_000),
+            partial_state_rooms: registry.new_cache("rust_is_partial_state_room", 10_000),
+            erased_users: registry.new_cache("rust_is_user_erased", 1000),
+            retention_policies: registry.new_cache("rust_get_retention_policy_for_room", 1000),
+            event_to_state_group: registry.new_cache("rust_get_state_group_for_event", 10_000),
+            unread_counts: registry.new_weighted_cache(
+                "rust_get_unread_event_push_actions_by_room_for_user",
+                5000,
+                |counts| counts.threads.len() + 1,
+            ),
         }
+    }
+
+    /// The caches that mirror a Python cache, for the datastore to attach
+    /// to the Python cache each names.
+    pub(crate) fn mirrored(&self) -> Vec<MirroredCache> {
+        fn mirror<K: 'static, V: 'static>(
+            python_name: &'static str,
+            cache: &Arc<Cache<K, V>>,
+        ) -> MirroredCache
+        where
+            Cache<K, V>: CacheHandle,
+        {
+            MirroredCache {
+                python_name,
+                cache: Arc::clone(cache) as Arc<dyn CacheHandle>,
+            }
+        }
+        vec![
+            mirror("get_rooms_for_user", &self.rooms_for_user),
+            mirror("get_room_summary", &self.room_summary),
+            mirror("is_partial_state_room", &self.partial_state_rooms),
+            mirror("is_user_erased", &self.erased_users),
+            mirror("get_retention_policy_for_room", &self.retention_policies),
+            mirror("_get_state_group_for_event", &self.event_to_state_group),
+            mirror(
+                "get_unread_event_push_actions_by_room_for_user",
+                &self.unread_counts,
+            ),
+        ]
     }
 
     /// Drop what is cached about an event: the event, and its chain position

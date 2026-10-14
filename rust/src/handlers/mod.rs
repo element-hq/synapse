@@ -88,7 +88,7 @@ impl RustHandlers {
                     )?),
                     Some(Py::new(
                         py,
-                        SyncHandler::new(connection_pool, runtime.clone(), store),
+                        SyncHandler::new(connection_pool, runtime.clone(), store, &config),
                     )?),
                 )
             } else {

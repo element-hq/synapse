@@ -76,6 +76,7 @@ from .rejections import RejectionsStore
 from .relations import RelationsStore
 from .room import RoomStore
 from .roommember import RoomMemberStore
+from .rust_store import RustWorkerStore
 from .search import SearchStore
 from .session import SessionStore
 from .signatures import SignatureStore
@@ -117,6 +118,7 @@ class UserPaginateResponse:
 class DataStore(
     EventsBackgroundUpdatesStore,
     ExperimentalFeaturesStore,
+    RustWorkerStore,
     DeviceStore,
     RoomMemberStore,
     RoomStore,

@@ -47,6 +47,12 @@ class RustStore:
         """The event, chain cover and state group caches, to register for
         metrics and cache factors. Nothing invalidates them by name."""
 
+    @property
+    def mirrored_caches(self) -> list[tuple[str, RustCache]]:
+        """The caches that mirror a `@cached` function of the datastore, each
+        with the function's name: attach each as a mirror of that function's
+        cache (`mirror_rust_cache`) and register it for metrics."""
+
     def invalidate_event(self, event_id: str) -> None:
         """Drop an event from the event and chain position caches. Called
         whenever the Python event cache drops it."""

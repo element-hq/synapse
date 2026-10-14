@@ -33,8 +33,10 @@ use std::sync::{Arc, Mutex};
 use pyo3::{create_exception, exceptions::PyException, prelude::*, types::PyModule};
 
 use crate::caches::lock_ignoring_poison;
+use crate::config::SynapseHomeServerConfig;
 use crate::runtime::RustRuntime;
 use crate::storage::store::Store;
+use crate::storage::sync_store::{SyncStore, SyncStoreConfig};
 use crate::types::stream_token::RoomStreamToken;
 
 pub mod filter;
@@ -63,9 +65,8 @@ pub struct SyncHandler {
     db_pool: Py<PyAny>,
     #[allow(dead_code)]
     runtime: RustRuntime,
-    /// The Rust store, for its event and state group caches.
-    #[allow(dead_code)]
-    store: Arc<Store>,
+    /// The queries, over the Rust store's caches.
+    store: Arc<SyncStore>,
     /// The lazy-loaded members sent to each device. Held here rather than
     /// on the store: they are per device, and no data change invalidates
     /// them.
@@ -73,13 +74,26 @@ pub struct SyncHandler {
 }
 
 impl SyncHandler {
-    pub fn new(db_pool: Py<PyAny>, runtime: RustRuntime, store: Arc<Store>) -> Self {
+    pub fn new(
+        db_pool: Py<PyAny>,
+        runtime: RustRuntime,
+        store: Arc<Store>,
+        config: &SynapseHomeServerConfig,
+    ) -> Self {
+        let store = SyncStore::new(
+            Arc::clone(&store.caches),
+            SyncStoreConfig::from_config(config),
+        );
         SyncHandler {
             db_pool,
             runtime,
-            store,
+            store: Arc::new(store),
             ll_members: Mutex::new(LazyLoadedMembersCaches::new()),
         }
+    }
+
+    pub(crate) fn store(&self) -> &Arc<SyncStore> {
+        &self.store
     }
 }
 
@@ -110,6 +124,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<ll_members::LazyLoadedMembersCache>()?;
     state_delta::register_test_functions(py, &child_module)?;
     summary::register_test_functions(py, &child_module)?;
+    crate::storage::sync_store::register_test_classes(&child_module)?;
     child_module.add("RustSyncFallback", py.get_type::<RustSyncFallback>())?;
 
     m.add_submodule(&child_module)?;

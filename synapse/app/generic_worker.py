@@ -96,6 +96,7 @@ from synapse.storage.databases.main.registration import RegistrationWorkerStore
 from synapse.storage.databases.main.relations import RelationsWorkerStore
 from synapse.storage.databases.main.room import RoomWorkerStore
 from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
+from synapse.storage.databases.main.rust_store import RustWorkerStore
 from synapse.storage.databases.main.search import SearchStore
 from synapse.storage.databases.main.session import SessionStore
 from synapse.storage.databases.main.signatures import SignatureWorkerStore
@@ -167,6 +168,7 @@ class GenericWorkerStore(
     SessionStore,
     TaskSchedulerWorkerStore,
     ExperimentalFeaturesStore,
+    RustWorkerStore,
     SlidingSyncStore,
     DelayedEventsStore,
 ):

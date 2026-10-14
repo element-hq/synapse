@@ -18,3 +18,4 @@ pub mod db;
 pub mod events;
 pub mod python;
 pub mod store;
+pub mod sync_store;

@@ -37,6 +37,9 @@ if TYPE_CHECKING:
 
 
 class ExperimentalFeaturesStore(CacheInvalidationWorkerStore):
+    # Built by `RustWorkerStore`, which comes later in the datastore's bases.
+    rust_store: RustStore
+
     def __init__(
         self,
         database: DatabasePool,
@@ -45,22 +48,12 @@ class ExperimentalFeaturesStore(CacheInvalidationWorkerStore):
     ) -> None:
         super().__init__(database, db_conn, hs)
 
-        # The Rust side of this store, over the same database pool. The Rust
-        # handlers share it, via `hs.get_rust_store()`.
-        self.rust_store = RustStore(hs.get_rust_runtime(), self.db_pool)
-
         # `is_feature_enabled_for_user` is a cache that lives in Rust, and the
         # function that reads through it. It is bound here under its own name,
         # which is how Synapse's invalidation machinery finds a cache, and
         # registered for metrics and cache factors like any other.
         self.is_feature_enabled_for_user = self.rust_store.is_feature_enabled_for_user
         register_rust_cache(self.is_feature_enabled_for_user, server_name=hs.hostname)
-
-        # The store's event and related caches are emptied through the store
-        # itself, by `EventsWorkerStore`, so they are registered for metrics
-        # and cache factors only.
-        for cache in self.rust_store.caches:
-            register_rust_cache(cache, server_name=hs.hostname)
 
     @cached()
     async def list_enabled_features(self, user_id: str) -> frozenset[str]:

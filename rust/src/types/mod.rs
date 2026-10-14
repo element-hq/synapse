@@ -197,6 +197,7 @@ impl Requester {
 }
 
 /// Called when registering modules with python.
+pub mod state_filter;
 pub mod stream_token;
 
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {

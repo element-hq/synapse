@@ -32,6 +32,11 @@
 //! [`RustStore::invalidate_event`] and [`RustStore::clear_event_cache`]
 //! whenever it empties its own event cache. They reach `register_cache`
 //! through [`RustStore::caches`], for metrics and cache factors.
+//!
+//! The caches that mirror a Python `@cached` function reach the datastore
+//! through [`RustStore::mirrored_caches`], which attaches each to the
+//! Python cache it names, so that every invalidation of the Python cache
+//! reaches it.
 
 use std::sync::Arc;
 
@@ -59,6 +64,8 @@ pub struct RustStore {
     is_feature_enabled_for_user: Py<IsFeatureEnabledForUser>,
     /// The store's event and related caches, as Python sees them.
     caches: Vec<Py<RustCache>>,
+    /// The caches that mirror a Python cache, with the Python cache's name.
+    mirrored_caches: Vec<(&'static str, Py<RustCache>)>,
 }
 
 impl RustStore {
@@ -95,11 +102,34 @@ impl RustStore {
             Py::new(py, RustCache::new(store_caches.state_groups.clone()))?,
         ];
 
+        let mirrored_caches = store_caches
+            .mirrored()
+            .into_iter()
+            .map(|mirrored| {
+                Ok((
+                    mirrored.python_name,
+                    Py::new(py, RustCache::new(mirrored.cache))?,
+                ))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+
         Ok(RustStore {
             store,
             is_feature_enabled_for_user,
             caches,
+            mirrored_caches,
         })
+    }
+
+    /// The caches that mirror a Python `@cached` function, each with the
+    /// name of the function, for the datastore to attach as a mirror of
+    /// that function's cache and to register for metrics.
+    #[getter]
+    fn mirrored_caches(&self, py: Python<'_>) -> Vec<(&'static str, Py<RustCache>)> {
+        self.mirrored_caches
+            .iter()
+            .map(|(name, cache)| (*name, cache.clone_ref(py)))
+            .collect()
     }
 
     /// The event, chain cover and state group caches, for the datastore to
