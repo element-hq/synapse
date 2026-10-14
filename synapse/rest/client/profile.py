@@ -241,7 +241,7 @@ class ProfileFieldRestServlet(RestServlet):
             # That way, clients don't accidentally rely on being able to send them.
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
-                f"'{field_name}' can not be `null`.",
+                f"'{field_name}' cannot be `null`.",
                 Codes.INVALID_PARAM,
             )
 
