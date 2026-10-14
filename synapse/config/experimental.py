@@ -260,6 +260,10 @@ class ExperimentalConfig(Config):
         # TODO: Remove the flag and the legacy rules after 2026-12-01.
         self.msc4210_enabled: bool = experimental.get("msc4210_enabled", True)
 
+        # MSC4233: Remembering which server a user knocked through, so that
+        # knocks can be rescinded and denied over federation.
+        self.msc4233_enabled: bool = experimental.get("msc4233_enabled", False)
+
         # MSC4076: Add `disable_badge_count`` to pusher configuration
         self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)
 
