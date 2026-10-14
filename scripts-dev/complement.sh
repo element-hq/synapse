@@ -370,6 +370,12 @@ main() {
     export PASS_SYNAPSE_RUST_STATE_RES="$RUST_STATE_RES"
   fi
 
+  if [[ -n "$RUST_SYNC" ]]; then
+    # Set `experimental_features.rust_sync` (off, shadow or on). The Rust sync
+    # handler needs RUST_DRIVER=1.
+    export PASS_SYNAPSE_RUST_SYNC="$RUST_SYNC"
+  fi
+
   if [[ -n "$UNIX_SOCKETS" ]]; then
     # Enable full on Unix socket mode for Synapse, Redis and Postgresql
     export PASS_SYNAPSE_USE_UNIX_SOCKET=1

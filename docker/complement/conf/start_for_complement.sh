@@ -6,7 +6,7 @@ set -e
 
 echo "Complement Synapse launcher"
 echo "  Args: $*"
-echo "  Env: SYNAPSE_COMPLEMENT_DATABASE=$SYNAPSE_COMPLEMENT_DATABASE SYNAPSE_COMPLEMENT_USE_WORKERS=$SYNAPSE_COMPLEMENT_USE_WORKERS SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR=$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR SYNAPSE_USE_RUST_DRIVER=$SYNAPSE_USE_RUST_DRIVER SYNAPSE_RUST_STATE_RES=$SYNAPSE_RUST_STATE_RES"
+echo "  Env: SYNAPSE_COMPLEMENT_DATABASE=$SYNAPSE_COMPLEMENT_DATABASE SYNAPSE_COMPLEMENT_USE_WORKERS=$SYNAPSE_COMPLEMENT_USE_WORKERS SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR=$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR SYNAPSE_USE_RUST_DRIVER=$SYNAPSE_USE_RUST_DRIVER SYNAPSE_RUST_STATE_RES=$SYNAPSE_RUST_STATE_RES SYNAPSE_RUST_SYNC=$SYNAPSE_RUST_SYNC"
 
 function log {
     d=$(printf '%(%Y-%m-%d %H:%M:%S)T,%.3s\n' ${EPOCHREALTIME/./ })
@@ -133,6 +133,12 @@ export SYNAPSE_TLS_KEY=/conf/server.tls.key
 # `experimental_features` would replace the shared one.
 if [[ -n "$SYNAPSE_RUST_STATE_RES" ]]; then
   sed -i "s/^experimental_features:$/experimental_features:\n  rust_state_res: \"$SYNAPSE_RUST_STATE_RES\"/" /conf/shared.yaml.j2
+fi
+
+# Compute sync rooms in Rust (`experimental_features.rust_sync`), allowing the
+# two event caches a test homeserver can afford.
+if [[ -n "$SYNAPSE_RUST_SYNC" ]]; then
+  sed -i "s/^experimental_features:$/experimental_features:\n  rust_sync: \"$SYNAPSE_RUST_SYNC\"\n  rust_sync_allow_unshared_event_cache: true/" /conf/shared.yaml.j2
 fi
 
 # Add a directory for tests to add config overrides if they want
