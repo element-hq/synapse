@@ -24,6 +24,7 @@ use pyo3::{
 
 use crate::homeserver::HomeServer;
 use crate::state::StateResolutionHandler;
+use crate::sync::SyncHandler;
 
 pub mod versions;
 
@@ -32,6 +33,8 @@ struct RustHandlers {
     versions: Py<versions::VersionsHandler>,
     /// Only when the main database uses the native Rust driver.
     state_resolution: Option<Py<StateResolutionHandler>>,
+    /// Only when the main database uses the native Rust driver.
+    sync: Option<Py<SyncHandler>>,
 }
 
 #[pymethods]
@@ -62,26 +65,40 @@ impl RustHandlers {
             },
         )?;
 
-        // The Rust state resolution reads the database through the native
-        // driver's pool, so it needs the main database to use that driver.
+        // The Rust state resolution and sync read the database through the
+        // native driver's pool, so they need the main database to use that
+        // driver.
         let connection_pool = homeserver
             .main_database_pool(py)?
             .getattr(intern!(py, "_db_pool"))?;
         let rust_connection_pool_class = py
             .import("synapse.storage.rust_pool")?
             .getattr("RustConnectionPool")?;
-        let state_resolution = if connection_pool.is_instance(&rust_connection_pool_class)? {
-            Some(Py::new(
-                py,
-                StateResolutionHandler::new(connection_pool.unbind(), runtime.clone(), store),
-            )?)
-        } else {
-            None
-        };
+        let (state_resolution, sync) =
+            if connection_pool.is_instance(&rust_connection_pool_class)? {
+                let connection_pool = connection_pool.unbind();
+                (
+                    Some(Py::new(
+                        py,
+                        StateResolutionHandler::new(
+                            connection_pool.clone_ref(py),
+                            runtime.clone(),
+                            Arc::clone(&store),
+                        ),
+                    )?),
+                    Some(Py::new(
+                        py,
+                        SyncHandler::new(connection_pool, runtime.clone(), store),
+                    )?),
+                )
+            } else {
+                (None, None)
+            };
 
         Ok(RustHandlers {
             versions,
             state_resolution,
+            sync,
         })
     }
 
@@ -95,6 +112,13 @@ impl RustHandlers {
     #[getter]
     fn state_resolution(&self, py: Python<'_>) -> Option<Py<StateResolutionHandler>> {
         self.state_resolution.as_ref().map(|h| h.clone_ref(py))
+    }
+
+    /// The Rust sync handler, or `None` if the main database does not use
+    /// the native Rust driver.
+    #[getter]
+    fn sync(&self, py: Python<'_>) -> Option<Py<SyncHandler>> {
+        self.sync.as_ref().map(|h| h.clone_ref(py))
     }
 }
 

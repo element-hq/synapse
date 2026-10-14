@@ -3379,3 +3379,27 @@ class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
         self.assertTrue(cache.was_sent("@u0:test", "$u0"))
         self.assertFalse(cache.was_sent("@u1:test", "$u1"))
         self.assertTrue(cache.was_sent("@new:test", "$new"))
+
+
+class RustSyncHandlerTestCase(tests.unittest.HomeserverTestCase):
+    """The Rust sync handler is only wired up on the native Rust driver."""
+
+    @override_config({"experimental_features": {"rust_sync": "on"}})
+    def test_rust_sync_needs_the_rust_driver(self) -> None:
+        sync_handler = self.hs.get_sync_handler()
+        self.assertEqual(sync_handler._rust_sync_mode, "on")
+        if tests.utils.USE_RUST_DRIVER_FOR_TESTS:
+            self.assertIsNotNone(sync_handler._rust_sync)
+            self.assertIsNotNone(self.hs.get_rust_handlers().sync)
+        else:
+            # Falls back to the Python handler, with a warning.
+            self.assertIsNone(sync_handler._rust_sync)
+            self.assertIsNone(self.hs.get_rust_handlers().sync)
+
+    def test_rust_sync_off_by_default(self) -> None:
+        sync_handler = self.hs.get_sync_handler()
+        # Unless the test run sets it for every homeserver.
+        expected = tests.utils.RUST_SYNC_FOR_TESTS or "off"
+        self.assertEqual(sync_handler._rust_sync_mode, expected)
+        if expected == "off":
+            self.assertIsNone(sync_handler._rust_sync)

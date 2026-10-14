@@ -110,6 +110,7 @@ from synapse.synapse_rust.runtime import RustRuntime, set_virtual_time_msec
 from synapse.synapse_rust.state import (
     StateResolutionHandler as RustStateResolutionHandler,
 )
+from synapse.synapse_rust.sync import SyncHandler as RustSyncHandler
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
@@ -123,6 +124,7 @@ from tests.utils import (
     POSTGRES_PORT,
     POSTGRES_USER,
     RUST_STATE_RES_FOR_TESTS,
+    RUST_SYNC_FOR_TESTS,
     SQLITE_PERSIST_DB,
     USE_POSTGRES_FOR_TESTS,
     USE_RUST_DRIVER_FOR_TESTS,
@@ -1317,6 +1319,13 @@ def setup_test_homeserver(
             Literal["off", "shadow", "on"], RUST_STATE_RES_FOR_TESTS
         )
 
+    if RUST_SYNC_FOR_TESTS:
+        if RUST_SYNC_FOR_TESTS not in ("off", "shadow", "on"):
+            raise ValueError("SYNAPSE_TEST_RUST_SYNC must be off, shadow or on")
+        config.experimental.rust_sync = cast(
+            Literal["off", "shadow", "on"], RUST_SYNC_FOR_TESTS
+        )
+
     if USE_POSTGRES_FOR_TESTS:
         test_db = "synapse_test_%s" % uuid.uuid4().hex
 
@@ -1515,6 +1524,14 @@ def setup_test_homeserver(
                 Any, _BlockingRustStateResolution(state_res_handler._rust_state_res)
             )
 
+    if RUST_SYNC_FOR_TESTS:
+        # Likewise for the Rust sync handler.
+        sync_handler = hs.get_sync_handler()
+        if sync_handler._rust_sync is not None:
+            sync_handler._rust_sync = cast(
+                Any, _BlockingRustSyncHandler(sync_handler._rust_sync)
+            )
+
     return hs
 
 
@@ -1563,6 +1580,32 @@ class _BlockingRustStateResolution:
             )
         except Exception:
             return fail()
+
+
+class _BlockingRustSyncHandler:
+    """Wraps the Rust `SyncHandler` so that each of its entry points blocks,
+    for the reason `_BlockingRustStateResolution` gives.
+
+    Every entry point `name` on the Rust handler that returns a Deferred has a
+    `name_blocking` twin that returns the result directly. This wrapper
+    answers `name` with that twin's result in an already-fired Deferred.
+    """
+
+    def __init__(self, handler: "RustSyncHandler") -> None:
+        self._handler = handler
+
+    def __getattr__(self, name: str) -> Any:
+        blocking = getattr(self._handler, f"{name}_blocking", None)
+        if blocking is None:
+            return getattr(self._handler, name)
+
+        def call(*args: Any, **kwargs: Any) -> "Deferred[Any]":
+            try:
+                return succeed(blocking(*args, **kwargs))
+            except Exception:
+                return fail()
+
+        return call
 
 
 def start_test_homeserver(

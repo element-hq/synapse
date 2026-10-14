@@ -58,6 +58,8 @@ USE_RUST_DRIVER_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_DRIVER", False)
 # test homeserver, overriding the test's own config. The Rust state resolution
 # only runs on the native Rust driver (SYNAPSE_TEST_RUST_DRIVER).
 RUST_STATE_RES_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_STATE_RES")
+# As above, for `experimental_features.rust_sync`.
+RUST_SYNC_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_SYNC")
 LEAVE_DB = os.environ.get("SYNAPSE_LEAVE_DB", False)
 POSTGRES_USER = os.environ.get("SYNAPSE_POSTGRES_USER", None)
 POSTGRES_HOST = os.environ.get("SYNAPSE_POSTGRES_HOST", None)

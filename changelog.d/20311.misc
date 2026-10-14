@@ -1,0 +1,1 @@
+Add a Rust sync handler behind `experimental_features.rust_sync`, with the shared Rust store caches and deferred cancellation it needs.

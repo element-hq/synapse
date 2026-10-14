@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Optional
 from twisted.internet.defer import Deferred
 
 from synapse.synapse_rust.state import StateResolutionHandler
+from synapse.synapse_rust.sync import SyncHandler
 from synapse.types import JsonDict
 
 if TYPE_CHECKING:
@@ -37,4 +38,9 @@ class RustHandlers:
     @property
     def state_resolution(self) -> StateResolutionHandler | None:
         """The Rust state resolution, or None if the main database does not use
+        the native Rust Postgres driver."""
+
+    @property
+    def sync(self) -> SyncHandler | None:
+        """The Rust sync handler, or None if the main database does not use
         the native Rust Postgres driver."""

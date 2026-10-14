@@ -337,3 +337,22 @@ class ExperimentalConfig(Config):
                 ("experimental", "rust_state_res"),
             )
         self.rust_state_res: Literal["off", "shadow", "on"] = rust_state_res
+
+        # Whether to compute the per-room part of `/sync` responses in Rust.
+        # Needs the native Rust Postgres driver. Same modes as `rust_state_res`:
+        #  - "off": the Python implementation.
+        #  - "shadow": Python, then Rust for each room, comparing the two
+        #    (`synapse_sync_rust_shadow_total`).
+        #  - "on": Rust, falling back to Python per room where Rust cannot
+        #    compute it.
+        rust_sync = experimental.get("rust_sync", "off")
+        if rust_sync is True:
+            rust_sync = "on"
+        elif rust_sync is False:
+            rust_sync = "off"
+        if rust_sync not in ("off", "shadow", "on"):
+            raise ConfigError(
+                "experimental_features.rust_sync must be one of 'off', 'shadow' or 'on'",
+                ("experimental", "rust_sync"),
+            )
+        self.rust_sync: Literal["off", "shadow", "on"] = rust_sync

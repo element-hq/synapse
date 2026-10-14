@@ -66,6 +66,7 @@ from synapse.storage.databases.main.roommember import extract_heroes_from_room_s
 from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import MemberSummary
+from synapse.synapse_rust.sync import SyncHandler as RustSyncHandler
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -481,6 +482,19 @@ class SyncHandler:
         """
 
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
+
+        # The Rust sync handler, used when the `rust_sync` experimental option
+        # is "on" or "shadow". It needs the native Rust Postgres driver.
+        self._rust_sync_mode = hs.config.experimental.rust_sync
+        self._rust_sync: RustSyncHandler | None = None
+        if self._rust_sync_mode != "off":
+            self._rust_sync = hs.get_rust_handlers().sync
+            if self._rust_sync is None:
+                logger.warning(
+                    "rust_sync is %r but the main database does not use the "
+                    "native Rust driver: using the Python sync handler",
+                    self._rust_sync_mode,
+                )
 
     async def wait_for_sync_for_user(
         self,
