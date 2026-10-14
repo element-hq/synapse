@@ -19,6 +19,12 @@
 //! the per-room part of a sync response, one room at a time, and raises
 //! [`RustSyncFallback`] for a room it cannot handle, which Python then
 //! computes itself.
+//!
+//! The pure parts of the per-room loop are each a port of the Python they
+//! are named after, checked against it by the tests in `tests/sync/`:
+//! [`filter`] ports `synapse.api.filtering`.
+//! [`crate::visibility`] and [`crate::types::stream_token`] are shared with
+//! later ports.
 
 use std::sync::Arc;
 
@@ -26,6 +32,8 @@ use pyo3::{create_exception, exceptions::PyException, prelude::*, types::PyModul
 
 use crate::runtime::RustRuntime;
 use crate::storage::store::Store;
+
+pub mod filter;
 
 create_exception!(
     synapse.synapse_rust.sync,
@@ -65,6 +73,7 @@ impl SyncHandler {
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "sync")?;
     child_module.add_class::<SyncHandler>()?;
+    child_module.add_class::<filter::FilterCollection>()?;
     child_module.add("RustSyncFallback", py.get_type::<RustSyncFallback>())?;
 
     m.add_submodule(&child_module)?;
