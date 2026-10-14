@@ -358,7 +358,7 @@ docs = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 # See https://beta.ruff.rs/docs/rules/#error-e
