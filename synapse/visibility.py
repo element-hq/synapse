@@ -177,70 +177,102 @@ async def filter_and_transform_events_for_client(
             ] = await storage.main.get_retention_policy_for_room(room_id)
 
     def allowed(event: EventBase) -> FilteredEvent | None:
-        state_after_event = event_id_to_state.get(event.event_id)
-        filtered = _check_client_allowed_to_see_event(
+        return _check_event_for_client(
             user_id=user_id,
             event=event,
+            state_after_event=event_id_to_state.get(event.event_id),
             clock=storage.main.clock,
             msc4354_enabled=storage.main.hs.config.experimental.msc4354_enabled,
             filter_send_to_client=filter_send_to_client,
             sender_ignored=event.sender in ignore_list,
             always_include_ids=always_include_ids,
             retention_policy=retention_policies[event.room_id],
-            state=state_after_event,
             is_peeking=is_peeking,
             sender_erased=erased_senders.get(event.sender, False),
         )
-        if filtered is None:
-            return None
-
-        # Filter out call invites in public rooms, as this would potentially
-        # ring a lot of users.
-        if event.type == EventTypes.CallInvite and not event.is_state():
-            # `state_after_event` should only be None if the event is an outlier,
-            # and earlier code should filter out outliers entirely.
-            #
-            # In addition, we only create outliers locally for out-of-band
-            # invite rejections, invites received over federation, or state
-            # events needed to authorise other events. None of this applies to
-            # call invites.
-            assert state_after_event is not None
-
-            room_join_rules = state_after_event.get((EventTypes.JoinRules, ""))
-            if (
-                room_join_rules is not None
-                and room_join_rules.content.get("join_rule") == JoinRules.PUBLIC
-            ):
-                return None
-
-        # Annotate the event with the user's membership after the event.
-        #
-        # Normally we just look in `state_after_event`, but if the event is an outlier
-        # we won't have such a state. The only outliers that are returned here are the
-        # user's own membership event, so we can just inspect that.
-
-        user_membership_event: EventBase | None
-        if event.type == EventTypes.Member and event.state_key == user_id:
-            user_membership_event = event
-        elif state_after_event is not None:
-            user_membership_event = state_after_event.get((EventTypes.Member, user_id))
-        else:
-            # unreachable!
-            raise Exception("Missing state for event that is not user's own membership")
-
-        user_membership = (
-            user_membership_event.membership
-            if user_membership_event
-            else Membership.LEAVE
-        )
-
-        return FilteredEvent(event=filtered, membership=user_membership)
 
     # Check each event: gives an iterable of None or a FilteredEvent.
     filtered_events = map(allowed, events)
 
     # Turn it into a list and remove None entries before returning.
     return [ev for ev in filtered_events if ev]
+
+
+def _check_event_for_client(
+    user_id: str,
+    event: EventBase,
+    state_after_event: StateMap[EventBase] | None,
+    clock: Clock,
+    msc4354_enabled: bool,
+    filter_send_to_client: bool,
+    sender_ignored: bool,
+    always_include_ids: frozenset[str],
+    retention_policy: RetentionPolicy,
+    is_peeking: bool,
+    sender_erased: bool,
+) -> FilteredEvent | None:
+    """The per-event decision of `filter_and_transform_events_for_client`:
+    whether the user may see `event`, in what form, and their membership at
+    it. `state_after_event` is `None` for an outlier.
+
+    The Rust sync handler has a port of this; `tests/sync/test_rust_pure.py`
+    checks the two agree.
+    """
+    filtered = _check_client_allowed_to_see_event(
+        user_id=user_id,
+        event=event,
+        clock=clock,
+        msc4354_enabled=msc4354_enabled,
+        filter_send_to_client=filter_send_to_client,
+        sender_ignored=sender_ignored,
+        always_include_ids=always_include_ids,
+        retention_policy=retention_policy,
+        state=state_after_event,
+        is_peeking=is_peeking,
+        sender_erased=sender_erased,
+    )
+    if filtered is None:
+        return None
+
+    # Filter out call invites in public rooms, as this would potentially
+    # ring a lot of users.
+    if event.type == EventTypes.CallInvite and not event.is_state():
+        # `state_after_event` should only be None if the event is an outlier,
+        # and earlier code should filter out outliers entirely.
+        #
+        # In addition, we only create outliers locally for out-of-band
+        # invite rejections, invites received over federation, or state
+        # events needed to authorise other events. None of this applies to
+        # call invites.
+        assert state_after_event is not None
+
+        room_join_rules = state_after_event.get((EventTypes.JoinRules, ""))
+        if (
+            room_join_rules is not None
+            and room_join_rules.content.get("join_rule") == JoinRules.PUBLIC
+        ):
+            return None
+
+    # Annotate the event with the user's membership after the event.
+    #
+    # Normally we just look in `state_after_event`, but if the event is an outlier
+    # we won't have such a state. The only outliers that are returned here are the
+    # user's own membership event, so we can just inspect that.
+
+    user_membership_event: EventBase | None
+    if event.type == EventTypes.Member and event.state_key == user_id:
+        user_membership_event = event
+    elif state_after_event is not None:
+        user_membership_event = state_after_event.get((EventTypes.Member, user_id))
+    else:
+        # unreachable!
+        raise Exception("Missing state for event that is not user's own membership")
+
+    user_membership = (
+        user_membership_event.membership if user_membership_event else Membership.LEAVE
+    )
+
+    return FilteredEvent(event=filtered, membership=user_membership)
 
 
 async def filter_event_for_clients_with_state(

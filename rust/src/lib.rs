@@ -39,6 +39,7 @@ pub mod storage;
 pub mod sync;
 pub mod twisted_dispatch;
 pub mod types;
+pub mod visibility;
 
 lazy_static! {
     static ref LOGGING_HANDLE: ResetHandle = pyo3_log::init();
@@ -110,6 +111,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     sync::register_module(py, m)?;
     room_versions::register_module(py, m)?;
     types::register_module(py, m)?;
+    visibility::register_module(py, m)?;
 
     Ok(())
 }

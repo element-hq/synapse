@@ -407,7 +407,7 @@ impl Event {
     /// the expiry of the event's stickiness, as seen locally on this homeserver.
     ///
     /// It is the caller's responsibility to check this time is not in the past.
-    fn locally_sticky_until_ts(&self) -> PyResult<Option<i64>> {
+    pub fn locally_sticky_until_ts(&self) -> PyResult<Option<i64>> {
         let Some(sticky_duration) = self.sticky_duration()? else {
             return Ok(None);
         };
@@ -732,6 +732,11 @@ impl Event {
         &self.parsed_event.common_fields.content
     }
 
+    /// The event's `unsigned` data, shared with the Python object.
+    pub fn unsigned_ref(&self) -> &Unsigned {
+        &self.parsed_event.unsigned
+    }
+
     /// The room version this event was parsed for.
     pub fn room_version(&self) -> &'static RoomVersion {
         self.room_version
@@ -795,7 +800,7 @@ pub(crate) fn event_dict_from_json_str(
 ///
 /// Returns the redacted event as a dict.
 #[pyfunction(name = "redact_event")]
-fn redact_event_py(event: &Event) -> PyResult<Event> {
+pub(crate) fn redact_event_py(event: &Event) -> PyResult<Event> {
     let event_value = serde_json::to_value(&event.parsed_event).map_err(|err| {
         PyValueError::new_err(format!("Failed to serialize event for redaction: {}", err))
     })?;

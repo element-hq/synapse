@@ -297,6 +297,12 @@ impl Unsigned {
     pub fn age_ts(&self) -> PyResult<Option<Number>> {
         Ok(self.py_read()?.persisted_fields.age_ts.clone())
     }
+
+    /// Get the `prev_content` field: the content of the state this event
+    /// replaced, if it is a state event and the content is known.
+    pub fn prev_content(&self) -> PyResult<Option<Box<serde_json::Value>>> {
+        Ok(self.py_read()?.prev_content.clone())
+    }
 }
 
 fn room_state_to_py<'py>(
