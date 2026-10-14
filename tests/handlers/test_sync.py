@@ -249,6 +249,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         self.store._get_rooms_for_local_user_where_membership_is_inner.invalidate_all()
         self.store._get_event_cache.clear()
         self.store._event_ref.clear()
+        self.hs.get_rust_store().clear_event_cache()
 
         # The rooms should be excluded from the sync response.
         # Get a new request key.
@@ -3534,22 +3535,69 @@ class RustSyncDispatchTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(self._rooms_count("rust"), before_rust)
         self.assertEqual([joined.room_id for joined in result.joined], [room_id])
 
-    def test_rust_error_falls_back_to_python(self) -> None:
+    def test_rust_room_error_falls_back_to_python(self) -> None:
         """A room the Rust handler fails on is computed by Python, rather than
         failing the response."""
         room_id = self.helper.create_room_as(self.user, tok=self.tok)
         event_id = self.helper.send(room_id, "hello", tok=self.tok)["event_id"]
 
+        class FailedRooms:
+            empty: list[str] = []
+            fallbacks: list[tuple[str, str]] = []
+            errors = [(room_id, "boom")]
+
+            def take_entries(self) -> list:
+                return []
+
         # Tests otherwise fail on any Rust error.
         self.sync_handler._rust_sync_strict = False
         before = self._rooms_count("error")
         rust_sync = Mock(wraps=self.sync_handler._rust_sync)
-        rust_sync.generate_room_entry.side_effect = RuntimeError("boom")
+        rust_sync.generate_room_entries.side_effect = lambda *args, **kwargs: (
+            defer.succeed(FailedRooms())
+        )
         with patch.object(self.sync_handler, "_rust_sync", rust_sync):
             result = self._sync()
         self.assertEqual(self._rooms_count("error"), before + 1)
 
         [joined] = result.joined
+        self.assertEqual(joined.timeline.events[-1].event.event_id, event_id)
+
+    def test_rust_room_changes_error_falls_back_to_python(self) -> None:
+        """If the Rust handler fails to work out which rooms to report, Python
+        computes the whole section."""
+        room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        event_id = self.helper.send(room_id, "hello", tok=self.tok)["event_id"]
+
+        self.sync_handler._rust_sync_strict = False
+        before = self._rooms_count("error")
+        rust_sync = Mock(wraps=self.sync_handler._rust_sync)
+        rust_sync.room_changes.side_effect = RuntimeError("boom")
+        with patch.object(self.sync_handler, "_rust_sync", rust_sync):
+            result = self._sync()
+        self.assertEqual(self._rooms_count("error"), before + 1)
+        rust_sync.generate_room_entries.assert_not_called()
+
+        [joined] = result.joined
+        self.assertEqual(joined.room_id, room_id)
+        self.assertEqual(joined.timeline.events[-1].event.event_id, event_id)
+
+    def test_rust_room_entries_error_falls_back_to_python(self) -> None:
+        """If the Rust handler fails before it starts on the rooms, Python
+        computes the whole section."""
+        room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        event_id = self.helper.send(room_id, "hello", tok=self.tok)["event_id"]
+
+        self.sync_handler._rust_sync_strict = False
+        before = self._rooms_count("error")
+        rust_sync = Mock(wraps=self.sync_handler._rust_sync)
+        rust_sync.generate_room_entries.side_effect = RuntimeError("boom")
+        with patch.object(self.sync_handler, "_rust_sync", rust_sync):
+            result = self._sync()
+        self.assertEqual(self._rooms_count("error"), before + 1)
+
+        [joined] = result.joined
+        self.assertEqual(joined.room_id, room_id)
         self.assertEqual(joined.timeline.events[-1].event.event_id, event_id)
 
     def test_shadow_mode_does_not_swallow_cancellation(self) -> None:
@@ -3560,7 +3608,7 @@ class RustSyncDispatchTestCase(tests.unittest.HomeserverTestCase):
         self.sync_handler._rust_sync_strict = False
         with patch.object(
             self.sync_handler,
-            "_generate_room_entry_in_rust",
+            "_generate_rooms_section_in_rust",
             AsyncMock(side_effect=defer.CancelledError()),
         ):
             self.get_failure(

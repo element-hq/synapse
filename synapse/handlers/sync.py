@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import functools
 import hashlib
 import itertools
 import json
@@ -28,6 +29,8 @@ from typing import (
     TYPE_CHECKING,
     AbstractSet,
     Any,
+    Awaitable,
+    Callable,
     Collection,
     Mapping,
     Sequence,
@@ -71,9 +74,9 @@ from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import MemberSummary
 from synapse.synapse_rust.sync import (
     FilterCollection as RustFilterCollection,
-    RoomSyncInput,
+    RoomChanges as RustRoomChanges,
+    RoomsInput as RustRoomsInput,
     RoomSyncResult,
-    RustSyncFallback,
     SyncHandler as RustSyncHandler,
     SyncRequest as RustSyncRequest,
 )
@@ -125,7 +128,9 @@ non_empty_sync_counter = Counter(
 
 # Room entries computed by the Rust sync handler in `rust_sync: on` mode.
 # `result` is "rust", "fallback" for a room left to Python, or "error" for a
-# room Python computed after the Rust handler failed.
+# room Python computed after the Rust handler failed on it. An "error" is also
+# counted once for a request whose room changes the Rust handler failed to
+# work out, which Python then computes in full.
 rust_sync_rooms_counter = Counter(
     "synapse_sync_rust_rooms_total",
     "Room entries of sync responses computed in `rust_sync: on` mode, by "
@@ -134,7 +139,9 @@ rust_sync_rooms_counter = Counter(
 )
 
 # Room entries computed by both implementations in `rust_sync: shadow` mode.
-# `result` is "match", "mismatch", "error" or "fallback".
+# `result` is "match", "mismatch", "error" or "fallback". The room changes of
+# each request (which rooms are reported, and which were joined or left) are
+# compared too, and counted as one more "match" or "mismatch".
 rust_sync_shadow_counter = Counter(
     "synapse_sync_rust_shadow_total",
     "Room entries of sync responses computed by both the Python and the Rust "
@@ -294,10 +301,6 @@ class _RustLazyLoadedMembersCache:
         )
 
 
-class _RustRoomError(Exception):
-    """The Rust sync handler failed to compute a room's entry."""
-
-
 SyncRequestKey = tuple[Any, ...]
 
 
@@ -412,6 +415,77 @@ class _RoomChanges:
     knocked: list[KnockedSyncResult]
     newly_joined_rooms: list[str]
     newly_left_rooms: list[str]
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _RoomExtras:
+    """What `_generate_sync_entry_for_rooms` fetches for each room before
+    working out which rooms to report."""
+
+    ephemeral_by_room: Mapping[str, list[JsonDict]]
+    tags_by_room: Mapping[str, Mapping[str, JsonMapping]]
+    account_data_by_room: Mapping[str, Mapping[str, JsonMapping]]
+    sticky_by_room: Mapping[str, list[str]]
+
+
+@attr.s(slots=True, auto_attribs=True)
+class _RoomsSection:
+    """The rooms of a sync response, and the rooms the user joined or left
+    since the last sync."""
+
+    invited: list[InvitedSyncResult]
+    knocked: list[KnockedSyncResult]
+    newly_joined_rooms: set[str]
+    newly_left_rooms: set[str]
+    joined: list[JoinedSyncResult] = attr.Factory(list)
+    archived: list[ArchivedSyncResult] = attr.Factory(list)
+    # In shadow mode, the rooms the Rust handler left to Python, which are
+    # not compared.
+    uncompared_rooms: set[str] = attr.Factory(set)
+
+    def add(self, entry: "JoinedSyncResult | ArchivedSyncResult | None") -> None:
+        if isinstance(entry, JoinedSyncResult):
+            self.joined.append(entry)
+        elif isinstance(entry, ArchivedSyncResult):
+            self.archived.append(entry)
+
+    def entries_by_room(
+        self,
+    ) -> "dict[str, JoinedSyncResult | ArchivedSyncResult]":
+        entries: dict[str, JoinedSyncResult | ArchivedSyncResult] = {
+            entry.room_id: entry for entry in self.joined
+        }
+        entries.update((entry.room_id, entry) for entry in self.archived)
+        return entries
+
+
+class _RustRoomsError(Exception):
+    """The Rust sync handler failed before computing any room's entry: while
+    working out which rooms to report, or before starting on the rooms."""
+
+
+def _diff_rooms_sections(python: _RoomsSection, rust: _RoomsSection) -> list[str]:
+    """How the Python and Rust sync handlers' room changes differ, for
+    `rust_sync: shadow` mode. Empty if they do not."""
+    differences = []
+
+    def compare(field: str, python_value: object, rust_value: object) -> None:
+        if python_value != rust_value:
+            differences.append(f"{field}: python {python_value!r}, rust {rust_value!r}")
+
+    compare("newly_joined_rooms", python.newly_joined_rooms, rust.newly_joined_rooms)
+    compare("newly_left_rooms", python.newly_left_rooms, rust.newly_left_rooms)
+    compare(
+        "invited",
+        {result.room_id: result.invite.event_id for result in python.invited},
+        {result.room_id: result.invite.event_id for result in rust.invited},
+    )
+    compare(
+        "knocked",
+        {result.room_id: result.knock.event_id for result in python.knocked},
+        {result.room_id: result.knock.event_id for result in rust.knocked},
+    )
+    return differences
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -2975,72 +3049,33 @@ class SyncHandler:
                         logger.debug("no-oping sync")
                         return set(), set()
 
-        # 3. Work out which rooms need reporting in the sync response.
+        # 3. Work out which rooms need reporting in the sync response, and 4.
+        # compute the entries of the joined and archived ones.
         ignored_users = await self.store.ignored_users(user_id)
         if since_token:
-            room_changes = await self._get_room_changes_for_incremental_sync(
-                sync_result_builder, ignored_users
-            )
             tags_by_room = await self.store.get_updated_tags(
                 user_id, since_token.account_data_key
             )
         else:
-            room_changes = await self._get_room_changes_for_initial_sync(
-                sync_result_builder, ignored_users
-            )
             tags_by_room = await self.store.get_tags_for_user(user_id)
 
-        log_kv({"rooms_changed": len(room_changes.room_entries)})
+        section = await self._generate_rooms_section_with_mode(
+            sync_result_builder,
+            ignored_users,
+            _RoomExtras(
+                ephemeral_by_room=ephemeral_by_room,
+                tags_by_room=tags_by_room,
+                account_data_by_room=account_data_by_room,
+                sticky_by_room=sticky_by_room,
+            ),
+        )
 
-        room_entries = room_changes.room_entries
-        invited = room_changes.invited
-        knocked = room_changes.knocked
-        newly_joined_rooms = room_changes.newly_joined_rooms
-        newly_left_rooms = room_changes.newly_left_rooms
+        sync_result_builder.joined.extend(section.joined)
+        sync_result_builder.archived.extend(section.archived)
+        sync_result_builder.invited.extend(section.invited)
+        sync_result_builder.knocked.extend(section.knocked)
 
-        if self.hs_config.experimental.msc4354_enabled and newly_joined_rooms:
-            # If we have any newly-joined rooms, load all sticky events from them.
-            # We then send down all the sticky events, including historical ones,
-            # rather than just the ones that are new since the `since` token.
-            sticky_by_room.update(
-                await self.sticky_events_for_newly_joined_rooms(
-                    sync_result_builder.now_token, newly_joined_rooms
-                )
-            )
-
-        rust_request: RustSyncRequest | None = None
-        if self._rust_sync is not None and room_entries:
-            rust_request = await self._build_rust_sync_request(
-                sync_result_builder, ignored_users
-            )
-
-        # 4. We need to apply further processing to `room_entries` (rooms considered
-        # joined or archived).
-        async def handle_room_entries(room_entry: "RoomSyncResultBuilder") -> None:
-            logger.debug("Generating room entry for %s", room_entry.room_id)
-            result = await self._generate_room_entry_with_mode(
-                sync_result_builder,
-                room_entry,
-                rust_request,
-                ephemeral=ephemeral_by_room.get(room_entry.room_id, []),
-                tags=tags_by_room.get(room_entry.room_id),
-                account_data=account_data_by_room.get(room_entry.room_id, {}),
-                sticky_event_ids=sticky_by_room.get(room_entry.room_id, []),
-                always_include=sync_result_builder.full_state,
-            )
-            if isinstance(result, JoinedSyncResult):
-                sync_result_builder.joined.append(result)
-            elif isinstance(result, ArchivedSyncResult):
-                sync_result_builder.archived.append(result)
-            logger.debug("Generated room entry for %s", room_entry.room_id)
-
-        with start_active_span("sync.generate_room_entries"):
-            await concurrently_execute(handle_room_entries, room_entries, 10)
-
-        sync_result_builder.invited.extend(invited)
-        sync_result_builder.knocked.extend(knocked)
-
-        return set(newly_joined_rooms), set(newly_left_rooms)
+        return section.newly_joined_rooms, section.newly_left_rooms
 
     def _may_have_rooms_changed(self, sync_result_builder: "SyncResultBuilder") -> bool:
         """Returns whether there may be any new events that should be sent down
@@ -3437,109 +3472,64 @@ class SyncHandler:
             msc4354_enabled=config.experimental.msc4354_enabled,
         )
 
-    async def _generate_room_entry_with_mode(
+    async def _generate_rooms_section_with_mode(
         self,
         sync_result_builder: "SyncResultBuilder",
-        room_builder: "RoomSyncResultBuilder",
-        rust_request: RustSyncRequest | None,
-        ephemeral: list[JsonDict],
-        tags: Mapping[str, JsonMapping] | None,
-        account_data: Mapping[str, JsonMapping],
-        sticky_event_ids: list[str],
-        always_include: bool,
-    ) -> "JoinedSyncResult | ArchivedSyncResult | None":
-        """`_generate_room_entry` through the implementation `rust_sync` picks.
+        ignored_users: frozenset[str],
+        extras: "_RoomExtras",
+    ) -> "_RoomsSection":
+        """Steps 3 and 4 of `_generate_sync_entry_for_rooms`, through the
+        implementation `rust_sync` picks."""
 
-        `rust_request` is None when the Rust handler is not in use.
-        """
-
-        async def python() -> "JoinedSyncResult | ArchivedSyncResult | None":
-            return await self._generate_room_entry(
-                sync_result_builder,
-                room_builder,
-                ephemeral=ephemeral,
-                tags=tags,
-                account_data=account_data,
-                sticky_event_ids=sticky_event_ids,
-                always_include=always_include,
+        async def python() -> _RoomsSection:
+            return await self._generate_rooms_section(
+                sync_result_builder, ignored_users, extras
             )
 
-        if rust_request is None:
+        if self._rust_sync is None:
             return await python()
 
-        async def rust(
-            bundle_aggregations: bool,
-        ) -> "JoinedSyncResult | ArchivedSyncResult | None":
-            return await self._generate_room_entry_in_rust(
-                sync_result_builder,
-                room_builder,
-                rust_request,
-                ephemeral=ephemeral,
-                tags=tags,
-                account_data=account_data,
-                sticky_event_ids=sticky_event_ids,
-                always_include=always_include,
-                bundle_aggregations=bundle_aggregations,
-            )
-
-        room_id = room_builder.room_id
         if self._rust_sync_mode == "on":
             try:
-                result = await rust(bundle_aggregations=True)
-            except CancelledError:
-                raise
-            except RustSyncFallback as e:
-                rust_sync_rooms_counter.labels(
-                    result="fallback", **{SERVER_NAME_LABEL: self.server_name}
-                ).inc()
-                logger.debug("Computing %s in Python: %s", room_id, e)
-                return await python()
-            except _RustRoomError:
-                # Python may well manage the room, so a Rust bug costs this
-                # room's speed rather than the whole response. The Rust
-                # handler records the members it sent only for rooms it
-                # finishes, so Python sends them again. A failure after the
-                # Rust handler finished the room is not caught: Python would
-                # leave out the members the Rust handler recorded.
+                return await self._generate_rooms_section_in_rust(
+                    sync_result_builder, ignored_users, extras, shadow=False
+                )
+            except _RustRoomsError:
+                # No room recorded the lazy-loaded members it sent, so Python
+                # can compute the section.
                 rust_sync_rooms_counter.labels(
                     result="error", **{SERVER_NAME_LABEL: self.server_name}
                 ).inc()
                 if self._rust_sync_strict:
                     raise
                 logger.exception(
-                    "Rust sync failed for %s: computing it in Python", room_id
+                    "Rust sync failed on the rooms of %s: using Python",
+                    sync_result_builder.sync_config.user,
                 )
                 return await python()
-            rust_sync_rooms_counter.labels(
-                result="rust", **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
-            return result
 
         # Shadow mode: Python's answer is the one sent. The Rust one is only
         # compared with it, so it skips the bundled aggregations. The two run
         # at once, so the response waits for the slower rather than for both.
         # The comparison stays on the request, rather than after it, so that
         # it sees the lazy-loaded members caches as Python did.
-        async def rust_outcome() -> (
-            "tuple[JoinedSyncResult | ArchivedSyncResult | None, Exception | None]"
-        ):
+        async def rust_outcome() -> tuple[_RoomsSection | None, Exception | None]:
             try:
-                return await rust(bundle_aggregations=False), None
+                section = await self._generate_rooms_section_in_rust(
+                    sync_result_builder, ignored_users, extras, shadow=True
+                )
+                return section, None
             except CancelledError:
                 raise
             except Exception as e:
                 return None, e
 
-        python_result, outcome = await gather_optional_coroutines(
+        python_section, outcome = await gather_optional_coroutines(
             python(), rust_outcome()
         )
+        assert python_section is not None
         assert outcome is not None
-        rust_result, rust_error = outcome
-        if isinstance(rust_error, RustSyncFallback):
-            rust_sync_shadow_counter.labels(
-                result="fallback", **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
-            return python_result
+        rust_section, rust_error = outcome
         if rust_error is not None:
             rust_sync_shadow_counter.labels(
                 result="error", **{SERVER_NAME_LABEL: self.server_name}
@@ -3548,115 +3538,382 @@ class SyncHandler:
                 raise rust_error
             logger.error(
                 "Rust sync failed for %s in shadow mode",
-                room_id,
+                sync_result_builder.sync_config.user,
                 exc_info=(type(rust_error), rust_error, rust_error.__traceback__),
             )
-            return python_result
+            return python_section
+        assert rust_section is not None
+        self._compare_rooms_sections(
+            sync_result_builder.sync_config.user.to_string(),
+            python_section,
+            rust_section,
+        )
+        return python_section
 
-        differences = _diff_room_entries(python_result, rust_result)
-        if not differences:
-            rust_sync_shadow_counter.labels(
-                result="match", **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
-            return python_result
-
-        rust_sync_shadow_counter.labels(
-            result="mismatch", **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
-        message = "Rust sync entry for %s differs from Python's: %s"
-        if self._rust_sync_strict:
-            raise AssertionError(message % (room_id, "; ".join(differences)))
-        if room_id in self._rust_sync_mismatched_rooms:
-            logger.debug(message, room_id, "; ".join(differences))
+    async def _generate_rooms_section(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        ignored_users: frozenset[str],
+        extras: "_RoomExtras",
+    ) -> "_RoomsSection":
+        """Steps 3 and 4 of `_generate_sync_entry_for_rooms` in Python: which
+        rooms to report, then the entry of each joined or archived room."""
+        since_token = sync_result_builder.since_token
+        if since_token:
+            room_changes = await self._get_room_changes_for_incremental_sync(
+                sync_result_builder, ignored_users
+            )
         else:
+            room_changes = await self._get_room_changes_for_initial_sync(
+                sync_result_builder, ignored_users
+            )
+
+        log_kv({"rooms_changed": len(room_changes.room_entries)})
+
+        sticky_by_room = await self._with_newly_joined_sticky_events(
+            sync_result_builder, extras.sticky_by_room, room_changes.newly_joined_rooms
+        )
+
+        section = _RoomsSection(
+            invited=room_changes.invited,
+            knocked=room_changes.knocked,
+            newly_joined_rooms=set(room_changes.newly_joined_rooms),
+            newly_left_rooms=set(room_changes.newly_left_rooms),
+        )
+
+        async def handle_room_entries(room_entry: "RoomSyncResultBuilder") -> None:
+            logger.debug("Generating room entry for %s", room_entry.room_id)
+            section.add(
+                await self._generate_room_entry(
+                    sync_result_builder,
+                    room_entry,
+                    ephemeral=extras.ephemeral_by_room.get(room_entry.room_id, []),
+                    tags=extras.tags_by_room.get(room_entry.room_id),
+                    account_data=extras.account_data_by_room.get(
+                        room_entry.room_id, {}
+                    ),
+                    sticky_event_ids=sticky_by_room.get(room_entry.room_id, []),
+                    always_include=sync_result_builder.full_state,
+                )
+            )
+            logger.debug("Generated room entry for %s", room_entry.room_id)
+
+        with start_active_span("sync.generate_room_entries"):
+            await concurrently_execute(
+                handle_room_entries, room_changes.room_entries, 10
+            )
+
+        return section
+
+    async def _with_newly_joined_sticky_events(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        sticky_by_room: Mapping[str, list[str]],
+        newly_joined_rooms: Collection[str],
+    ) -> Mapping[str, list[str]]:
+        """`sticky_by_room`, with all the sticky events of newly joined rooms,
+        including historical ones, rather than just those since the `since`
+        token."""
+        if not (self.hs_config.experimental.msc4354_enabled and newly_joined_rooms):
+            return sticky_by_room
+        return {
+            **sticky_by_room,
+            **await self.sticky_events_for_newly_joined_rooms(
+                sync_result_builder.now_token, newly_joined_rooms
+            ),
+        }
+
+    async def _generate_rooms_section_in_rust(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        ignored_users: frozenset[str],
+        extras: "_RoomExtras",
+        shadow: bool,
+    ) -> "_RoomsSection":
+        """`_generate_rooms_section` through the Rust sync handler.
+
+        Raises `_RustRoomsError` if the Rust handler fails before it starts
+        on any room, so that Python may compute the section instead. A room the
+        Rust handler fails on is computed by Python.
+
+        Args:
+            shadow: Whether the section is only compared with Python's. The
+                rooms the Rust handler leaves to Python are then left out of
+                it, and of the comparison, and the bundled aggregations are
+                skipped.
+        """
+        assert self._rust_sync is not None
+        sync_config = sync_result_builder.sync_config
+        user_id = sync_config.user.to_string()
+        since_token = sync_result_builder.since_token
+        now_token = sync_result_builder.now_token
+
+        try:
+            rust_request = await self._build_rust_sync_request(
+                sync_result_builder, ignored_users
+            )
+            if since_token:
+                changed_room_ids = self.store.get_rooms_that_changed(
+                    sync_result_builder.joined_room_ids, since_token.room_key
+                )
+                initial_rooms = []
+            else:
+                changed_room_ids = set()
+                room_list = (
+                    await self.store.get_rooms_for_local_user_where_membership_is(
+                        user_id=user_id,
+                        membership_list=Membership.LIST,
+                        excluded_rooms=sync_result_builder.excluded_room_ids,
+                    )
+                )
+                initial_rooms = [
+                    (
+                        room.room_id,
+                        room.sender,
+                        room.membership,
+                        room.event_id,
+                        room.event_pos.stream,
+                    )
+                    for room in room_list
+                    if room.room_version_id in KNOWN_ROOM_VERSIONS
+                ]
+            rooms_input = RustRoomsInput(
+                since=since_token.room_key if since_token else None,
+                full_state=sync_result_builder.full_state,
+                joined_room_ids=list(sync_result_builder.joined_room_ids),
+                changed_room_ids=changed_room_ids,
+                forced_newly_joined_room_ids=list(
+                    sync_result_builder.forced_newly_joined_room_ids
+                ),
+                membership_change_events=sync_result_builder.membership_change_events,
+                initial_rooms=initial_rooms,
+            )
+            with start_active_span("sync.room_changes_in_rust"):
+                changes = await self._rust_sync.room_changes(rust_request, rooms_input)
+        except CancelledError:
+            raise
+        except Exception as e:
+            raise _RustRoomsError() from e
+
+        log_kv({"rooms_changed": len(changes)})
+
+        invite_config = await self.store.get_invite_config_for_user(user_id)
+        section = _RoomsSection(
+            invited=[
+                InvitedSyncResult(room_id, invite=event)
+                for room_id, event in changes.invited
+                if event.sender not in ignored_users
+                and invite_config.get_invite_rule(event.sender) != InviteRule.IGNORE
+            ],
+            knocked=[
+                KnockedSyncResult(room_id, knock=event)
+                for room_id, event in changes.knocked
+            ],
+            newly_joined_rooms=set(changes.newly_joined_rooms),
+            newly_left_rooms=set(changes.newly_left_rooms),
+        )
+
+        sticky_by_room = await self._with_newly_joined_sticky_events(
+            sync_result_builder, extras.sticky_by_room, changes.newly_joined_rooms
+        )
+
+        # Each room's outcome comes back in the result, so the call fails only
+        # before it starts on the rooms.
+        try:
+            with start_active_span("sync.generate_room_entries_in_rust"):
+                result = await self._rust_sync.generate_room_entries(
+                    rust_request,
+                    changes,
+                    ephemeral_by_room=extras.ephemeral_by_room,
+                    tags_by_room=extras.tags_by_room,
+                    account_data_by_room=extras.account_data_by_room,
+                    sticky_by_room=sticky_by_room,
+                )
+        except CancelledError:
+            raise
+        except Exception as e:
+            raise _RustRoomsError() from e
+
+        counter = rust_sync_shadow_counter if shadow else rust_sync_rooms_counter
+        python_room_ids = []
+        for room_id, reason in result.fallbacks:
+            counter.labels(
+                result="fallback", **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
+            logger.debug("Computing %s in Python: %s", room_id, reason)
+            python_room_ids.append(room_id)
+        for room_id, error in result.errors:
+            counter.labels(
+                result="error", **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
+            if self._rust_sync_strict:
+                raise RuntimeError(f"Rust sync failed for {room_id}: {error}")
+            # Python may well manage the room, so a Rust bug costs this
+            # room's speed rather than the whole response. The Rust handler
+            # records the members it sent only for rooms it finishes, so
+            # Python sends them again.
+            logger.error(
+                "Rust sync failed for %s: %s. Computing it in Python", room_id, error
+            )
+            python_room_ids.append(room_id)
+
+        entries = result.take_entries()
+        if not shadow:
+            counter.labels(result="rust", **{SERVER_NAME_LABEL: self.server_name}).inc(
+                len(entries) + len(result.empty)
+            )
+
+        async def from_rust(
+            entry: tuple[RoomSyncResult, bool, RoomStreamToken],
+        ) -> None:
+            room_result, upto_from_now, upto_room_key = entry
+            base = now_token if upto_from_now else since_token
+            assert base is not None
+            section.add(
+                await self._room_entry_from_rust(
+                    sync_result_builder,
+                    base.copy_and_replace(StreamKeyType.ROOM, upto_room_key),
+                    room_result,
+                    bundle_aggregations=not shadow,
+                )
+            )
+
+        async def in_python(room_id: str) -> None:
+            section.add(
+                await self._generate_room_entry(
+                    sync_result_builder,
+                    self._room_builder_from_rust(sync_result_builder, changes, room_id),
+                    ephemeral=extras.ephemeral_by_room.get(room_id, []),
+                    tags=extras.tags_by_room.get(room_id),
+                    account_data=extras.account_data_by_room.get(room_id, {}),
+                    sticky_event_ids=sticky_by_room.get(room_id, []),
+                    always_include=sync_result_builder.full_state,
+                )
+            )
+
+        # The rooms Python computes run alongside the bundling of the Rust
+        # ones.
+        tasks: list[Callable[[], Awaitable[None]]] = [
+            functools.partial(from_rust, entry) for entry in entries
+        ]
+        if shadow:
+            section.uncompared_rooms.update(python_room_ids)
+        else:
+            tasks.extend(
+                functools.partial(in_python, room_id) for room_id in python_room_ids
+            )
+
+        async def run(task: Callable[[], Awaitable[None]]) -> None:
+            await task()
+
+        await concurrently_execute(run, tasks, 10)
+        return section
+
+    @staticmethod
+    def _room_builder_from_rust(
+        sync_result_builder: "SyncResultBuilder",
+        changes: RustRoomChanges,
+        room_id: str,
+    ) -> "RoomSyncResultBuilder":
+        """The `RoomSyncResultBuilder` of a room the Rust handler worked out
+        the changes of, for Python to compute its entry."""
+        (
+            rtype,
+            events,
+            newly_joined,
+            full_state,
+            has_since,
+            upto_from_now,
+            upto_room_key,
+            end_from_now,
+            end_room_key,
+            out_of_band,
+        ) = changes.room_entry(room_id)
+        since_token = sync_result_builder.since_token
+        now_token = sync_result_builder.now_token
+
+        def token(from_now: bool, room_key: RoomStreamToken) -> StreamToken:
+            base = now_token if from_now else since_token
+            assert base is not None
+            return base.copy_and_replace(StreamKeyType.ROOM, room_key)
+
+        return RoomSyncResultBuilder(
+            room_id=room_id,
+            rtype=rtype,
+            events=events,
+            newly_joined=newly_joined,
+            full_state=full_state,
+            since_token=since_token if has_since else None,
+            upto_token=token(upto_from_now, upto_room_key),
+            end_token=token(end_from_now, end_room_key),
+            out_of_band=out_of_band,
+        )
+
+    def _compare_rooms_sections(
+        self, user_id: str, python: "_RoomsSection", rust: "_RoomsSection"
+    ) -> None:
+        """Compare the Python and Rust sections in shadow mode, counting and
+        logging the differences, or raising in strict mode."""
+
+        def report(subject: str, differences: list[str]) -> None:
+            if not differences:
+                rust_sync_shadow_counter.labels(
+                    result="match", **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
+                return
+            rust_sync_shadow_counter.labels(
+                result="mismatch", **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
+            message = "Rust sync entry for %s differs from Python's: %s"
+            if self._rust_sync_strict:
+                raise AssertionError(message % (subject, "; ".join(differences)))
+            if subject in self._rust_sync_mismatched_rooms:
+                logger.debug(message, subject, "; ".join(differences))
+                return
             if (
                 len(self._rust_sync_mismatched_rooms)
                 >= _RUST_SYNC_MISMATCH_ROOMS_LOGGED
             ):
                 self._rust_sync_mismatched_rooms.clear()
-            self._rust_sync_mismatched_rooms.add(room_id)
-            logger.warning(message, room_id, "; ".join(differences))
-        return python_result
+            self._rust_sync_mismatched_rooms.add(subject)
+            logger.warning(message, subject, "; ".join(differences))
 
-    async def _generate_room_entry_in_rust(
-        self,
-        sync_result_builder: "SyncResultBuilder",
-        room_builder: "RoomSyncResultBuilder",
-        rust_request: RustSyncRequest,
-        ephemeral: list[JsonDict],
-        tags: Mapping[str, JsonMapping] | None,
-        account_data: Mapping[str, JsonMapping],
-        sticky_event_ids: list[str],
-        always_include: bool,
-        bundle_aggregations: bool,
-    ) -> "JoinedSyncResult | ArchivedSyncResult | None":
-        """`_generate_room_entry` through the Rust sync handler.
+        # Each user's room changes are their own subject, so that a mismatch
+        # for one user does not hide the next user's at debug level.
+        report(f"the rooms of {user_id}", _diff_rooms_sections(python, rust))
 
-        Raises `RustSyncFallback` for a room the Rust handler cannot compute,
-        and `_RustRoomError` if the Rust handler fails on it.
-
-        Args:
-            bundle_aggregations: Whether to bundle aggregations for the
-                timeline when the room calls for them.
-        """
-        assert self._rust_sync is not None
-        newly_joined = room_builder.newly_joined
-        since_token = room_builder.since_token
-        room_input = RoomSyncInput(
-            room_id=room_builder.room_id,
-            rtype=room_builder.rtype,
-            events=room_builder.events,
-            newly_joined=newly_joined,
-            full_state=(
-                room_builder.full_state
-                or newly_joined
-                or sync_result_builder.full_state
-            ),
-            since=since_token.room_key if since_token else None,
-            upto=room_builder.upto_token.room_key,
-            end=room_builder.end_token.room_key,
-            out_of_band=room_builder.out_of_band,
-            ephemeral=ephemeral,
-            tags=tags,
-            account_data=account_data,
-            sticky_event_ids=sticky_event_ids,
-            always_include=always_include,
-            room_max_token=self.store.get_room_max_token(),
-        )
-        with start_active_span("sync.generate_room_entry_in_rust"):
-            set_tag("room_id", room_builder.room_id)
-            try:
-                result = await self._rust_sync.generate_room_entry(
-                    rust_request, room_input
-                )
-            except (CancelledError, RustSyncFallback):
-                raise
-            except Exception as e:
-                raise _RustRoomError() from e
-        if result is None:
-            return None
-        return await self._room_entry_from_rust(
-            sync_result_builder, room_builder, result, bundle_aggregations
-        )
+        python_entries = python.entries_by_room()
+        rust_entries = rust.entries_by_room()
+        for room_id in sorted(python_entries.keys() | rust_entries.keys()):
+            if room_id in rust.uncompared_rooms:
+                continue
+            report(
+                room_id,
+                _diff_room_entries(
+                    python_entries.get(room_id), rust_entries.get(room_id)
+                ),
+            )
 
     async def _room_entry_from_rust(
         self,
         sync_result_builder: "SyncResultBuilder",
-        room_builder: "RoomSyncResultBuilder",
+        upto_token: StreamToken,
         result: RoomSyncResult,
         bundle_aggregations: bool,
     ) -> "JoinedSyncResult | ArchivedSyncResult":
         """The room entry for a result of the Rust sync handler, with the
-        bundled aggregations added as `_load_filtered_recents` does."""
+        bundled aggregations added as `_load_filtered_recents` does.
+
+        Args:
+            upto_token: The room's `RoomSyncResultBuilder.upto_token`.
+        """
         events = [
             FilteredEvent(event=event, membership=membership)
             for event, membership in result.timeline
         ]
 
         prev_batch = (
-            sync_result_builder.now_token
-            if result.prev_batch_from_now
-            else room_builder.upto_token
+            sync_result_builder.now_token if result.prev_batch_from_now else upto_token
         )
         prev_batch_room_key = result.prev_batch_room_key
         if prev_batch_room_key is not None:

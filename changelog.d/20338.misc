@@ -1,0 +1,1 @@
+Work out the rooms of `/sync` responses in Rust, and compute their entries in one call, when `experimental_features.rust_sync` is `shadow` or `on`.
