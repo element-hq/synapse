@@ -1,0 +1,1 @@
+Compute the joined and archived rooms of `/sync` responses in Rust when `experimental_features.rust_sync` is `shadow` or `on`, falling back to Python for partial state rooms.

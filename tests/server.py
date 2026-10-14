@@ -125,6 +125,7 @@ from tests.utils import (
     POSTGRES_USER,
     RUST_STATE_RES_FOR_TESTS,
     RUST_SYNC_FOR_TESTS,
+    RUST_SYNC_STRICT_FOR_TESTS,
     SQLITE_PERSIST_DB,
     USE_POSTGRES_FOR_TESTS,
     USE_RUST_DRIVER_FOR_TESTS,
@@ -1325,6 +1326,8 @@ def setup_test_homeserver(
         config.experimental.rust_sync = cast(
             Literal["off", "shadow", "on"], RUST_SYNC_FOR_TESTS
         )
+        # Tests may hold every event twice.
+        config.experimental.rust_sync_allow_unshared_event_cache = True
 
     if USE_POSTGRES_FOR_TESTS:
         test_db = "synapse_test_%s" % uuid.uuid4().hex
@@ -1531,6 +1534,7 @@ def setup_test_homeserver(
             sync_handler._rust_sync = cast(
                 Any, _BlockingRustSyncHandler(sync_handler._rust_sync)
             )
+        sync_handler._rust_sync_strict = RUST_SYNC_STRICT_FOR_TESTS
 
     return hs
 

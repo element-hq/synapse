@@ -36,6 +36,8 @@ from typing import (
 import attr
 from prometheus_client import Counter
 
+from twisted.internet.defer import CancelledError
+
 from synapse.api.constants import (
     AccountDataTypes,
     Direction,
@@ -67,7 +69,14 @@ from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import MemberSummary
-from synapse.synapse_rust.sync import SyncHandler as RustSyncHandler
+from synapse.synapse_rust.sync import (
+    FilterCollection as RustFilterCollection,
+    RoomSyncInput,
+    RoomSyncResult,
+    RustSyncFallback,
+    SyncHandler as RustSyncHandler,
+    SyncRequest as RustSyncRequest,
+)
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -85,11 +94,15 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.state import StateFilter
-from synapse.util.async_helpers import concurrently_execute
+from synapse.util.async_helpers import (
+    concurrently_execute,
+    gather_optional_coroutines,
+)
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 from synapse.util.cancellation import cancellable
+from synapse.util.frozenutils import unfreeze
 from synapse.util.metrics import Measure
 from synapse.visibility import filter_and_transform_events_for_client
 
@@ -109,6 +122,29 @@ non_empty_sync_counter = Counter(
     "enabled for that request.",
     labelnames=["type", "lazy_loaded", SERVER_NAME_LABEL],
 )
+
+# Room entries computed by the Rust sync handler in `rust_sync: on` mode.
+# `result` is "rust", "fallback" for a room left to Python, or "error" for a
+# room Python computed after the Rust handler failed.
+rust_sync_rooms_counter = Counter(
+    "synapse_sync_rust_rooms_total",
+    "Room entries of sync responses computed in `rust_sync: on` mode, by "
+    "whether Rust computed them or fell back to Python",
+    labelnames=["result", SERVER_NAME_LABEL],
+)
+
+# Room entries computed by both implementations in `rust_sync: shadow` mode.
+# `result` is "match", "mismatch", "error" or "fallback".
+rust_sync_shadow_counter = Counter(
+    "synapse_sync_rust_shadow_total",
+    "Room entries of sync responses computed by both the Python and the Rust "
+    "sync handler in `rust_sync: shadow` mode, by whether they matched",
+    labelnames=["result", SERVER_NAME_LABEL],
+)
+
+# How many rooms' shadow mismatches are logged at warning level before
+# the set of them is reset. Later mismatches in a room go to debug.
+_RUST_SYNC_MISMATCH_ROOMS_LOGGED = 10000
 
 # Store the cache that tracks which lazy-loaded members have been sent to a given
 # client for no more than 30 minutes.
@@ -222,6 +258,44 @@ class LazyLoadedMembersCache:
         # entries after a later one has.
         if self._newest is None or self._newest.is_before_or_eq(sent_at):
             self._newest = sent_at
+
+
+class _RustLazyLoadedMembersCache:
+    """A device's `LazyLoadedMembersCache` as the Rust sync handler holds it.
+
+    In `rust_sync: on` mode a room moves between the implementations: Python
+    computes a partial state room, and Rust takes it over once the room has
+    full state. Both therefore read and record the members sent to a device in
+    the Rust handler's caches.
+    """
+
+    def __init__(
+        self, handler: RustSyncHandler, user_id: str, device_id: str | None
+    ) -> None:
+        self._handler = handler
+        self._user_id = user_id
+        self._device_id = device_id
+
+    def start_request(self, since_token: StreamToken | None) -> None:
+        self._handler.start_request(
+            self._user_id,
+            self._device_id,
+            since_token.room_key if since_token else None,
+        )
+
+    def was_sent(self, user_id: str, event_id: str) -> bool:
+        return self._handler.ll_member_was_sent(
+            self._user_id, self._device_id, user_id, event_id
+        )
+
+    def mark_sent(self, user_id: str, event_id: str, next_batch: StreamToken) -> None:
+        self._handler.ll_member_mark_sent(
+            self._user_id, self._device_id, user_id, event_id, next_batch.room_key
+        )
+
+
+class _RustRoomError(Exception):
+    """The Rust sync handler failed to compute a room's entry."""
 
 
 SyncRequestKey = tuple[Any, ...]
@@ -496,6 +570,12 @@ class SyncHandler:
                     "native Rust driver: using the Python sync handler",
                     self._rust_sync_mode,
                 )
+
+        # Whether a Rust error, or in shadow mode a mismatch between the two
+        # implementations, raises rather than being logged. Tests set it.
+        self._rust_sync_strict = False
+        # The rooms whose shadow mismatch was logged at warning level.
+        self._rust_sync_mismatched_rooms: set[str] = set()
 
     async def wait_for_sync_for_user(
         self,
@@ -1224,7 +1304,11 @@ class SyncHandler:
 
     def get_lazy_loaded_members_cache(
         self, cache_key: tuple[str, str | None]
-    ) -> LazyLoadedMembersCache:
+    ) -> "LazyLoadedMembersCache | _RustLazyLoadedMembersCache":
+        if self._rust_sync is not None and self._rust_sync_mode == "on":
+            # Rooms move between the implementations, so they share the Rust
+            # handler's caches.
+            return _RustLazyLoadedMembersCache(self._rust_sync, *cache_key)
         cache = self.lazy_loaded_members_cache.get(cache_key)
         if cache is None:
             logger.debug("creating LazyLoadedMembersCache for %r", cache_key)
@@ -2797,6 +2881,13 @@ class SyncHandler:
             self.get_lazy_loaded_members_cache(
                 (user_id, sync_config.device_id)
             ).start_request(since_token)
+            if self._rust_sync is not None and self._rust_sync_mode == "shadow":
+                # In shadow mode the Rust handler keeps its own caches.
+                self._rust_sync.start_request(
+                    user_id,
+                    sync_config.device_id,
+                    since_token.room_key if since_token else None,
+                )
 
         blocks_all_rooms = (
             sync_result_builder.sync_config.filter_collection.blocks_all_rooms()
@@ -2917,20 +3008,30 @@ class SyncHandler:
                 )
             )
 
+        rust_request: RustSyncRequest | None = None
+        if self._rust_sync is not None and room_entries:
+            rust_request = await self._build_rust_sync_request(
+                sync_result_builder, ignored_users
+            )
+
         # 4. We need to apply further processing to `room_entries` (rooms considered
         # joined or archived).
         async def handle_room_entries(room_entry: "RoomSyncResultBuilder") -> None:
             logger.debug("Generating room entry for %s", room_entry.room_id)
-            # Note that this mutates sync_result_builder.{joined,archived}.
-            await self._generate_room_entry(
+            result = await self._generate_room_entry_with_mode(
                 sync_result_builder,
                 room_entry,
+                rust_request,
                 ephemeral=ephemeral_by_room.get(room_entry.room_id, []),
                 tags=tags_by_room.get(room_entry.room_id),
                 account_data=account_data_by_room.get(room_entry.room_id, {}),
                 sticky_event_ids=sticky_by_room.get(room_entry.room_id, []),
                 always_include=sync_result_builder.full_state,
             )
+            if isinstance(result, JoinedSyncResult):
+                sync_result_builder.joined.append(result)
+            elif isinstance(result, ArchivedSyncResult):
+                sync_result_builder.archived.append(result)
             logger.debug("Generated room entry for %s", room_entry.room_id)
 
         with start_active_span("sync.generate_room_entries"):
@@ -3306,6 +3407,305 @@ class SyncHandler:
 
         return _RoomChanges(room_entries, invited, knocked, [], [])
 
+    async def _build_rust_sync_request(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        ignored_users: frozenset[str],
+    ) -> RustSyncRequest:
+        """What the Rust sync handler reads about the request, for every room."""
+        sync_config = sync_result_builder.sync_config
+        user_id = sync_config.user.to_string()
+        is_server_admin = await self.store.is_server_admin(user_id)
+        client_config = await self.store.get_admin_client_config_for_user(user_id)
+        config = self.hs_config
+        return RustSyncRequest(
+            user_id=user_id,
+            device_id=sync_config.device_id,
+            filter=RustFilterCollection(
+                sync_config.filter_collection.get_filter_json(),
+                msc3773_enabled=config.experimental.msc3773_enabled,
+                msc3874_enabled=config.experimental.msc3874_enabled,
+                include_profile_updates_in_sync=config.server.include_profile_updates_in_sync,
+            ),
+            use_state_after=sync_config.use_state_after,
+            now_room_key=sync_result_builder.now_token.room_key,
+            ignored_users=ignored_users,
+            is_server_admin=is_server_admin,
+            return_soft_failed_events=client_config.return_soft_failed_events,
+            return_policy_server_spammy_events=client_config.return_policy_server_spammy_events,
+            enable_push=self.should_calculate_push_rules,
+            msc4354_enabled=config.experimental.msc4354_enabled,
+        )
+
+    async def _generate_room_entry_with_mode(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        room_builder: "RoomSyncResultBuilder",
+        rust_request: RustSyncRequest | None,
+        ephemeral: list[JsonDict],
+        tags: Mapping[str, JsonMapping] | None,
+        account_data: Mapping[str, JsonMapping],
+        sticky_event_ids: list[str],
+        always_include: bool,
+    ) -> "JoinedSyncResult | ArchivedSyncResult | None":
+        """`_generate_room_entry` through the implementation `rust_sync` picks.
+
+        `rust_request` is None when the Rust handler is not in use.
+        """
+
+        async def python() -> "JoinedSyncResult | ArchivedSyncResult | None":
+            return await self._generate_room_entry(
+                sync_result_builder,
+                room_builder,
+                ephemeral=ephemeral,
+                tags=tags,
+                account_data=account_data,
+                sticky_event_ids=sticky_event_ids,
+                always_include=always_include,
+            )
+
+        if rust_request is None:
+            return await python()
+
+        async def rust(
+            bundle_aggregations: bool,
+        ) -> "JoinedSyncResult | ArchivedSyncResult | None":
+            return await self._generate_room_entry_in_rust(
+                sync_result_builder,
+                room_builder,
+                rust_request,
+                ephemeral=ephemeral,
+                tags=tags,
+                account_data=account_data,
+                sticky_event_ids=sticky_event_ids,
+                always_include=always_include,
+                bundle_aggregations=bundle_aggregations,
+            )
+
+        room_id = room_builder.room_id
+        if self._rust_sync_mode == "on":
+            try:
+                result = await rust(bundle_aggregations=True)
+            except CancelledError:
+                raise
+            except RustSyncFallback as e:
+                rust_sync_rooms_counter.labels(
+                    result="fallback", **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
+                logger.debug("Computing %s in Python: %s", room_id, e)
+                return await python()
+            except _RustRoomError:
+                # Python may well manage the room, so a Rust bug costs this
+                # room's speed rather than the whole response. The Rust
+                # handler records the members it sent only for rooms it
+                # finishes, so Python sends them again. A failure after the
+                # Rust handler finished the room is not caught: Python would
+                # leave out the members the Rust handler recorded.
+                rust_sync_rooms_counter.labels(
+                    result="error", **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
+                if self._rust_sync_strict:
+                    raise
+                logger.exception(
+                    "Rust sync failed for %s: computing it in Python", room_id
+                )
+                return await python()
+            rust_sync_rooms_counter.labels(
+                result="rust", **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
+            return result
+
+        # Shadow mode: Python's answer is the one sent. The Rust one is only
+        # compared with it, so it skips the bundled aggregations. The two run
+        # at once, so the response waits for the slower rather than for both.
+        # The comparison stays on the request, rather than after it, so that
+        # it sees the lazy-loaded members caches as Python did.
+        async def rust_outcome() -> (
+            "tuple[JoinedSyncResult | ArchivedSyncResult | None, Exception | None]"
+        ):
+            try:
+                return await rust(bundle_aggregations=False), None
+            except CancelledError:
+                raise
+            except Exception as e:
+                return None, e
+
+        python_result, outcome = await gather_optional_coroutines(
+            python(), rust_outcome()
+        )
+        assert outcome is not None
+        rust_result, rust_error = outcome
+        if isinstance(rust_error, RustSyncFallback):
+            rust_sync_shadow_counter.labels(
+                result="fallback", **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
+            return python_result
+        if rust_error is not None:
+            rust_sync_shadow_counter.labels(
+                result="error", **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
+            if self._rust_sync_strict:
+                raise rust_error
+            logger.error(
+                "Rust sync failed for %s in shadow mode",
+                room_id,
+                exc_info=(type(rust_error), rust_error, rust_error.__traceback__),
+            )
+            return python_result
+
+        differences = _diff_room_entries(python_result, rust_result)
+        if not differences:
+            rust_sync_shadow_counter.labels(
+                result="match", **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
+            return python_result
+
+        rust_sync_shadow_counter.labels(
+            result="mismatch", **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
+        message = "Rust sync entry for %s differs from Python's: %s"
+        if self._rust_sync_strict:
+            raise AssertionError(message % (room_id, "; ".join(differences)))
+        if room_id in self._rust_sync_mismatched_rooms:
+            logger.debug(message, room_id, "; ".join(differences))
+        else:
+            if (
+                len(self._rust_sync_mismatched_rooms)
+                >= _RUST_SYNC_MISMATCH_ROOMS_LOGGED
+            ):
+                self._rust_sync_mismatched_rooms.clear()
+            self._rust_sync_mismatched_rooms.add(room_id)
+            logger.warning(message, room_id, "; ".join(differences))
+        return python_result
+
+    async def _generate_room_entry_in_rust(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        room_builder: "RoomSyncResultBuilder",
+        rust_request: RustSyncRequest,
+        ephemeral: list[JsonDict],
+        tags: Mapping[str, JsonMapping] | None,
+        account_data: Mapping[str, JsonMapping],
+        sticky_event_ids: list[str],
+        always_include: bool,
+        bundle_aggregations: bool,
+    ) -> "JoinedSyncResult | ArchivedSyncResult | None":
+        """`_generate_room_entry` through the Rust sync handler.
+
+        Raises `RustSyncFallback` for a room the Rust handler cannot compute,
+        and `_RustRoomError` if the Rust handler fails on it.
+
+        Args:
+            bundle_aggregations: Whether to bundle aggregations for the
+                timeline when the room calls for them.
+        """
+        assert self._rust_sync is not None
+        newly_joined = room_builder.newly_joined
+        since_token = room_builder.since_token
+        room_input = RoomSyncInput(
+            room_id=room_builder.room_id,
+            rtype=room_builder.rtype,
+            events=room_builder.events,
+            newly_joined=newly_joined,
+            full_state=(
+                room_builder.full_state
+                or newly_joined
+                or sync_result_builder.full_state
+            ),
+            since=since_token.room_key if since_token else None,
+            upto=room_builder.upto_token.room_key,
+            end=room_builder.end_token.room_key,
+            out_of_band=room_builder.out_of_band,
+            ephemeral=ephemeral,
+            tags=tags,
+            account_data=account_data,
+            sticky_event_ids=sticky_event_ids,
+            always_include=always_include,
+            room_max_token=self.store.get_room_max_token(),
+        )
+        with start_active_span("sync.generate_room_entry_in_rust"):
+            set_tag("room_id", room_builder.room_id)
+            try:
+                result = await self._rust_sync.generate_room_entry(
+                    rust_request, room_input
+                )
+            except (CancelledError, RustSyncFallback):
+                raise
+            except Exception as e:
+                raise _RustRoomError() from e
+        if result is None:
+            return None
+        return await self._room_entry_from_rust(
+            sync_result_builder, room_builder, result, bundle_aggregations
+        )
+
+    async def _room_entry_from_rust(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        room_builder: "RoomSyncResultBuilder",
+        result: RoomSyncResult,
+        bundle_aggregations: bool,
+    ) -> "JoinedSyncResult | ArchivedSyncResult":
+        """The room entry for a result of the Rust sync handler, with the
+        bundled aggregations added as `_load_filtered_recents` does."""
+        events = [
+            FilteredEvent(event=event, membership=membership)
+            for event, membership in result.timeline
+        ]
+
+        prev_batch = (
+            sync_result_builder.now_token
+            if result.prev_batch_from_now
+            else room_builder.upto_token
+        )
+        prev_batch_room_key = result.prev_batch_room_key
+        if prev_batch_room_key is not None:
+            prev_batch = prev_batch.copy_and_replace(
+                StreamKeyType.ROOM, prev_batch_room_key
+            )
+
+        bundled_aggregations = None
+        if bundle_aggregations and result.bundle_aggregations:
+            bundled_aggregations = (
+                await self._relations_handler.get_bundled_aggregations(
+                    events, sync_result_builder.sync_config.user.to_string()
+                )
+            )
+
+        timeline = TimelineBatch(
+            events=events,
+            prev_batch=prev_batch,
+            limited=result.limited,
+            bundled_aggregations=bundled_aggregations,
+        )
+        state: MutableStateMap[EventBase] = {}
+        for event in result.state:
+            assert event.state_key is not None
+            state[(event.type, event.state_key)] = event
+
+        if result.rtype == "joined":
+            return JoinedSyncResult(
+                room_id=result.room_id,
+                timeline=timeline,
+                state=state,
+                ephemeral=result.ephemeral,
+                account_data=result.account_data,
+                sticky=[
+                    FilteredEvent(event=event, membership=membership)
+                    for event, membership in result.sticky
+                ],
+                unread_notifications=result.unread_notifications,
+                unread_thread_notifications=result.unread_thread_notifications,
+                summary=result.summary,
+                unread_count=result.unread_count,
+            )
+        return ArchivedSyncResult(
+            room_id=result.room_id,
+            timeline=timeline,
+            state=state,
+            account_data=result.account_data,
+        )
+
     async def _generate_room_entry(
         self,
         sync_result_builder: "SyncResultBuilder",
@@ -3315,9 +3715,9 @@ class SyncHandler:
         account_data: Mapping[str, JsonMapping],
         sticky_event_ids: list[str],
         always_include: bool = False,
-    ) -> None:
-        """Populates the `joined` and `archived` section of `sync_result_builder`
-        based on the `room_builder`.
+    ) -> "JoinedSyncResult | ArchivedSyncResult | None":
+        """Computes the entry for the `joined` or `archived` section of the
+        sync response for the `room_builder`.
 
         Ideally, we want to report all events whose stream ordering `s` lies in the
         range `since_token < s <= now_token`, where the two tokens are read from the
@@ -3347,6 +3747,9 @@ class SyncHandler:
                 In sticky event stream order.
             always_include: Always include this room in the sync response,
                 even if empty.
+
+        Returns:
+            The room's entry, or None if the room has nothing to send.
         """
         newly_joined = room_builder.newly_joined
         full_state = (
@@ -3363,7 +3766,7 @@ class SyncHandler:
             or sticky_event_ids
         ):
             if events == [] and tags is None:
-                return
+                return None
 
         now_token = sync_result_builder.now_token
         sync_config = sync_result_builder.sync_config
@@ -3455,7 +3858,7 @@ class SyncHandler:
                 or full_state
                 or sticky_event_ids
             ):
-                return
+                return None
 
             if not room_builder.out_of_band:
                 state = await self.compute_state_delta(
@@ -3567,8 +3970,6 @@ class SyncHandler:
                     unread_notifications["highlight_count"] = highlight_count
                     room_sync.unread_count = unread_count
 
-                    sync_result_builder.joined.append(room_sync)
-
                 if batch.limited and since_token:
                     user_id = sync_result_builder.sync_config.user.to_string()
                     logger.debug(
@@ -3577,6 +3978,10 @@ class SyncHandler:
                         user_id,
                         len(state),
                     )
+
+                if room_sync or always_include:
+                    return room_sync
+                return None
             elif room_builder.rtype == "archived":
                 archived_room_sync = ArchivedSyncResult(
                     room_id=room_id,
@@ -3585,9 +3990,120 @@ class SyncHandler:
                     account_data=account_data_events,
                 )
                 if archived_room_sync or always_include:
-                    sync_result_builder.archived.append(archived_room_sync)
+                    return archived_room_sync
+                return None
             else:
                 raise Exception("Unrecognized rtype: %r", room_builder.rtype)
+
+
+def _entry_ids(entries: "list[object] | tuple[object, ...]") -> list[object]:
+    """The event IDs of a list of compared events, or the entries themselves."""
+    ids: list[object] = []
+    for entry in entries:
+        # `((event_id, event_dict), membership)` or `(event_id, event_dict)`.
+        while isinstance(entry, tuple) and entry and isinstance(entry[0], tuple):
+            entry = entry[0]
+        if isinstance(entry, tuple) and entry and isinstance(entry[0], str):
+            ids.append(entry[0])
+        else:
+            ids.append(entry)
+    return ids
+
+
+def _diff_room_entries(
+    python: "JoinedSyncResult | ArchivedSyncResult | None",
+    rust: "JoinedSyncResult | ArchivedSyncResult | None",
+) -> list[str]:
+    """How the Python and Rust sync handlers' entries for a room differ, for
+    `rust_sync: shadow` mode. Empty if they do not.
+
+    The bundled aggregations are not compared: the Rust entry is built
+    without them.
+    """
+    if python is None or rust is None:
+        if python is rust:
+            return []
+        return [f"python {python!r} but rust {rust!r}"]
+    if type(python) is not type(rust):
+        return [f"python {type(python).__name__} but rust {type(rust).__name__}"]
+
+    def event_summary(event: EventBase) -> tuple[str, JsonDict]:
+        return event.event_id, unfreeze(event.get_dict())
+
+    def state_event_summary(event: EventBase) -> tuple[str, JsonDict]:
+        # State and sticky events are fetched without their previous content.
+        # A Python event has it anyway if an earlier fetch of the cached event
+        # added it, so whether it is there depends on the cache's history.
+        event_id, event_dict = event_summary(event)
+        unsigned = event_dict.get("unsigned")
+        if isinstance(unsigned, dict):
+            unsigned.pop("prev_content", None)
+            unsigned.pop("prev_sender", None)
+        return event_id, event_dict
+
+    differences = []
+
+    def compare(field: str, python_value: object, rust_value: object) -> None:
+        if python_value == rust_value:
+            return
+        # Narrow the report down to the entries that differ.
+        if isinstance(python_value, dict) and isinstance(rust_value, dict):
+            for key in python_value.keys() | rust_value.keys():
+                compare(f"{field}[{key!r}]", python_value.get(key), rust_value.get(key))
+            return
+        if (
+            isinstance(python_value, (list, tuple))
+            and isinstance(rust_value, (list, tuple))
+            and len(python_value) == len(rust_value)
+        ):
+            for index, (p, r) in enumerate(zip(python_value, rust_value)):
+                compare(f"{field}[{index}]", p, r)
+            return
+        if isinstance(python_value, (list, tuple)) and isinstance(
+            rust_value, (list, tuple)
+        ):
+            differences.append(
+                f"{field}: python has {len(python_value)} entries, rust "
+                f"{len(rust_value)}: python {_entry_ids(python_value)}, rust "
+                f"{_entry_ids(rust_value)}"
+            )
+            return
+        differences.append(f"{field}: python {python_value!r}, rust {rust_value!r}")
+
+    compare(
+        "timeline",
+        [(event_summary(e.event), e.membership) for e in python.timeline.events],
+        [(event_summary(e.event), e.membership) for e in rust.timeline.events],
+    )
+    compare("prev_batch", python.timeline.prev_batch, rust.timeline.prev_batch)
+    compare("limited", python.timeline.limited, rust.timeline.limited)
+    compare(
+        "state",
+        {key: state_event_summary(e) for key, e in python.state.items()},
+        {key: state_event_summary(e) for key, e in rust.state.items()},
+    )
+    compare("account_data", unfreeze(python.account_data), unfreeze(rust.account_data))
+    if isinstance(python, JoinedSyncResult):
+        assert isinstance(rust, JoinedSyncResult)
+        compare("ephemeral", unfreeze(python.ephemeral), unfreeze(rust.ephemeral))
+        compare("summary", unfreeze(python.summary), unfreeze(rust.summary))
+        compare(
+            "unread_notifications",
+            python.unread_notifications,
+            rust.unread_notifications,
+        )
+        compare(
+            "unread_thread_notifications",
+            python.unread_thread_notifications,
+            rust.unread_thread_notifications,
+        )
+        compare("unread_count", python.unread_count, rust.unread_count)
+        compare(
+            "sticky",
+            [(state_event_summary(e.event), e.membership) for e in python.sticky],
+            [(state_event_summary(e.event), e.membership) for e in rust.sticky],
+        )
+    return differences
 
 
 def _action_has_highlight(actions: list[JsonDict]) -> bool:

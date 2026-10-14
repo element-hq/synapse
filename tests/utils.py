@@ -60,6 +60,10 @@ USE_RUST_DRIVER_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_DRIVER", False)
 RUST_STATE_RES_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_STATE_RES")
 # As above, for `experimental_features.rust_sync`.
 RUST_SYNC_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_SYNC")
+# A Rust error, or in `shadow` mode a room whose Rust entry differs from the
+# Python one, fails the test, so that the suite is a differential test of the
+# two. Set to 0 to only count and log them, as production does.
+RUST_SYNC_STRICT_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_SYNC_STRICT", "1") != "0"
 LEAVE_DB = os.environ.get("SYNAPSE_LEAVE_DB", False)
 POSTGRES_USER = os.environ.get("SYNAPSE_POSTGRES_USER", None)
 POSTGRES_HOST = os.environ.get("SYNAPSE_POSTGRES_HOST", None)

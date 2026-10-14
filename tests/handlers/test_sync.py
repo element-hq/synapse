@@ -19,6 +19,7 @@
 #
 from http import HTTPStatus
 from typing import Collection, ContextManager, cast
+from unittest import SkipTest
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
@@ -30,6 +31,8 @@ from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Profi
 from synapse.api.errors import Codes, ResourceLimitError
 from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
+from synapse.config._base import ConfigError, RootConfig
+from synapse.config.experimental import ExperimentalConfig
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sync import (
@@ -40,7 +43,9 @@ from synapse.handlers.sync import (
     SyncRequestKey,
     SyncResult,
     TimelineBatch,
+    rust_sync_rooms_counter,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
@@ -1239,7 +1244,9 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 "auth_events": prev_events,
                 "origin_server_ts": self.clock.time_msec(),
             },
-            RoomVersions.V10,
+            # The rooms' version: an event of another version is
+            # stored, but the Rust event loader cannot read it back.
+            self.hs.config.server.default_room_version,
         )
 
         self.assertEqual(
@@ -1287,7 +1294,9 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 "auth_events": priv_prev_events,
                 "origin_server_ts": self.clock.time_msec(),
             },
-            RoomVersions.V10,
+            # The rooms' version: an event of another version is
+            # stored, but the Rust event loader cannot read it back.
+            self.hs.config.server.default_room_version,
         )
 
         self.assertEqual(
@@ -3384,8 +3393,17 @@ class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
 class RustSyncHandlerTestCase(tests.unittest.HomeserverTestCase):
     """The Rust sync handler is only wired up on the native Rust driver."""
 
-    @override_config({"experimental_features": {"rust_sync": "on"}})
+    @override_config(
+        {
+            "experimental_features": {
+                "rust_sync": "on",
+                "rust_sync_allow_unshared_event_cache": True,
+            }
+        }
+    )
     def test_rust_sync_needs_the_rust_driver(self) -> None:
+        if tests.utils.RUST_SYNC_FOR_TESTS:
+            raise SkipTest("SYNAPSE_TEST_RUST_SYNC overrides the config")
         sync_handler = self.hs.get_sync_handler()
         self.assertEqual(sync_handler._rust_sync_mode, "on")
         if tests.utils.USE_RUST_DRIVER_FOR_TESTS:
@@ -3396,6 +3414,26 @@ class RustSyncHandlerTestCase(tests.unittest.HomeserverTestCase):
             self.assertIsNone(sync_handler._rust_sync)
             self.assertIsNone(self.hs.get_rust_handlers().sync)
 
+    def test_rust_sync_on_needs_a_shared_event_cache(self) -> None:
+        """`rust_sync: on` is refused while every event would be cached twice."""
+        config = ExperimentalConfig(RootConfig())
+        with self.assertRaises(ConfigError):
+            config.read_config(
+                {"experimental_features": {"rust_sync": "on"}},
+                allow_secrets_in_config=False,
+            )
+
+        config.read_config(
+            {
+                "experimental_features": {
+                    "rust_sync": "on",
+                    "rust_sync_allow_unshared_event_cache": True,
+                }
+            },
+            allow_secrets_in_config=False,
+        )
+        self.assertEqual(config.rust_sync, "on")
+
     def test_rust_sync_off_by_default(self) -> None:
         sync_handler = self.hs.get_sync_handler()
         # Unless the test run sets it for every homeserver.
@@ -3403,3 +3441,169 @@ class RustSyncHandlerTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(sync_handler._rust_sync_mode, expected)
         if expected == "off":
             self.assertIsNone(sync_handler._rust_sync)
+
+
+class RustSyncDispatchTestCase(tests.unittest.HomeserverTestCase):
+    """With `rust_sync: on`, rooms are computed by the Rust sync handler, and
+    partial state rooms are left to Python."""
+
+    if not tests.utils.USE_RUST_DRIVER_FOR_TESTS:
+        skip = "the Rust sync handler needs the Rust driver"
+    elif tests.utils.RUST_SYNC_FOR_TESTS not in (None, "on"):
+        skip = "SYNAPSE_TEST_RUST_SYNC overrides the config"
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {
+            "rust_sync": "on",
+            "rust_sync_allow_unshared_event_cache": True,
+        }
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sync_handler = hs.get_sync_handler()
+        self.store = hs.get_datastores().main
+        self.user = self.register_user("alice", "password")
+        self.tok = self.login(self.user, "password")
+
+    def _rooms_count(self, result: str) -> float:
+        return rust_sync_rooms_counter.labels(
+            result=result, **{SERVER_NAME_LABEL: self.hs.hostname}
+        )._value.get()
+
+    def _sync(
+        self,
+        filter_collection: FilterCollection | None = None,
+        since_token: StreamToken | None = None,
+    ) -> SyncResult:
+        return self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                create_requester(self.user),
+                generate_sync_config(self.user, filter_collection=filter_collection),
+                request_key=generate_request_key(),
+                since_token=since_token,
+            )
+        )
+
+    def _mark_partial_state(self, room_id: str, join_event_id: str) -> None:
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "partial_state_rooms",
+                {
+                    "room_id": room_id,
+                    "device_lists_stream_id": 0,
+                    "join_event_id": join_event_id,
+                    "joined_via": "other",
+                },
+            )
+        )
+        # Creating the room read the flag already.
+        self.store.is_partial_state_room.invalidate((room_id,))
+
+    def test_room_computed_in_rust(self) -> None:
+        room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        event_id = self.helper.send(room_id, "hello", tok=self.tok)["event_id"]
+
+        before = self._rooms_count("rust")
+        result = self._sync()
+        self.assertEqual(self._rooms_count("rust"), before + 1)
+
+        [joined] = result.joined
+        self.assertEqual(joined.room_id, room_id)
+        self.assertEqual(joined.timeline.events[-1].event.event_id, event_id)
+
+    def test_partial_state_room_falls_back_to_python(self) -> None:
+        room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        join_event_id = self.helper.send(room_id, "hello", tok=self.tok)["event_id"]
+        self._mark_partial_state(room_id, join_event_id)
+
+        # Partial state rooms are only in lazy-loading syncs.
+        lazy_loading = FilterCollection(
+            self.hs, {"room": {"state": {"lazy_load_members": True}}}
+        )
+        before_rust = self._rooms_count("rust")
+        before_fallback = self._rooms_count("fallback")
+        result = self._sync(lazy_loading)
+        self.assertEqual(self._rooms_count("fallback"), before_fallback + 1)
+        self.assertEqual(self._rooms_count("rust"), before_rust)
+        self.assertEqual([joined.room_id for joined in result.joined], [room_id])
+
+    def test_rust_error_falls_back_to_python(self) -> None:
+        """A room the Rust handler fails on is computed by Python, rather than
+        failing the response."""
+        room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        event_id = self.helper.send(room_id, "hello", tok=self.tok)["event_id"]
+
+        # Tests otherwise fail on any Rust error.
+        self.sync_handler._rust_sync_strict = False
+        before = self._rooms_count("error")
+        rust_sync = Mock(wraps=self.sync_handler._rust_sync)
+        rust_sync.generate_room_entry.side_effect = RuntimeError("boom")
+        with patch.object(self.sync_handler, "_rust_sync", rust_sync):
+            result = self._sync()
+        self.assertEqual(self._rooms_count("error"), before + 1)
+
+        [joined] = result.joined
+        self.assertEqual(joined.timeline.events[-1].event.event_id, event_id)
+
+    def test_shadow_mode_does_not_swallow_cancellation(self) -> None:
+        """A cancelled Rust computation stops the request in shadow mode, rather
+        than being logged as a Rust error."""
+        self.helper.create_room_as(self.user, tok=self.tok)
+        self.sync_handler._rust_sync_mode = "shadow"
+        self.sync_handler._rust_sync_strict = False
+        with patch.object(
+            self.sync_handler,
+            "_generate_room_entry_in_rust",
+            AsyncMock(side_effect=defer.CancelledError()),
+        ):
+            self.get_failure(
+                self.sync_handler.wait_for_sync_for_user(
+                    create_requester(self.user),
+                    generate_sync_config(self.user),
+                    request_key=generate_request_key(),
+                ),
+                defer.CancelledError,
+            )
+
+    def test_members_sent_by_python_are_not_resent_by_rust(self) -> None:
+        """The two implementations share the lazy-loaded members caches, so a
+        room taken over by Rust once it has full state does not send again the
+        members Python sent while it was partial state."""
+        bob = self.register_user("bob", "password")
+        bob_tok = self.login(bob, "password")
+        room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        self.helper.join(room_id, bob, tok=bob_tok)
+        join_event_id = self.helper.send(room_id, "hello", tok=bob_tok)["event_id"]
+        self._mark_partial_state(room_id, join_event_id)
+
+        lazy_loading = FilterCollection(
+            self.hs,
+            {"room": {"state": {"lazy_load_members": True}, "timeline": {"limit": 1}}},
+        )
+        before_fallback = self._rooms_count("fallback")
+        first = self._sync(lazy_loading)
+        self.assertEqual(self._rooms_count("fallback"), before_fallback + 1)
+        [joined] = first.joined
+        self.assertIn((EventTypes.Member, bob), joined.state)
+
+        # The room reaches full state, and bob speaks again.
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                "partial_state_rooms", {"room_id": room_id}, desc="test"
+            )
+        )
+        self.store.is_partial_state_room.invalidate((room_id,))
+        self.helper.send(room_id, "again", tok=bob_tok)
+
+        before_rust = self._rooms_count("rust")
+        second = self._sync(lazy_loading, since_token=first.next_batch)
+        self.assertEqual(self._rooms_count("rust"), before_rust + 1)
+        [joined] = second.joined
+        self.assertNotIn((EventTypes.Member, bob), joined.state)
