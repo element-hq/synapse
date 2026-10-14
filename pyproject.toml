@@ -122,7 +122,8 @@ dependencies = [
 [project.optional-dependencies]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3>=0.1"]
 postgres = [
-    "psycopg2>=2.8;platform_python_implementation != 'PyPy'",
+    # Support for Python 3.11 introduced in `psycopg2@2.9.5
+    "psycopg2>=2.9.5;platform_python_implementation != 'PyPy'",
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
 ]
@@ -182,7 +183,7 @@ all = [
     # matrix-synapse-ldap3
     "matrix-synapse-ldap3>=0.1",
     # postgres
-    "psycopg2>=2.8;platform_python_implementation != 'PyPy'",
+    "psycopg2>=2.9.5;platform_python_implementation != 'PyPy'",
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
     # saml2
