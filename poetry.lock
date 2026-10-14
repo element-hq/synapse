@@ -534,7 +534,6 @@ files = [
 
 [package.dependencies]
 cffi = {version = ">=2.0.0", markers = "platform_python_implementation != \"PyPy\""}
-typing-extensions = {version = ">=4.13.2", markers = "python_full_version < \"3.11.0\""}
 
 [package.extras]
 ssh = ["bcrypt (>=3.1.5)"]
@@ -936,7 +935,6 @@ files = [
 
 [package.dependencies]
 packaging = ">=17.0"
-tomli = {version = "*", markers = "python_version < \"3.11\""}
 
 [[package]]
 name = "jaeger-client"
@@ -1596,7 +1594,6 @@ files = [
 librt = {version = ">=0.6.2", markers = "platform_python_implementation != \"PyPy\""}
 mypy_extensions = ">=1.0.0"
 pathspec = ">=0.9.0"
-tomli = {version = ">=1.1.0", markers = "python_version < \"3.11\""}
 typing_extensions = ">=4.6.0"
 
 [package.extras]
@@ -2178,7 +2175,6 @@ files = [
 
 [package.dependencies]
 cryptography = {version = ">=3.4.0", optional = true, markers = "extra == \"crypto\""}
-typing_extensions = {version = ">=4.0", markers = "python_version < \"3.11\""}
 
 [package.extras]
 crypto = ["cryptography (>=3.4.0)"]
@@ -3075,7 +3071,7 @@ version = "2.4.1"
 description = "A lil' TOML parser"
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "dev"]
+groups = ["dev"]
 files = [
     {file = "tomli-2.4.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:f8f0fc26ec2cc2b965b7a3b87cd19c5c6b8c5e5f436b984e85f486d652285c30"},
     {file = "tomli-2.4.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:4ab97e64ccda8756376892c53a72bd1f964e519c77236368527f758fbc36a53a"},
@@ -3125,7 +3121,6 @@ files = [
     {file = "tomli-2.4.1-py3-none-any.whl", hash = "sha256:0d85819802132122da43cb86656f8d1f8c6587d54ae7dcaf30e90533028b49fe"},
     {file = "tomli-2.4.1.tar.gz", hash = "sha256:7c7e1a961a0b2f2472c1ac5b69affa0ae1132c39adcb67aba98568702b9cc23f"},
 ]
-markers = {main = "python_version < \"3.11\""}
 
 [[package]]
 name = "tornado"
@@ -3163,7 +3158,6 @@ files = [
 [package.dependencies]
 click = "*"
 jinja2 = "*"
-tomli = {version = "*", markers = "python_version < \"3.11\""}
 
 [package.extras]
 dev = ["furo (>=2024.5.6)", "nox", "packaging", "sphinx (>=5)", "twisted"]
@@ -3660,5 +3654,5 @@ url-preview = ["beautifulsoup4"]
 
 [metadata]
 lock-version = "2.1"
-python-versions = ">=3.10.0,<4.0.0"
-content-hash = "6e8f0d223b61ab7c100236797f0ec1eed7f23b819c01c117fe445c6b1e91bbfc"
+python-versions = ">=3.11.0,<4.0.0"
+content-hash = "eedb6a0a1c9f5e48b60f9644a233b750cb54d26c4a76d9c36cb16debe2a0599a"
