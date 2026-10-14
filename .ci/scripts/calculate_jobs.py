@@ -39,6 +39,9 @@ IS_PR = os.environ["GITHUB_REF"].startswith("refs/pull/")
 # version that's supported. The oldest version ensures we don't accidentally
 # introduce syntax or code that's too new, and the newest ensures we don't use
 # code that's been dropped in the latest supported Python version.
+#
+# We avoid running all of the in-between Python versions on every PR as it saves on CI
+# time.
 
 trial_sqlite_tests = [
     {
@@ -53,9 +56,8 @@ trial_sqlite_tests = [
     },
 ]
 
-# Avoiding running all of the in-between Python versions on every PR as it saves on CI time.
+# For any merged changes, test the rest of the Python versions
 if not IS_PR:
-    # Otherwise, check all supported Python versions.
     trial_sqlite_tests.extend(
         {
             "python-version": version,
@@ -63,8 +65,8 @@ if not IS_PR:
             "extras": "all",
         }
         for version in (
-            # (the first/last supported versions are commented out here as they're
-            # already added above)
+            # (the first/last supported Python versions are commented out here as
+            # they're already added above)
             #
             # "3.11",
             "3.12",
