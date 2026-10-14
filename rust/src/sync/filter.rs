@@ -624,10 +624,10 @@ impl FilterCollection {
     }
 }
 
-/// Read a Python dict as JSON. `JsonDict`s hold only JSON values, so a
-/// failure means the dict is not one.
-fn json_from_py(dict: &Bound<'_, PyDict>) -> PyResult<Value> {
-    pythonize::depythonize(dict).map_err(Into::into)
+/// Read a Python mapping as JSON. `JsonMapping`s hold only JSON values, so
+/// a failure means the mapping is not one.
+fn json_from_py(mapping: &Bound<'_, PyAny>) -> PyResult<Value> {
+    pythonize::depythonize(mapping).map_err(Into::into)
 }
 
 #[pymethods]
@@ -637,7 +637,7 @@ impl FilterCollection {
     #[new]
     #[pyo3(signature = (filter_json, *, msc3773_enabled = false, msc3874_enabled = false, include_profile_updates_in_sync = false))]
     fn py_new(
-        filter_json: &Bound<'_, PyDict>,
+        filter_json: &Bound<'_, PyAny>,
         msc3773_enabled: bool,
         msc3874_enabled: bool,
         include_profile_updates_in_sync: bool,
@@ -752,12 +752,12 @@ impl FilterCollection {
 
     #[pyo3(name = "check_room_ephemeral")]
     fn py_check_room_ephemeral(&self, event: &Bound<'_, PyDict>) -> PyResult<bool> {
-        Ok(self.check_room_ephemeral(&json_from_py(event)?))
+        Ok(self.check_room_ephemeral(&json_from_py(event.as_any())?))
     }
 
     #[pyo3(name = "check_room_account_data")]
     fn py_check_room_account_data(&self, event: &Bound<'_, PyDict>) -> PyResult<bool> {
-        Ok(self.check_room_account_data(&json_from_py(event)?))
+        Ok(self.check_room_account_data(&json_from_py(event.as_any())?))
     }
 
     #[pyo3(name = "check_presence")]
@@ -767,7 +767,7 @@ impl FilterCollection {
 
     #[pyo3(name = "check_global_account_data")]
     fn py_check_global_account_data(&self, event: &Bound<'_, PyDict>) -> PyResult<bool> {
-        Ok(self.check_global_account_data(&json_from_py(event)?))
+        Ok(self.check_global_account_data(&json_from_py(event.as_any())?))
     }
 }
 

@@ -336,6 +336,43 @@ impl<'a> SyncReader<'a> {
         Ok(found)
     }
 
+    /// `events_have_relations`: which of `event_ids` have a relation from
+    /// one of `senders`, of one of `rel_types`. With neither given, all of
+    /// them.
+    pub async fn events_have_relations(
+        &self,
+        event_ids: &[&str],
+        senders: Option<&[String]>,
+        rel_types: Option<&[String]>,
+    ) -> anyhow::Result<HashSet<String>> {
+        let senders = senders.filter(|s| !s.is_empty());
+        let rel_types = rel_types.filter(|t| !t.is_empty());
+        if senders.is_none() && rel_types.is_none() {
+            return Ok(event_ids.iter().map(|id| (*id).to_owned()).collect());
+        }
+        let mut found = HashSet::new();
+        if event_ids.is_empty() {
+            return Ok(found);
+        }
+        let borrowed = self.borrow().await?;
+        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
+            let rows = borrowed
+                .query(
+                    "SELECT relates_to_id FROM event_relations
+                    INNER JOIN events USING (event_id)
+                    WHERE relates_to_id = ANY($1)
+                        AND ($2::text[] IS NULL OR sender = ANY($2))
+                        AND ($3::text[] IS NULL OR relation_type = ANY($3))",
+                    &[&batch, &senders, &rel_types],
+                )
+                .await?;
+            for row in rows {
+                found.insert(row.try_get::<_, String>(0)?);
+            }
+        }
+        Ok(found)
+    }
+
     /// `get_timeline_gaps`: a token marking the last gap in the room's
     /// timeline between the tokens, if there is one.
     pub async fn timeline_gap(

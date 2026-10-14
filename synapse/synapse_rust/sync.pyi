@@ -10,7 +10,9 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+
+from twisted.internet.defer import Deferred
 
 from synapse.synapse_rust.database.postgres import ConnectionPool
 from synapse.synapse_rust.events import Event
@@ -34,6 +36,120 @@ class SyncHandler:
     ) -> None:
         """Forget the lazy-loaded members the device did not receive, at the
         start of its request from `since` (None for an initial sync)."""
+
+    def ll_member_was_sent(
+        self, user_id: str, device_id: str | None, member: str, event_id: str
+    ) -> bool:
+        """Whether `event_id` is the membership of `member` last sent to the
+        device. For rooms Python computes in `rust_sync: on` mode, which share
+        the Rust handler's lazy-loaded members caches."""
+
+    def ll_member_mark_sent(
+        self,
+        user_id: str,
+        device_id: str | None,
+        member: str,
+        event_id: str,
+        next_batch: RoomStreamToken,
+    ) -> None:
+        """Record that `event_id` is being sent to the device as the membership
+        of `member`, in the response ending at `next_batch`."""
+
+    def generate_room_entry(
+        self, request: "SyncRequest", room: "RoomSyncInput"
+    ) -> "Deferred[RoomSyncResult | None]":
+        """`_generate_room_entry` for one joined or archived room. Resolves to
+        None when the room has nothing to send. Fails with `RustSyncFallback`
+        for a room the Python implementation must compute. Cancelling the
+        deferred stops the computation."""
+
+    def generate_room_entry_blocking(
+        self, request: "SyncRequest", room: "RoomSyncInput"
+    ) -> "RoomSyncResult | None":
+        """As `generate_room_entry`, but blocks. For tests."""
+
+class SyncRequest:
+    """One `/sync` request, as the per-room computation sees it."""
+
+    def __init__(
+        self,
+        *,
+        user_id: str,
+        device_id: str | None,
+        filter: "FilterCollection",
+        use_state_after: bool,
+        now_room_key: RoomStreamToken,
+        ignored_users: frozenset[str],
+        is_server_admin: bool,
+        return_soft_failed_events: bool,
+        return_policy_server_spammy_events: bool,
+        enable_push: bool,
+        msc4354_enabled: bool,
+    ) -> None: ...
+
+class RoomSyncInput:
+    """One room's `RoomSyncResultBuilder`, plus what `handle_room_entries`
+    passes alongside it."""
+
+    def __init__(
+        self,
+        *,
+        room_id: str,
+        rtype: str,
+        events: Sequence[Event] | None,
+        newly_joined: bool,
+        full_state: bool,
+        since: RoomStreamToken | None,
+        upto: RoomStreamToken,
+        end: RoomStreamToken,
+        out_of_band: bool,
+        ephemeral: Sequence[JsonMapping],
+        tags: Mapping[str, JsonMapping] | None,
+        account_data: Mapping[str, JsonMapping],
+        sticky_event_ids: Sequence[str],
+        always_include: bool,
+        room_max_token: RoomStreamToken,
+    ) -> None: ...
+
+class RoomSyncResult:
+    """A room's entry, less the bundled aggregations."""
+
+    @property
+    def room_id(self) -> str: ...
+    @property
+    def rtype(self) -> str: ...
+    @property
+    def timeline(self) -> list[tuple[Event, str]]:
+        """`(event, membership)` pairs, oldest first."""
+    @property
+    def prev_batch_from_now(self) -> bool:
+        """Whether `prev_batch` builds on the response's now token rather
+        than the room's upto token."""
+    @property
+    def prev_batch_room_key(self) -> RoomStreamToken | None:
+        """The room key of `prev_batch`, if it differs from the base
+        token's."""
+    @property
+    def limited(self) -> bool: ...
+    @property
+    def bundle_aggregations(self) -> bool:
+        """Whether to bundle aggregations for the timeline."""
+    @property
+    def state(self) -> list[Event]: ...
+    @property
+    def ephemeral(self) -> list[JsonDict]: ...
+    @property
+    def account_data(self) -> list[JsonDict]: ...
+    @property
+    def summary(self) -> JsonDict | None: ...
+    @property
+    def unread_notifications(self) -> JsonDict: ...
+    @property
+    def unread_thread_notifications(self) -> JsonDict: ...
+    @property
+    def unread_count(self) -> int: ...
+    @property
+    def sticky(self) -> list[tuple[Event, str]]: ...
 
 class FilterCollection:
     """The Rust port of `synapse.api.filtering.FilterCollection`, built from
