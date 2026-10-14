@@ -654,6 +654,12 @@ def _encode_urlsafe_base64_unpadded(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
+# A room member as a client names them: a user ID, or in an MSC4430 member key room
+# a member key the server cannot attribute to a user (one it holds is handled as the
+# user behind it). See `MemberKeyHandler.parse_membership_target`.
+RoomMemberIdentity = Union[UserID, MemberKey]
+
+
 MXID_LOCALPART_ALLOWED_CHARACTERS = set(
     "_-./=+" + string.ascii_lowercase + string.digits
 )

@@ -25,9 +25,12 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
+from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.rest import admin
 from synapse.rest.client import login, room, room_upgrade_rest_servlet
 from synapse.server import HomeServer
+from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -485,3 +488,99 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
         # This is a regression test where previously Synapse would accidentally
         # mutate the old power levels event.
         self.assertEqual(old_power_level_event.content["users"][self.creator], 100)
+
+
+class UpgradeStateDagRoomTest(unittest.HomeserverTestCase):
+    """Upgrading a room with a state DAG (MSC4242): the events the clone sends
+    in one batch chain on each other in the state DAG, so that a join is
+    authorised against the invite sent with it, and the rejections of the old
+    room's pending invites come after its tombstone rather than beside it."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        room_upgrade_rest_servlet.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})["msc4242_enabled"] = True
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.creator = self.register_user("creator", "pass")
+        self.creator_token = self.login(self.creator, "pass")
+        self.other = self.register_user("user", "pass")
+        self.other_token = self.login(self.other, "pass")
+        self.invited = self.register_user("invited", "pass")
+        self.banned = [self.register_user("banned%d" % i, "pass") for i in (1, 2)]
+
+        self.room_id = self.helper.create_room_as(
+            self.creator,
+            tok=self.creator_token,
+            room_version=RoomVersions.MSC4242v12.identifier,
+            is_public=False,
+        )
+        self.helper.invite(
+            self.room_id, src=self.creator, targ=self.other, tok=self.creator_token
+        )
+        self.helper.join(self.room_id, self.other, tok=self.other_token)
+        self.helper.invite(
+            self.room_id, src=self.creator, targ=self.invited, tok=self.creator_token
+        )
+        for banned in self.banned:
+            self.helper.ban(
+                self.room_id, src=self.creator, targ=banned, tok=self.creator_token
+            )
+
+    def _current_state(self, room_id: str) -> dict[tuple[str, str], EventBase]:
+        state_ids = self.get_success(self.store.get_partial_current_state_ids(room_id))
+        events = self.get_success(self.store.get_events(state_ids.values()))
+        return {key: events[event_id] for key, event_id in state_ids.items()}
+
+    def _state_parents(self, event: EventBase) -> list[str]:
+        assert supports_msc4242_state_dag(event), event
+        return list(event.prev_state_events)
+
+    def test_batched_events_chain_in_the_state_dag(self) -> None:
+        new_room_id = self.get_success(
+            self.hs.get_room_creation_handler().upgrade_room(
+                create_requester(self.creator),
+                self.room_id,
+                RoomVersions.MSC4242v12,
+                additional_creators=None,
+                auto_member=True,
+            )
+        )
+        new_state = self._current_state(new_room_id)
+
+        # The two bans, sent in one batch, chain.
+        bans = sorted(
+            (new_state[(EventTypes.Member, banned)] for banned in self.banned),
+            key=lambda e: e.depth,
+        )
+        self.assertEqual([b.membership for b in bans], [Membership.BAN] * 2)
+        self.assertEqual(self._state_parents(bans[1]), [bans[0].event_id])
+
+        # The auto-join was authorised against the invite sent with it.
+        join = new_state[(EventTypes.Member, self.other)]
+        self.assertEqual(join.membership, Membership.JOIN)
+        invite = self.get_success(self.store.get_event(self._state_parents(join)[0]))
+        self.assertEqual(
+            (invite.type, invite.state_key, invite.membership),
+            (EventTypes.Member, self.other, Membership.INVITE),
+        )
+        self.assertEqual(
+            new_state[(EventTypes.Member, self.invited)].membership, Membership.INVITE
+        )
+
+        # The old invite's rejection follows the tombstone rather than forking
+        # the state DAG beside it.
+        old_state = self._current_state(self.room_id)
+        rejection = old_state[(EventTypes.Member, self.invited)]
+        self.assertEqual(rejection.membership, Membership.LEAVE)
+        tombstone = old_state[(EventTypes.Tombstone, "")]
+        self.assertEqual(tombstone.content["replacement_room"], new_room_id)
+        self.assertEqual(self._state_parents(rejection), [tombstone.event_id])

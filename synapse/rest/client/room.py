@@ -81,7 +81,14 @@ from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main import DataStore
 from synapse.streams.config import PaginationConfig
-from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
+from synapse.types import (
+    JsonDict,
+    Requester,
+    RoomMemberIdentity,
+    StreamToken,
+    ThirdPartyInstanceID,
+    UserID,
+)
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
@@ -212,6 +219,7 @@ class RoomStateEventRestServlet(RestServlet):
         super().__init__()
         self.event_creation_handler = hs.get_event_creation_handler()
         self.room_member_handler = hs.get_room_member_handler()
+        self.member_key_handler = hs.get_member_key_handler()
         self.message_handler = hs.get_message_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
@@ -364,7 +372,10 @@ class RoomStateEventRestServlet(RestServlet):
 
                 event_id, _ = await self.room_member_handler.update_membership(
                     requester,
-                    target=UserID.from_string(state_key),
+                    # (A member key, in an MSC4430 room.)
+                    target=await self.member_key_handler.parse_membership_target(
+                        room_id, state_key
+                    ),
                     room_id=room_id,
                     action=membership,
                     content=content,
@@ -1203,6 +1214,7 @@ class RoomMembershipRestServlet(TransactionRestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
         self.room_member_handler = hs.get_room_member_handler()
+        self.member_key_handler = hs.get_member_key_handler()
         self.auth = hs.get_auth()
         self.config = hs.config
 
@@ -1256,10 +1268,13 @@ class RoomMembershipRestServlet(TransactionRestServlet):
                 pass
             return 200, {}
 
-        target = requester.user
+        target: RoomMemberIdentity = requester.user
         if membership_action in ["invite", "ban", "unban", "kick"]:
             assert_params_in_dict(request_body, ["user_id"])
-            target = UserID.from_string(request_body["user_id"])
+            # (A member key, in an MSC4430 room.)
+            target = await self.member_key_handler.parse_membership_target(
+                room_id, request_body["user_id"]
+            )
 
         event_content = None
         if "reason" in request_body:

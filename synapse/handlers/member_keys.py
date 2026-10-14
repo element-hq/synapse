@@ -37,6 +37,7 @@ vouch for linkage information that is not ours.
 """
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Iterable
 
 from prometheus_client import Counter
@@ -56,7 +57,14 @@ from synapse.events import EventBase
 from synapse.events.py_protocol import supports_msc4430_member_keys
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.member_keys import LocalMemberKey
-from synapse.types import JsonDict, MemberKey, UserID, get_domain_from_id, is_member_key
+from synapse.types import (
+    JsonDict,
+    MemberKey,
+    RoomMemberIdentity,
+    UserID,
+    get_domain_from_id,
+    is_member_key,
+)
 from synapse.util.caches.expiringcache import ExpiringCache
 
 if TYPE_CHECKING:
@@ -210,6 +218,38 @@ class MemberKeyHandler:
             return user_id
         return local_key.member_key
 
+    async def parse_membership_target(
+        self, room_id: str, target: str
+    ) -> RoomMemberIdentity:
+        """Parse a membership target a client named (`/invite`, `/kick`, `/ban`,
+        `/unban`, `PUT /state/m.room.member/{target}`).
+
+        In a room without member keys the target is a user ID, as ever. In an
+        MSC4430 member key room a client may also name a member by their key:
+        a key we hold is handled as the user behind it, so that everything the
+        membership code does for a user of ours (suspension, invite rules,
+        profiles, notifications) applies and the user ID is turned back into
+        the key when the event is built; any other key (one nobody vouches
+        for, or a member of another server, whose handling is a later change)
+        is returned as a `MemberKey`, which only moderation (a kick, a ban, an
+        unban) can act on, and which the event then names as it is.
+
+        Raises:
+            SynapseError: 400 for a malformed target.
+        """
+        try:
+            room_version = await self._store.get_room_version(room_id)
+            member_keys = room_version.msc4430_member_keys
+        except NotFoundError:
+            member_keys = False
+        if not member_keys or not is_member_key(target):
+            return UserID.from_string(target)
+        member_key = MemberKey.from_string(target)
+        user_id = await self.local_user_id_for_identity(room_id, target)
+        if user_id is not None:
+            return UserID.from_string(user_id)
+        return member_key
+
     # ------------------------------------------------------------------
     # The keys we hold
     # ------------------------------------------------------------------
@@ -318,17 +358,27 @@ class MemberKeyHandler:
         filled in only for a target we can vouch for. An erased user gets no
         `localpart`, so their name is not published again.
 
+        The `users` of an `m.room.power_levels` event are translated the same
+        way (user IDs of ours become keys; keys stay as they are, so a client
+        may name any member by key).
+
         Members of other servers cannot be named yet (their keys are learned over
         federation, which a later change adds): a remote user ID as a target,
-        additional creator or sender is refused with 400 rather than quietly
-        sent as a user ID the room cannot hold. So is a member key the client
-        chose itself as a target or additional creator: a key nobody vouches
-        for would be a seat in the room for whoever holds its private half.
+        additional creator, power level entry or sender is refused with 400
+        rather than quietly sent as a user ID the room cannot hold. A member
+        key the client chose itself as a target or additional creator is
+        refused too (a key nobody vouches for would be a seat in the room for
+        whoever holds its private half), except as the target of a kick, ban or
+        unban: a moderator must be able to act on any member, so a membership
+        of `leave` or `ban` sent by someone else may name any key, and carries
+        no linkage information for it. Third-party invites bind a user ID to
+        a membership, which has no meaning for keys, and are refused.
 
         Raises:
-            SynapseError: 400 for a target or additional creator that is not one
-                of our users, or a create event sent into an existing room; 403
-                for a remote sender.
+            SynapseError: 400 for a target, additional creator or power level
+                entry that is not one of our users, a create event sent into
+                an existing room, or a third-party invite; 403 for a remote
+                sender.
         """
         if not room_version.msc4430_member_keys:
             return
@@ -371,6 +421,10 @@ class MemberKeyHandler:
                 event_dict["sender"] = local_key.member_key
 
         content = event_dict.get("content")
+        if isinstance(content, Mapping) and not isinstance(content, dict):
+            # (The content of an event copied from another room, as a room
+            # upgrade does, may be a frozen dict.)
+            content = event_dict["content"] = dict(content)
         if not isinstance(content, dict):
             return
 
@@ -401,7 +455,12 @@ class MemberKeyHandler:
                 target_user_id = await self.local_user_id_for_identity(
                     room_id, state_key
                 )
-                if target_user_id is None:
+                is_moderation = (
+                    content.get(EventContentFields.MEMBERSHIP)
+                    in (Membership.LEAVE, Membership.BAN)
+                    and event_dict.get("sender") != state_key
+                )
+                if target_user_id is None and not is_moderation:
                     raise SynapseError(
                         400,
                         "Only members of this server can be named in a room with "
@@ -414,6 +473,45 @@ class MemberKeyHandler:
                 content[EventContentFields.MSC4430_DOMAIN] = target.domain
                 if not await self._store.is_user_erased(target_user_id):
                     content[EventContentFields.MSC4430_LOCALPART] = target.localpart
+
+        elif event_type == EventTypes.ThirdPartyInvite:
+            raise SynapseError(
+                400,
+                "Third-party invites are not supported in rooms with member keys",
+                Codes.UNRECOGNIZED,
+            )
+
+        elif event_type == EventTypes.PowerLevels and isinstance(room_id, str):
+            users = content.get("users")
+            if isinstance(users, dict):
+                translated_users: dict[str, object] = {}
+                for identity, level in users.items():
+                    if (
+                        isinstance(identity, str)
+                        and not is_member_key(identity)
+                        and UserID.is_valid(identity)
+                    ):
+                        if not self._is_mine_id(identity):
+                            raise SynapseError(
+                                400,
+                                "Users of other servers cannot be given power "
+                                "levels in a room with member keys yet",
+                                Codes.INVALID_PARAM,
+                            )
+                        local_key = await self.get_or_create_local_member_key(
+                            room_id, identity
+                        )
+                        identity = local_key.member_key
+                    # Keys, and anything else, are left for the auth rules.
+                    if identity in translated_users:
+                        # (The same member by user ID and by key: which level?)
+                        raise SynapseError(
+                            400,
+                            "Power levels name %s more than once" % (identity,),
+                            Codes.INVALID_PARAM,
+                        )
+                    translated_users[identity] = level
+                content["users"] = translated_users
 
         elif event_type == EventTypes.Create:
             additional_creators = content.get(EventContentFields.ADDITIONAL_CREATORS)

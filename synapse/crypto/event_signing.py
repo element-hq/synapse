@@ -291,7 +291,9 @@ def _check_member_key_room_signer(
         return MemberKeySigningRefusedError(signature_name, why)
 
     content = event_dict.get("content")
-    if not isinstance(content, dict):
+    # (A `Mapping`: the content of an event copied from another room, as a
+    # room upgrade does, may be a frozen dict.)
+    if not isinstance(content, collections.abc.Mapping):
         raise refuse("the event has no content")
 
     if signature_name == MemberKeys.SIGNATURE_ENTITY:

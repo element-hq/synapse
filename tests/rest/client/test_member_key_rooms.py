@@ -11,8 +11,9 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
-"""Creating, joining, sending to and leaving an MSC4430 member key room through
-the client API, with one homeserver and no federation.
+"""An MSC4430 member key room through the client API, with one homeserver and
+no federation: creating, joining, sending to and leaving it, what a client is
+served from it, and moderating it.
 
 Clients speak in user IDs; the room's events must name member keys and be signed
 by them. These are the local halves of the Complement tests for creating a room
@@ -33,23 +34,26 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.constants import (
     EventContentFields,
     EventTypes,
+    GuestAccess,
     MemberInfo,
     MemberKeys,
     Membership,
 )
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.rest import admin
 from synapse.rest.client import (
     account_data,
     login,
+    register,
     room,
     room_upgrade_rest_servlet,
     sync,
 )
 from synapse.server import HomeServer
 from synapse.storage.member_keys import MemberLink
-from synapse.types import JsonDict, is_member_key
+from synapse.types import JsonDict, create_requester, is_member_key
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -60,7 +64,10 @@ from tests.unittest import override_config
 ROOM_VERSION = RoomVersions.MSC4430v12
 
 
-class MemberKeyRoomsTestCase(unittest.HomeserverTestCase):
+class _MemberKeyRoomsBase(unittest.HomeserverTestCase):
+    """Two users, and helpers to create a member key room and inspect it
+    through the store."""
+
     servlets = [
         admin.register_servlets,
         login.register_servlets,
@@ -155,6 +162,16 @@ class MemberKeyRoomsTestCase(unittest.HomeserverTestCase):
             self.assertTrue(is_member_key(event.sender), (event.type, event.sender))
             if event.type == EventTypes.Member:
                 self.assertTrue(is_member_key(event.state_key), event.state_key)
+
+
+class MemberKeyRoomsTestCase(_MemberKeyRoomsBase):
+    """Creating, joining, sending to and leaving a member key room. Clients
+    speak in user IDs; the room's events must name member keys and be signed
+    by them. These are the local halves of the Complement tests for creating
+    a room (the create event is sent by a member key and the creator's
+    membership carries co-signed linkage information) and for joining,
+    leaving and changing one's own membership by user ID (the user never
+    appears in the room as a user ID)."""
 
     def test_create_room(self) -> None:
         """The create event is sent by the creator's member key and signed only by
@@ -304,8 +321,10 @@ class MemberKeyRoomsTestCase(unittest.HomeserverTestCase):
         )
         self._assert_no_user_ids_in_room(room_id)
 
-    def test_only_user_ids_are_accepted_as_targets(self) -> None:
-        """Clients cannot (yet) name a member key as a membership target."""
+    def test_a_key_nobody_vouches_for_cannot_be_invited(self) -> None:
+        """A member key the client chose itself is not a member of this server
+        to invite (it would be a seat in the room for whoever holds its private
+        half)."""
         room_id = self._create_room()
         self.helper.invite(
             room_id,
@@ -419,17 +438,6 @@ class MemberKeyRoomsTestCase(unittest.HomeserverTestCase):
             expect_code=HTTPStatus.BAD_REQUEST,
         )
 
-    def test_upgrade_into_member_key_room_is_refused(self) -> None:
-        legacy_room = self.helper.create_room_as(self.alice, tok=self.alice_tok)
-        channel = self.make_request(
-            "POST",
-            f"/_matrix/client/r0/rooms/{legacy_room}/upgrade",
-            {"new_version": ROOM_VERSION.identifier},
-            access_token=self.alice_tok,
-        )
-        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
-        self.assertEqual(channel.json_body["errcode"], "M_UNSUPPORTED_ROOM_VERSION")
-
     @override_config({"experimental_features": {"msc4430_enabled": False}})
     def test_room_version_needs_the_flag(self) -> None:
         self.helper.create_room_as(
@@ -437,6 +445,815 @@ class MemberKeyRoomsTestCase(unittest.HomeserverTestCase):
             tok=self.alice_tok,
             room_version=ROOM_VERSION.identifier,
             expect_code=HTTPStatus.BAD_REQUEST,
+        )
+
+
+class MemberKeyModerationTestCase(_MemberKeyRoomsBase):
+    """Moderating a member key room: kicks, bans and unbans naming a member by
+    user ID or by key (including a key this server holds nothing for, as
+    federation will bring), power levels naming users or keys, third-party
+    invites refused, and room upgrades carrying the power levels and bans over
+    by the users behind the old room's keys. These are the local halves of the
+    Complement tests for moderation by key, power levels, third-party invites,
+    additional creators and upgrades."""
+
+    servlets = _MemberKeyRoomsBase.servlets + [register.register_servlets]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["allow_guest_access"] = True
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.carol = self.register_user("carol", "pass")
+        self.carol_tok = self.login("carol", "pass")
+
+    def _stranger_join(self, room_id: str, stranger: Member) -> EventBase:
+        """A join by a key this server does not hold, as federation would bring."""
+        builder = self.get_success(MemberKeyRoom.for_existing_room(self.hs, room_id))
+        return self.get_success(builder.send_member(stranger, Membership.JOIN))
+
+    def _moderate(
+        self,
+        room_id: str,
+        action: str,
+        target: str,
+        tok: str | None = None,
+        expect_code: int = HTTPStatus.OK,
+    ) -> JsonDict:
+        """`/invite`, `/kick`, `/ban` or `/unban`, naming `target` as a client
+        would (a user ID or a member key)."""
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{room_id}/{action}",
+            {"user_id": target, "reason": f"{action} reason"},
+            access_token=tok or self.alice_tok,
+        )
+        self.assertEqual(channel.code, expect_code, channel.json_body)
+        return channel.json_body
+
+    def _membership(self, room_id: str, member_key: str) -> str:
+        return self._member_event(room_id, member_key).membership
+
+    def _assert_moderated_by(
+        self, event: EventBase, sender_key: str, target_user_id: str | None = None
+    ) -> None:
+        """A membership event sent by `sender_key` about another member: with
+        the target's linkage information and our co-signature if the target is
+        one of our users, else with neither and signed by the sender's key alone
+        (we vouch for nothing about a key we do not hold)."""
+        self.assertEqual(event.sender, sender_key)
+        if target_user_id is not None:
+            self._assert_linked_and_cosigned(event, target_user_id)
+        else:
+            self.assertNotIn(EventContentFields.MSC4430_LOCALPART, event.content)
+            self.assertNotIn(EventContentFields.MSC4430_DOMAIN, event.content)
+            self._assert_signed_by_member_key_only(event)
+
+    def _power_levels(self, room_id: str) -> JsonDict:
+        return dict(self._current_state(room_id)[(EventTypes.PowerLevels, "")].content)
+
+    def _upgrade(
+        self,
+        room_id: str,
+        new_version: str = ROOM_VERSION.identifier,
+        tok: str | None = None,
+        expect_code: int = HTTPStatus.OK,
+        **extra: object,
+    ) -> JsonDict:
+        # Not a cached response, when a room is upgraded (or refused) twice.
+        self.reactor.advance(5 * 60 + 1)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{room_id}/upgrade",
+            {"new_version": new_version, **extra},
+            access_token=tok or self.alice_tok,
+        )
+        self.assertEqual(channel.code, expect_code, channel.json_body)
+        return channel.json_body
+
+    def _tombstone(self, room_id: str) -> EventBase | None:
+        return self._current_state(room_id).get((EventTypes.Tombstone, ""))
+
+    def test_kick_ban_unban_by_user_id(self) -> None:
+        """Moderation names a member of ours by user ID, as ever; the events
+        name their key, carry their linkage and are co-signed."""
+        room_id = self._create_room(preset="public_chat")
+        self.helper.join(room_id, self.bob, tok=self.bob_tok)
+        alice_key = self._key(room_id, self.alice)
+        bob_key = self._key(room_id, self.bob)
+
+        self._moderate(room_id, "kick", self.bob)
+        kick = self._member_event(room_id, bob_key)
+        self.assertEqual(kick.membership, Membership.LEAVE)
+        self.assertEqual(kick.content["reason"], "kick reason")
+        self._assert_moderated_by(kick, alice_key, self.bob)
+
+        self._moderate(room_id, "ban", self.bob)
+        ban = self._member_event(room_id, bob_key)
+        self.assertEqual(ban.membership, Membership.BAN)
+        self._assert_moderated_by(ban, alice_key, self.bob)
+        self.helper.join(
+            room_id, self.bob, tok=self.bob_tok, expect_code=HTTPStatus.FORBIDDEN
+        )
+
+        self._moderate(room_id, "unban", self.bob)
+        unban = self._member_event(room_id, bob_key)
+        self.assertEqual(unban.membership, Membership.LEAVE)
+        self._assert_moderated_by(unban, alice_key, self.bob)
+
+        # Back under the same key.
+        self.helper.join(room_id, self.bob, tok=self.bob_tok)
+        self.assertEqual(self._membership(room_id, bob_key), Membership.JOIN)
+        self._assert_no_user_ids_in_room(room_id)
+
+    def test_kick_ban_unban_by_key(self) -> None:
+        """A member of ours may equally be named by their key, which is handled
+        as the user behind it."""
+        room_id = self._create_room(preset="public_chat")
+        self.helper.join(room_id, self.bob, tok=self.bob_tok)
+        alice_key = self._key(room_id, self.alice)
+        bob_key = self._key(room_id, self.bob)
+
+        self._moderate(room_id, "kick", bob_key)
+        kick = self._member_event(room_id, bob_key)
+        self.assertEqual(kick.membership, Membership.LEAVE)
+        self._assert_moderated_by(kick, alice_key, self.bob)
+        self.assertEqual(
+            self.get_success(
+                self.store.get_local_current_membership_for_user_in_room(
+                    self.bob, room_id
+                )
+            )[0],
+            Membership.LEAVE,
+        )
+
+        self._moderate(room_id, "ban", bob_key)
+        self.assertEqual(self._membership(room_id, bob_key), Membership.BAN)
+        self.helper.join(
+            room_id, self.bob, tok=self.bob_tok, expect_code=HTTPStatus.FORBIDDEN
+        )
+
+        self._moderate(room_id, "unban", bob_key)
+        unban = self._member_event(room_id, bob_key)
+        self.assertEqual(unban.membership, Membership.LEAVE)
+        self._assert_moderated_by(unban, alice_key, self.bob)
+        self.helper.join(room_id, self.bob, tok=self.bob_tok)
+
+        # Once erased, Bob is still ours (co-signed, our domain), unnamed.
+        self.get_success(self.store.mark_user_erased(self.bob))
+        self._moderate(room_id, "ban", bob_key)
+        ban = self._member_event(room_id, bob_key)
+        self.assertEqual(ban.membership, Membership.BAN)
+        self.assertNotIn(EventContentFields.MSC4430_LOCALPART, ban.content)
+        self.assertEqual(
+            ban.content[EventContentFields.MSC4430_DOMAIN], self.hs.hostname
+        )
+        self.assertIn(self.hs.hostname, ban.signatures.as_dict())
+        self._assert_no_user_ids_in_room(room_id)
+
+    def test_moderation_through_the_state_api(self) -> None:
+        """`PUT /state/m.room.member/{key}` names a member by key too, and a
+        member may name their own key."""
+        room_id = self._create_room(preset="public_chat")
+        self.helper.join(room_id, self.bob, tok=self.bob_tok)
+        alice_key = self._key(room_id, self.alice)
+        bob_key = self._key(room_id, self.bob)
+
+        self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            {"membership": Membership.BAN},
+            tok=self.alice_tok,
+            state_key=bob_key,
+        )
+        ban = self._member_event(room_id, bob_key)
+        self.assertEqual(ban.membership, Membership.BAN)
+        self._assert_moderated_by(ban, alice_key, self.bob)
+
+        self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            {"membership": Membership.LEAVE},
+            tok=self.alice_tok,
+            state_key=bob_key,
+        )
+        self.assertEqual(self._membership(room_id, bob_key), Membership.LEAVE)
+
+        body = self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            {"membership": Membership.JOIN, "displayname": "Bob"},
+            tok=self.bob_tok,
+            state_key=bob_key,
+        )
+        join = self._event(body["event_id"])
+        self.assertEqual((join.sender, join.state_key), (bob_key, bob_key))
+        self.assertEqual(join.membership, Membership.JOIN)
+        self._assert_linked_and_cosigned(join, self.bob)
+        self._assert_no_user_ids_in_room(room_id)
+
+    def test_moderation_of_a_key_we_do_not_hold(self) -> None:
+        """A member whose key maps to no user (as federation will bring) can be
+        kicked, banned and unbanned by key; the events carry no linkage
+        information and only the moderator's signature. A ban may name a key
+        the room has never seen."""
+        room_id = self._create_room(preset="public_chat")
+        alice_key = self._key(room_id, self.alice)
+        stranger = Member()
+        self._stranger_join(room_id, stranger)
+        self.assertEqual(self._membership(room_id, stranger.key), Membership.JOIN)
+
+        self._moderate(room_id, "kick", stranger.key)
+        kick = self._member_event(room_id, stranger.key)
+        self.assertEqual(kick.membership, Membership.LEAVE)
+        self.assertEqual(kick.content["reason"], "kick reason")
+        self._assert_moderated_by(kick, alice_key)
+
+        self._moderate(room_id, "ban", stranger.key)
+        ban = self._member_event(room_id, stranger.key)
+        self.assertEqual(ban.membership, Membership.BAN)
+        self._assert_moderated_by(ban, alice_key)
+
+        self._moderate(room_id, "unban", stranger.key)
+        unban = self._member_event(room_id, stranger.key)
+        self.assertEqual(unban.membership, Membership.LEAVE)
+        self._assert_moderated_by(unban, alice_key)
+
+        never_seen = Member()
+        self._moderate(room_id, "ban", never_seen.key)
+        ban = self._member_event(room_id, never_seen.key)
+        self.assertEqual(ban.membership, Membership.BAN)
+        self._assert_moderated_by(ban, alice_key)
+
+        # Through the state API too.
+        self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            {"membership": Membership.LEAVE},
+            tok=self.alice_tok,
+            state_key=never_seen.key,
+        )
+        self.assertEqual(self._membership(room_id, never_seen.key), Membership.LEAVE)
+        self._assert_no_user_ids_in_room(room_id)
+
+    def test_moderation_of_a_linked_key(self) -> None:
+        """A key with a verified link to a user of another server is still a
+        key to moderation (members of other servers are a later change): the
+        kick names it as it is, with no linkage and the moderator's signature
+        only, rather than the user it links to, whom the room cannot name."""
+        room_id = self._create_room(preset="public_chat")
+        alice_key = self._key(room_id, self.alice)
+        linked = Member()
+        self._stranger_join(room_id, linked)
+        self.get_success(
+            self.store.upsert_member_link(
+                MemberLink(
+                    room_id=room_id,
+                    member_key=linked.key,
+                    domain="other.example",
+                    localpart="dave",
+                    verified=True,
+                    event_id="$verified",
+                    key_id="ed25519:x",
+                )
+            )
+        )
+
+        self._moderate(room_id, "kick", linked.key)
+        kick = self._member_event(room_id, linked.key)
+        self.assertEqual(kick.membership, Membership.LEAVE)
+        self._assert_moderated_by(kick, alice_key)
+        self._moderate(
+            room_id, "invite", linked.key, expect_code=HTTPStatus.BAD_REQUEST
+        )
+
+    def test_guests_are_kicked_when_guest_access_is_revoked(self) -> None:
+        """A guest of ours is found by the key we hold for them."""
+        room_id = self._create_room(preset="public_chat")
+        self.helper.send_state(
+            room_id,
+            EventTypes.GuestAccess,
+            {EventContentFields.GUEST_ACCESS: GuestAccess.CAN_JOIN},
+            tok=self.alice_tok,
+        )
+        channel = self.make_request(
+            "POST", "/_matrix/client/v3/register?kind=guest", {}
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        guest, guest_tok = (
+            channel.json_body["user_id"],
+            channel.json_body["access_token"],
+        )
+        self.helper.join(room_id, guest, tok=guest_tok)
+        guest_key = self._key(room_id, guest)
+        join = self._member_event(room_id, guest_key)
+        self.assertEqual(
+            (join.membership, join.content["kind"]), (Membership.JOIN, "guest")
+        )
+
+        self.helper.send_state(
+            room_id,
+            EventTypes.GuestAccess,
+            {EventContentFields.GUEST_ACCESS: GuestAccess.FORBIDDEN},
+            tok=self.alice_tok,
+        )
+        leave = self._member_event(room_id, guest_key)
+        self.assertEqual(leave.membership, Membership.LEAVE)
+        self.assertEqual(leave.sender, guest_key)
+        self._assert_linked_and_cosigned(leave, guest)
+        self._assert_no_user_ids_in_room(room_id)
+
+    def test_only_moderation_can_name_a_key_we_do_not_hold(self) -> None:
+        """There is nobody to invite, join or knock as behind such a key, and
+        moderation is still the room's power levels to allow."""
+        room_id = self._create_room(preset="public_chat")
+        stranger = Member()
+        self._stranger_join(room_id, stranger)
+
+        body = self._moderate(
+            room_id, "invite", stranger.key, expect_code=HTTPStatus.BAD_REQUEST
+        )
+        self.assertEqual(body["errcode"], "M_INVALID_PARAM")
+        for membership in (Membership.INVITE, Membership.JOIN, Membership.KNOCK):
+            self.helper.send_state(
+                room_id,
+                EventTypes.Member,
+                {"membership": membership},
+                tok=self.alice_tok,
+                state_key=stranger.key,
+                expect_code=HTTPStatus.BAD_REQUEST,
+            )
+        self.assertEqual(self._membership(room_id, stranger.key), Membership.JOIN)
+
+        self.helper.join(room_id, self.bob, tok=self.bob_tok)
+        self._moderate(
+            room_id,
+            "kick",
+            stranger.key,
+            tok=self.bob_tok,
+            expect_code=HTTPStatus.FORBIDDEN,
+        )
+        self.assertEqual(self._membership(room_id, stranger.key), Membership.JOIN)
+
+        # A third-party invite to exchange names a user ID: not for a key.
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{room_id}/kick",
+            {
+                "user_id": stranger.key,
+                "third_party_signed": {
+                    "sender": self.alice,
+                    "mxid": self.bob,
+                    "token": "token",
+                    "signatures": {},
+                },
+            },
+            access_token=self.alice_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
+        self.assertEqual(self._membership(room_id, stranger.key), Membership.JOIN)
+
+    def test_invite_by_key(self) -> None:
+        """A member of ours who has a key in the room can be invited back by
+        it; the invite is theirs."""
+        room_id = self._create_room()
+        self.helper.invite(room_id, src=self.alice, targ=self.bob, tok=self.alice_tok)
+        self.helper.join(room_id, self.bob, tok=self.bob_tok)
+        bob_key = self._key(room_id, self.bob)
+        self.helper.leave(room_id, self.bob, tok=self.bob_tok)
+
+        self._moderate(room_id, "invite", bob_key)
+        invite = self._member_event(room_id, bob_key)
+        self.assertEqual(invite.membership, Membership.INVITE)
+        self._assert_linked_and_cosigned(invite, self.bob)
+        self.assertIsNotNone(
+            self.get_success(
+                self.store.get_invite_for_local_user_in_room(self.bob, room_id)
+            )
+        )
+        self.helper.join(room_id, self.bob, tok=self.bob_tok)
+        self.assertEqual(self._membership(room_id, bob_key), Membership.JOIN)
+        self._assert_no_user_ids_in_room(room_id)
+
+    def test_power_levels_name_keys(self) -> None:
+        """`users` may name our users by user ID (a user with no key in the
+        room yet is given one) or any member by key; the event names keys, and
+        they are the room's power levels."""
+        room_id = self._create_room(preset="public_chat")
+        self.helper.join(room_id, self.bob, tok=self.bob_tok)
+        bob_key = self._key(room_id, self.bob)
+        stranger = Member()
+        self._stranger_join(room_id, stranger)
+
+        self.helper.send_state(
+            room_id,
+            EventTypes.PowerLevels,
+            {"users": {self.bob: 50, stranger.key: 25}},
+            tok=self.alice_tok,
+        )
+        self.assertEqual(
+            self._power_levels(room_id)["users"], {bob_key: 50, stranger.key: 25}
+        )
+
+        self.helper.send_state(
+            room_id,
+            EventTypes.PowerLevels,
+            {"users": {bob_key: 75, self.carol: 10}},
+            tok=self.alice_tok,
+        )
+        carol_key = self._key(room_id, self.carol)
+        self.assertEqual(
+            self._power_levels(room_id)["users"], {bob_key: 75, carol_key: 10}
+        )
+        self.assertNotIn((EventTypes.Member, carol_key), self._current_state(room_id))
+
+        # The same member by user ID and by key is refused: which level?
+        self.helper.send_state(
+            room_id,
+            EventTypes.PowerLevels,
+            {"users": {self.bob: 50, bob_key: 75}},
+            tok=self.alice_tok,
+            expect_code=HTTPStatus.BAD_REQUEST,
+        )
+        self.assertEqual(
+            self._power_levels(room_id)["users"], {bob_key: 75, carol_key: 10}
+        )
+
+        # Bob, a moderator now, can kick the stranger; Carol, at 10, cannot.
+        self.helper.join(room_id, self.carol, tok=self.carol_tok)
+        self.assertEqual(self._membership(room_id, carol_key), Membership.JOIN)
+        self._moderate(
+            room_id,
+            "kick",
+            stranger.key,
+            tok=self.carol_tok,
+            expect_code=HTTPStatus.FORBIDDEN,
+        )
+        self._moderate(room_id, "kick", stranger.key, tok=self.bob_tok)
+        self.assertEqual(self._membership(room_id, stranger.key), Membership.LEAVE)
+        self._assert_no_user_ids_in_room(room_id)
+
+    def test_power_levels_cannot_name_remote_users(self) -> None:
+        """Members of other servers are a later change: refused, not sent as a
+        user ID the room cannot hold."""
+        room_id = self._create_room()
+        self.helper.send_state(
+            room_id,
+            EventTypes.PowerLevels,
+            {"users": {"@remote:other.example": 50}},
+            tok=self.alice_tok,
+            expect_code=HTTPStatus.BAD_REQUEST,
+        )
+        self.assertEqual(self._power_levels(room_id).get("users", {}), {})
+
+    def test_power_level_content_override_names_keys(self) -> None:
+        """The power levels a room is created with are translated too."""
+        room_id = self._create_room(
+            preset="public_chat",
+            power_level_content_override={"users": {self.bob: 50}, "kick": 60},
+        )
+        bob_key = self._key(room_id, self.bob)
+        power_levels = self._power_levels(room_id)
+        self.assertEqual(power_levels["users"], {bob_key: 50})
+        self.assertEqual(power_levels["kick"], 60)
+        self._assert_no_user_ids_in_room(room_id)
+
+    def test_third_party_invites_are_refused(self) -> None:
+        """A third-party invite binds a user ID to a membership, which has no
+        meaning for keys."""
+        room_id = self._create_room()
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{room_id}/invite",
+            {
+                "id_server": "id.example",
+                "id_access_token": "token",
+                "medium": "email",
+                "address": "someone@example.com",
+            },
+            access_token=self.alice_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
+
+        self.helper.send_state(
+            room_id,
+            EventTypes.ThirdPartyInvite,
+            {
+                "display_name": "someone",
+                "key_validity_url": "https://id.example/_matrix/identity/v2/pubkey/isvalid",
+                "public_key": "abc",
+            },
+            tok=self.alice_tok,
+            state_key="token",
+            expect_code=HTTPStatus.BAD_REQUEST,
+        )
+        self.assertNotIn(
+            (EventTypes.ThirdPartyInvite, "token"), self._current_state(room_id)
+        )
+
+        # Nor can one be exchanged on a join.
+        public_room = self._create_room(preset="public_chat")
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{public_room}/join",
+            {
+                "third_party_signed": {
+                    "sender": self.alice,
+                    "mxid": self.bob,
+                    "token": "token",
+                    "signatures": {},
+                }
+            },
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
+        self.assertIsNone(
+            self.get_success(self.store.get_local_member_key(public_room, self.bob))
+        )
+        self.assertEqual(
+            [
+                sk
+                for (t, sk) in self._current_state(public_room)
+                if t == EventTypes.Member
+            ],
+            [self._key(public_room, self.alice)],
+        )
+
+    def test_upgrade_member_key_room(self) -> None:
+        """An upgrade carries the power levels and bans over by the users
+        behind the old room's keys, who get new keys in the new room; the
+        tombstone is sent by the upgrader's old key."""
+        old_room = self._create_room(preset="public_chat")
+        self.helper.join(old_room, self.bob, tok=self.bob_tok)
+        old_alice_key = self._key(old_room, self.alice)
+        old_bob_key = self._key(old_room, self.bob)
+        self.helper.send_state(
+            old_room,
+            EventTypes.PowerLevels,
+            {"users": {self.bob: 50}},
+            tok=self.alice_tok,
+        )
+        self._moderate(old_room, "ban", self.carol)
+        old_carol_key = self._key(old_room, self.carol)
+
+        new_room = self._upgrade(old_room)["replacement_room"]
+        self.assertEqual(
+            self.get_success(self.store.get_room_version_id(new_room)),
+            ROOM_VERSION.identifier,
+        )
+        new_alice_key = self._key(new_room, self.alice)
+        new_bob_key = self._key(new_room, self.bob)
+        new_carol_key = self._key(new_room, self.carol)
+        self.assertEqual(
+            len(
+                {
+                    old_alice_key,
+                    old_bob_key,
+                    old_carol_key,
+                    new_alice_key,
+                    new_bob_key,
+                    new_carol_key,
+                }
+            ),
+            6,
+        )
+
+        create = self.get_success(self.store.get_create_event_for_room(new_room))
+        self.assertEqual(create.sender, new_alice_key)
+        self.assertEqual(create.content["predecessor"]["room_id"], old_room)
+        self.assertEqual(self._power_levels(new_room)["users"], {new_bob_key: 50})
+        ban = self._member_event(new_room, new_carol_key)
+        self.assertEqual(ban.membership, Membership.BAN)
+        self._assert_moderated_by(ban, new_alice_key, self.carol)
+        self.assertEqual(self._membership(new_room, new_alice_key), Membership.JOIN)
+        self.assertNotIn(
+            (EventTypes.Member, new_bob_key), self._current_state(new_room)
+        )
+        self._assert_no_user_ids_in_room(new_room)
+
+        tombstone = self._tombstone(old_room)
+        assert tombstone is not None
+        self.assertEqual(tombstone.sender, old_alice_key)
+        self.assertEqual(tombstone.content["replacement_room"], new_room)
+        self.assertEqual(self._power_levels(old_room)["events_default"], 50)
+
+        # The members follow, under their new keys.
+        self.helper.join(new_room, self.bob, tok=self.bob_tok)
+        self.assertEqual(self._membership(new_room, new_bob_key), Membership.JOIN)
+        self.helper.join(
+            new_room, self.carol, tok=self.carol_tok, expect_code=HTTPStatus.FORBIDDEN
+        )
+
+    def test_upgrade_joins_local_members_by_their_new_keys(self) -> None:
+        """With `auto_member`, the members of ours are joined to the new room
+        under new keys (with their profiles) and the pending invites of ours
+        are re-sent, the old ones rejected."""
+        old_room = self.helper.create_room_as(
+            self.alice,
+            tok=self.alice_tok,
+            room_version=ROOM_VERSION.identifier,
+            is_public=False,
+        )
+        self.helper.invite(old_room, src=self.alice, targ=self.bob, tok=self.alice_tok)
+        self.helper.join(old_room, self.bob, tok=self.bob_tok)
+        self.helper.send_state(
+            old_room,
+            EventTypes.Member,
+            {"membership": Membership.JOIN, "displayname": "Bobby"},
+            tok=self.bob_tok,
+            state_key=self.bob,
+        )
+        self.helper.invite(
+            old_room, src=self.alice, targ=self.carol, tok=self.alice_tok
+        )
+        old_carol_key = self._key(old_room, self.carol)
+
+        new_room = self.get_success(
+            self.hs.get_room_creation_handler().upgrade_room(
+                create_requester(self.alice),
+                old_room,
+                ROOM_VERSION,
+                additional_creators=None,
+                auto_member=True,
+            )
+        )
+        new_bob_key = self._key(new_room, self.bob)
+        bob_join = self._member_event(new_room, new_bob_key)
+        self.assertEqual(bob_join.membership, Membership.JOIN)
+        self.assertEqual(bob_join.content["displayname"], "Bobby")
+        self._assert_linked_and_cosigned(bob_join, self.bob)
+        new_carol_key = self._key(new_room, self.carol)
+        invite = self._member_event(new_room, new_carol_key)
+        self.assertEqual(invite.membership, Membership.INVITE)
+        self._assert_linked_and_cosigned(invite, self.carol)
+        # The rejection of the old invite comes after the tombstone, chained
+        # on it (a sibling would fork the state DAG, with the invite on the
+        # tombstone's branch).
+        rejection = self._member_event(old_room, old_carol_key)
+        self.assertEqual(rejection.membership, Membership.LEAVE)
+        self.assertEqual(rejection.sender, old_carol_key)
+        tombstone = self._tombstone(old_room)
+        assert tombstone is not None
+        assert supports_msc4242_state_dag(rejection), rejection
+        self.assertEqual(list(rejection.prev_state_events), [tombstone.event_id])
+        self._assert_no_user_ids_in_room(new_room)
+        self._assert_no_user_ids_in_room(old_room)
+
+    def test_upgrade_leaves_members_that_map_to_no_user_behind(self) -> None:
+        """A member whose key maps to no user is not joined to the new room:
+        there is nobody to join."""
+        old_room = self._create_room(preset="public_chat")
+        self.helper.join(old_room, self.bob, tok=self.bob_tok)
+        stranger = Member()
+        self._stranger_join(old_room, stranger)
+
+        new_room = self.get_success(
+            self.hs.get_room_creation_handler().upgrade_room(
+                create_requester(self.alice),
+                old_room,
+                ROOM_VERSION,
+                additional_creators=None,
+                auto_member=True,
+            )
+        )
+        self.assertEqual(
+            self._membership(new_room, self._key(new_room, self.bob)), Membership.JOIN
+        )
+        self.assertNotIn(
+            (EventTypes.Member, stranger.key), self._current_state(new_room)
+        )
+        self._assert_no_user_ids_in_room(new_room)
+
+    def test_upgrade_with_members_that_map_to_no_user_is_refused(self) -> None:
+        """The power levels or bans name a key the new room cannot carry (there
+        is nobody behind it to give a key): refused, with nothing created."""
+        old_room = self._create_room(preset="public_chat")
+        stranger = Member()
+        self._stranger_join(old_room, stranger)
+        self.helper.send_state(
+            old_room,
+            EventTypes.PowerLevels,
+            {"users": {stranger.key: 50}},
+            tok=self.alice_tok,
+        )
+        body = self._upgrade(old_room, expect_code=HTTPStatus.BAD_REQUEST)
+        self.assertEqual(body["errcode"], "M_INVALID_PARAM")
+        self.assertIn(stranger.key, body["error"])
+        self.assertIsNone(self._tombstone(old_room))
+
+        self.helper.send_state(
+            old_room, EventTypes.PowerLevels, {"users": {}}, tok=self.alice_tok
+        )
+        self._moderate(old_room, "ban", stranger.key)
+        body = self._upgrade(old_room, expect_code=HTTPStatus.BAD_REQUEST)
+        self.assertEqual(body["errcode"], "M_INVALID_PARAM")
+        self.assertIsNone(self._tombstone(old_room))
+        self.assertEqual(
+            self.get_success(self.store.get_rooms_for_user(self.alice)), {old_room}
+        )
+
+    def test_upgrade_legacy_room_into_member_key_room(self) -> None:
+        """A room without member keys can be upgraded into one: its members of
+        ours in the power levels and bans get keys in the new room."""
+        # (A version that names the creator in the power levels.)
+        old_room = self.helper.create_room_as(
+            self.alice, tok=self.alice_tok, is_public=True, room_version="10"
+        )
+        self.helper.join(old_room, self.bob, tok=self.bob_tok)
+        self.helper.send_state(
+            old_room,
+            EventTypes.PowerLevels,
+            {"users": {self.alice: 100, self.bob: 50}},
+            tok=self.alice_tok,
+        )
+        self._moderate(old_room, "ban", self.carol)
+
+        new_room = self._upgrade(old_room)["replacement_room"]
+        self.assertEqual(
+            self.get_success(self.store.get_room_version_id(new_room)),
+            ROOM_VERSION.identifier,
+        )
+        create = self.get_success(self.store.get_create_event_for_room(new_room))
+        self.assertEqual(create.sender, self._key(new_room, self.alice))
+        # (The creator's power is the create event's, not an entry.)
+        self.assertEqual(
+            self._power_levels(new_room)["users"], {self._key(new_room, self.bob): 50}
+        )
+        self.assertEqual(
+            self._membership(new_room, self._key(new_room, self.carol)),
+            Membership.BAN,
+        )
+        self._assert_no_user_ids_in_room(new_room)
+        tombstone = self._tombstone(old_room)
+        assert tombstone is not None
+        self.assertEqual(tombstone.sender, self.alice)
+        self.assertEqual(tombstone.content["replacement_room"], new_room)
+
+    def test_upgrade_legacy_room_with_remote_members_is_refused(self) -> None:
+        """Members of other servers are a later change: a power level entry or
+        a ban naming one cannot be carried, and the upgrade is refused with
+        nothing created."""
+        old_room = self.helper.create_room_as(
+            self.alice, tok=self.alice_tok, room_version="10"
+        )
+        self.helper.send_state(
+            old_room,
+            EventTypes.PowerLevels,
+            {"users": {self.alice: 100, "@remote:other.example": 50}},
+            tok=self.alice_tok,
+        )
+        body = self._upgrade(old_room, expect_code=HTTPStatus.BAD_REQUEST)
+        self.assertEqual(body["errcode"], "M_INVALID_PARAM")
+        self.assertIn("@remote:other.example", body["error"])
+        self.assertIsNone(self._tombstone(old_room))
+
+        banning_room = self.helper.create_room_as(
+            self.alice, tok=self.alice_tok, room_version="10"
+        )
+        self._moderate(banning_room, "ban", "@banned:other.example")
+        body = self._upgrade(banning_room, expect_code=HTTPStatus.BAD_REQUEST)
+        self.assertEqual(body["errcode"], "M_INVALID_PARAM")
+        self.assertIn("@banned:other.example", body["error"])
+        self.assertIsNone(self._tombstone(banning_room))
+
+    def test_upgrade_out_of_member_key_rooms_is_refused(self) -> None:
+        """Keys mean nothing in a room without them."""
+        room_id = self._create_room()
+        body = self._upgrade(
+            room_id, new_version="10", expect_code=HTTPStatus.BAD_REQUEST
+        )
+        self.assertEqual(body["errcode"], "M_UNSUPPORTED_ROOM_VERSION")
+        self.assertIsNone(self._tombstone(room_id))
+
+    def test_upgrade_with_additional_creators(self) -> None:
+        """Additional creators are named by user ID and become keys in the new
+        create event; a remote user or a key is refused with nothing created."""
+        old_room = self._create_room()
+        new_room = self._upgrade(old_room, additional_creators=[self.bob])[
+            "replacement_room"
+        ]
+        create = self.get_success(self.store.get_create_event_for_room(new_room))
+        self.assertEqual(
+            create.content[EventContentFields.ADDITIONAL_CREATORS],
+            [self._key(new_room, self.bob)],
+        )
+        self._assert_no_user_ids_in_room(new_room)
+
+        other_room = self._create_room()
+        for creators in (["@remote:other.example"], [Member().key], ["not a user"]):
+            self._upgrade(
+                other_room,
+                additional_creators=creators,
+                expect_code=HTTPStatus.BAD_REQUEST,
+            )
+        self.assertIsNone(self._tombstone(other_room))
+        self.assertEqual(
+            self.get_success(self.store.get_rooms_for_user(self.alice)),
+            {old_room, new_room, other_room},
         )
 
 

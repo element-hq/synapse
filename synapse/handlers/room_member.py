@@ -59,9 +59,11 @@ from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.invite_rule import InviteRule
 from synapse.types import (
     JsonDict,
+    MemberKey,
     Requester,
     RoomAlias,
     RoomID,
+    RoomMemberIdentity,
     StateMap,
     UserID,
     create_requester,
@@ -400,7 +402,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self,
         *,
         requester: Requester,
-        target: UserID,
+        target: RoomMemberIdentity,
         room_id: str,
         membership: str,
         prev_event_ids: list[str] | None = None,
@@ -518,7 +520,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         await self.event_creation_handler.handle_new_client_event(
                             requester,
                             events_and_context=[(event, context)],
-                            extra_users=[target],
+                            # (A `MemberKey` target is nobody's to wake.)
+                            extra_users=[target] if isinstance(target, UserID) else [],
                             ratelimit=ratelimit,
                         )
                     )
@@ -528,7 +531,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         prev_member_event = await self.store.get_event(
                             prev_member_event_id
                         )
-                        if prev_member_event.membership == Membership.JOIN:
+                        if prev_member_event.membership == Membership.JOIN and (
+                            isinstance(target, UserID)
+                        ):
                             await self._user_left_room(target, room_id)
 
                 break
@@ -583,7 +588,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
     async def update_membership(
         self,
         requester: Requester,
-        target: UserID,
+        target: RoomMemberIdentity,
         room_id: str,
         action: str,
         txn_id: str | None = None,
@@ -638,6 +643,22 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         Raises:
             ShadowBanError if a shadow-banned requester attempts to send an invite.
         """
+        if isinstance(target, MemberKey) and action not in (
+            "kick",
+            "ban",
+            "unban",
+            Membership.LEAVE,
+            Membership.BAN,
+        ):
+            # An MSC4430 member key we cannot attribute to a user (see
+            # `MemberKeyHandler.parse_membership_target`): only moderation can
+            # act on it, there being nobody to invite, join or knock as.
+            raise SynapseError(
+                400,
+                "Only kicks, bans and unbans can name a member by member key",
+                Codes.INVALID_PARAM,
+            )
+
         if ratelimit:
             if action == Membership.JOIN:
                 # Only rate-limit if the user isn't already joined to the room, otherwise
@@ -702,7 +723,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
     async def update_membership_locked(
         self,
         requester: Requester,
-        target: UserID,
+        target: RoomMemberIdentity,
         room_id: str,
         action: str,
         txn_id: str | None = None,
@@ -787,7 +808,10 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     Codes.USER_ACCOUNT_SUSPENDED,
                 )
 
-            if target.to_string() != requester.user.to_string():
+            if not isinstance(target, UserID):
+                # (A member key nobody is behind: no account to be suspended.)
+                target_suspended = False
+            elif target.to_string() != requester.user.to_string():
                 target_suspended = await self.store.get_user_suspended_status(
                     target.to_string()
                 )
@@ -854,6 +878,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         if (
             effective_membership_state
             in self._membership_types_to_include_profile_data_in
+            # (A member key nobody is behind has no profile.)
+            and isinstance(target, UserID)
         ):
             # If event doesn't include a display name, add one.
             profile = self.profile_handler
@@ -873,6 +899,22 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # if this is a join with a 3pid signature, we may need to turn a 3pid
         # invite into a normal invite before we can handle the join.
         if third_party_signed is not None:
+            try:
+                signed_room_version = await self.store.get_room_version(room_id)
+            except (NotFoundError, UnsupportedRoomVersionError):
+                signed_room_version = None
+            if not isinstance(target, UserID) or (
+                signed_room_version is not None
+                and signed_room_version.msc4430_member_keys
+            ):
+                # A third-party invite names a user ID, and exchanging it builds
+                # a membership event from the user IDs the client sent; neither
+                # has a meaning in a room with member keys (see `do_3pid_invite`).
+                raise SynapseError(
+                    400,
+                    "Third-party invites are not supported in rooms with member keys",
+                    Codes.UNRECOGNIZED,
+                )
             await self.federation_handler.exchange_third_party_invite(
                 third_party_signed["sender"],
                 target.to_string(),
@@ -889,6 +931,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 raise SynapseError(403, "This room has been blocked on this server")
 
         if effective_membership_state == Membership.INVITE:
+            # Only a user can be invited (`update_membership` refuses the rest).
+            assert isinstance(target, UserID), target
             target_id = target.to_string()
 
             # block any attempts to invite the server notices mxid
@@ -982,9 +1026,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         target_identity = target.to_string()
         requester_identity = requester.user.to_string()
         if room_version is not None and room_version.msc4430_member_keys:
-            target_identity = await self._member_key_handler.room_identity_for_user(
-                room_id, target_identity, room_version
-            )
+            if isinstance(target, UserID):
+                target_identity = await self._member_key_handler.room_identity_for_user(
+                    room_id, target_identity, room_version
+                )
+            # (A `MemberKey` target is already the room's identity for them.)
             requester_identity = await self._member_key_handler.room_identity_for_user(
                 room_id, requester_identity, room_version
             )
@@ -1085,6 +1131,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     raise AuthError(403, "The target user is not in the room")
 
         if effective_membership_state == Membership.JOIN:
+            # Only a user can join (`update_membership` refuses the rest).
+            assert isinstance(target, UserID), target
             if requester.is_guest:
                 guest_can_join = await self._can_guest_join(partial_state_before_join)
                 if not guest_can_join:
@@ -1189,6 +1237,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         elif effective_membership_state == Membership.LEAVE:
             if not is_host_in_room:
+                if not isinstance(target, UserID):
+                    # A member key we hold nothing for, in a room we are not in:
+                    # nothing of ours to leave, and nothing to kick from.
+                    raise SynapseError(404, "Not a known room")
+
                 # Figure out the user's current membership state for the room
                 (
                     current_membership_type,
@@ -1251,6 +1304,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     )
 
         elif effective_membership_state == Membership.KNOCK:
+            # Only a user can knock (`update_membership` refuses the rest).
+            assert isinstance(target, UserID), target
             if not is_host_in_room:
                 # we used to add the domain of the room ID to remote_room_hosts.
                 # This is not safe in MSC4291 rooms which do not have a domain.
@@ -1636,12 +1691,32 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             current_state: the current state of the room. We will iterate this to look
                for guest users to kick.
         """
-        for member_event in current_state:
-            try:
-                if member_event.type != EventTypes.Member:
-                    continue
+        member_events = [e for e in current_state if e.type == EventTypes.Member]
 
-                if not self.hs.is_mine_id(member_event.state_key):
+        # The members of ours, by room and state key: their user IDs, or in an
+        # MSC4430 room the users behind the keys we hold there.
+        state_keys_by_room: dict[str, list[str]] = {}
+        for member_event in member_events:
+            state_keys_by_room.setdefault(member_event.room_id, []).append(
+                member_event.state_key
+            )
+        local_users: dict[tuple[str, str], str] = {}
+        for room_id, state_keys in state_keys_by_room.items():
+            local_users.update(
+                {
+                    (room_id, identity): user_id
+                    for identity, user_id in (
+                        await self.store.get_local_identity_map(room_id, state_keys)
+                    ).items()
+                }
+            )
+
+        for member_event in member_events:
+            try:
+                local_user_id = local_users.get(
+                    (member_event.room_id, member_event.state_key)
+                )
+                if local_user_id is None:
                     continue
 
                 if member_event.content["membership"] not in {
@@ -1663,7 +1738,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 # and having homeservers have their own users leave keeps more
                 # of that decision-making and control local to the guest-having
                 # homeserver.
-                target_user = UserID.from_string(member_event.state_key)
+                target_user = UserID.from_string(local_user_id)
                 requester = create_requester(
                     target_user, is_guest=True, authenticated_entity=self._server_name
                 )
@@ -1745,7 +1820,20 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         Raises:
             ShadowBanError if the requester has been shadow-banned.
+            SynapseError: 400 in an MSC4430 member key room, where a third-party
+                invite (which binds a user ID to a membership) has no meaning.
         """
+        try:
+            room_version = await self.store.get_room_version(room_id)
+        except NotFoundError:
+            room_version = None
+        if room_version is not None and room_version.msc4430_member_keys:
+            raise SynapseError(
+                400,
+                "Third-party invites are not supported in rooms with member keys",
+                Codes.UNRECOGNIZED,
+            )
+
         if self.config.server.block_non_admin_invites:
             is_requester_admin = await self.auth.is_server_admin(requester)
             if not is_requester_admin:

@@ -33,7 +33,7 @@ from synapse.http.servlet import (
     parse_json_object_from_request,
 )
 from synapse.http.site import SynapseRequest
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util import stringutils
 
 from ._base import client_patterns
@@ -86,20 +86,24 @@ class RoomUpgradeRestServlet(RestServlet):
                 "Your homeserver does not support this room version",
                 Codes.UNSUPPORTED_ROOM_VERSION,
             )
-        if new_version.msc4430_member_keys:
-            # Cloning a room into one with member keys (its power levels, bans
-            # and invites name user IDs) is a later change; refusing here keeps
-            # it from creating a room it cannot finish.
-            raise SynapseError(
-                400,
-                "Upgrading into a room with member keys is not supported yet",
-                Codes.UNSUPPORTED_ROOM_VERSION,
-            )
         additional_creators = None
         if new_version.msc4289_creator_power_enabled:
             additional_creators = content.get("additional_creators")
             if additional_creators is not None:
-                check_valid_additional_creators(additional_creators, new_version)
+                if new_version.msc4430_member_keys:
+                    # Clients name creators by user ID; the create event names
+                    # them by member key once built. Validate the former here.
+                    if not isinstance(additional_creators, list) or not all(
+                        isinstance(c, str) and UserID.is_valid(c)
+                        for c in additional_creators
+                    ):
+                        raise SynapseError(
+                            400,
+                            "additional_creators must be a list of user IDs",
+                            Codes.INVALID_PARAM,
+                        )
+                else:
+                    check_valid_additional_creators(additional_creators, new_version)
 
         try:
             async with self._worker_lock_handler.acquire_read_write_lock(

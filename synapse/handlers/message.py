@@ -1773,6 +1773,18 @@ class EventCreationHandler:
             current_state_group
         )
 
+        # In a room with a state DAG (MSC4242) the state events of the batch
+        # chain too: each takes the previous one as its state parent, so that
+        # a later event is authorised against the earlier ones (a join against
+        # its invite, say) rather than against the state persisted before the
+        # batch, which none of them is in yet.
+        prev_state_event_ids: list[str] | None = None
+        room_version = await self.store.get_room_version(room_id)
+        if room_version.msc4242_state_dags:
+            prev_state_event_ids = list(
+                await self.store.get_state_dag_extremities(room_id)
+            )
+
         events_and_contexts_to_send = []
         state_map = dict(state_map)
         depth = None
@@ -1787,6 +1799,7 @@ class EventCreationHandler:
                 # state_map since it is modified below.
                 state_map=dict(state_map),
                 for_batch=True,
+                prev_state_events=prev_state_event_ids,
             )
             events_and_contexts_to_send.append((event, context))
 
@@ -1796,6 +1809,8 @@ class EventCreationHandler:
                 # If this is a state event, we need to update the state map
                 # so that it can be used for the next event.
                 state_map[(event.type, event.state_key)] = event.event_id
+                if prev_state_event_ids is not None:
+                    prev_state_event_ids = [event.event_id]
 
         datastore = self.hs.get_datastores().state
         events_and_context = (

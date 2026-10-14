@@ -180,7 +180,7 @@ from synapse.synapse_rust.handlers import RustHandlers
 from synapse.synapse_rust.msc4388_rendezvous import MSC4388RendezvousHandler
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.synapse_rust.runtime import RustRuntime
-from synapse.types import DomainSpecificString, ISynapseReactor
+from synapse.types import DomainSpecificString, ISynapseReactor, MemberKey
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches import CACHE_METRIC_REGISTRY
 from synapse.util.clock import Clock
@@ -680,8 +680,14 @@ class HomeServer(metaclass=abc.ABCMeta):
         """
         return self._reactor
 
-    def is_mine(self, domain_specific_string: DomainSpecificString) -> bool:
-        return domain_specific_string.domain == self.hostname
+    def is_mine(self, identity: "DomainSpecificString | MemberKey") -> bool:
+        if isinstance(identity, MemberKey):
+            # An MSC4430 member key has no domain. The membership code only
+            # holds a `MemberKey` for a member it could not attribute to a user
+            # (keys we hold are handled as the user behind them), so such a key
+            # is not ours.
+            return False
+        return identity.domain == self.hostname
 
     def is_mine_id(self, user_id: str) -> bool:
         """Determines whether a user ID or room alias originates from this homeserver.

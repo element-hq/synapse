@@ -28,7 +28,7 @@ import math
 import random
 import string
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -307,6 +307,9 @@ class RoomCreationHandler:
                     tombstone_event
                 )
 
+                # (After the auth check: the refusal names members of the room.)
+                await self._check_upgrade_member_identities(old_room_id, new_version)
+
                 # Upgrade the room
                 #
                 # If this user has sent multiple upgrade requests for the same room
@@ -338,6 +341,87 @@ class RoomCreationHandler:
 
         # This is to satisfy mypy and should never happen
         raise PartialStateConflictError()
+
+    async def _check_upgrade_member_identities(
+        self, old_room_id: str, new_version: RoomVersion
+    ) -> None:
+        """Refuse an upgrade that would carry members the new room cannot name,
+        before anything is created. Called once the requester is known to be
+        allowed to upgrade the room, since the refusal names its members.
+
+        A member key room's members are keys, which mean nothing in another
+        room: the clone carries the power levels and bans over by the *users*
+        behind them, who get keys in the new room. So a member key room can
+        only be upgraded to a member key version, and (members of other
+        servers being a later change) every member the power levels or the
+        bans name, in a room of either kind, must be one of our users.
+        """
+        old_version = await self.store.get_room_version(old_room_id)
+        if old_version.msc4430_member_keys and not new_version.msc4430_member_keys:
+            raise SynapseError(
+                400,
+                "A room with member keys can only be upgraded to a room version "
+                "with member keys",
+                Codes.UNSUPPORTED_ROOM_VERSION,
+            )
+        if not new_version.msc4430_member_keys:
+            return
+
+        identities: set[str] = set()
+        state_ids = await self._storage_controllers.state.get_current_state_ids(
+            old_room_id, StateFilter.from_types([(EventTypes.PowerLevels, "")])
+        )
+        pl_event_id = state_ids.get((EventTypes.PowerLevels, ""))
+        if pl_event_id is not None:
+            pl_event = await self.store.get_event(pl_event_id, allow_none=True)
+            if pl_event is not None:
+                users = pl_event.content.get("users")
+                if isinstance(users, dict):
+                    identities.update(u for u in users if isinstance(u, str))
+        ban_event_ids = await self.store.get_ban_event_ids_in_room(old_room_id)
+        if ban_event_ids:
+            identities.update(
+                e.state_key for e in await self.store.get_events_as_list(ban_event_ids)
+            )
+
+        users_behind = await self.store.get_user_ids_for_identities(
+            old_room_id, identities
+        )
+        not_ours = sorted(
+            identity
+            for identity, user_id in users_behind.items()
+            if user_id is None or not self.hs.is_mine_id(user_id)
+        )
+        if not_ours:
+            raise SynapseError(
+                400,
+                "Cannot upgrade: the room's power levels or bans name members "
+                "who are not users of this server, which a room with member keys "
+                "cannot carry yet: %s" % (", ".join(not_ours),),
+                Codes.INVALID_PARAM,
+            )
+
+    async def _users_behind_room_identities(
+        self, room_id: str, identities: Iterable[str]
+    ) -> dict[str, str]:
+        """The users behind a room's membership identities, for carrying them
+        into another room: user IDs as they are, member keys as the users they
+        map to. Identities that map to nobody are left out (and logged): there
+        is nobody to carry."""
+        users = await self.store.get_user_ids_for_identities(room_id, identities)
+        dropped = [identity for identity, user_id in users.items() if user_id is None]
+        if dropped:
+            logger.info(
+                "Not carrying members of %s that map to no user into the upgraded "
+                "room: %s",
+                room_id,
+                dropped,
+            )
+        return {
+            identity: user_id
+            for identity, user_id in users.items()
+            if user_id is not None
+        }
 
     async def _upgrade_room(
         self,
@@ -389,7 +473,7 @@ class RoomCreationHandler:
                 room_version=new_version,
             )
 
-        await self.clone_existing_room(
+        old_room_events_after_tombstone = await self.clone_existing_room(
             requester,
             old_room_id=old_room_id,
             new_room_id=new_room_id,
@@ -405,6 +489,15 @@ class RoomCreationHandler:
             requester=requester,
             events_and_context=[(tombstone_event, tombstone_context)],
         )
+
+        for batched_event_dicts in batch_iter(old_room_events_after_tombstone, 1000):
+            await self.event_creation_handler.create_and_send_new_client_events(
+                requester=requester,
+                room_id=old_room_id,
+                prev_event_id=None,
+                event_dicts=list(batched_event_dicts),
+                ratelimit=False,  # We ratelimit the entire upgrade, not individual events.
+            )
 
         state_filter = StateFilter.from_types(
             [(EventTypes.CanonicalAlias, ""), (EventTypes.PowerLevels, "")]
@@ -510,6 +603,13 @@ class RoomCreationHandler:
         power_levels_content: JsonMapping = old_room_pl_state.content
 
         new_room_version = await self.store.get_room_version(new_room_id)
+        if new_room_version.msc4430_member_keys:
+            # The old room's power levels name its members as it knows them
+            # (member keys, if it is a member key room); the new room needs the
+            # users, who are given their keys there when the event is built.
+            power_levels_content = await self._power_levels_by_user(
+                old_room_id, power_levels_content
+            )
         if new_room_version.msc4289_creator_power_enabled:
             power_levels_content = self._copy_and_remove_creators_from_pl_users_map(
                 power_levels_content,
@@ -528,6 +628,27 @@ class RoomCreationHandler:
             },
             ratelimit=False,
         )
+
+    async def _power_levels_by_user(
+        self, room_id: str, power_levels: JsonMapping
+    ) -> JsonMapping:
+        """A copy of a power levels content whose `users` name the users behind
+        the room's membership identities (see `_users_behind_room_identities`),
+        for carrying into a room with member keys."""
+        users = power_levels.get("users")
+        if not isinstance(users, Mapping):
+            return power_levels
+        users_behind = await self._users_behind_room_identities(
+            room_id, [u for u in users if isinstance(u, str)]
+        )
+        return {
+            **power_levels,
+            "users": {
+                users_behind[identity]: level
+                for identity, level in users.items()
+                if identity in users_behind
+            },
+        }
 
     def _calculate_upgraded_room_creation_content(
         self,
@@ -572,7 +693,7 @@ class RoomCreationHandler:
         ]
         | None = None,
         auto_member: bool = False,
-    ) -> None:
+    ) -> list[JsonDict]:
         """Populate a new room based on an old room
 
         Args:
@@ -587,8 +708,22 @@ class RoomCreationHandler:
             room ID as create event ID hash.
             auto_member: Whether to automatically join local users to the new
                 room and send out invites to remote users.
+
+        Returns:
+            Event dicts to send into the old room once its tombstone has been
+            sent (see below); empty unless the old room has a state DAG.
         """
         user_id = requester.user.to_string()
+
+        # Events for the old room that must come after the tombstone. The
+        # tombstone is built before the clone and sent after it, so anything
+        # the clone sends into the old room is the tombstone's sibling. In a
+        # room without a state DAG that is an ordinary fork; in an MSC4242 room
+        # it forks the state DAG, and the merge of (say) a rejected invite with
+        # the tombstone's branch, where the invite stands, is left to state
+        # resolution, which has nothing to order the two by. So in such a room
+        # the rejections are sent after the tombstone, chained on it.
+        old_room_events_after_tombstone: list[JsonDict] = []
 
         # Get old room's create event
         old_room_create_event = await self.store.get_create_event_for_room(old_room_id)
@@ -645,10 +780,15 @@ class RoomCreationHandler:
         # deep-copy the power-levels event before we start modifying it
         # note that if frozen_dicts are enabled, `power_levels` will be a frozen
         # dict so we can't just copy.deepcopy it.
-        initial_state[(EventTypes.PowerLevels, "")] = power_levels = (
-            copy_and_fixup_power_levels_contents(
-                initial_state[(EventTypes.PowerLevels, "")]
+        old_power_levels = initial_state[(EventTypes.PowerLevels, "")]
+        if new_room_version.msc4430_member_keys:
+            # The old room names its members as it knows them; the new room
+            # needs the users behind them (see `_power_levels_by_user`).
+            old_power_levels = await self._power_levels_by_user(
+                old_room_id, old_power_levels
             )
+        initial_state[(EventTypes.PowerLevels, "")] = power_levels = (
+            copy_and_fixup_power_levels_contents(old_power_levels)
         )
 
         # Resolve the minimum power level required to send any state event
@@ -744,6 +884,17 @@ class RoomCreationHandler:
         ban_event_ids = await self.store.get_ban_event_ids_in_room(old_room_id)
         if ban_event_ids:
             ban_events = await self.store.get_events_as_list(ban_event_ids)
+            # In a room with member keys the banned are named by the users
+            # behind the old room's identities (who get keys in the new room
+            # when the events are built); members that map to nobody cannot
+            # be carried.
+            banned_identities: dict[str, str] = {
+                e.state_key: e.state_key for e in ban_events
+            }
+            if new_room_version.msc4430_member_keys:
+                banned_identities = await self._users_behind_room_identities(
+                    old_room_id, list(banned_identities)
+                )
 
             # Add any banned users to the new room.
             #
@@ -752,20 +903,24 @@ class RoomCreationHandler:
             # these bans don't need any special treatment, i.e. the sender is in
             # the room and they don't need any extra signatures, etc.
             for batched_ban_events in batch_iter(ban_events, 1000):
+                event_dicts = [
+                    {
+                        "type": EventTypes.Member,
+                        "state_key": banned_identities[ban_event.state_key],
+                        "room_id": new_room_id,
+                        "sender": requester.user.to_string(),
+                        "content": ban_event.content,
+                    }
+                    for ban_event in batched_ban_events
+                    if ban_event.state_key in banned_identities
+                ]
+                if not event_dicts:
+                    continue
                 await self.event_creation_handler.create_and_send_new_client_events(
                     requester=requester,
                     room_id=new_room_id,
                     prev_event_id=last_event_id,
-                    event_dicts=[
-                        {
-                            "type": EventTypes.Member,
-                            "state_key": ban_event.state_key,
-                            "room_id": new_room_id,
-                            "sender": requester.user.to_string(),
-                            "content": ban_event.content,
-                        }
-                        for ban_event in batched_ban_events
-                    ],
+                    event_dicts=event_dicts,
                     ratelimit=False,  # We ratelimit the entire upgrade, not individual events.
                 )
 
@@ -777,9 +932,13 @@ class RoomCreationHandler:
                 old_room_id
             )
 
-            local_user_ids = [
-                user_id for user_id in joined_profiles if self.hs.is_mine_id(user_id)
-            ]
+            # (Keyed by the old room's identities; ours are the users we hold
+            # keys for, in a member key room.)
+            joined_users = await self.store.get_local_identity_map(
+                old_room_id, joined_profiles
+            )
+            local_user_ids = list(joined_users.values())
+            identity_by_user = {u: i for i, u in joined_users.items()}
 
             logger.info("Local user IDs %s", local_user_ids)
 
@@ -793,6 +952,7 @@ class RoomCreationHandler:
                         # Ignore the upgrading user, as they are already in the
                         # new room.
                         continue
+                    local_identity = identity_by_user[local_user_id]
 
                     invites_to_send.append(
                         {
@@ -816,7 +976,7 @@ class RoomCreationHandler:
                     # that most clients don't copy this information over either,
                     # but we could be wrong.)
                     content_profile = {}
-                    user_profile = joined_profiles[local_user_id]
+                    user_profile = joined_profiles[local_identity]
                     if user_profile.display_name:
                         content_profile["displayname"] = user_profile.display_name
                     if user_profile.avatar_url:
@@ -853,16 +1013,23 @@ class RoomCreationHandler:
                 is_public = join_rule_content["join_rule"] == JoinRules.PUBLIC
 
             if not is_public:
+                old_room_version = await self.store.get_room_version(old_room_id)
+
                 # Copy invites
                 # TODO: Copy over 3pid invites as well.
                 invited_users = await self.store.get_invited_users_in_room(
                     room_id=old_room_id
                 )
 
-                # For local users we can just batch send the invites.
-                local_invited_users = [
-                    user_id for user_id in invited_users if self.hs.is_mine_id(user_id)
-                ]
+                # For local users we can just batch send the invites. (The
+                # invited are named as the old room knows them.)
+                local_invited_users = list(
+                    (
+                        await self.store.get_local_identity_map(
+                            old_room_id, invited_users
+                        )
+                    ).values()
+                )
 
                 logger.info(
                     "Joining local user IDs %s to new room %s",
@@ -907,13 +1074,16 @@ class RoomCreationHandler:
                             }
                         )
 
-                    await self.event_creation_handler.create_and_send_new_client_events(
-                        requester=requester,
-                        room_id=old_room_id,
-                        prev_event_id=None,
-                        event_dicts=leaves_to_send,
-                        ratelimit=False,  # We ratelimit the entire upgrade, not individual events.
-                    )
+                    if old_room_version.msc4242_state_dags:
+                        old_room_events_after_tombstone.extend(leaves_to_send)
+                    else:
+                        await self.event_creation_handler.create_and_send_new_client_events(
+                            requester=requester,
+                            room_id=old_room_id,
+                            prev_event_id=None,
+                            event_dicts=leaves_to_send,
+                            ratelimit=False,  # We ratelimit the entire upgrade, not individual events.
+                        )
                     await self.event_creation_handler.create_and_send_new_client_events(
                         requester=requester,
                         room_id=new_room_id,
@@ -926,11 +1096,27 @@ class RoomCreationHandler:
                 # send each one to the remote server.
                 #
                 # We also invite joined remote users who were in the old room.
-                remote_user_ids = [
-                    user_id
-                    for user_id in itertools.chain(invited_users, joined_profiles)
-                    if not self.hs.is_mine_id(user_id)
-                ]
+                if old_room_version.msc4430_member_keys:
+                    # The old room names its members by key: the users behind
+                    # them, where known, are the ones to invite (a key that
+                    # maps to nobody is left behind, there being no user to
+                    # name; inviting a user of another server into a room with
+                    # member keys is a later change and is refused below).
+                    users_behind = await self._users_behind_room_identities(
+                        old_room_id,
+                        itertools.chain(invited_users, joined_profiles),
+                    )
+                    remote_user_ids = [
+                        user_id
+                        for user_id in users_behind.values()
+                        if not self.hs.is_mine_id(user_id)
+                    ]
+                else:
+                    remote_user_ids = [
+                        user_id
+                        for user_id in itertools.chain(invited_users, joined_profiles)
+                        if not self.hs.is_mine_id(user_id)
+                    ]
 
                 logger.debug("Inviting remote user IDs %s", remote_user_ids)
 
@@ -959,6 +1145,8 @@ class RoomCreationHandler:
                     remote_user_ids,
                     10,
                 )
+
+        return old_room_events_after_tombstone
 
     async def _move_aliases_to_new_room(
         self,
