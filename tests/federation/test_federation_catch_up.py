@@ -957,6 +957,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         self._send_sticky(room_id, "sticky before join", u1_token)
 
         # (Sanity-check) The federation sender does nothing because the server isn't joined the the room
+        # Advance so that the federation sender wakes up and has chance to send something (if it was going to).
         self.reactor.advance(0)
         self.assertEqual(self.pdus, [])
 
@@ -966,9 +967,8 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         )
 
         # The event is sent to the newly joined server via /send
-        self.reactor.advance(0)
         # (PDUs don't carry an `event_id` in room v3+, so match on content)
-        self.assertIn(
-            "sticky before join",
+        self.assertEqual(
             [pdu["content"].get("body") for pdu in self.pdus],
+            ["sticky before join"],
         )
