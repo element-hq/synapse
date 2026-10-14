@@ -13,7 +13,7 @@
 from collections.abc import Mapping
 
 from synapse.synapse_rust.events import Event
-from synapse.types import JsonDict, JsonMapping
+from synapse.types import JsonDict, JsonMapping, RoomStreamToken
 
 class RustSyncFallback(Exception):
     """The Rust sync handler cannot compute this room's entry. Compute it
@@ -26,6 +26,12 @@ class SyncHandler:
     Get one from `RustHandlers.sync`; it is only built when the main database
     uses that driver.
     """
+
+    def start_request(
+        self, user_id: str, device_id: str | None, since: RoomStreamToken | None
+    ) -> None:
+        """Forget the lazy-loaded members the device did not receive, at the
+        start of its request from `since` (None for an initial sync)."""
 
 class FilterCollection:
     """The Rust port of `synapse.api.filtering.FilterCollection`, built from
@@ -73,6 +79,19 @@ class FilterCollection:
     def check_room_account_data(self, event: JsonDict) -> bool: ...
     def check_presence(self, user_id: str) -> bool: ...
     def check_global_account_data(self, event: JsonDict) -> bool: ...
+
+class LazyLoadedMembersCache:
+    """The Rust port of `synapse.handlers.sync.LazyLoadedMembersCache`: the
+    members a lazy-loading device has been sent. Positions are the room part
+    of the sync tokens."""
+
+    def __init__(self) -> None: ...
+    def start_request(self, since: RoomStreamToken | None) -> None: ...
+    def was_sent(self, user_id: str, event_id: str) -> bool: ...
+    def mark_sent(
+        self, user_id: str, event_id: str, next_batch: RoomStreamToken
+    ) -> None: ...
+    def __len__(self) -> int: ...
 
 # The Rust ports of the state delta arithmetic in `synapse.handlers.sync`.
 # Deltas are `(event_type, state_key, event_id, prev_event_id)` in stream
