@@ -197,9 +197,12 @@ impl Requester {
 }
 
 /// Called when registering modules with python.
+pub mod stream_token;
+
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "types")?;
     child_module.add_class::<Requester>()?;
+    stream_token::register_test_functions(py, &child_module)?;
 
     m.add_submodule(&child_module)?;
 

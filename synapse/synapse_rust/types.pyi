@@ -10,7 +10,9 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from synapse.types import JsonDict, UserID
+from collections.abc import Mapping
+
+from synapse.types import JsonDict, RoomStreamToken, UserID
 
 class Requester:
     def __init__(
@@ -66,3 +68,55 @@ class Requester:
     def deserialize(input: JsonDict) -> Requester:
         """Converts a dict that was produced by `serialize` back into a
         Requester."""
+
+# The Rust port of `RoomStreamToken` and the pagination helpers of
+# `synapse.storage.databases.main.stream`, as `tests/sync/test_rust_pure.py`
+# compares them with the Python ones. Tokens cross as `RoomStreamToken`s.
+
+def room_stream_token_ops_for_test(
+    a: RoomStreamToken, b: RoomStreamToken, max_stream: int
+) -> tuple[bool, RoomStreamToken, RoomStreamToken, int]:
+    """`(a.is_before_or_eq(b), a.copy_and_advance(b),
+    a.bound_stream_token(max_stream), a.get_max_stream_pos())`."""
+
+def room_stream_token_string_for_test(
+    token: RoomStreamToken, instance_ids: Mapping[str, int]
+) -> tuple[str, RoomStreamToken]:
+    """`token.to_string()` with the given instance IDs, and that string
+    parsed back."""
+
+def filter_results_for_test(
+    lower: RoomStreamToken | None,
+    upper: RoomStreamToken | None,
+    instance_name: str | None,
+    topological_ordering: int,
+    stream_ordering: int,
+) -> tuple[bool, bool | None]:
+    """`_filter_results` and `_filter_results_by_stream` (None for historic
+    tokens, which it rejects)."""
+
+def pagination_bounds_for_test(
+    direction: str,
+    from_token: RoomStreamToken | None,
+    to_token: RoomStreamToken | None,
+    instance_name: str,
+    stream_ordering: int,
+) -> tuple[
+    str,
+    tuple[int | None, int] | None,
+    tuple[int | None, int] | None,
+    str,
+    bool | None,
+]:
+    """`generate_pagination_bounds`, the Postgres
+    `generate_pagination_where_clause` over `(topological_ordering,
+    stream_ordering)`, and `PersistedEventPosition(instance_name,
+    stream_ordering).persisted_after(from_token)`."""
+
+def generate_next_token_for_test(
+    direction: str, last_topo_ordering: int | None, last_stream_ordering: int
+) -> RoomStreamToken: ...
+def round_trip_room_stream_tokens_for_test(
+    tokens: list[RoomStreamToken],
+) -> list[RoomStreamToken]:
+    """The tokens, converted to the Rust type and back."""
