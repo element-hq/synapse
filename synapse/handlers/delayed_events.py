@@ -41,6 +41,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
+from synapse.util.async_helpers import yieldable_gather_results
 from synapse.util.duration import Duration
 from synapse.util.events import generate_fake_event_id
 
@@ -336,9 +337,15 @@ class DelayedEventsHandler:
         await self._send_events(events)
 
     async def _send_events(self, events: list[DelayedEventDetails]) -> None:
-        # TODO: parallelize, but per room to preserve send order
+        events_by_room: dict[str, list[DelayedEventDetails]] = {}
         for event in events:
-            await self._send_event(event, True)
+            events_by_room.setdefault(str(event.room_id), []).append(event)
+
+        async def send_events(events: list[DelayedEventDetails]) -> None:
+            for event in events:
+                await self._send_event(event, True)
+
+        await yieldable_gather_results(send_events, events_by_room.values())
 
     def _schedule_next_at_or_none(self, next_send_ts: Timestamp | None) -> None:
         if next_send_ts is not None:
