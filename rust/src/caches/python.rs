@@ -57,6 +57,27 @@ pub trait PyCacheKey: Sized {
     fn from_py_key(key: &Bound<'_, PyTuple>) -> Option<Self>;
 }
 
+/// A key that is one string, such as a room or user ID: a one-tuple of it in
+/// Python.
+impl PyCacheKey for Arc<str> {
+    fn from_py_key(key: &Bound<'_, PyTuple>) -> Option<Self> {
+        let (key,): (String,) = key.extract().ok()?;
+        Some(Arc::from(key))
+    }
+}
+
+/// A key that is one integer, such as a state group ID. Over the invalidation
+/// stream it arrives as a string.
+impl PyCacheKey for i64 {
+    fn from_py_key(key: &Bound<'_, PyTuple>) -> Option<Self> {
+        if let Ok((key,)) = key.extract::<(i64,)>() {
+            return Some(key);
+        }
+        let (key,): (String,) = key.extract().ok()?;
+        key.parse().ok()
+    }
+}
+
 /// A [`Cache`] with its key and value types erased, so that one `#[pyclass]`
 /// can serve every cache and the [`registry`](super::registry) can hold them
 /// all.
@@ -73,7 +94,10 @@ pub(crate) trait CacheHandle: Send + Sync {
 
 /// What `register_cache` reads off a cache at each scrape.
 pub(crate) struct CacheStats {
-    pub len: usize,
+    /// The sum of the entries' weights, which is the entry count for a cache
+    /// that weighs every value as one. Reported as the cache's length, as a
+    /// Python `LruCache` with a `size_callback` reports its size.
+    pub size: usize,
     pub max_size: usize,
     pub hits: u64,
     pub misses: u64,
@@ -95,7 +119,7 @@ where
         let (hits, misses) = self.hit_counts();
         let (evicted_size, evicted_time, evicted_invalidation) = self.eviction_counts();
         CacheStats {
-            len: self.len(),
+            size: self.size(),
             max_size: self.max_size(),
             hits,
             misses,
@@ -176,8 +200,10 @@ impl RustCache {
         self.handle.invalidate_everything();
     }
 
+    /// The cache's size: its entry count, or for a weighted cache the sum of
+    /// its entries' weights, as for a Python cache with a `size_callback`.
     fn __len__(&self) -> usize {
-        self.handle.stats().len
+        self.handle.stats().size
     }
 
     #[getter]

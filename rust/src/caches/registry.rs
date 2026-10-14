@@ -40,7 +40,7 @@ use std::{
 use crate::caches::{
     lock_ignoring_poison,
     python::{CacheHandle, PyCacheKey},
-    Cache,
+    Cache, Weigher,
 };
 
 /// Every cache built for one homeserver, weakly.
@@ -80,8 +80,30 @@ impl CacheRegistry {
         K: PyCacheKey + Eq + Hash + Clone + Send + Sync + 'static,
         V: Clone + Send + Sync + 'static,
     {
-        let cache = Cache::new(name, max_size);
+        self.register(Cache::new(name, max_size))
+    }
 
+    /// Build a cache whose values' weights, as `weigher` measures them, sum
+    /// to at most `max_weight`, enrolled for this homeserver's age-based
+    /// expiry. See [`Cache::new_weighted`].
+    pub fn new_weighted_cache<K, V>(
+        &self,
+        name: &'static str,
+        max_weight: usize,
+        weigher: Weigher<V>,
+    ) -> Arc<Cache<K, V>>
+    where
+        K: PyCacheKey + Eq + Hash + Clone + Send + Sync + 'static,
+        V: Clone + Send + Sync + 'static,
+    {
+        self.register(Cache::new_weighted(name, max_weight, weigher))
+    }
+
+    fn register<K, V>(&self, cache: Arc<Cache<K, V>>) -> Arc<Cache<K, V>>
+    where
+        K: PyCacheKey + Eq + Hash + Clone + Send + Sync + 'static,
+        V: Clone + Send + Sync + 'static,
+    {
         // Via a second `Arc` to the same allocation, because the unsizing
         // coercion to `dyn CacheHandle` has to happen before we downgrade.
         let handle: Arc<dyn CacheHandle> = cache.clone();

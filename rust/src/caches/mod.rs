@@ -17,7 +17,14 @@
 //!
 //! This is the Rust counterpart to `synapse.util.caches.descriptors.cached`:
 //! a bounded LRU of loaded values, with in-flight requests for the same key
-//! coalesced into one database round trip.
+//! coalesced into one database round trip. A cache can also be filled
+//! directly, with [`Cache::insert`], by code that loads values its own way.
+//!
+//! The bound is a weight: the sum of what a [`Weigher`] says each cached value
+//! weighs. The default weigher counts every value as one, which makes the
+//! bound a number of entries, as for `@cached`. A cache of state maps weighs
+//! each by its entries instead, as Python's `size_callback` caches do, so a
+//! few huge maps cannot pin more memory than many small ones.
 //!
 //! Invalidation deliberately stays in Python. Synapse invalidates caches by
 //! *name*, resolving `getattr(store, cache_name)` and calling `.invalidate(key)`
@@ -51,7 +58,6 @@ use std::{
     fmt,
     future::Future,
     hash::Hash,
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex, MutexGuard,
@@ -87,15 +93,34 @@ impl fmt::Display for SharedError {
 
 impl std::error::Error for SharedError {}
 
+/// How much a cached value counts towards the cache's bound.
+pub type Weigher<V> = fn(&V) -> usize;
+
+/// The default [`Weigher`]: every value weighs one, so the bound is a number
+/// of entries.
+pub fn weigh_one<V>(_: &V) -> usize {
+    1
+}
+
 /// A cached value, and when it was last read.
 struct Entry<V> {
     value: V,
     /// From [`Cache::clock`]. Used by the age-based expiry in [`registry`].
     last_read: SystemTime,
+    /// What the value counted for when it was inserted.
+    weight: usize,
 }
 
 struct Inner<K, V> {
+    /// Unbounded as far as `lru` is concerned: the bound is [`Inner::max_weight`],
+    /// which this module enforces itself.
     entries: lru::LruCache<K, Entry<V>>,
+
+    /// The sum of the weights of the entries.
+    total_weight: usize,
+
+    /// The bound on `total_weight`, after any cache factor.
+    max_weight: usize,
 
     /// Keys with a load in flight, and the id of that load.
     ///
@@ -108,10 +133,10 @@ struct Inner<K, V> {
 
     next_load_id: u64,
 
-    /// The size this cache was declared with, before any cache factor is
-    /// applied. `set_cache_factor` scales this rather than the current size, so
-    /// that repeated resizes don't compound.
-    original_max_size: usize,
+    /// The bound this cache was declared with, before any cache factor is
+    /// applied. `set_cache_factor` scales this rather than the current bound,
+    /// so that repeated resizes don't compound.
+    original_max_weight: usize,
 }
 
 /// A bounded, LRU cache of values loaded from somewhere slow.
@@ -124,6 +149,8 @@ pub struct Cache<K, V> {
     /// Stamps entries with their last access time. Read without the GIL, from
     /// under the cache lock. See [`crate::clock`].
     clock: Clock,
+
+    weigher: Weigher<V>,
 
     hits: AtomicU64,
     misses: AtomicU64,
@@ -147,20 +174,31 @@ where
     /// `name` is the name Synapse knows the cache by: the datastore attribute,
     /// the metrics label, and what travels over the cache invalidation stream.
     pub fn new(name: &'static str, max_size: usize) -> Arc<Self> {
+        Self::new_weighted(name, max_size, weigh_one)
+    }
+
+    /// Build a cache whose values' weights, as `weigher` measures them, sum
+    /// to at most `max_weight`. A value heavier than the whole cache is never
+    /// cached. Otherwise as [`Cache::new`].
+    pub fn new_weighted(name: &'static str, max_weight: usize, weigher: Weigher<V>) -> Arc<Self> {
+        let max_weight = non_zero(max_weight);
         Arc::new(Cache {
             name,
             clock: Clock::new(),
+            weigher,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             evicted_size: AtomicU64::new(0),
             evicted_time: AtomicU64::new(0),
             evicted_invalidation: AtomicU64::new(0),
             inner: Mutex::new(Inner {
-                entries: lru::LruCache::new(non_zero(max_size)),
+                entries: lru::LruCache::unbounded(),
+                total_weight: 0,
+                max_weight,
                 pending: HashMap::new(),
                 waiters: HashMap::new(),
                 next_load_id: 0,
-                original_max_size: max_size,
+                original_max_weight: max_weight,
             }),
         })
     }
@@ -234,7 +272,7 @@ where
         // changed, so whatever it returns may already be stale.
         inner.pending.remove(key);
 
-        let removed = inner.entries.pop(key).map(|entry| entry.value);
+        let removed = inner.remove(key);
         if removed.is_some() {
             self.evicted_invalidation.fetch_add(1, Ordering::Relaxed);
         }
@@ -250,8 +288,8 @@ where
         inner.pending.clear();
 
         let mut removed = Vec::with_capacity(inner.entries.len());
-        while let Some((_, entry)) = inner.entries.pop_lru() {
-            removed.push(entry.value);
+        while let Some(value) = inner.pop_lru() {
+            removed.push(value);
         }
 
         self.evicted_invalidation
@@ -273,6 +311,26 @@ where
         value
     }
 
+    /// Cache `value` under `key`, replacing what was there. Returns the
+    /// values this displaced (the old value, and any cold entries evicted to
+    /// make room) for the caller to drop.
+    ///
+    /// For code that loads values its own way, as `prefill` is for a Python
+    /// cache. It leaves any in-flight load for the key alone: that load
+    /// still answers its waiters, and caches what it found if nothing
+    /// invalidated the key meanwhile, which is at least as fresh as `value`.
+    pub fn insert(&self, key: K, value: V) -> Vec<V> {
+        let weight = (self.weigher)(&value);
+        let mut displaced = self.lock().insert(key, value, weight, self.clock.now());
+        self.evicted_size
+            .fetch_add(displaced.evicted.len() as u64, Ordering::Relaxed);
+        if let Some(old) = displaced.old.take() {
+            self.evicted_invalidation.fetch_add(1, Ordering::Relaxed);
+            displaced.evicted.push(old);
+        }
+        displaced.evicted
+    }
+
     /// Evict every entry that hasn't been read since `cutoff`. Returns the
     /// evicted values, for the caller to drop.
     pub fn expire_before(&self, cutoff: SystemTime) -> Vec<V> {
@@ -284,7 +342,7 @@ where
         expired
     }
 
-    /// Rescale the cache to `original_max_size * factor`, evicting from the
+    /// Rescale the cache's bound to `original * factor`, evicting from the
     /// cold end if it shrank. Returns the evicted values, for the caller to
     /// drop.
     ///
@@ -293,19 +351,13 @@ where
     pub fn set_cache_factor(&self, factor: f64) -> Vec<V> {
         let mut inner = self.lock();
 
-        let new_size = non_zero((inner.original_max_size as f64 * factor) as usize);
-        if new_size == inner.entries.cap() {
+        let new_max = non_zero((inner.original_max_weight as f64 * factor) as usize);
+        if new_max == inner.max_weight {
             return Vec::new();
         }
+        inner.max_weight = new_max;
 
-        // Evict by hand rather than letting `resize` do it, so that the values
-        // are dropped by our caller with the lock released.
-        let mut evicted = Vec::new();
-        while inner.entries.len() > new_size.get() {
-            let (_, entry) = inner.entries.pop_lru().expect("cache is over capacity");
-            evicted.push(entry.value);
-        }
-        inner.entries.resize(new_size);
+        let evicted = inner.evict_to_fit(0);
 
         self.evicted_size
             .fetch_add(evicted.len() as u64, Ordering::Relaxed);
@@ -313,6 +365,7 @@ where
         evicted
     }
 
+    /// The number of cached entries.
     pub fn len(&self) -> usize {
         self.lock().entries.len()
     }
@@ -321,8 +374,15 @@ where
         self.len() == 0
     }
 
+    /// The sum of the cached values' weights. The same as [`Cache::len`] for
+    /// a cache built with [`Cache::new`].
+    pub fn size(&self) -> usize {
+        self.lock().total_weight
+    }
+
+    /// The bound on [`Cache::size`].
     pub fn max_size(&self) -> usize {
-        self.lock().entries.cap().get()
+        self.lock().max_weight
     }
 
     pub fn name(&self) -> &'static str {
@@ -400,17 +460,17 @@ where
 
             let displaced = match &result {
                 Ok(value) if still_current => {
-                    // The key can't already be present: it wasn't when this
-                    // load started, and nothing else populates a key while a
-                    // load for it is current. So anything `insert` hands back
-                    // is a cold entry evicted to make room.
-                    let displaced = inner.insert(key, value.clone(), self.clock.now());
-                    if displaced.is_some() {
-                        self.evicted_size.fetch_add(1, Ordering::Relaxed);
-                    }
-                    displaced
+                    let weight = (self.weigher)(value);
+                    let mut displaced = inner.insert(key, value.clone(), weight, self.clock.now());
+                    // `Cache::insert` may have filled the key while this load
+                    // was in flight. What it put there is no fresher than
+                    // this, so replacing it is not an invalidation.
+                    displaced.evicted.extend(displaced.old.take());
+                    self.evicted_size
+                        .fetch_add(displaced.evicted.len() as u64, Ordering::Relaxed);
+                    displaced.evicted
                 }
-                _ => None,
+                _ => Vec::new(),
             };
 
             (waiters, displaced)
@@ -445,15 +505,61 @@ where
         Some(entry.value.clone())
     }
 
-    /// Insert an entry read at `now`, returning whatever it displaced for the
-    /// caller to drop.
-    fn insert(&mut self, key: K, value: V, now: SystemTime) -> Option<V> {
+    /// Insert an entry of `weight` read at `now`, evicting cold entries to
+    /// make room. Returns whatever it displaced for the caller to drop.
+    ///
+    /// A value heavier than the whole cache is not inserted, and any entry
+    /// under its key is removed, so that a key never maps to a value older
+    /// than the one its caller just loaded.
+    fn insert(&mut self, key: K, value: V, weight: usize, now: SystemTime) -> Displaced<V> {
+        let weight = weight.max(1);
+        let old = self.remove(&key);
+        if weight > self.max_weight {
+            return Displaced {
+                old,
+                evicted: Vec::new(),
+            };
+        }
+
+        let evicted = self.evict_to_fit(weight);
+        self.total_weight += weight;
         let entry = Entry {
             value,
             last_read: now,
+            weight,
         };
+        // The key was removed above, so nothing is pushed out here.
+        self.entries.push(key, entry);
 
-        self.entries.push(key, entry).map(|(_, entry)| entry.value)
+        Displaced { old, evicted }
+    }
+
+    /// Remove the entry under `key`, returning its value for the caller to
+    /// drop.
+    fn remove(&mut self, key: &K) -> Option<V> {
+        let entry = self.entries.pop(key)?;
+        self.total_weight -= entry.weight;
+        Some(entry.value)
+    }
+
+    /// Pop the coldest entry, returning its value for the caller to drop.
+    fn pop_lru(&mut self) -> Option<V> {
+        let (_, entry) = self.entries.pop_lru()?;
+        self.total_weight -= entry.weight;
+        Some(entry.value)
+    }
+
+    /// Pop cold entries until `extra` more weight fits under the bound.
+    /// Returns the values for the caller to drop.
+    fn evict_to_fit(&mut self, extra: usize) -> Vec<V> {
+        let mut evicted = Vec::new();
+        while self.total_weight + extra > self.max_weight {
+            match self.pop_lru() {
+                Some(value) => evicted.push(value),
+                None => break,
+            }
+        }
+        evicted
     }
 
     /// Pop every entry not read since `cutoff`, returning the values for the
@@ -468,12 +574,20 @@ where
             .peek_lru()
             .is_some_and(|(_, entry)| entry.last_read <= cutoff)
         {
-            let (_, entry) = self.entries.pop_lru().expect("peek_lru just succeeded");
-            expired.push(entry.value);
+            let value = self.pop_lru().expect("peek_lru just succeeded");
+            expired.push(value);
         }
 
         expired
     }
+}
+
+/// What an insert pushed out of the cache: the value that was under the key,
+/// if any, and the cold entries evicted to make room. Both are the caller's
+/// to drop, with the lock released.
+struct Displaced<V> {
+    old: Option<V>,
+    evicted: Vec<V>,
 }
 
 /// Entry points that take the time as an argument, for tests of the age-based
@@ -492,7 +606,8 @@ where
 
     /// Insert `value` as if it had been loaded at `now`.
     fn insert_at(&self, key: K, value: V, now: SystemTime) {
-        let displaced = self.lock().insert(key, value, now);
+        let weight = (self.weigher)(&value);
+        let displaced = self.lock().insert(key, value, weight, now);
         drop(displaced);
     }
 }
@@ -562,10 +677,10 @@ pub(crate) fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// A cache of size zero would be a cache that never caches anything, which is
-/// never what anyone means, and `lru` can't represent it in any case. Treat it
-/// as one entry, as `LruCache` does for a cache factor that rounds to nothing.
-fn non_zero(size: usize) -> NonZeroUsize {
-    NonZeroUsize::new(size).unwrap_or(NonZeroUsize::MIN)
+/// never what anyone means. Treat it as one entry, as `LruCache` does for a
+/// cache factor that rounds to nothing.
+fn non_zero(size: usize) -> usize {
+    size.max(1)
 }
 
 #[cfg(test)]
@@ -895,6 +1010,55 @@ mod tests {
         assert_eq!(cache.len(), 1);
         assert!(cache.expire_before(at(3)).is_empty());
         assert_eq!(cache.get_at(&"a", at(6)), Some(1));
+    }
+
+    #[test]
+    fn insert_fills_the_cache_directly() {
+        let cache = cache(2);
+        let loads = AtomicUsize::new(0);
+
+        assert!(cache.insert("a", 1).is_empty());
+        assert_eq!(cache.get(&"a"), Some(1));
+
+        // A loaded key is replaced, and the old value handed back.
+        assert_eq!(cache.insert("a", 2), vec![1]);
+        assert_eq!(
+            block_on(cache.get_or_load("a", counting_loader(9, &loads))).unwrap(),
+            2
+        );
+        assert_eq!(loads.load(Ordering::SeqCst), 0);
+
+        // Inserting past the bound evicts the coldest entry.
+        cache.insert("b", 3);
+        assert_eq!(cache.insert("c", 4), vec![2]);
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.eviction_counts(), (1, 0, 1));
+    }
+
+    #[test]
+    fn weighted_values_share_the_bound() {
+        let cache: Arc<Cache<&'static str, Vec<u8>>> =
+            Cache::new_weighted("weighted", 10, |value| value.len());
+
+        cache.insert("a", vec![0; 4]);
+        cache.insert("b", vec![0; 4]);
+        assert_eq!((cache.len(), cache.size()), (2, 8));
+
+        // Touch "a", so "b" is the coldest and goes when "c" needs room.
+        assert!(cache.get(&"a").is_some());
+        assert_eq!(cache.insert("c", vec![0; 4]), vec![vec![0; 4]]);
+        assert!(cache.get(&"b").is_none());
+        assert_eq!((cache.len(), cache.size()), (2, 8));
+
+        // Too heavy to cache at all, and the key it would have replaced goes.
+        cache.insert("a", vec![0; 11]);
+        assert!(cache.get(&"a").is_none());
+        assert_eq!((cache.len(), cache.size()), (1, 4));
+
+        // The factor scales the weight bound.
+        cache.insert("d", vec![0; 4]);
+        assert_eq!(cache.set_cache_factor(0.5).len(), 1);
+        assert_eq!((cache.max_size(), cache.size()), (5, 4));
     }
 
     #[test]
