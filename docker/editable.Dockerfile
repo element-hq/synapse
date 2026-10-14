@@ -15,9 +15,9 @@ FROM docker.io/library/python:${PYTHON_VERSION}-slim-trixie
 # Install Rust and other dependencies (stolen from normal Dockerfile)
 # install the OS build deps
 RUN \
-    --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update -qq && apt-get install -yqq \
+   --mount=type=cache,target=/var/cache/apt,sharing=locked \
+   --mount=type=cache,target=/var/lib/apt,sharing=locked \
+ apt-get update -qq && apt-get install -yqq \
     build-essential \
     libffi-dev \
     libjpeg-dev \
