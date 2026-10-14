@@ -33,14 +33,11 @@ from synapse.storage.databases.main.delayed_events import (
     DelayedEventDetails,
     DelayedEventResponse,
     DelayedEventResponseLegacyCompat,
-    EventType,
-    StateKey,
     Timestamp,
 )
 from synapse.types import (
     JsonDict,
     Requester,
-    RoomID,
     UserID,
     create_requester,
 )
@@ -339,30 +336,9 @@ class DelayedEventsHandler:
         await self._send_events(events)
 
     async def _send_events(self, events: list[DelayedEventDetails]) -> None:
-        sent_state: set[tuple[RoomID, EventType, StateKey]] = set()
+        # TODO: parallelize, but per room to preserve send order
         for event in events:
-            if event.state_key is not None:
-                state_info = (event.room_id, event.type, event.state_key)
-                if state_info in sent_state:
-                    continue
-            else:
-                state_info = None
-            try:
-                # TODO: send in background if message event or non-conflicting state event
-                finalised_ts = await self._send_event(event, True)
-                if state_info is not None:
-                    sent_state.add(state_info)
-            except Exception:
-                logger.exception("Failed to send delayed event")
-                finalised_ts = self._get_current_ts()
-
-            for room_id, event_type, state_key in sent_state:
-                await self._store.finalise_processed_delayed_state_events(
-                    room_id=str(room_id),
-                    event_type=event_type,
-                    state_key=state_key,
-                    finalised_ts=finalised_ts,
-                )
+            await self._send_event(event, True)
 
     def _schedule_next_at_or_none(self, next_send_ts: Timestamp | None) -> None:
         if next_send_ts is not None:
@@ -419,7 +395,7 @@ class DelayedEventsHandler:
         self,
         event: DelayedEventDetails,
         finalise_error: bool,
-    ) -> Timestamp:
+    ) -> None:
         """
         Sends the given delayed event, which must have been marked as processed,
         and finalises it in the DB.
@@ -430,8 +406,6 @@ class DelayedEventsHandler:
                 if sending it fails. If False, the delayed event is instead
                 unmarked as processed, so that it stays scheduled, and the error
                 is re-raised.
-
-        Returns: The timestamp at which the delayed event was finalised.
 
         Raises:
             Exception: whatever sending the event raised, if finalise_error is False.
@@ -545,7 +519,6 @@ class DelayedEventsHandler:
 
         if send_error is None:
             set_tag("event_id", event_id)
-        return finalised_ts
 
     def _get_current_ts(self) -> Timestamp:
         return Timestamp(self._clock.time_msec())

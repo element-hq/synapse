@@ -805,43 +805,6 @@ class DelayedEventsStore(SQLBaseStore):
             finalise_processed_delayed_event_txn,
         )
 
-    async def finalise_processed_delayed_state_events(
-        self,
-        *,
-        room_id: str,
-        event_type: str,
-        state_key: str,
-        finalised_ts: Timestamp,
-    ) -> None:
-        """
-        Finalise the matching delayed state events that have been marked as processed.
-        """
-
-        def finalise_processed_delayed_state_events(txn: LoggingTransaction) -> None:
-            txn.execute(
-                """
-                UPDATE delayed_events
-                SET
-                    finalised_error = ?,
-                    finalised_ts = ?
-                WHERE room_id = ? AND event_type = ? AND state_key = ?
-                    AND is_processed
-                    AND finalised_ts IS NULL
-                """,
-                (
-                    _generate_cancelled_by_state_update_json(),
-                    finalised_ts,
-                    room_id,
-                    event_type,
-                    state_key,
-                ),
-            )
-
-        await self.db_pool.runInteraction(
-            "finalise_processed_delayed_state_events",
-            finalise_processed_delayed_state_events,
-        )
-
     async def unprocess_delayed_event(self, delay_id: DelayID) -> Timestamp | None:
         """
         Unmark the matching delayed event for processing, so that it is scheduled again.
