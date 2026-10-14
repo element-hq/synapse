@@ -42,7 +42,7 @@ IS_PR = os.environ["GITHUB_REF"].startswith("refs/pull/")
 
 trial_sqlite_tests = [
     {
-        "python-version": "3.10",
+        "python-version": "3.11",
         "database": "sqlite",
         "extras": "all",
     },
@@ -70,7 +70,7 @@ if not IS_PR:
 # support in order to save on CI time.
 trial_postgres_tests = [
     {
-        "python-version": "3.10",
+        "python-version": "3.11",
         "database": "postgres",
         "postgres-version": "14",
         "extras": "all",
@@ -86,7 +86,7 @@ trial_postgres_tests = [
 # Ensure that Synapse passes unit tests even with no extra dependencies installed.
 trial_no_extra_tests = [
     {
-        "python-version": "3.10",
+        "python-version": "3.11",
         "database": "sqlite",
         "extras": "",
     }
