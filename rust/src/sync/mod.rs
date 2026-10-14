@@ -23,8 +23,8 @@
 //! The pure parts of the per-room loop are each a port of the Python they
 //! are named after, checked against it by the tests in `tests/sync/`:
 //! [`filter`] ports `synapse.api.filtering`, [`state_delta`] the state
-//! delta arithmetic of the sync handler, and [`ll_members`] the per-device cache
-//! of lazy-loaded members sent.
+//! delta arithmetic of the sync handler, [`ll_members`] the per-device cache
+//! of lazy-loaded members sent, and [`summary`] the room summary's heroes.
 //! [`crate::visibility`] and [`crate::types::stream_token`] are shared with
 //! later ports.
 
@@ -40,6 +40,7 @@ use crate::types::stream_token::RoomStreamToken;
 pub mod filter;
 pub mod ll_members;
 pub mod state_delta;
+pub mod summary;
 
 use ll_members::LazyLoadedMembersCaches;
 
@@ -108,6 +109,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<filter::FilterCollection>()?;
     child_module.add_class::<ll_members::LazyLoadedMembersCache>()?;
     state_delta::register_test_functions(py, &child_module)?;
+    summary::register_test_functions(py, &child_module)?;
     child_module.add("RustSyncFallback", py.get_type::<RustSyncFallback>())?;
 
     m.add_submodule(&child_module)?;

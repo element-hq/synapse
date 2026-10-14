@@ -119,3 +119,9 @@ def apply_state_deltas_for_test(
     user_id: str,
 ) -> tuple[dict[tuple[str, str], str], set[tuple[str, str]], set[tuple[str, str]]]:
     """`_apply_current_state_deltas`."""
+
+def extract_heroes_for_test(
+    details: Mapping[str, tuple[list[tuple[str, str]], int]], me: str
+) -> list[str]:
+    """`extract_heroes_from_room_summary`, with each membership's summary as
+    `(members, count)`."""
