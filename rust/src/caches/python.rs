@@ -47,6 +47,10 @@ use crate::caches::Cache;
 /// `_invalidate_cache_and_stream`, and over the cache invalidation stream,
 /// whose column is `keys text[]`, so anything arriving from another worker is
 /// a string whatever it started as. An implementation has to cope with both.
+/// A test of whether a key starts with a decoded prefix. See
+/// [`PyCacheKey::prefix_matcher`].
+pub type PrefixMatcher<K> = Box<dyn Fn(&K) -> bool>;
+
 pub trait PyCacheKey: Sized {
     /// Decode a key, or `None` if the tuple cannot be one of this cache's keys.
     ///
@@ -55,6 +59,30 @@ pub trait PyCacheKey: Sized {
     /// cache shrugs those off. Raising here instead would fail the whole batch
     /// of invalidations it arrived in.
     fn from_py_key(key: &Bound<'_, PyTuple>) -> Option<Self>;
+
+    /// Decode a prefix of a key, for a cache that Python invalidates by
+    /// prefix as it does a `tree=True` cache: a tuple shorter than a key,
+    /// which drops every entry whose key starts with it. Returns the test
+    /// for such a key, or `None` when the tuple is not a prefix of this
+    /// cache's keys, which is always the case for a cache without prefixes.
+    fn prefix_matcher(prefix: &Bound<'_, PyTuple>) -> Option<PrefixMatcher<Self>> {
+        let _ = prefix;
+        None
+    }
+}
+
+/// A key of two strings, such as a room and a user, for a cache that
+/// Python invalidates by the first alone as well.
+impl PyCacheKey for (Arc<str>, Arc<str>) {
+    fn from_py_key(key: &Bound<'_, PyTuple>) -> Option<Self> {
+        let (first, second): (String, String) = key.extract().ok()?;
+        Some((Arc::from(first), Arc::from(second)))
+    }
+
+    fn prefix_matcher(prefix: &Bound<'_, PyTuple>) -> Option<PrefixMatcher<Self>> {
+        let (first,): (String,) = prefix.extract().ok()?;
+        Some(Box::new(move |key| *key.0 == first))
+    }
 }
 
 /// A key that is one string, such as a room or user ID: a one-tuple of it in
@@ -130,17 +158,18 @@ where
     }
 
     fn invalidate_key(&self, key: &Bound<'_, PyTuple>) {
-        let Some(key) = K::from_py_key(key) else {
+        // The removed values are dropped here, once the cache lock is free
+        // again.
+        if let Some(key) = K::from_py_key(key) {
+            drop(self.invalidate(&key));
+        } else if let Some(matches) = K::prefix_matcher(key) {
+            drop(self.invalidate_matching(matches));
+        } else {
             log::debug!(
                 "Ignoring invalidation of cache {} with a key of the wrong shape: {key}",
                 self.name
             );
-            return;
-        };
-
-        // The removed value is dropped here, once `invalidate` has returned and
-        // the cache lock is free again.
-        drop(self.invalidate(&key));
+        }
     }
 
     fn invalidate_everything(&self) {

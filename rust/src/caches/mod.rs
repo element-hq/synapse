@@ -280,6 +280,37 @@ where
         removed
     }
 
+    /// Drop every entry whose key satisfies `matches`, and stop in-flight
+    /// loads of such keys from caching what they find. Returns the values
+    /// that were cached, for the caller to drop.
+    ///
+    /// This walks the whole cache, as there is no index by prefix. It is
+    /// what a `tree=True` Python cache does with a partial key, for a cache
+    /// such as the unread counts, which is invalidated by room as well as
+    /// by room and user. See [`python::PyCacheKey::prefix_matcher`].
+    pub fn invalidate_matching(&self, matches: impl Fn(&K) -> bool) -> Vec<V> {
+        let mut inner = self.lock();
+
+        inner.pending.retain(|key, _| !matches(key));
+
+        let keys: Vec<K> = inner
+            .entries
+            .iter()
+            .filter(|(key, _)| matches(key))
+            .map(|(key, _)| key.clone())
+            .collect();
+        let mut removed = Vec::with_capacity(keys.len());
+        for key in &keys {
+            if let Some(value) = inner.remove(key) {
+                removed.push(value);
+            }
+        }
+        self.evicted_invalidation
+            .fetch_add(removed.len() as u64, Ordering::Relaxed);
+
+        removed
+    }
+
     /// Empty the cache, and stop every in-flight load from caching what it
     /// finds. Returns the values that were cached, for the caller to drop.
     pub fn invalidate_all(&self) -> Vec<V> {
@@ -1080,5 +1111,37 @@ mod tests {
         // going back to 1.0 restores the original.
         assert!(cache.set_cache_factor(1.0).is_empty());
         assert_eq!(cache.max_size(), 4);
+    }
+
+    #[test]
+    fn invalidate_matching_drops_entries_and_pending_loads() {
+        let cache: Arc<Cache<(&'static str, u32), u32>> = Cache::new("matching", 10);
+        cache.insert(("a", 1), 1);
+        cache.insert(("a", 2), 2);
+        cache.insert(("b", 1), 3);
+
+        let mut removed = cache.invalidate_matching(|key| key.0 == "a");
+        removed.sort();
+        assert_eq!(removed, vec![1, 2]);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.get(&("b", 1)), Some(3));
+        assert_eq!(cache.eviction_counts().2, 2);
+
+        // A load in flight for a matching key does not get to cache what it
+        // finds, as for `invalidate`.
+        let starts = AtomicUsize::new(0);
+        let (loader, release) = GatedLoader::new(7, &starts);
+        block_on(async {
+            let mut load = pin!(cache.get_or_load(("a", 3), || loader.load()));
+            poll_fn(|cx| {
+                assert!(load.poll_unpin(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+            assert!(cache.invalidate_matching(|key| key.0 == "a").is_empty());
+            release.send(()).unwrap();
+            assert_eq!(load.await.unwrap(), 7);
+        });
+        assert!(cache.get(&("a", 3)).is_none());
     }
 }

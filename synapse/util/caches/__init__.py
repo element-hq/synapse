@@ -36,6 +36,7 @@ from synapse.util.metrics import DynamicCollectorRegistry
 
 if TYPE_CHECKING:
     from synapse.synapse_rust.caches import RustCache
+    from synapse.util.caches.descriptors import CachedFunction
 
 logger = logging.getLogger(__name__)
 
@@ -337,3 +338,32 @@ def _intern_known_values(key: str, value: Any) -> Any:
         return intern_string(value)
 
     return value
+
+
+def mirror_rust_cache(
+    cached_function: "CachedFunction", rust_cache: "RustCache"
+) -> None:
+    """Invalidate `rust_cache` whenever `cached_function`'s cache is.
+
+    For a Rust cache of the same data as a `@cached` function, filled by Rust
+    readers: it takes the same keys, as tuples of the function's arguments,
+    and a prefix of one where the Python cache is a `tree=True` cache. Every
+    invalidation of the Python cache, by whichever path it arrives, then
+    reaches the Rust one too, so the two can never disagree for longer than
+    the Python cache would be wrong on its own.
+
+    Register the Rust cache for metrics separately, under its own name.
+    """
+    num_args = cached_function.num_args
+
+    class Mirror:
+        def invalidate(self, key: Any) -> None:
+            # A one-argument `DeferredCache` is keyed on the bare argument.
+            # The Rust cache takes the tuple, as the invalidation machinery
+            # passes it.
+            rust_cache.invalidate(key if num_args != 1 else (key,))
+
+        def invalidate_all(self) -> None:
+            rust_cache.invalidate_all()
+
+    cached_function.cache.add_mirror(Mirror())

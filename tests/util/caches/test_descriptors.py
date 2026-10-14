@@ -41,7 +41,7 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.util.caches import descriptors
+from synapse.util.caches import descriptors, mirror_rust_cache
 from synapse.util.caches.descriptors import _CacheContext, cached, cachedList
 
 from tests import unittest
@@ -652,6 +652,41 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
         yield a.func("foo")
 
         self.assertEqual(callcount[0], 2)
+
+    def test_mirror_follows_invalidations(self) -> None:
+        """A mirror added to a cache is invalidated with it, with the key as a
+        tuple of the arguments, or the prefix a tree cache was given."""
+
+        class A:
+            server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
+
+            @cached()
+            async def one(self, key: str) -> str:
+                return key
+
+            @cached(num_args=2, tree=True)
+            async def two(self, first: str, second: str) -> str:
+                return first + second
+
+        a = A()
+        one_mirror = mock.Mock()
+        two_mirror = mock.Mock()
+        mirror_rust_cache(a.one, one_mirror)
+        mirror_rust_cache(a.two, two_mirror)
+
+        self.assertEqual(get_awaitable_result(a.one("foo")), "foo")
+        a.one.invalidate(("foo",))
+        one_mirror.invalidate.assert_called_once_with(("foo",))
+        a.one.invalidate_all()
+        one_mirror.invalidate_all.assert_called_once_with()
+
+        self.assertEqual(get_awaitable_result(a.two("foo", "bar")), "foobar")
+        a.two.invalidate(("foo", "bar"))
+        two_mirror.invalidate.assert_called_once_with(("foo", "bar"))
+        a.two.invalidate(("foo",))
+        two_mirror.invalidate.assert_called_with(("foo",))
+        self.assertEqual(get_awaitable_result(a.two("foo", "bar")), "foobar")
 
     def test_invalidate_missing(self) -> None:
         class A:

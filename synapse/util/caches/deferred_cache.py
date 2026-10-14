@@ -29,6 +29,7 @@ from typing import (
     Generic,
     MutableMapping,
     Optional,
+    Protocol,
     Sized,
     TypeVar,
     cast,
@@ -74,6 +75,7 @@ class DeferredCache(Generic[KT, VT]):
         "cache",
         "thread",
         "_pending_deferred_cache",
+        "_mirrors",
     )
 
     def __init__(
@@ -105,6 +107,10 @@ class DeferredCache(Generic[KT, VT]):
             clock: The homeserver `Clock` instance
         """
         cache_type = TreeCache if tree else dict
+
+        # Caches invalidated whenever this one is, with the same key. See
+        # `add_mirror`.
+        self._mirrors: list[CacheMirror[KT]] = []
 
         # _pending_deferred_cache maps from the key value to a `CacheEntry` object.
         self._pending_deferred_cache: (
@@ -386,6 +392,17 @@ class DeferredCache(Generic[KT, VT]):
         self.cache.set(key, value, callbacks=callbacks)
         self._pending_deferred_cache.pop(key, None)
 
+    def add_mirror(self, mirror: "CacheMirror[KT]") -> None:
+        """Invalidate `mirror` whenever this cache is invalidated, with the
+        same key.
+
+        For a cache of the same data that lives elsewhere, such as in Rust,
+        and fills itself: every invalidation of this cache, whichever path it
+        arrives by (a write on this process, the caches stream, a current
+        state change), then reaches it too.
+        """
+        self._mirrors.append(mirror)
+
     def invalidate(self, key: KT) -> None:
         """Delete a key, or tree of entries
 
@@ -398,6 +415,8 @@ class DeferredCache(Generic[KT, VT]):
         """
         self.check_thread()
         self.cache.del_multi(key)
+        for mirror in self._mirrors:
+            mirror.invalidate(key)
 
         # if we have a pending lookup for this key, remove it from the
         # _pending_deferred_cache, which will (a) stop it being returned for
@@ -415,11 +434,24 @@ class DeferredCache(Generic[KT, VT]):
     def invalidate_all(self) -> None:
         self.check_thread()
         self.cache.clear()
+        for mirror in self._mirrors:
+            mirror.invalidate_all()
         for key, entry in self._pending_deferred_cache.items():
             for cb in entry.get_invalidation_callbacks(key):
                 cb()
 
         self._pending_deferred_cache.clear()
+
+
+KT_contra = TypeVar("KT_contra", contravariant=True)
+
+
+class CacheMirror(Protocol[KT_contra]):
+    """What `DeferredCache.add_mirror` needs: a cache invalidated with the
+    `DeferredCache`'s own keys."""
+
+    def invalidate(self, key: KT_contra) -> None: ...
+    def invalidate_all(self) -> None: ...
 
 
 class CacheEntry(Generic[KT, VT], metaclass=abc.ABCMeta):
