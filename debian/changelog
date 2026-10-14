@@ -1,3 +1,9 @@
+matrix-synapse-py3 (1.163.0~rc1+unreleased1) UNRELEASED; urgency=medium
+
+  * Stop preinstalling the unused Python lxml package.
+
+ -- Synapse Packaging team <packages@matrix.org>  Wed, 14 Oct 2026 11:30:04 +0100
+
 matrix-synapse-py3 (1.163.0~rc1) stable; urgency=medium
 
   * New synapse release 1.163.0rc1.
