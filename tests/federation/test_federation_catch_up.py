@@ -949,7 +949,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
 
     def test_historical_sticky_events_sent_to_newly_joined_server(self) -> None:
         """
-        Tests that historical sticky events are sent (via `/send`) to a newly-joined server.
+        Tests that historical sticky events are sent (via Federation `/send`) to a newly-joined server.
         """
         self.register_user("u1", "you the one")
         u1_token = self.login("u1", "you the one")

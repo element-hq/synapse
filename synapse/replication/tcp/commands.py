@@ -481,7 +481,7 @@ class NewServerJoinedCommand(Command):
     def from_line(
         cls: type["NewServerJoinedCommand"], line: str
     ) -> "NewServerJoinedCommand":
-        server, room_id = line.split(" ")
+        server, room_id = line.split(" ", 1)
         return cls(server=server, room_id=room_id)
 
     def to_line(self) -> str:
