@@ -1,0 +1,1 @@
+Fix the unread notification counts of a room with threads: the main timeline's notifications since the last summary rotation were counted against whichever thread was summarised last.

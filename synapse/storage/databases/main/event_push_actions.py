@@ -703,8 +703,8 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 continue
 
             if thread_id == MAIN_TIMELINE:
-                counts.notify_count += notif_count
-                counts.unread_count += unread_count
+                main_counts.notify_count += notif_count
+                main_counts.unread_count += unread_count
             elif thread_id in thread_counts:
                 thread_counts[thread_id].notify_count += notif_count
                 thread_counts[thread_id].unread_count += unread_count
