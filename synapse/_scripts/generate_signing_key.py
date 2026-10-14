@@ -23,9 +23,9 @@ import argparse
 import os
 import sys
 
-from signedjson.key import generate_signing_key, write_signing_keys
+from signedjson.key import write_signing_keys
 
-from synapse.util.stringutils import random_string
+from synapse.util.signing_key import generate_signing_key
 
 
 def main() -> None:
@@ -40,8 +40,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    key_id = "a_" + random_string(4)
-    key = (generate_signing_key(key_id),)
+    key = (generate_signing_key(),)
     if args.output_file == "-":
         write_signing_keys(sys.stdout, key)
     else:
