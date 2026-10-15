@@ -143,6 +143,7 @@ def event_visible_to_server(
     sender: str,
     target_server_name: str,
     history_visibility: str,
+    sticky: bool,
     erased_senders: Mapping[str, bool],
     partial_state_invisible: bool,
     memberships: list[tuple[str, str]],
@@ -153,6 +154,9 @@ def event_visible_to_server(
         sender: The sender of the event.
         target_server_name: The server we want to send the event to.
         history_visibility: The history_visibility value at the event.
+        sticky: Whether the event is an unexpired MSC4354 sticky event that is still sticky.
+            If True, the history visibility check is skipped.
+            Erasure and partial state checks still apply.
         erased_senders: A mapping of users and whether they have requested erasure. If a
             user is not in the map, it is treated as though they haven't requested erasure.
         partial_state_invisible: Whether the event should be treated as invisible due to
