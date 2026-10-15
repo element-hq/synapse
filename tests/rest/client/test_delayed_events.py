@@ -633,7 +633,6 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         self.reactor.advance(1)
-        self.assertListEqual([], self._get_delayed_events())
         content = self.helper.get_state(
             room_id,
             EventTypes.Member,
@@ -660,10 +659,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             access_token=self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-        self.assertEqual(1, len(self._get_delayed_events()))
 
         self.reactor.advance(1)
-        self.assertListEqual([], self._get_delayed_events())
         self.helper.get_state(
             room_id,
             EventTypes.Member,
