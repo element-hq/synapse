@@ -244,7 +244,7 @@ pub trait AwaitableObserver: Send + Sync + 'static {
     /// The awaitable has been made and is running on the reactor.
     fn started(&self);
     /// The awaitable has a result, which the caller has yet to see. Also
-    /// called if it failed to start, without `started`.
+    /// called if it failed to start, whether or not `started` was.
     fn finished(&self);
 }
 

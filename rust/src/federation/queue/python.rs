@@ -20,7 +20,10 @@
 //! the [`QueueHooks`] as coroutines: `_rust_catch_up`, `_rust_device_edus`,
 //! `_rust_sticky_backlog` and `_rust_complete`.
 
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 use async_trait::async_trait;
 use pyo3::{
@@ -31,16 +34,16 @@ use pyo3::{
 use serde_json::Value;
 
 use super::{
-    Activity, Completion, DestinationQueue, DeviceEdus, DeviceEdusRequest, Edu, LoopActivity,
-    LoopError, PduBody, PresenceState, QueueConfig, QueueHooks, QueuedPdu, Receipt, SendOutcome,
+    Activity, Completion, DestinationQueue, DeviceEdus, DeviceEdusRequest, Edu, LoopError,
+    Observer, PduBody, PresenceState, QueueConfig, QueueHooks, QueuedPdu, Receipt, SendOutcome,
     StickyBatch, StickyStreamPosition, TransactionSink,
 };
 use crate::{
-    deferred::{run_python_awaitable_observed, AwaitableObserver},
+    deferred::run_python_awaitable_observed,
     events::Event,
     federation::{
         client::{limiter::NotRetrying, RequestStats},
-        gil::{account, with_gil},
+        gil::{account, account_held, with_gil},
         transaction::{
             acknowledged_pdus,
             python::{python_acknowledged, RustTransaction, RustTransactionManager},
@@ -91,11 +94,9 @@ impl RustDestinationQueues {
             .getattr("ref")?
             .call1((facade,))?
             .unbind();
-        let activity = LoopActivity::new(Arc::clone(&self.activity));
         let hooks = PyHooks {
             runtime: self.runtime.clone(),
             facade: Arc::new(facade),
-            activity: Arc::clone(&activity),
             destination: destination.clone(),
         };
         let sink: Arc<dyn TransactionSink> = self.sink.clone();
@@ -108,7 +109,7 @@ impl RustDestinationQueues {
                 },
                 Arc::new(hooks),
                 sink,
-                activity,
+                Arc::clone(&self.activity),
                 self.runtime.tokio_handle()?,
             ),
         })
@@ -311,15 +312,15 @@ struct PyHooks {
     runtime: RustRuntime,
     /// A weak reference to the Python queue.
     facade: Arc<Py<PyAny>>,
-    activity: Arc<LoopActivity>,
     destination: String,
 }
 
 impl PyHooks {
     /// Await `facade.<method>(*args(py))` on the reactor, and read its result
-    /// with `convert` there.
+    /// with `convert` there. Both count as GIL time under `site`.
     async fn call<A, C, T>(
         &self,
+        observer: &Observer,
         site: &'static str,
         method: &'static str,
         args: A,
@@ -331,7 +332,6 @@ impl PyHooks {
         T: Send + 'static,
     {
         let facade = Arc::clone(&self.facade);
-        let observer: Arc<dyn AwaitableObserver> = self.activity.clone();
         let result = run_python_awaitable_observed(
             &self.runtime,
             move |py| {
@@ -345,8 +345,13 @@ impl PyHooks {
                     facade.call_method1(method, args(py)?)
                 })
             },
-            convert,
-            Some(observer),
+            move |value| {
+                let start = Instant::now();
+                let converted = convert(value);
+                account_held(site, start.elapsed());
+                converted
+            },
+            Some(Arc::clone(observer)),
         )
         .await;
         result.map_err(|err| python_error(err, &self.destination))
@@ -355,8 +360,9 @@ impl PyHooks {
 
 #[async_trait]
 impl QueueHooks for PyHooks {
-    async fn catch_up(&self) -> Result<(), LoopError> {
+    async fn catch_up(&self, observer: &Observer) -> Result<(), LoopError> {
         self.call(
+            observer,
             "queue_catch_up",
             "_rust_catch_up",
             |py| Ok(PyTuple::empty(py)),
@@ -365,8 +371,13 @@ impl QueueHooks for PyHooks {
         .await
     }
 
-    async fn device_edus(&self, request: DeviceEdusRequest) -> Result<DeviceEdus, LoopError> {
+    async fn device_edus(
+        &self,
+        observer: &Observer,
+        request: DeviceEdusRequest,
+    ) -> Result<DeviceEdus, LoopError> {
         self.call(
+            observer,
             "queue_device_edus",
             "_rust_device_edus",
             move |py| {
@@ -409,8 +420,9 @@ impl QueueHooks for PyHooks {
         .await
     }
 
-    async fn sticky_backlog(&self) -> Result<Option<StickyBatch>, LoopError> {
+    async fn sticky_backlog(&self, observer: &Observer) -> Result<Option<StickyBatch>, LoopError> {
         self.call(
+            observer,
             "queue_sticky_backlog",
             "_rust_sticky_backlog",
             |py| Ok(PyTuple::empty(py)),
@@ -435,9 +447,10 @@ impl QueueHooks for PyHooks {
         .await
     }
 
-    async fn complete(&self, completion: Completion) -> Result<(), LoopError> {
+    async fn complete(&self, observer: &Observer, completion: Completion) -> Result<(), LoopError> {
         let completion = Arc::new(completion);
         self.call(
+            observer,
             "queue_complete",
             "_rust_complete",
             move |py| completion_args(py, &completion),
@@ -556,12 +569,24 @@ struct ClientSink {
 }
 
 impl ClientSink {
+    /// Record the request counters, which are Python's. A sent transaction's
+    /// go with its completion. A failed one needs this.
+    fn record_metrics(&self, py: Python<'_>, stats: &RequestStats) {
+        let recorded =
+            self.record_metrics
+                .bind(py)
+                .call1(("PUT", stats.attempts, stats.responses.clone()));
+        if let Err(err) = recorded {
+            log::warn!("Failed to record federation request metrics: {err}");
+        }
+    }
+
     /// Send through the Python stand-in.
     async fn send_for_test(
         &self,
         send: Arc<Py<PyAny>>,
         transaction: Transaction,
-        observer: Arc<dyn AwaitableObserver>,
+        observer: &Observer,
     ) -> Result<SendOutcome, LoopError> {
         let destination = transaction.destination.clone();
         let log_prefix = transaction.log_prefix();
@@ -581,7 +606,7 @@ impl ClientSink {
                     Err(_) => Value::Null,
                 })
             },
-            Some(observer),
+            Some(Arc::clone(observer)),
         )
         .await
         .map_err(|err| python_error(err, &destination))?;
@@ -618,7 +643,7 @@ impl TransactionSink for ClientSink {
     async fn send(
         &self,
         transaction: Transaction,
-        observer: Arc<dyn AwaitableObserver>,
+        observer: &Observer,
     ) -> Result<SendOutcome, LoopError> {
         let send_for_test = self.send_for_test.lock().expect("poisoned").clone();
         if let Some(send) = send_for_test {
@@ -636,6 +661,8 @@ impl TransactionSink for ClientSink {
             }),
             Ok(TransactionResponse::Unparsed(body)) => with_gil("queue_response_fallback", |py| {
                 python_acknowledged(py, &destination, &transaction_id, &body).map_err(|err| {
+                    // No later trip to Python will carry the counters.
+                    self.record_metrics(py, &stats);
                     classify_python_error(py, &err)
                         .unwrap_or_else(|_| LoopError::Other(format_exception(py, &err)))
                 })
@@ -645,19 +672,8 @@ impl TransactionSink for ClientSink {
                 stats,
             }),
             Err(err) => {
-                // The request counters are Python's. A failure is the only
-                // case without a later trip to Python to carry them.
-                let record_metrics = Arc::clone(&self.record_metrics);
-                with_gil("queue_send_failed", |py| {
-                    let recorded = record_metrics.bind(py).call1((
-                        "PUT",
-                        stats.attempts,
-                        stats.responses.clone(),
-                    ));
-                    if let Err(err) = recorded {
-                        log::warn!("Failed to record federation request metrics: {err}");
-                    }
-                });
+                // As above, there is no later trip to Python.
+                with_gil("queue_send_failed", |py| self.record_metrics(py, &stats));
                 Err(LoopError::from_client(err, &destination))
             }
         }

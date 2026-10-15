@@ -78,7 +78,7 @@ impl TransactionSink for FakeSink {
     async fn send(
         &self,
         transaction: Transaction,
-        _observer: Arc<dyn AwaitableObserver>,
+        _observer: &Observer,
     ) -> Result<SendOutcome, LoopError> {
         let answer = self
             .answers
@@ -133,7 +133,7 @@ impl FakeHooks {
 
 #[async_trait]
 impl QueueHooks for FakeHooks {
-    async fn catch_up(&self) -> Result<(), LoopError> {
+    async fn catch_up(&self, _observer: &Observer) -> Result<(), LoopError> {
         self.catch_ups.fetch_add(1, Ordering::SeqCst);
         // As Python's, with nothing in the database to catch up on.
         let queue = self.queue.get().and_then(Weak::upgrade).unwrap();
@@ -143,7 +143,11 @@ impl QueueHooks for FakeHooks {
         Ok(())
     }
 
-    async fn device_edus(&self, request: DeviceEdusRequest) -> Result<DeviceEdus, LoopError> {
+    async fn device_edus(
+        &self,
+        _observer: &Observer,
+        request: DeviceEdusRequest,
+    ) -> Result<DeviceEdus, LoopError> {
         self.device_requests.lock().unwrap().push(request);
         Ok(self
             .device_edus
@@ -157,11 +161,15 @@ impl QueueHooks for FakeHooks {
             }))
     }
 
-    async fn sticky_backlog(&self) -> Result<Option<StickyBatch>, LoopError> {
+    async fn sticky_backlog(&self, _observer: &Observer) -> Result<Option<StickyBatch>, LoopError> {
         Ok(self.sticky.lock().unwrap().pop_front().flatten())
     }
 
-    async fn complete(&self, completion: Completion) -> Result<(), LoopError> {
+    async fn complete(
+        &self,
+        _observer: &Observer,
+        completion: Completion,
+    ) -> Result<(), LoopError> {
         self.completed.lock().unwrap().push(Completed {
             to_device_stream_id: completion.to_device_stream_id,
             device_list_stream_id: completion.device_list_stream_id,
@@ -196,7 +204,7 @@ fn harness_with(msc4354_enabled: bool) -> Harness {
         },
         hooks.clone(),
         sink.clone(),
-        LoopActivity::new(Arc::clone(&activity)),
+        Arc::clone(&activity),
         Handle::current(),
     );
     hooks.queue.set(Arc::downgrade(&queue)).unwrap();
@@ -731,4 +739,22 @@ fn receipts_with_threads_share_an_edu() {
         .map(|edu| edu["!room"]["m.read"].as_object().unwrap().keys().collect())
         .collect();
     assert_eq!(users, [["alice", "bob"], ["alice", "bob"]]);
+}
+
+#[test]
+fn a_loop_ending_does_not_touch_the_next() {
+    // The old loop ends after the next one has parked on Python.
+    let activity = Arc::new(Activity::default());
+    let old = LoopActivity::new(Arc::clone(&activity));
+    old.loop_started();
+    let next = LoopActivity::new(Arc::clone(&activity));
+    next.loop_started();
+    next.started();
+    old.loop_ended();
+    assert!(activity.idle());
+
+    next.finished();
+    assert!(!activity.idle());
+    next.loop_ended();
+    assert!(activity.idle());
 }

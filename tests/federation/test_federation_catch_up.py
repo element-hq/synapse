@@ -375,6 +375,56 @@ class FederationCatchUpTestCases(_FederationCatchUpTestCaseBase):
             event_5.internal_metadata.stream_ordering,
         )
 
+    def test_catch_up_loop_stops_at_shutdown(self) -> None:
+        """A shutdown during catch-up stops it before the next room, so the
+        rooms it has not sent are not recorded as sent."""
+        per_dest_queue, sent_pdus = self.make_fake_destination_queue()
+        send = per_dest_queue._transaction_manager.send_new_transaction
+
+        async def send_then_shut_down(
+            destination: str, pdus: list[EventBase], edus: list[Edu]
+        ) -> None:
+            await send(destination, pdus, edus)
+            # What `shutdown` does to the loop. The transport client is a
+            # mock, which the transaction manager's shutdown would fail on.
+            per_dest_queue._transmission_loop_enabled = False
+
+        per_dest_queue._transaction_manager.send_new_transaction = send_then_shut_down  # type: ignore[method-assign]
+
+        self.register_user("u1", "you the one")
+        u1_token = self.login("u1", "you the one")
+        room_1 = self.helper.create_room_as("u1", tok=u1_token)
+        room_2 = self.helper.create_room_as("u1", tok=u1_token)
+        for room_id in (room_1, room_2):
+            self.get_success(
+                event_injection.inject_member_event(
+                    self.hs, room_id, "@user:host2", "join"
+                )
+            )
+
+        store = self.hs.get_datastores().main
+        event_id_0 = self.helper.send(room_1, "already sent", tok=u1_token)["event_id"]
+        event_id_1 = self.helper.send(room_1, "one", tok=u1_token)["event_id"]
+        self.helper.send(room_2, "two", tok=u1_token)
+        event_0 = self.get_success(store.get_event(event_id_0))
+        event_1 = self.get_success(store.get_event(event_id_1))
+        assert event_0.internal_metadata.stream_ordering is not None
+        self.get_success(
+            store.set_destination_last_successful_stream_ordering(
+                "host2", event_0.internal_metadata.stream_ordering
+            )
+        )
+
+        self.get_success(per_dest_queue._catch_up_transmission_loop())
+
+        self.assertEqual([pdu.event_id for pdu in sent_pdus], [event_id_1])
+        self.assertEqual(
+            self.get_success(
+                store.get_destination_last_successful_stream_ordering("host2")
+            ),
+            event_1.internal_metadata.stream_ordering,
+        )
+
     def test_catch_up_on_synapse_startup(self) -> None:
         """
         Tests the behaviour of get_catch_up_outstanding_destinations and

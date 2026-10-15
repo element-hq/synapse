@@ -284,17 +284,17 @@ class FederationSenderReceiptsTestCases(HomeserverTestCase):
 
         self.pump()
 
-        # First, expect a call to send_transaction for the sending host
-        mock_send_transaction.assert_called()
-
-        transaction = mock_send_transaction.call_args_list[0].args[0]
-        self.assertEqual(transaction.destination, "host1")
-        self._assert_edu_in_call(mock_send_transaction.call_args_list[0].args[1])
-
-        # We also expect a call to one of the other hosts, as the first
-        # destination to wake up.
+        # Expect a call to send_transaction for the sending host, and one to
+        # one of the other hosts, as the first destination to wake up. With
+        # the queues in Rust, the two loops run at once, so either may send
+        # first.
         self.assertEqual(mock_send_transaction.call_count, 2)
-        self._assert_edu_in_call(mock_send_transaction.call_args.args[1])
+        destinations = [
+            call.args[0].destination for call in mock_send_transaction.call_args_list
+        ]
+        self.assertIn("host1", destinations)
+        for call in mock_send_transaction.call_args_list:
+            self._assert_edu_in_call(call.args[1])
 
         mock_send_transaction.reset_mock()
 

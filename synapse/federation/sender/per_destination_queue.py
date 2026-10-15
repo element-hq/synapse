@@ -333,6 +333,14 @@ class _CatchUpLoop:
                     else:
                         room_catchup_pdus = [pdu]
 
+                # After a shutdown, the transaction manager returns without
+                # sending, and we would record the room as caught up. The
+                # Python loop is cancelled at shutdown, but the Rust one cannot
+                # cancel this coroutine. (mypy does not see that the awaits
+                # above can change the flag.)
+                if not self._transmission_loop_enabled:
+                    return  # type: ignore[unreachable]
+
                 logger.info(
                     "Catching up rooms to %s: %r", self._destination, pdu.room_id
                 )

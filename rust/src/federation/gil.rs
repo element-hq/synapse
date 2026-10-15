@@ -62,13 +62,24 @@ pub fn account<R>(site: &'static str, py: Python<'_>, f: impl FnOnce(Python<'_>)
     result
 }
 
+/// Add `held` to the time of `site` without counting a call: for later work
+/// in a GIL hold that [`account`] already counted, such as reading the result
+/// of a call it made.
+pub fn account_held(site: &'static str, held: Duration) {
+    add(site, 0, held);
+}
+
 fn record(site: &'static str, held: Duration) {
+    add(site, 1, held);
+}
+
+fn add(site: &'static str, calls: u64, held: Duration) {
     let mut stats = STATS.lock().expect("poisoned");
     let entry = stats
         .get_or_insert_with(HashMap::new)
         .entry(site)
         .or_default();
-    entry.calls += 1;
+    entry.calls += calls;
     entry.held += held;
 }
 
@@ -103,5 +114,15 @@ mod tests {
         assert_eq!(answer, 42);
         assert_eq!(after.calls, before.calls + 2);
         assert!(after.held >= before.held);
+    }
+
+    #[test]
+    fn held_time_without_a_call() {
+        let before = snapshot().get("held_site").copied().unwrap_or_default();
+        account_held("held_site", Duration::from_millis(5));
+        let after = snapshot()["held_site"];
+
+        assert_eq!(after.calls, before.calls);
+        assert_eq!(after.held, before.held + Duration::from_millis(5));
     }
 }

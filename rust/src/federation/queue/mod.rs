@@ -263,22 +263,30 @@ pub struct Completion {
     pub sent: Option<Sent>,
 }
 
-/// The parts of the loop that run in Python for now.
+/// Hears when the loop waits on the reactor: see [`LoopActivity`].
+pub type Observer = Arc<dyn AwaitableObserver>;
+
+/// The parts of the loop that run in Python for now. Each is given the
+/// calling loop's [`Observer`].
 #[async_trait]
 pub trait QueueHooks: Send + Sync + 'static {
     /// `_catch_up_transmission_loop`.
-    async fn catch_up(&self) -> Result<(), LoopError>;
+    async fn catch_up(&self, observer: &Observer) -> Result<(), LoopError>;
 
     /// The to-device messages and device list updates to send.
-    async fn device_edus(&self, request: DeviceEdusRequest) -> Result<DeviceEdus, LoopError>;
+    async fn device_edus(
+        &self,
+        observer: &Observer,
+        request: DeviceEdusRequest,
+    ) -> Result<DeviceEdus, LoopError>;
 
     /// `StickyEventBacklogTracker.prepare_transaction`: `None` once the
     /// backlog is empty.
-    async fn sticky_backlog(&self) -> Result<Option<StickyBatch>, LoopError>;
+    async fn sticky_backlog(&self, observer: &Observer) -> Result<Option<StickyBatch>, LoopError>;
 
     /// Record a finished transaction: the stream positions, the module
     /// callback and the metrics.
-    async fn complete(&self, completion: Completion) -> Result<(), LoopError>;
+    async fn complete(&self, observer: &Observer, completion: Completion) -> Result<(), LoopError>;
 }
 
 /// The answer to a sent transaction.
@@ -301,7 +309,7 @@ pub trait TransactionSink: Send + Sync + 'static {
     async fn send(
         &self,
         transaction: Transaction,
-        observer: Arc<dyn AwaitableObserver>,
+        observer: &Observer,
     ) -> Result<SendOutcome, LoopError>;
 }
 
@@ -319,8 +327,9 @@ impl Activity {
     }
 }
 
-/// One queue's part in [`Activity`]. Python calls tell it when they start
-/// and finish, on the reactor thread.
+/// One loop's part in [`Activity`]. Python calls tell it when they start
+/// and finish, on the reactor thread. Each loop has its own, so a loop that
+/// ends cannot clear the flag of the next one.
 pub struct LoopActivity {
     activity: Arc<Activity>,
     /// The loop is waiting on a Python call that has started.
@@ -428,7 +437,7 @@ pub struct DestinationQueue {
     state: Mutex<QueueState>,
     hooks: Arc<dyn QueueHooks>,
     sink: Arc<dyn TransactionSink>,
-    activity: Arc<LoopActivity>,
+    activity: Arc<Activity>,
     tokio: Handle,
 }
 
@@ -440,7 +449,7 @@ impl DestinationQueue {
         config: QueueConfig,
         hooks: Arc<dyn QueueHooks>,
         sink: Arc<dyn TransactionSink>,
-        activity: Arc<LoopActivity>,
+        activity: Arc<Activity>,
         tokio: Handle,
     ) -> Arc<Self> {
         if !config.should_send_on_this_instance {
@@ -654,7 +663,8 @@ impl DestinationQueue {
         let loop_id = NEXT_LOOP_ID.fetch_add(1, Ordering::Relaxed);
         state.transmission_loop_running = true;
         state.loop_id = loop_id;
-        self.activity.loop_started();
+        let activity = LoopActivity::new(Arc::clone(&self.activity));
+        activity.loop_started();
         // The guard takes the lock when it drops, which it does at once if
         // the runtime has shut down.
         drop(state);
@@ -663,11 +673,12 @@ impl DestinationQueue {
         let guard = LoopGuard {
             queue: Arc::clone(self),
             loop_id,
+            activity: Arc::clone(&activity),
         };
         let this = Arc::clone(self);
         let task = self.tokio.spawn(async move {
             let _guard = guard;
-            this.transmission_loop().await;
+            this.transmission_loop(activity).await;
         });
 
         let mut state = self.state();
@@ -677,15 +688,17 @@ impl DestinationQueue {
     }
 
     /// `_transaction_transmission_loop`.
-    async fn transmission_loop(&self) {
+    async fn transmission_loop(&self, activity: Arc<LoopActivity>) {
+        let observer: Observer = activity;
         let mut in_flight = Vec::new();
-        if let Err(err) = self.run_transmission_loop(&mut in_flight).await {
+        if let Err(err) = self.run_transmission_loop(&observer, &mut in_flight).await {
             self.handle_error(err, &in_flight);
         }
     }
 
     async fn run_transmission_loop(
         &self,
+        observer: &Observer,
         in_flight: &mut Vec<Arc<QueuedPdu>>,
     ) -> Result<(), LoopError> {
         // Fail fast if we are backing off. The client checks again.
@@ -694,7 +707,7 @@ impl DestinationQueue {
         }
 
         if self.state().catching_up {
-            self.hooks.catch_up().await?;
+            self.hooks.catch_up(observer).await?;
             if self.state().catching_up {
                 // Not caught up yet.
                 return Ok(());
@@ -711,7 +724,7 @@ impl DestinationQueue {
             }
             in_flight.clear();
 
-            let Some(prepared) = self.prepare_transaction().await? else {
+            let Some(prepared) = self.prepare_transaction(observer).await? else {
                 log::debug!(target: QUEUE_LOG, "TX [{}] Nothing to send", self.destination());
                 let mut state = self.state();
                 if state.new_data_to_send {
@@ -727,18 +740,23 @@ impl DestinationQueue {
             if !prepared.has_anything_to_send() {
                 // Filtering emptied a sticky event batch. Preparing it still
                 // moved the backlog on, which must be recorded.
-                self.complete_transaction(prepared, None).await?;
+                self.complete_transaction(observer, prepared, None).await?;
                 continue;
             }
 
             in_flight.extend(prepared.pdus.iter().cloned());
-            let sent = self.send_transaction(&prepared).await?;
-            self.complete_transaction(prepared, Some(sent)).await?;
+            let sent = self.send_transaction(observer, &prepared).await?;
+            self.complete_transaction(observer, prepared, Some(sent))
+                .await?;
         }
     }
 
     /// Build and send the transaction.
-    async fn send_transaction(&self, prepared: &Prepared) -> Result<Sent, LoopError> {
+    async fn send_transaction(
+        &self,
+        observer: &Observer,
+        prepared: &Prepared,
+    ) -> Result<Sent, LoopError> {
         let destination = self.destination();
         if !prepared.pdus.is_empty() {
             log::debug!(
@@ -757,7 +775,6 @@ impl DestinationQueue {
         let edus = prepared.edus.iter().cloned().map(Edu::into_value).collect();
         let transaction = self.sink.build(destination, pdus, edus);
 
-        let observer: Arc<dyn AwaitableObserver> = self.activity.clone();
         let outcome = self.sink.send(transaction, observer).await?;
         Ok(Sent {
             pdus: prepared.pdus.clone(),
@@ -827,16 +844,19 @@ impl DestinationQueue {
 
     /// `_prepare_transaction`: take turns between the sticky event backlog
     /// and the real-time queue, so neither starves the other.
-    async fn prepare_transaction(&self) -> Result<Option<Prepared>, LoopError> {
+    async fn prepare_transaction(
+        &self,
+        observer: &Observer,
+    ) -> Result<Option<Prepared>, LoopError> {
         let sticky_turn = std::mem::take(&mut self.state().sticky_backlog_turn);
         if sticky_turn {
-            if let Some(prepared) = self.prepare_sticky_transaction().await? {
+            if let Some(prepared) = self.prepare_sticky_transaction(observer).await? {
                 return Ok(Some(prepared));
             }
-            return self.prepare_main_queue_transaction().await;
+            return self.prepare_main_queue_transaction(observer).await;
         }
 
-        let prepared = self.prepare_main_queue_transaction().await?;
+        let prepared = self.prepare_main_queue_transaction(observer).await?;
         let backlogged = {
             let mut state = self.state();
             state.sticky_backlog_turn = self.config.msc4354_enabled && state.sticky_backlogged;
@@ -846,18 +866,21 @@ impl DestinationQueue {
             return Ok(prepared);
         }
         if backlogged {
-            return self.prepare_sticky_transaction().await;
+            return self.prepare_sticky_transaction(observer).await;
         }
         Ok(None)
     }
 
     /// `StickyEventBacklogTracker.prepare_transaction`.
-    async fn prepare_sticky_transaction(&self) -> Result<Option<Prepared>, LoopError> {
+    async fn prepare_sticky_transaction(
+        &self,
+        observer: &Observer,
+    ) -> Result<Option<Prepared>, LoopError> {
         if !self.config.msc4354_enabled || !self.state().sticky_backlogged {
             return Ok(None);
         }
 
-        let Some(batch) = self.hooks.sticky_backlog().await? else {
+        let Some(batch) = self.hooks.sticky_backlog(observer).await? else {
             log::info!(
                 target: QUEUE_LOG,
                 "Caught up on federation sticky event backlog for destination '{}'",
@@ -883,7 +906,10 @@ impl DestinationQueue {
     /// EDUs go in this order, up to 100: one presence EDU, up to five
     /// receipt EDUs, to-device messages (leaving ten places for device list
     /// updates), device list updates, then anything else.
-    async fn prepare_main_queue_transaction(&self) -> Result<Option<Prepared>, LoopError> {
+    async fn prepare_main_queue_transaction(
+        &self,
+        observer: &Observer,
+    ) -> Result<Option<Prepared>, LoopError> {
         let now_ms = self.sink.now_ms() as i64;
         let mut edus = Vec::new();
         let request = {
@@ -923,7 +949,7 @@ impl DestinationQueue {
             }
         };
 
-        let device = self.hooks.device_edus(request).await?;
+        let device = self.hooks.device_edus(observer, request).await?;
 
         let mut state = self.state();
         let mut edu_limit = request.edu_limit;
@@ -990,6 +1016,7 @@ impl DestinationQueue {
     /// and record how far we got.
     async fn complete_transaction(
         &self,
+        observer: &Observer,
         prepared: Prepared,
         sent: Option<Sent>,
     ) -> Result<(), LoopError> {
@@ -1012,13 +1039,16 @@ impl DestinationQueue {
         }
 
         self.hooks
-            .complete(Completion {
-                to_device_stream_id,
-                device_list_stream_id,
-                last_stream_ordering: prepared.last_stream_ordering.filter(|so| *so != 0),
-                sticky: prepared.sticky,
-                sent,
-            })
+            .complete(
+                observer,
+                Completion {
+                    to_device_stream_id,
+                    device_list_stream_id,
+                    last_stream_ordering: prepared.last_stream_ordering.filter(|so| *so != 0),
+                    sticky: prepared.sticky,
+                    sent,
+                },
+            )
             .await?;
 
         let mut state = self.state();
@@ -1094,6 +1124,7 @@ fn start_catching_up(state: &mut QueueState) {
 struct LoopGuard {
     queue: Arc<DestinationQueue>,
     loop_id: u64,
+    activity: Arc<LoopActivity>,
 }
 
 impl Drop for LoopGuard {
@@ -1105,6 +1136,6 @@ impl Drop for LoopGuard {
                 state.loop_task = None;
             }
         }
-        self.queue.activity.loop_ended();
+        self.activity.loop_ended();
     }
 }
