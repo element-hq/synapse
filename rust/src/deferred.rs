@@ -229,10 +229,48 @@ pub(crate) async fn run_python_awaitable<F>(
 where
     F: for<'py> Fn(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + Sync + 'static,
 {
+    run_python_awaitable_observed(
+        runtime,
+        make_awaitable,
+        |value: &Bound<'_, PyAny>| Ok(value.clone().unbind()),
+        None,
+    )
+    .await
+}
+
+/// Told, on the reactor thread, when the awaitable of
+/// [`run_python_awaitable_observed`] starts and when it finishes.
+pub trait AwaitableObserver: Send + Sync + 'static {
+    /// The awaitable has been made and is running on the reactor.
+    fn started(&self);
+    /// The awaitable has a result, which the caller has yet to see. Also
+    /// called if it failed to start, without `started`.
+    fn finished(&self);
+}
+
+/// As [`run_python_awaitable`], with two additions.
+///
+/// - `convert` turns the result into a Rust value on the reactor thread, in
+///   the GIL hold that receives it. The caller then needs no GIL hop of its
+///   own to read the result.
+/// - `observer` hears when the awaitable starts and finishes. A test can then
+///   tell a task waiting on the reactor from one with work still to do.
+pub(crate) async fn run_python_awaitable_observed<F, C, T>(
+    runtime: &RustRuntime,
+    make_awaitable: F,
+    convert: C,
+    observer: Option<Arc<dyn AwaitableObserver>>,
+) -> PyResult<T>
+where
+    F: for<'py> Fn(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + Sync + 'static,
+    C: for<'py> Fn(&Bound<'py, PyAny>) -> PyResult<T> + Send + Sync + 'static,
+    T: Send + 'static,
+{
     // Resolves when the awaitable completes; carries the resolved value or error.
-    let (tx, rx) = oneshot::channel::<PyResult<Py<PyAny>>>();
+    let (tx, rx) = oneshot::channel::<PyResult<T>>();
     // Shared between the success and error callbacks (only one ever fires).
-    let sender = Arc::new(Mutex::new(Some(tx)));
+    // The observer hears of the result before the channel carries it.
+    let sender = Arc::new(Mutex::new(Some((tx, observer))));
 
     // Capture the logcontext of the calling tokio task (if any). We restore it
     // on the reactor thread before driving the awaitable, so Python code
@@ -253,15 +291,18 @@ where
                 None,
                 None,
                 move |args, _kwargs| -> PyResult<Py<PyAny>> {
-                    let value = args.get_item(0)?.unbind();
-                    if let Some(tx) = success_sender
+                    let value = convert(&args.get_item(0)?);
+                    if let Some((tx, observer)) = success_sender
                         .lock()
                         .map_err(|err| {
                             anyhow::anyhow!("Failed to acquire lock on `success_sender`: {:#}", err)
                         })?
                         .take()
                     {
-                        let _ = tx.send(Ok(value));
+                        if let Some(observer) = observer {
+                            observer.finished();
+                        }
+                        let _ = tx.send(value);
                     }
                     Ok(args.py().None())
                 },
@@ -275,13 +316,16 @@ where
                 None,
                 move |args, _kwargs| -> PyResult<Py<PyAny>> {
                     let err = failure_to_pyerr(&args.get_item(0)?);
-                    if let Some(tx) = error_sender
+                    if let Some((tx, observer)) = error_sender
                         .lock()
                         .map_err(|err| {
                             anyhow::anyhow!("Failed to acquire lock on `error_sender`: {:#}", err)
                         })?
                         .take()
                     {
+                        if let Some(observer) = observer {
+                            observer.finished();
+                        }
                         let _ = tx.send(Err(err));
                     }
                     Ok(args.py().None())
@@ -317,6 +361,13 @@ where
             // logcontext and follows the logcontext rules from there. In
             // particular, it arranges for the reactor to be back at the
             // sentinel when the awaitable later completes.
+            let started_observer = sender
+                .lock()
+                .ok()
+                .and_then(|slot| slot.as_ref().and_then(|(_, observer)| observer.clone()));
+            if let Some(observer) = started_observer {
+                observer.started();
+            }
             with_logcontext(py, context, || {
                 let deferred = run_in_background(py, awaitable_factory.bind(py))?;
                 deferred.call_method1(
@@ -330,7 +381,10 @@ where
         if let Err(err) = started {
             // We failed before the awaitable's callbacks were attached, so
             // nothing else will ever resolve the channel. Do it ourselves.
-            if let Some(tx) = sender.lock().ok().and_then(|mut slot| slot.take()) {
+            if let Some((tx, observer)) = sender.lock().ok().and_then(|mut slot| slot.take()) {
+                if let Some(observer) = observer {
+                    observer.finished();
+                }
                 let _ = tx.send(Err(err));
             }
         }

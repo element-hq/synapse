@@ -106,7 +106,7 @@ impl Transaction {
     }
 
     /// The prefix of the transaction's log lines, `TX [dest] {txn}`.
-    fn log_prefix(&self) -> String {
+    pub(crate) fn log_prefix(&self) -> String {
         log_prefix(&self.destination, &self.transaction_id)
     }
 }

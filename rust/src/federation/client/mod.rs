@@ -307,6 +307,21 @@ impl FederationClient {
         self.is_shutdown.store(true, Ordering::Relaxed);
     }
 
+    /// Whether we are backing off from `destination`: the check of
+    /// `get_retry_limiter`, which the transmission loop makes before it does
+    /// anything.
+    pub async fn backoff(&self, destination: &str) -> Result<Option<NotRetrying>, ClientError> {
+        let checked = RetryLimiter::check(
+            &*self.retry_timings,
+            destination,
+            self.now_ms(),
+            LimiterOptions::default(),
+        )
+        .await
+        .map_err(ClientError::Store)?;
+        Ok(checked.err())
+    }
+
     /// The destination may be back: end any sleep before a retry to it.
     pub fn wake_destination(&self, destination: &str) {
         self.retry_sleeper.wake(destination);

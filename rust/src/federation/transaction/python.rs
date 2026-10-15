@@ -45,7 +45,7 @@ use crate::{
 /// A built transaction. Tests read it as they read a Python `Transaction`.
 #[pyclass(frozen, name = "RustTransaction")]
 pub struct RustTransaction {
-    inner: Transaction,
+    pub(crate) inner: Transaction,
 }
 
 #[pymethods]
@@ -89,9 +89,9 @@ impl RustTransaction {
 /// Builds and sends transactions through a [`RustFederationClient`].
 #[pyclass(frozen, name = "RustTransactionManager")]
 pub struct RustTransactionManager {
-    sender: Arc<TransactionSender>,
-    runtime: RustRuntime,
-    record_metrics: Arc<Py<PyAny>>,
+    pub(crate) sender: Arc<TransactionSender>,
+    pub(crate) runtime: RustRuntime,
+    pub(crate) record_metrics: Arc<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -231,7 +231,7 @@ impl RustTransactionManager {
 /// The response handling for a body serde_json refused: decode it with
 /// Python's decoder, as `JsonParser` would, and read the `pdus` map from the
 /// result.
-fn python_acknowledged(
+pub(crate) fn python_acknowledged(
     py: Python<'_>,
     destination: &str,
     transaction_id: &str,

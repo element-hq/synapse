@@ -10,15 +10,17 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from signedjson.types import SigningKey
 
 from twisted.internet.defer import Deferred
 
+from synapse.api.presence import UserPresenceState
+from synapse.federation.units import Edu
 from synapse.server import HomeServer
 from synapse.synapse_rust.events import Event
-from synapse.types import JsonDict
+from synapse.types import JsonDict, ReadReceipt
 
 def build_auth_header_for_test(
     signing_key: SigningKey,
@@ -199,3 +201,54 @@ class RustTransactionManager:
     ) -> list[str]:
         """The ids of the PDUs `response` accepts, logging the ones it rejects.
         For tests."""
+
+class RustDestinationQueues:
+    """Makes the Rust per-destination queues, at
+    `rust_federation_sending: queues`."""
+
+    def __init__(
+        self, transactions: RustTransactionManager, msc4354_enabled: bool
+    ) -> None: ...
+    def queue(
+        self, destination: str, facade: Any, should_send_on_this_instance: bool
+    ) -> "RustDestinationQueue":
+        """The queue for `destination`. `facade` provides the `_rust_*`
+        hooks, and is held weakly."""
+
+    def idle(self) -> bool:
+        """Whether every transmission loop has finished or is waiting on the
+        reactor. For tests."""
+
+    def set_send_for_test(
+        self, send: Callable[[RustTransaction], Awaitable[Any]] | None
+    ) -> None:
+        """Send transactions through `send` in place of the network. For
+        tests."""
+
+class RustDestinationQueue:
+    """One destination's queue. Each method is the `PerDestinationQueue`
+    method of the same name."""
+
+    transmission_loop_running: bool
+    new_data_to_send: bool
+    catching_up: bool
+    catchup_last_skipped: int
+    last_successful_stream_ordering: int | None
+    transmission_loop_enabled: bool
+    sticky_backlogged: bool
+
+    def shutdown(self) -> None: ...
+    def pending_pdu_count(self) -> int: ...
+    def pending_edu_count(self) -> int: ...
+    def send_pdu(self, pdu: Event) -> None: ...
+    def send_presence(
+        self, states: Sequence[UserPresenceState], start_loop: bool = True
+    ) -> None: ...
+    def queue_read_receipt(self, receipt: ReadReceipt) -> None: ...
+    def send_keyed_edu(self, edu: Edu, key: str) -> None: ...
+    def send_edu(self, edu: Edu) -> None: ...
+    def mark_new_data(self) -> None: ...
+    def attempt_new_transaction(self) -> None: ...
+    def start_catching_up(self) -> None: ...
+    def pending_pdu_ids(self) -> list[str]:
+        """The event IDs of the queued PDUs, oldest first. For tests."""
