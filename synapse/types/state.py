@@ -47,6 +47,15 @@ T = TypeVar("T")
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
+class StateEventQuery:
+    """A query for a state event type and optional state key."""
+
+    event_type: str
+    # None means all state keys for the event type.
+    state_key: str | None = None
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
 class StateFilter:
     """A filter used when querying for state.
 
