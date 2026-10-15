@@ -315,7 +315,7 @@ impl MemoryStateResStore {
             let Some(event) = self.events.get(&event_id) else {
                 bail!("Unknown event {event_id}");
             };
-            stack.extend(event.auth_event_ids().iter().cloned());
+            stack.extend(event.auth_event_ids()?.iter().cloned());
         }
         Ok(result)
     }

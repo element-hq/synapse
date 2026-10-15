@@ -378,7 +378,7 @@ pub async fn get_auth_chain_difference(
         let mut visited: HashSet<&Arc<str>> = HashSet::from([event_id]);
         let mut to_search: Vec<(&Arc<str>, &StateResEvent)> = vec![(event_id, event)];
         while let Some((next_id, next_event)) = to_search.pop() {
-            for auth_id in next_event.auth_event_ids() {
+            for auth_id in next_event.auth_event_ids()? {
                 chain.insert(Arc::clone(auth_id));
                 event_to_next_event
                     .entry(Arc::clone(auth_id))
@@ -594,11 +594,10 @@ pub async fn prefetch(
     load(store, event_map, &mut absent, roots.iter().cloned()).await?;
 
     // 2.
-    let auth_ids: Vec<Arc<str>> = roots
-        .iter()
-        .filter_map(|id| event_map.get(id))
-        .flat_map(|event| event.auth_event_ids().iter().cloned())
-        .collect();
+    let mut auth_ids: Vec<Arc<str>> = Vec::new();
+    for event in roots.iter().filter_map(|id| event_map.get(id)) {
+        auth_ids.extend(event.auth_event_ids()?.iter().cloned());
+    }
     load(store, event_map, &mut absent, auth_ids).await?;
 
     // 3.
@@ -607,7 +606,7 @@ pub async fn prefetch(
         let mut wanted: Vec<Arc<str>> = Vec::new();
         for (id, event) in event_map.iter() {
             if is_key(event, POWER_LEVELS_KEY) && expanded.insert(Arc::clone(id)) {
-                wanted.extend(event.auth_event_ids().iter().cloned());
+                wanted.extend(event.auth_event_ids()?.iter().cloned());
             }
         }
         wanted.retain(|id| !event_map.contains_key(id) && !absent.contains(id));
@@ -836,7 +835,7 @@ impl<'a> Core<'a> {
                 yielder.tick().await;
                 graph.entry(Arc::clone(&eid)).or_default();
                 let event = self.get(&eid)?;
-                for aid in event.auth_event_ids() {
+                for aid in event.auth_event_ids()? {
                     if full_conflicted_set.contains(aid) {
                         if !graph.contains_key(aid) {
                             state.push(Arc::clone(aid));
@@ -876,7 +875,7 @@ impl<'a> Core<'a> {
 
         let mut pl = None;
         let mut create = None;
-        for aid in event.auth_event_ids() {
+        for aid in event.auth_event_ids()? {
             if let Some(aev) = self.get_opt(aid)? {
                 if is_key(aev, POWER_LEVELS_KEY) {
                     pl = Some(aev);
@@ -902,7 +901,7 @@ impl<'a> Core<'a> {
 
         let Some(pl) = pl else {
             // No power levels: check if they're the creator of the room.
-            for aid in event.auth_event_ids() {
+            for aid in event.auth_event_ids()? {
                 let Some(aev) = self.get_opt(aid)? else {
                     continue;
                 };
@@ -970,7 +969,7 @@ impl<'a> Core<'a> {
                 .with_context(|| format!("Unknown event {event_id}"))?;
 
             let mut auth_events: AuthMap<'a> = HashMap::new();
-            for aid in event.auth_event_ids() {
+            for aid in event.auth_event_ids()? {
                 match self.get_opt(aid)? {
                     None => warn!("auth_event id {aid} for event {event_id} is missing"),
                     Some(ev) => {
@@ -1052,7 +1051,7 @@ impl<'a> Core<'a> {
             }
             mainline.push(pl_ev.event_id());
             pl = None;
-            for aid in pl_ev.auth_event_ids() {
+            for aid in pl_ev.auth_event_ids()? {
                 if let Some(ev) = self.get_opt(aid)? {
                     if is_key(ev, POWER_LEVELS_KEY) {
                         pl = Some(ev);
@@ -1103,7 +1102,7 @@ impl<'a> Core<'a> {
             }
 
             tmp_event = None;
-            for aid in current.auth_event_ids() {
+            for aid in current.auth_event_ids()? {
                 if let Some(aev) = self.get_opt(aid)? {
                     if is_key(aev, POWER_LEVELS_KEY) {
                         tmp_event = Some(aev);

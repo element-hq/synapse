@@ -28,7 +28,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -58,8 +58,8 @@ pub trait Querier: Send + Sync {
 
 /// An event as the event cache holds it: the event as persisted, rejected
 /// or not, and its redacted form if a valid redaction was known when it
-/// was loaded. The auth event IDs are computed once, as state resolution
-/// reads them many times.
+/// was loaded. The auth event IDs are worked out on first use and kept, as
+/// state resolution reads them many times and most other readers never do.
 ///
 /// An event handed in from Python shares the Python object's data,
 /// including its internal metadata and unsigned data.
@@ -70,23 +70,22 @@ struct CachedEventInner {
     event: Event,
     /// The event with the redaction applied, when one was found.
     redacted: Option<Event>,
-    auth_event_ids: Box<[Arc<str>]>,
+    auth_event_ids: OnceLock<Box<[Arc<str>]>>,
 }
 
 impl CachedEvent {
     /// An event without a known redaction: one from memory rather than the
     /// database.
-    pub fn new(event: Event) -> anyhow::Result<Self> {
+    pub fn new(event: Event) -> Self {
         Self::with_redaction(event, None)
     }
 
-    pub fn with_redaction(event: Event, redacted: Option<Event>) -> anyhow::Result<Self> {
-        let auth_event_ids = auth_event_ids_of(&event)?;
-        Ok(CachedEvent(Arc::new(CachedEventInner {
+    pub fn with_redaction(event: Event, redacted: Option<Event>) -> Self {
+        CachedEvent(Arc::new(CachedEventInner {
             event,
             redacted,
-            auth_event_ids,
-        })))
+            auth_event_ids: OnceLock::new(),
+        }))
     }
 
     /// The event as persisted.
@@ -99,8 +98,17 @@ impl CachedEvent {
         self.0.redacted.as_ref()
     }
 
-    pub fn auth_event_ids(&self) -> &[Arc<str>] {
-        &self.0.auth_event_ids
+    /// The IDs of the event's auth events.
+    ///
+    /// Fails only for an event whose format derives them from internal
+    /// metadata that was never filled in. A failure is not kept, so a later
+    /// call tries again.
+    pub fn auth_event_ids(&self) -> anyhow::Result<&[Arc<str>]> {
+        if let Some(ids) = self.0.auth_event_ids.get() {
+            return Ok(ids);
+        }
+        let ids = auth_event_ids_of(&self.0.event)?;
+        Ok(self.0.auth_event_ids.get_or_init(|| ids))
     }
 
     /// The event as `behaviour` wants it: `None` for [`RedactBehaviour::Block`]
@@ -116,6 +124,15 @@ impl CachedEvent {
     /// The event as a new Python object sharing this event's data.
     pub fn to_py(&self, py: Python<'_>) -> PyResult<Py<Event>> {
         Py::new(py, self.0.event.shallow_clone())
+    }
+
+    /// The redacted form as a new Python object, if there is one.
+    pub fn redacted_to_py(&self, py: Python<'_>) -> PyResult<Option<Py<Event>>> {
+        self.0
+            .redacted
+            .as_ref()
+            .map(|redacted| Py::new(py, redacted.shallow_clone()))
+            .transpose()
     }
 }
 
@@ -422,14 +439,7 @@ impl<'a> EventLoader<'a> {
         let mut events = HashMap::with_capacity(fetched.len());
         for (event_id, redacted) in redactions {
             let row = fetched.remove(&event_id).expect("built from the same map");
-            match CachedEvent::with_redaction(row.event, redacted) {
-                Ok(event) => {
-                    events.insert(event_id, event);
-                }
-                Err(e) => {
-                    error!("Unable to load event {event_id} from the database: {e:#}");
-                }
-            }
+            events.insert(event_id, CachedEvent::with_redaction(row.event, redacted));
         }
         Ok(events)
     }

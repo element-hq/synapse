@@ -92,7 +92,7 @@ impl FakeEvent {
         if let Some(state_key) = self.state_key {
             event["state_key"] = json!(state_key);
         }
-        StateResEvent::new(make_event(&RoomVersion::V1, event)).unwrap()
+        StateResEvent::new(make_event(&RoomVersion::V1, event))
     }
 
     fn auth_types(&self) -> HashSet<(&str, &str)> {
@@ -826,7 +826,7 @@ fn power_level_for_sender() {
         if !room_version.implicit_room_creator {
             create_content["creator"] = json!(ALICE);
         }
-        let make = |partial: Value| StateResEvent::new(make_event(room_version, partial)).unwrap();
+        let make = |partial: Value| StateResEvent::new(make_event(room_version, partial));
 
         let create = make(json!({"room_id": ROOM_ID, "sender": ALICE, "type": CREATE,
                                  "state_key": "", "content": create_content}));

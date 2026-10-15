@@ -40,7 +40,7 @@ use std::{
 use crate::caches::{
     lock_ignoring_poison,
     python::{CacheHandle, PyCacheKey},
-    Cache, Weigher,
+    Cache, Indexer, Weigher,
 };
 
 /// Every cache built for one homeserver, weakly.
@@ -97,6 +97,22 @@ impl CacheRegistry {
         V: Clone + Send + Sync + 'static,
     {
         self.register(Cache::new_weighted(name, max_weight, weigher))
+    }
+
+    /// Build a cache of at most `max_size` entries with a secondary index,
+    /// enrolled for this homeserver's age-based expiry. See
+    /// [`Cache::new_indexed`].
+    pub fn new_indexed_cache<K, V>(
+        &self,
+        name: &'static str,
+        max_size: usize,
+        index_of: Indexer<V>,
+    ) -> Arc<Cache<K, V>>
+    where
+        K: PyCacheKey + Eq + Hash + Clone + Send + Sync + 'static,
+        V: Clone + Send + Sync + 'static,
+    {
+        self.register(Cache::new_indexed(name, max_size, index_of))
     }
 
     fn register<K, V>(&self, cache: Arc<Cache<K, V>>) -> Arc<Cache<K, V>>

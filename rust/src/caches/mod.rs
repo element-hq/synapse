@@ -54,7 +54,7 @@ pub mod python;
 pub mod registry;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     future::Future,
     hash::Hash,
@@ -102,6 +102,10 @@ pub fn weigh_one<V>(_: &V) -> usize {
     1
 }
 
+/// What a cache indexes its values by, as well as their key: a string the
+/// value holds. See [`Cache::new_indexed`].
+pub type Indexer<V> = fn(&V) -> &str;
+
 /// A cached value, and when it was last read.
 struct Entry<V> {
     value: V,
@@ -137,6 +141,18 @@ struct Inner<K, V> {
     /// applied. `set_cache_factor` scales this rather than the current bound,
     /// so that repeated resizes don't compound.
     original_max_weight: usize,
+
+    /// The secondary index, for a cache built with [`Cache::new_indexed`].
+    index: Option<SecondaryIndex<K, V>>,
+}
+
+/// The keys of a cache's entries, grouped by what [`Indexer`] says of each
+/// value. Kept in step with `entries` by [`Inner::insert`],
+/// [`Inner::remove`] and [`Inner::pop_lru`], which every path that adds or
+/// removes an entry goes through.
+struct SecondaryIndex<K, V> {
+    index_of: Indexer<V>,
+    keys: HashMap<Arc<str>, HashSet<K>>,
 }
 
 /// A bounded, LRU cache of values loaded from somewhere slow.
@@ -181,6 +197,32 @@ where
     /// to at most `max_weight`. A value heavier than the whole cache is never
     /// cached. Otherwise as [`Cache::new`].
     pub fn new_weighted(name: &'static str, max_weight: usize, weigher: Weigher<V>) -> Arc<Self> {
+        Self::build(name, max_weight, weigher, None)
+    }
+
+    /// Build a cache of at most `max_size` entries that also indexes its
+    /// entries by `index_of` of their values, so that
+    /// [`Cache::invalidate_index`] can drop every entry under one index key
+    /// without walking the whole cache. The event cache indexes by room, for
+    /// a room purge.
+    pub fn new_indexed(name: &'static str, max_size: usize, index_of: Indexer<V>) -> Arc<Self> {
+        Self::build(
+            name,
+            max_size,
+            weigh_one,
+            Some(SecondaryIndex {
+                index_of,
+                keys: HashMap::new(),
+            }),
+        )
+    }
+
+    fn build(
+        name: &'static str,
+        max_weight: usize,
+        weigher: Weigher<V>,
+        index: Option<SecondaryIndex<K, V>>,
+    ) -> Arc<Self> {
         let max_weight = non_zero(max_weight);
         Arc::new(Cache {
             name,
@@ -199,6 +241,7 @@ where
                 waiters: HashMap::new(),
                 next_load_id: 0,
                 original_max_weight: max_weight,
+                index,
             }),
         })
     }
@@ -311,6 +354,33 @@ where
         removed
     }
 
+    /// Drop every entry whose value the cache's [`Indexer`] maps to
+    /// `index_key`. Returns the values that were cached, for the caller to
+    /// drop. Does nothing for a cache built without an index.
+    ///
+    /// In-flight loads are left alone, as their values, and so their index
+    /// keys, aren't known yet. A caller that needs those stopped too must
+    /// invalidate their keys, or the whole cache.
+    pub fn invalidate_index(&self, index_key: &str) -> Vec<V> {
+        let mut inner = self.lock();
+
+        let keys = match &mut inner.index {
+            Some(index) => index.keys.remove(index_key).unwrap_or_default(),
+            None => return Vec::new(),
+        };
+
+        let mut removed = Vec::with_capacity(keys.len());
+        for key in &keys {
+            if let Some(value) = inner.remove(key) {
+                removed.push(value);
+            }
+        }
+        self.evicted_invalidation
+            .fetch_add(removed.len() as u64, Ordering::Relaxed);
+
+        removed
+    }
+
     /// Empty the cache, and stop every in-flight load from caching what it
     /// finds. Returns the values that were cached, for the caller to drop.
     pub fn invalidate_all(&self) -> Vec<V> {
@@ -335,9 +405,74 @@ where
     /// a caller that will go on to [`Cache::get_or_load`], which counts that
     /// lookup, if the value isn't here.
     pub fn get(&self, key: &K) -> Option<V> {
+        self.lookup(key, Counted::HitsOnly)
+    }
+
+    /// Look `key` up, as [`Cache::get`], and count `None` as a miss. For a
+    /// caller that loads what it doesn't find its own way and fills the cache
+    /// with [`Cache::insert`].
+    pub fn get_or_count_miss(&self, key: &K) -> Option<V> {
+        self.lookup(key, Counted::HitsAndMisses)
+    }
+
+    /// Look `key` up, as [`Cache::get`], without touching the hit or miss
+    /// counts. The entry is still marked as read. For Python's
+    /// `update_metrics=False`.
+    pub fn get_uncounted(&self, key: &K) -> Option<V> {
+        self.lookup(key, Counted::Nothing)
+    }
+
+    /// Mark `key`'s entry as read, as a hit would, without cloning its value.
+    /// Returns whether the key was cached.
+    ///
+    /// Not counted: the caller already has the value from somewhere else,
+    /// and decides whether that counts as a hit, with [`Cache::count_hit`].
+    pub fn touch(&self, key: &K) -> bool {
+        self.lock().touch(key, self.clock.now())
+    }
+
+    /// Mark `key`'s entry as read, as [`Cache::touch`] does, or if the key
+    /// isn't cached, cache `value()` under it. One lock, so an entry another
+    /// thread inserts meanwhile is never overwritten. Returns the values an
+    /// insert evicted, for the caller to drop.
+    pub fn touch_or_insert_with(&self, key: K, value: impl FnOnce() -> V) -> Vec<V> {
+        let now = self.clock.now();
+        let mut inner = self.lock();
+        if inner.touch(&key, now) {
+            return Vec::new();
+        }
+        let value = value();
+        let weight = (self.weigher)(&value);
+        let displaced = inner.insert(key, value, weight, now);
+        self.evicted_size
+            .fetch_add(displaced.evicted.len() as u64, Ordering::Relaxed);
+        // The key was absent, so nothing was under it.
+        debug_assert!(displaced.old.is_none());
+        displaced.evicted
+    }
+
+    /// Count a hit answered outside the cache, such as from a caller's own
+    /// memo of values it handed out.
+    pub fn count_hit(&self) {
+        self.hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Count a miss that happened outside the cache: the caller looked
+    /// somewhere else first and found nothing there either.
+    pub fn count_miss(&self) {
+        self.misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn lookup(&self, key: &K, counted: Counted) -> Option<V> {
         let value = self.lock().get(key, self.clock.now());
-        if value.is_some() {
-            self.hits.fetch_add(1, Ordering::Relaxed);
+        match (&value, counted) {
+            (Some(_), Counted::HitsOnly | Counted::HitsAndMisses) => {
+                self.hits.fetch_add(1, Ordering::Relaxed);
+            }
+            (None, Counted::HitsAndMisses) => {
+                self.misses.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
         }
         value
     }
@@ -525,7 +660,7 @@ where
 /// explicit timestamps and stay clear of the process-wide virtual clock.
 impl<K, V> Inner<K, V>
 where
-    K: Eq + Hash,
+    K: Eq + Hash + Clone,
     V: Clone,
 {
     /// Look `key` up, stamping its entry as read at `now` and moving it to the
@@ -534,6 +669,17 @@ where
         let entry = self.entries.get_mut(key)?;
         entry.last_read = now;
         Some(entry.value.clone())
+    }
+
+    /// [`Inner::get`] without the clone. Returns whether the key was here.
+    fn touch(&mut self, key: &K, now: SystemTime) -> bool {
+        match self.entries.get_mut(key) {
+            Some(entry) => {
+                entry.last_read = now;
+                true
+            }
+            None => false,
+        }
     }
 
     /// Insert an entry of `weight` read at `now`, evicting cold entries to
@@ -554,6 +700,20 @@ where
 
         let evicted = self.evict_to_fit(weight);
         self.total_weight += weight;
+        if let Some(index) = &mut self.index {
+            // Allocates the index key only for the first entry under it.
+            let index_key = (index.index_of)(&value);
+            match index.keys.get_mut(index_key) {
+                Some(keys) => {
+                    keys.insert(key.clone());
+                }
+                None => {
+                    index
+                        .keys
+                        .insert(Arc::from(index_key), HashSet::from([key.clone()]));
+                }
+            }
+        }
         let entry = Entry {
             value,
             last_read: now,
@@ -570,14 +730,30 @@ where
     fn remove(&mut self, key: &K) -> Option<V> {
         let entry = self.entries.pop(key)?;
         self.total_weight -= entry.weight;
+        self.unindex(key, &entry.value);
         Some(entry.value)
     }
 
     /// Pop the coldest entry, returning its value for the caller to drop.
     fn pop_lru(&mut self) -> Option<V> {
-        let (_, entry) = self.entries.pop_lru()?;
+        let (key, entry) = self.entries.pop_lru()?;
         self.total_weight -= entry.weight;
+        self.unindex(&key, &entry.value);
         Some(entry.value)
+    }
+
+    /// Take a removed entry out of the secondary index, if there is one.
+    fn unindex(&mut self, key: &K, value: &V) {
+        let Some(index) = &mut self.index else {
+            return;
+        };
+        let index_key = (index.index_of)(value);
+        if let Some(keys) = index.keys.get_mut(index_key) {
+            keys.remove(key);
+            if keys.is_empty() {
+                index.keys.remove(index_key);
+            }
+        }
     }
 
     /// Pop cold entries until `extra` more weight fits under the bound.
@@ -641,6 +817,14 @@ where
         let displaced = self.lock().insert(key, value, weight, now);
         drop(displaced);
     }
+}
+
+/// Which outcomes of a lookup count towards the hit and miss counters.
+#[derive(Clone, Copy)]
+enum Counted {
+    HitsOnly,
+    HitsAndMisses,
+    Nothing,
 }
 
 /// What [`Cache::start_load`] decided.
@@ -1143,5 +1327,133 @@ mod tests {
             assert_eq!(load.await.unwrap(), 7);
         });
         assert!(cache.get(&("a", 3)).is_none());
+    }
+
+    /// A cache of `(room, n)` values, indexed by room.
+    fn indexed(max_size: usize) -> Arc<Cache<&'static str, (Arc<str>, u32)>> {
+        fn room(value: &(Arc<str>, u32)) -> &str {
+            &value.0
+        }
+        Cache::new_indexed("indexed", max_size, room)
+    }
+
+    fn in_room(room: &str, n: u32) -> (Arc<str>, u32) {
+        (Arc::from(room), n)
+    }
+
+    #[test]
+    fn invalidate_index_drops_only_that_index_key() {
+        let cache = indexed(10);
+        cache.insert("a", in_room("!r1", 1));
+        cache.insert("b", in_room("!r1", 2));
+        cache.insert("c", in_room("!r2", 3));
+
+        let mut removed: Vec<u32> = cache
+            .invalidate_index("!r1")
+            .into_iter()
+            .map(|value| value.1)
+            .collect();
+        removed.sort_unstable();
+        assert_eq!(removed, vec![1, 2]);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(&"c").is_some());
+        assert_eq!(cache.eviction_counts().2, 2);
+
+        // Nothing is left under the key, and an unknown key is harmless.
+        assert!(cache.invalidate_index("!r1").is_empty());
+        assert!(cache.invalidate_index("!nope").is_empty());
+    }
+
+    /// Every way an entry leaves the cache takes it out of the index too, so
+    /// a later invalidation by index key cannot drop a re-inserted entry that
+    /// moved to another index key, nor leak keys.
+    #[test]
+    fn the_index_follows_every_removal() {
+        let cache = indexed(2);
+
+        // Replaced under a different index key.
+        cache.insert("a", in_room("!r1", 1));
+        cache.insert("a", in_room("!r2", 2));
+        assert!(cache.invalidate_index("!r1").is_empty());
+        assert_eq!(cache.get(&"a"), Some(in_room("!r2", 2)));
+
+        // Evicted for size.
+        cache.insert("b", in_room("!r3", 3));
+        cache.insert("c", in_room("!r3", 4));
+        assert!(cache.get(&"a").is_none());
+        assert!(cache.invalidate_index("!r2").is_empty());
+
+        // Invalidated by key, then by everything.
+        cache.invalidate(&"b");
+        assert_eq!(cache.invalidate_index("!r3").len(), 1);
+        cache.insert("d", in_room("!r4", 5));
+        cache.invalidate_all();
+        assert!(cache.invalidate_index("!r4").is_empty());
+
+        // Expired.
+        cache.insert_at("e", in_room("!r5", 6), at(1));
+        cache.expire_before(at(2));
+        assert!(cache.invalidate_index("!r5").is_empty());
+
+        assert!(cache.lock().index.as_ref().unwrap().keys.is_empty());
+    }
+
+    #[test]
+    fn invalidate_index_on_an_unindexed_cache_does_nothing() {
+        let cache: Arc<Cache<&'static str, (Arc<str>, u32)>> = Cache::new("plain", 10);
+        cache.insert("a", in_room("!r1", 1));
+        assert!(cache.invalidate_index("!r1").is_empty());
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn touch_marks_an_entry_as_read() {
+        let cache = cache(2);
+        assert!(!cache.touch(&"a"));
+
+        cache.insert("a", 1);
+        cache.insert("b", 2);
+        // Touching "a" makes "b" the coldest, so "b" goes for "c".
+        assert!(cache.touch(&"a"));
+        cache.insert("c", 3);
+        assert!(cache.get(&"b").is_none());
+        assert_eq!(cache.get(&"a"), Some(1));
+        // Only the `get` counted.
+        assert_eq!(cache.hit_counts(), (1, 0));
+    }
+
+    #[test]
+    fn touch_or_insert_keeps_what_is_there() {
+        let cache = cache(2);
+        assert!(cache.touch_or_insert_with("a", || 1).is_empty());
+        assert_eq!(cache.get(&"a"), Some(1));
+
+        // Already cached, so the value is not even built.
+        cache.touch_or_insert_with("a", || unreachable!());
+        assert_eq!(cache.get(&"a"), Some(1));
+
+        cache.insert("b", 2);
+        // "a" was touched last, so inserting "c" evicts "b".
+        cache.touch_or_insert_with("a", || unreachable!());
+        assert_eq!(cache.touch_or_insert_with("c", || 3), vec![2]);
+        assert_eq!(cache.hit_counts(), (2, 0));
+    }
+
+    #[test]
+    fn lookups_count_as_asked() {
+        let cache = cache(2);
+        cache.insert("a", 1);
+
+        assert_eq!(cache.get_or_count_miss(&"a"), Some(1));
+        assert_eq!(cache.get_or_count_miss(&"b"), None);
+        assert_eq!(cache.hit_counts(), (1, 1));
+
+        assert_eq!(cache.get_uncounted(&"a"), Some(1));
+        assert_eq!(cache.get_uncounted(&"b"), None);
+        assert_eq!(cache.hit_counts(), (1, 1));
+
+        cache.count_hit();
+        cache.count_miss();
+        assert_eq!(cache.hit_counts(), (2, 2));
     }
 }

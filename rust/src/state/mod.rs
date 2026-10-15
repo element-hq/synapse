@@ -241,7 +241,7 @@ fn event_map_from_py(
         let event = event.cast::<Event>()?.get().shallow_clone();
         map.insert(
             interner.intern(event_id.extract()?),
-            StateResEvent::new(event).map_err(|e| PyValueError::new_err(format!("{e:#}")))?,
+            StateResEvent::new(event),
         );
     }
     Ok(map)
