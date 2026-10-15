@@ -138,7 +138,13 @@ class DelayedEventsStore(SQLBaseStore):
             update_name="delayed_events_finalised_rank",
             index_name="delayed_events_finalised_rank",
             table="delayed_events",
-            columns=("user_localpart", "finalised_ts DESC", "delay_id ASC"),
+            columns=(
+                "user_localpart",
+                "finalised_ts DESC",
+                "(send_ts - delay) DESC",
+                "send_ts DESC",
+                "delay_id ASC",
+            ),
             where_clause="finalised_ts IS NOT NULL",
         )
 
@@ -370,7 +376,11 @@ class DelayedEventsStore(SQLBaseStore):
                             delay_id,
                             ROW_NUMBER() OVER (
                                 PARTITION BY user_localpart
-                                ORDER BY finalised_ts DESC, delay_id ASC
+                                ORDER BY
+                                    finalised_ts DESC,
+                                    (send_ts - delay) DESC,
+                                    send_ts DESC,
+                                    delay_id ASC
                             ) AS finalised_rank
                         FROM delayed_events
                         WHERE finalised_ts IS NOT NULL
