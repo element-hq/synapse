@@ -6,7 +6,7 @@ readme = "README.rst"
 authors = [
     { name = "Matrix.org Team and Contributors", email = "packages@matrix.org" }
 ]
-requires-python = ">=3.10.0,<4.0.0"
+requires-python = ">=3.11.0,<4.0.0"
 license = "AGPL-3.0-or-later OR LicenseRef-Element-Commercial"
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -122,7 +122,8 @@ dependencies = [
 [project.optional-dependencies]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3>=0.1"]
 postgres = [
-    "psycopg2>=2.8;platform_python_implementation != 'PyPy'",
+    # Support for Python 3.11 introduced in `psycopg2@2.9.5
+    "psycopg2>=2.9.5;platform_python_implementation != 'PyPy'",
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
 ]
@@ -182,7 +183,7 @@ all = [
     # matrix-synapse-ldap3
     "matrix-synapse-ldap3>=0.1",
     # postgres
-    "psycopg2>=2.8;platform_python_implementation != 'PyPy'",
+    "psycopg2>=2.9.5;platform_python_implementation != 'PyPy'",
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
     # saml2
@@ -199,7 +200,8 @@ all = [
     # redis
     "txredisapi>=1.4.12,<1.6.0", "hiredis>=0.3",
     # cache-memory
-    # 1.0 added support for python 3.10, our current minimum supported python version
+    # 1.0 added support for python 3.10 (previous minimum Python version but we've since
+    # moved past that and haven't had another reason to update this)
     "pympler>=1.0",
     # omitted:
     #   - test: it's useful to have this separate from dev deps in the olddeps job
@@ -308,9 +310,6 @@ dev = [
     # Towncrier min version comes from https://github.com/matrix-org/synapse/pull/3425. Rationale unclear.
     "towncrier>=18.6.0rc1",
 
-    # Used for checking the Poetry lockfile
-    "tomli>=1.2.3",
-
     # Used for checking the schema delta files
     "sqlglot>=28.0.0",
 ]
@@ -358,7 +357,7 @@ docs = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 # See https://beta.ruff.rs/docs/rules/#error-e
