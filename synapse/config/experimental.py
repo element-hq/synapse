@@ -356,20 +356,3 @@ class ExperimentalConfig(Config):
                 ("experimental", "rust_sync"),
             )
         self.rust_sync: Literal["off", "shadow", "on"] = rust_sync
-
-        # Until Python's event cache and the Rust one are the same cache, the
-        # Rust sync handler holds its own copy of every event it serves, so
-        # `rust_sync: on` is refused unless this is set. For tests and
-        # benchmarks. Drop the check once the caches are shared.
-        self.rust_sync_allow_unshared_event_cache: bool = experimental.get(
-            "rust_sync_allow_unshared_event_cache", False
-        )
-        if self.rust_sync == "on" and not self.rust_sync_allow_unshared_event_cache:
-            raise ConfigError(
-                "experimental_features.rust_sync cannot be 'on' yet: the Rust sync "
-                "handler keeps its own event cache, so every event it serves is "
-                "cached twice. Set rust_sync_allow_unshared_event_cache to accept "
-                "that. 'shadow' caches events twice as well, and computes every "
-                "room twice: use it for a time-limited comparison.",
-                ("experimental", "rust_sync"),
-            )

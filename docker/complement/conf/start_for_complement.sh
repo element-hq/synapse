@@ -138,7 +138,7 @@ fi
 # Compute sync rooms in Rust (`experimental_features.rust_sync`), allowing the
 # two event caches a test homeserver can afford.
 if [[ -n "$SYNAPSE_RUST_SYNC" ]]; then
-  sed -i "s/^experimental_features:$/experimental_features:\n  rust_sync: \"$SYNAPSE_RUST_SYNC\"\n  rust_sync_allow_unshared_event_cache: true/" /conf/shared.yaml.j2
+  sed -i "s/^experimental_features:$/experimental_features:\n  rust_sync: \"$SYNAPSE_RUST_SYNC\"/" /conf/shared.yaml.j2
 fi
 
 # Add a directory for tests to add config overrides if they want

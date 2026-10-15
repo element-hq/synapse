@@ -1326,8 +1326,6 @@ def setup_test_homeserver(
         config.experimental.rust_sync = cast(
             Literal["off", "shadow", "on"], RUST_SYNC_FOR_TESTS
         )
-        # Tests may hold every event twice.
-        config.experimental.rust_sync_allow_unshared_event_cache = True
 
     if USE_POSTGRES_FOR_TESTS:
         test_db = "synapse_test_%s" % uuid.uuid4().hex

@@ -31,8 +31,6 @@ from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Profi
 from synapse.api.errors import Codes, ResourceLimitError
 from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
-from synapse.config._base import ConfigError, RootConfig
-from synapse.config.experimental import ExperimentalConfig
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sync import (
@@ -3393,14 +3391,7 @@ class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
 class RustSyncHandlerTestCase(tests.unittest.HomeserverTestCase):
     """The Rust sync handler is only wired up on the native Rust driver."""
 
-    @override_config(
-        {
-            "experimental_features": {
-                "rust_sync": "on",
-                "rust_sync_allow_unshared_event_cache": True,
-            }
-        }
-    )
+    @override_config({"experimental_features": {"rust_sync": "on"}})
     def test_rust_sync_needs_the_rust_driver(self) -> None:
         if tests.utils.RUST_SYNC_FOR_TESTS:
             raise SkipTest("SYNAPSE_TEST_RUST_SYNC overrides the config")
@@ -3413,26 +3404,6 @@ class RustSyncHandlerTestCase(tests.unittest.HomeserverTestCase):
             # Falls back to the Python handler, with a warning.
             self.assertIsNone(sync_handler._rust_sync)
             self.assertIsNone(self.hs.get_rust_handlers().sync)
-
-    def test_rust_sync_on_needs_a_shared_event_cache(self) -> None:
-        """`rust_sync: on` is refused while every event would be cached twice."""
-        config = ExperimentalConfig(RootConfig())
-        with self.assertRaises(ConfigError):
-            config.read_config(
-                {"experimental_features": {"rust_sync": "on"}},
-                allow_secrets_in_config=False,
-            )
-
-        config.read_config(
-            {
-                "experimental_features": {
-                    "rust_sync": "on",
-                    "rust_sync_allow_unshared_event_cache": True,
-                }
-            },
-            allow_secrets_in_config=False,
-        )
-        self.assertEqual(config.rust_sync, "on")
 
     def test_rust_sync_off_by_default(self) -> None:
         sync_handler = self.hs.get_sync_handler()
@@ -3460,10 +3431,7 @@ class RustSyncDispatchTestCase(tests.unittest.HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        config["experimental_features"] = {
-            "rust_sync": "on",
-            "rust_sync_allow_unshared_event_cache": True,
-        }
+        config["experimental_features"] = {"rust_sync": "on"}
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
