@@ -165,7 +165,10 @@ impl QueueHooks for NativeHooks {
                 .await
                 .map_err(db_error)?
         } else {
-            (Vec::new(), to_device_token)
+            // Python moves an unchanged stream on to the token. Here the token
+            // is read after the check, so a change between the two would be
+            // skipped. Stay put instead.
+            (Vec::new(), request.last_device_stream_id)
         };
         if !to_device.is_empty() {
             log::debug!(
@@ -188,7 +191,7 @@ impl QueueHooks for NativeHooks {
                 .await
                 .map_err(db_error)?
         } else {
-            (device_list_token, Vec::new())
+            (request.last_device_list_stream_id, Vec::new())
         };
         if device_list.len() > device_list_limit {
             return Err(LoopError::Other(
@@ -210,11 +213,34 @@ impl QueueHooks for NativeHooks {
 
     /// The database writes of `_rust_complete`, natively. Python is only
     /// called for a sticky event batch or a module that wants to hear about
-    /// the delivered events.
+    /// the delivered events. As in Python, the module hears first, so a failed
+    /// write does not keep the news from it.
     async fn complete(&self, observer: &Observer, completion: Completion) -> Result<(), LoopError> {
         let destination = self.destination.as_str();
         if let Some(sent) = &completion.sent {
             self.metrics.record_sent(destination, sent);
+        }
+
+        // The module hears only of acknowledged PDUs, and nothing if none.
+        let notify = self.notify_delivered
+            && completion.sent.as_ref().is_some_and(|sent| {
+                sent.pdus
+                    .iter()
+                    .any(|pdu| sent.acknowledged.contains(&pdu.event_id))
+            });
+        if notify {
+            self.python
+                .call_complete(
+                    observer,
+                    Completion {
+                        to_device_stream_id: None,
+                        device_list_stream_id: None,
+                        last_stream_ordering: None,
+                        sticky: None,
+                        sent: completion.sent,
+                    },
+                )
+                .await?;
         }
 
         let writes = completion.to_device_stream_id.is_some()
@@ -247,14 +273,8 @@ impl QueueHooks for NativeHooks {
             }
         }
 
-        // The module hears only of acknowledged PDUs, and nothing if none.
-        let notify = self.notify_delivered
-            && completion.sent.as_ref().is_some_and(|sent| {
-                sent.pdus
-                    .iter()
-                    .any(|pdu| sent.acknowledged.contains(&pdu.event_id))
-            });
-        if completion.sticky.is_none() && !notify {
+        // The sticky batch finishes last, as in Python.
+        if completion.sticky.is_none() {
             return Ok(());
         }
         self.python
@@ -265,7 +285,7 @@ impl QueueHooks for NativeHooks {
                     device_list_stream_id: None,
                     last_stream_ordering: None,
                     sticky: completion.sticky,
-                    sent: if notify { completion.sent } else { None },
+                    sent: None,
                 },
             )
             .await

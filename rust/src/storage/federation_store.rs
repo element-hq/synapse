@@ -518,6 +518,32 @@ async fn cross_signing_keys(
     Ok(keys)
 }
 
+/// Decode base64 as leniently as `unpaddedbase64.decode_base64`. That takes
+/// the standard and URL-safe alphabets, skips other characters and ignores
+/// padding and trailing bits.
+fn decode_base64_lenient(data: &str) -> Result<Vec<u8>, base64::DecodeError> {
+    use base64::engine::{general_purpose, DecodePaddingMode, GeneralPurpose};
+
+    const LENIENT: GeneralPurpose = GeneralPurpose::new(
+        &base64::alphabet::STANDARD,
+        general_purpose::NO_PAD
+            .with_decode_allow_trailing_bits(true)
+            .with_decode_padding_mode(DecodePaddingMode::Indifferent),
+    );
+
+    let cleaned: String = data
+        .chars()
+        .take_while(|c| *c != '=')
+        .filter_map(|c| match c {
+            '-' => Some('+'),
+            '_' => Some('/'),
+            c if c.is_ascii_alphanumeric() || c == '+' || c == '/' => Some(c),
+            _ => None,
+        })
+        .collect();
+    LENIENT.decode(cleaned)
+}
+
 /// The device ID of a cross-signing key: the part of its one key ID after
 /// the algorithm. `get_verify_key_from_cross_signing_key` fails on anything
 /// but a single valid ed25519 key, and so does this.
@@ -535,9 +561,7 @@ fn cross_signing_key_device_id(key: &Value) -> anyhow::Result<String> {
         anyhow::bail!("Unsupported algorithm {algorithm}");
     }
     let key_data = key_data.as_str().context("Invalid key")?;
-    let bytes = base64::engine::general_purpose::STANDARD_NO_PAD
-        .decode(key_data.trim_end_matches('='))
-        .context("Invalid key")?;
+    let bytes = decode_base64_lenient(key_data).context("Invalid key")?;
     if bytes.len() != 32 {
         anyhow::bail!("Invalid key");
     }
@@ -696,11 +720,14 @@ impl Conn {
     /// Open a `READ COMMITTED` transaction. Its writes are upserts and
     /// deletes on rows only this sender writes, so it needs no retry loop.
     async fn begin(&mut self) -> anyhow::Result<()> {
+        // Set before awaiting: if we are dropped after BEGIN is sent but
+        // before it returns, the transaction is open and must be rolled back.
+        // A ROLLBACK outside one only warns.
+        self.in_transaction = true;
         self.conn()
             .batch_execute("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await
             .context("opening a transaction")?;
-        self.in_transaction = true;
         Ok(())
     }
 
@@ -892,6 +919,23 @@ mod tests {
             json!({"keys": {"ed25519:a": "too short"}}),
         ] {
             assert!(cross_signing_key_device_id(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn lenient_base64() {
+        // What `unpaddedbase64.decode_base64` returns for each.
+        let key = "01b09d11f1a12232a53273a942b4ad52f5b1633d35db7e39ebbf3dfbf01b09d1";
+        for (input, expected) in [
+            ("AbCdEfGhIjKlMnOpQrStUvWxYz0123456789+/AbCdE", key),
+            ("AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE", key),
+            ("AbCdEfGhIjKlMnOpQrStUvWxYz0123456789+/AbCdF", key),
+            ("AbCdEfGhIjKlMnOpQrStUvWxYz0123456789+/AbCdE=", key),
+            ("AbCd EfGh!", "01b09d11f1a1"),
+        ] {
+            let decoded = decode_base64_lenient(input).unwrap();
+            let hex: String = decoded.iter().map(|b| format!("{b:02x}")).collect();
+            assert_eq!(hex, expected, "{input}");
         }
     }
 

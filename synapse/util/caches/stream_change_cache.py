@@ -310,11 +310,13 @@ class StreamChangeCache:
         """
         assert isinstance(stream_pos, int)
 
-        # A listener may know of positions we have evicted, so it hears of
-        # this change even if we do nothing with it.
-        for listener in self._listeners:
-            listener(entity, stream_pos)
+        self._record_change(entity, stream_pos)
 
+        # A listener may know of positions we have evicted, so it hears of
+        # this change even if we did nothing with it.
+        self._notify_listeners(entity, stream_pos)
+
+    def _record_change(self, entity: EntityType, stream_pos: int) -> None:
         # For a change before _cache is valid (e.g. at or before the earliest known
         # stream position) there's nothing to do.
         if stream_pos <= self._earliest_known_stream_pos:
@@ -346,8 +348,15 @@ class StreamChangeCache:
         self._cache.clear()
         self._entity_to_key.clear()
         self._earliest_known_stream_pos = stream_pos
+        self._notify_listeners(None, stream_pos)
+
+    def _notify_listeners(self, entity: EntityType | None, stream_pos: int) -> None:
+        # A failing listener must not stop the others, or the caller.
         for listener in self._listeners:
-            listener(None, stream_pos)
+            try:
+                listener(entity, stream_pos)
+            except Exception:
+                logger.exception("Stream change listener for %s failed", self.name)
 
     def add_listener(self, listener: Callable[[EntityType | None, int], None]) -> int:
         """Call `listener(entity, stream_pos)` with every later change, and

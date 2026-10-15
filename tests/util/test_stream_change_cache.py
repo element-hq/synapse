@@ -324,3 +324,21 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         cache.all_entities_changed(6)
 
         self.assertEqual(heard, [("b", 4), ("c", 5), ("b", 4), (None, 6)])
+
+    def test_failing_listener(self) -> None:
+        """A listener that raises does not stop the cache or later listeners."""
+        cache = StreamChangeCache(
+            name="#test", server_name=self.hs.hostname, current_stream_pos=1
+        )
+
+        def fail(entity: str | None, stream_pos: int) -> None:
+            raise RuntimeError("listener failed")
+
+        heard: list[tuple[str | None, int]] = []
+        cache.add_listener(fail)
+        cache.add_listener(lambda e, pos: heard.append((e, pos)))
+
+        cache.entity_has_changed("a", 2)
+
+        self.assertTrue(cache.has_entity_changed("a", 1))
+        self.assertEqual(heard, [("a", 2)])

@@ -27,15 +27,15 @@ from unittest.mock import AsyncMock
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.presence import UserPresenceState
+from synapse.events import EventBase
 from synapse.federation.sender import FederationSender
 from synapse.federation.sender.per_destination_queue import PerDestinationQueue
 from synapse.federation.sender.rust_queue import (
     RustPerDestinationQueue,
     use_native_store,
 )
-from synapse.federation.sender.transaction_manager import last_pdu_ts_metric
 from synapse.federation.units import Edu
-from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
+from synapse.metrics import REGISTRY, SERVER_NAME_LABEL, sent_transactions_counter
 from synapse.module_api.callbacks.federation import (
     FederatedEventDeliveryMethod,
     FederationEventDeliveryEvent,
@@ -105,11 +105,11 @@ class RustQueuesTestCase(unittest.HomeserverTestCase):
         user = self.register_user("user", "pass")
         tok = self.login("user", "pass")
         room_id = self.helper.create_room_as(user, tok=tok)
-        self.helper.send(room_id, "hello", tok=tok)
+        self.room_id = room_id
+        self.tok = tok
 
         self.store = hs.get_datastores().main
-        event_ids = self.get_success(self.store.get_latest_event_ids_in_room(room_id))
-        self.event = self.get_success(self.store.get_event(next(iter(event_ids))))
+        self.event = self._send_event("hello")
 
         queue = sender._get_per_destination_queue(DEST)
         assert isinstance(queue, RustPerDestinationQueue)
@@ -119,6 +119,10 @@ class RustQueuesTestCase(unittest.HomeserverTestCase):
         self, transactions: RustTransactionManager
     ) -> RustDestinationQueues:
         return RustDestinationQueues(transactions, False, {DEST})
+
+    def _send_event(self, body: str) -> EventBase:
+        event_id = self.helper.send(self.room_id, body, tok=self.tok)["event_id"]
+        return self.get_success(self.store.get_event(event_id))
 
     def _settle(self) -> None:
         wait_for_rust_queues(self.reactor, self.queues)
@@ -378,20 +382,35 @@ class RustQueuesNativeTestCase(RustQueuesTestCase):
         self.assertEqual(pokes, [])
 
     def test_metrics(self) -> None:
-        """The loops' counts reach the Python metrics when collected."""
+        """The loops' counts reach the Python metrics in a scrape."""
         self._catch_up()
-        self.transport.responses.append(json_response(200, {}))
-        sent_before = self._sent_transactions()
 
-        self.queue.send_pdu(self.event)
+        def scrape(name: str, **labels: str) -> float | None:
+            # Collecting the registry runs the pre-collect hooks first.
+            return REGISTRY.get_sample_value(
+                name, {SERVER_NAME_LABEL: self.hs.hostname, **labels}
+            )
+
+        sent_before = scrape("synapse_federation_client_sent_transactions_total")
+        assert sent_before is not None
+
+        # A new event, so the gauge can only hold its time if this send set it.
+        self.reactor.advance(10)
+        event = self._send_event("again")
+        self.assertNotEqual(event.origin_server_ts, self.event.origin_server_ts)
+        self.transport.responses.append(json_response(200, {}))
+        self.queue.send_pdu(event)
         self._settle()
 
-        self.assertEqual(self._sent_transactions(), sent_before + 1)
         self.assertEqual(
-            last_pdu_ts_metric.labels(
-                destination_server_name=DEST, **{SERVER_NAME_LABEL: self.hs.hostname}
-            )._value.get(),
-            self.event.origin_server_ts / 1000,
+            scrape("synapse_federation_client_sent_transactions_total"),
+            sent_before + 1,
+        )
+        self.assertEqual(
+            scrape(
+                "synapse_federation_last_sent_pdu_time", destination_server_name=DEST
+            ),
+            event.origin_server_ts / 1000,
         )
 
 
