@@ -562,6 +562,7 @@ class FederationEventHandler:
         # Additional validation is performed on the returned events prior to persisting in MSC4242 rooms.
         if room_version.msc4242_state_dags:
             # The join event was built by the remote server, not us. We need to make sure it is valid.
+            # TODO: we almost certainly want to apply this to all room versions.
             self._sanity_check_event(event)
             if not is_state_dag_connected(
                 [

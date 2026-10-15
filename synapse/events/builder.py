@@ -154,7 +154,7 @@ class EventBuilder:
                 Only applicable on MSC4242 state DAG rooms. If this is supplied, auth_event_ids
                 must not be specified unless this event is part of a batch such that the builder
                 will be unable to compute the auth_event_ids due to the events not being persisted
-                yet.
+                yet. The event IDs will be trimmed to StateDag.MAX_PREV_STATE_EVENTS.
         Returns:
             The signed and hashed event.
         """
