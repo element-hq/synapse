@@ -22,6 +22,7 @@
 //! - [`client`]: the request layer: signing, retries and the backoff.
 //! - [`gil`]: accounting for every time this code takes the GIL.
 //! - [`signing`]: the `X-Matrix` request signature.
+//! - [`transaction`]: builds and sends `/send` transactions.
 //! - [`transport`]: the seam between the request layer and the network, with
 //!   a Python-backed implementation for tests.
 
@@ -31,6 +32,7 @@ pub mod agent;
 pub mod client;
 pub mod gil;
 pub mod signing;
+pub mod transaction;
 pub mod transport;
 
 use signing::{make_auth_header, CanonicalBody, Destination, FederationSigningKey};
@@ -87,6 +89,8 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_function(wrap_pyfunction!(gil::federation_gil_stats, &child_module)?)?;
     child_module.add_class::<agent::python::RustFederationAgentForTest>()?;
     child_module.add_class::<client::python::RustFederationClient>()?;
+    child_module.add_class::<transaction::python::RustTransaction>()?;
+    child_module.add_class::<transaction::python::RustTransactionManager>()?;
 
     m.add_submodule(&child_module)?;
 

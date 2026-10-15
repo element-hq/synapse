@@ -31,7 +31,7 @@ use super::{
 use crate::clock::TokioSleeper;
 
 /// What the scripted transport does with the next request.
-enum Step {
+pub(crate) enum Step {
     Respond(u16, &'static str),
     Fail(fn() -> TransportError),
     /// Never answer.
@@ -39,20 +39,20 @@ enum Step {
 }
 
 #[derive(Default)]
-struct ScriptedTransport {
+pub(crate) struct ScriptedTransport {
     steps: Mutex<VecDeque<Step>>,
     seen: Mutex<Vec<(Request<Bytes>, Instant)>>,
 }
 
 impl ScriptedTransport {
-    fn new(steps: impl IntoIterator<Item = Step>) -> Arc<Self> {
+    pub(crate) fn new(steps: impl IntoIterator<Item = Step>) -> Arc<Self> {
         Arc::new(ScriptedTransport {
             steps: Mutex::new(steps.into_iter().collect()),
             seen: Mutex::default(),
         })
     }
 
-    fn seen(&self) -> Vec<Request<Bytes>> {
+    pub(crate) fn seen(&self) -> Vec<Request<Bytes>> {
         self.seen
             .lock()
             .unwrap()
@@ -106,9 +106,9 @@ impl FederationTransport for ScriptedTransport {
 }
 
 #[derive(Default)]
-struct MemoryTimings {
+pub(crate) struct MemoryTimings {
     rows: Mutex<HashMap<String, RetryTimings>>,
-    updates: Mutex<Vec<(String, TimingsUpdate)>>,
+    pub(crate) updates: Mutex<Vec<(String, TimingsUpdate)>>,
 }
 
 #[async_trait]
@@ -125,8 +125,8 @@ impl RetryTimingsStore for MemoryTimings {
     }
 }
 
-const ORIGIN: &str = "origin.example";
-const DEST: &str = "remote.example";
+pub(crate) const ORIGIN: &str = "origin.example";
+pub(crate) const DEST: &str = "remote.example";
 
 fn signing_key() -> FederationSigningKey {
     FederationSigningKey::new("ed25519", "k1", &[7u8; 32]).unwrap()
@@ -152,7 +152,7 @@ fn config() -> ClientConfig {
 }
 
 /// The virtual epoch the client's clock starts at.
-const EPOCH_MS: u64 = 1_000_000;
+pub(crate) const EPOCH_MS: u64 = 1_000_000;
 
 fn client_with(
     config: ClientConfig,
@@ -170,7 +170,9 @@ fn client_with(
     .with_jitter(1.0)
 }
 
-fn new_client(transport: Arc<ScriptedTransport>) -> (FederationClient, Arc<MemoryTimings>) {
+pub(crate) fn new_client(
+    transport: Arc<ScriptedTransport>,
+) -> (FederationClient, Arc<MemoryTimings>) {
     let timings = Arc::new(MemoryTimings::default());
     (
         client_with(config(), transport, Arc::clone(&timings)),

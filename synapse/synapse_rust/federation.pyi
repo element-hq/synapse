@@ -17,6 +17,7 @@ from signedjson.types import SigningKey
 from twisted.internet.defer import Deferred
 
 from synapse.server import HomeServer
+from synapse.synapse_rust.events import Event
 from synapse.types import JsonDict
 
 def build_auth_header_for_test(
@@ -143,3 +144,58 @@ class RustFederationClient:
 
     def wake_destination(self, destination: str) -> None:
         """End the sleep before any retry to `destination`."""
+
+class RustTransaction:
+    """A transaction built by `RustTransactionManager`, with the attributes of
+    `synapse.federation.units.Transaction`."""
+
+    @property
+    def transaction_id(self) -> str: ...
+    @property
+    def origin(self) -> str: ...
+    @property
+    def destination(self) -> str: ...
+    @property
+    def origin_server_ts(self) -> int: ...
+    @property
+    def pdus(self) -> list[JsonDict]: ...
+    @property
+    def edus(self) -> list[JsonDict]: ...
+    def get_dict(self) -> JsonDict:
+        """The request body, as `Transaction.get_dict` gives it."""
+
+class RustTransactionManager:
+    """Builds and sends `/send` transactions through a `RustFederationClient`,
+    at `rust_federation_sending: transactions`."""
+
+    def __init__(self, client: RustFederationClient) -> None: ...
+    def send_transaction(
+        self,
+        destination: str,
+        pdus: Sequence[Event],
+        edus: Sequence[JsonDict],
+        *,
+        extra_headers: Sequence[tuple[str, str]] = (),
+        want_acknowledged: bool = False,
+        check: Callable[[RustTransaction], None] | None = None,
+    ) -> Deferred[list[str] | None]:
+        """Send `pdus` and `edus` to `destination` in one transaction.
+
+        Resolves to the ids of the PDUs the remote accepted if
+        `want_acknowledged`, else `None`. Raises what `put_json` raises.
+
+        `check`, for tests, is called with the transaction before it is sent,
+        and may raise to stop the send.
+        """
+
+    def build_transaction(
+        self, destination: str, pdus: Sequence[Event], edus: Sequence[JsonDict]
+    ) -> RustTransaction:
+        """Build the transaction `send_transaction` would send, without sending
+        it. For tests."""
+
+    def acknowledged_pdus(
+        self, transaction: RustTransaction, response: JsonDict
+    ) -> list[str]:
+        """The ids of the PDUs `response` accepts, logging the ones it rejects.
+        For tests."""

@@ -713,6 +713,27 @@ impl FederationClient {
     }
 }
 
+/// `check_content_type_is`.
+pub(crate) fn check_content_type(headers: &HeaderMap, expected: &str) -> Result<(), ClientError> {
+    let failed = |message: String| ClientError::SendFailed {
+        cause: FailureCause::ContentType(message),
+        can_retry: false,
+    };
+    let Some(value) = headers.get(header::CONTENT_TYPE) else {
+        return Err(failed(
+            "No Content-Type header received from remote server".to_owned(),
+        ));
+    };
+    let value = String::from_utf8_lossy(value.as_bytes());
+    let essence = value.split(';').next().unwrap_or_default().trim();
+    if essence != expected {
+        return Err(failed(format!(
+            "Remote server sent Content-Type header of '{value}', not '{expected}'"
+        )));
+    }
+    Ok(())
+}
+
 /// The reason phrase the server sent, else the standard one.
 fn reason_phrase(parts: &http::response::Parts) -> String {
     if let Some(phrase) = parts.extensions.get::<hyper::ext::ReasonPhrase>() {
@@ -776,4 +797,4 @@ fn rewrite_age_ts(body: &mut Value, now_ms: u64) {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

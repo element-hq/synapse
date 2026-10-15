@@ -33,7 +33,7 @@ use std::{
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
-use http::{header, HeaderMap, HeaderValue, Method};
+use http::{HeaderMap, HeaderValue, Method};
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     intern,
@@ -43,6 +43,7 @@ use pyo3::{
 use serde_json::Value;
 
 use super::{
+    check_content_type,
     limiter::{BackoffConfig, RetryTimings, RetryTimingsStore, TimingsUpdate},
     ClientConfig, ClientError, FailureCause, FederationClient, FederationRequest, HttpError,
     RequestOptions, RequestStats, SentResponse,
@@ -61,7 +62,7 @@ use crate::{
 };
 
 /// The response size limit of Python's JSON parsers.
-const MAX_JSON_RESPONSE_SIZE: usize = 100 * 1024 * 1024;
+pub(crate) const MAX_JSON_RESPONSE_SIZE: usize = 100 * 1024 * 1024;
 
 /// How much of the body to collect before handing it to a Python parser.
 const PARSER_CHUNK_SIZE: usize = 64 * 1024;
@@ -142,11 +143,11 @@ impl RetryTimingsStore for StoreRetryTimings {
 /// The Rust federation client.
 #[pyclass(frozen, name = "RustFederationClient")]
 pub struct RustFederationClient {
-    client: Arc<FederationClient>,
-    runtime: RustRuntime,
+    pub(crate) client: Arc<FederationClient>,
+    pub(crate) runtime: RustRuntime,
     /// `record(method, attempts, response_codes)`, which bumps the request
     /// and response counters.
-    record_metrics: Arc<Py<PyAny>>,
+    pub(crate) record_metrics: Arc<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -565,27 +566,6 @@ fn feed_parser(parser: &Py<PyAny>, chunk: Bytes) -> PyResult<()> {
     })
 }
 
-/// `check_content_type_is`.
-fn check_content_type(headers: &HeaderMap, expected: &str) -> Result<(), ClientError> {
-    let failed = |message: String| ClientError::SendFailed {
-        cause: FailureCause::ContentType(message),
-        can_retry: false,
-    };
-    let Some(value) = headers.get(header::CONTENT_TYPE) else {
-        return Err(failed(
-            "No Content-Type header received from remote server".to_owned(),
-        ));
-    };
-    let value = String::from_utf8_lossy(value.as_bytes());
-    let essence = value.split(';').next().unwrap_or_default().trim();
-    if essence != expected {
-        return Err(failed(format!(
-            "Remote server sent Content-Type header of '{value}', not '{expected}'"
-        )));
-    }
-    Ok(())
-}
-
 /// The shape check of `JsonParser` and `LegacyJsonSendParser`.
 fn validate_json(parser: &Parser, value: &Value) -> Result<(), String> {
     let valid = match parser {
@@ -609,7 +589,7 @@ fn validate_json(parser: &Parser, value: &Value) -> Result<(), String> {
 }
 
 /// The name of the Python type a JSON value decodes to.
-fn python_type_name(value: &Value) -> &'static str {
+pub(crate) fn python_type_name(value: &Value) -> &'static str {
     match value {
         Value::Null => "NoneType",
         Value::Bool(_) => "bool",
@@ -720,7 +700,11 @@ fn canonical_header_name(name: &str) -> String {
 }
 
 /// `RequestSendFailed(inner, can_retry)`.
-fn request_send_failed(py: Python<'_>, inner: Bound<'_, PyAny>, can_retry: bool) -> PyErr {
+pub(crate) fn request_send_failed(
+    py: Python<'_>,
+    inner: Bound<'_, PyAny>,
+    can_retry: bool,
+) -> PyErr {
     let built = (|| {
         py.import("synapse.api.errors")?
             .getattr("RequestSendFailed")?
@@ -753,7 +737,7 @@ fn http_exception<'py>(py: Python<'py>, err: &HttpError) -> PyResult<Bound<'py, 
 }
 
 /// The exception Python raises for `err`.
-fn client_error_to_py(py: Python<'_>, err: ClientError, destination: &str) -> PyErr {
+pub(crate) fn client_error_to_py(py: Python<'_>, err: ClientError, destination: &str) -> PyErr {
     let built = (|| -> PyResult<PyErr> {
         Ok(match err {
             ClientError::Denied => PyErr::from_value(build_exception(
