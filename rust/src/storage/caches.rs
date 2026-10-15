@@ -239,11 +239,13 @@ impl StoreCaches {
     }
 
     /// Drop what is cached about a room's events, for a purge: the events,
-    /// by the event cache's room index, and every chain position, chain link
-    /// and state group. A purge deletes the room's chains, links and state
+    /// by the event cache's room index, every event load in flight, and every
+    /// chain position, chain link and state group. A purge deletes the room's chains, links and state
     /// groups, and those caches are keyed on IDs rather than room.
     pub fn invalidate_room(&self, room_id: &str) {
         drop(self.events.invalidate_index(room_id));
+        // The room of an event being loaded isn't known until it arrives.
+        self.events.abandon_loads();
         drop(self.chain_positions.invalidate_all());
         drop(self.chain_links.invalidate_all());
         drop(self.state_groups.invalidate_all());

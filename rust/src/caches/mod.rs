@@ -80,6 +80,11 @@ impl SharedError {
     fn new(error: anyhow::Error) -> Self {
         SharedError(Arc::new(error))
     }
+
+    /// The load's error, for a caller that needs to tell errors apart.
+    pub fn inner(&self) -> &anyhow::Error {
+        &self.0
+    }
 }
 
 impl fmt::Display for SharedError {
@@ -92,6 +97,10 @@ impl fmt::Display for SharedError {
 }
 
 impl std::error::Error for SharedError {}
+
+/// What a waiter on an in-flight load gets: the value, `None` if a batch
+/// load did not find the key, or the load's error.
+type LoadAnswer<V> = Result<Option<V>, SharedError>;
 
 /// How much a cached value counts towards the cache's bound.
 pub type Weigher<V> = fn(&V) -> usize;
@@ -132,8 +141,10 @@ struct Inner<K, V> {
     /// to populate the cache if the id it started with is still the one here.
     pending: HashMap<K, u64>,
 
-    /// Callers waiting on an in-flight load, keyed by that load's id.
-    waiters: HashMap<u64, Vec<oneshot::Sender<Result<V, SharedError>>>>,
+    /// Callers waiting on an in-flight load, keyed by that load's id. A
+    /// batch load ([`Cache::get_or_load_many`]) answers `None` for a key it
+    /// did not find.
+    waiters: HashMap<u64, Vec<oneshot::Sender<LoadAnswer<V>>>>,
 
     next_load_id: u64,
 
@@ -269,10 +280,17 @@ where
                     // It is counted here rather than when we joined, because
                     // a leader can go away before it answers, and then we go
                     // round again and get charged as whatever we become.
-                    Ok(result) => {
+                    Ok(Ok(Some(value))) => {
                         self.hits.fetch_add(1, Ordering::Relaxed);
-                        return result;
+                        return Ok(value);
                     }
+                    Ok(Err(e)) => {
+                        self.hits.fetch_add(1, Ordering::Relaxed);
+                        return Err(e);
+                    }
+                    // A batch load did not find the key. This load may
+                    // know better, so go round again.
+                    Ok(Ok(None)) => continue,
                     // The sender went away, which means the caller that was
                     // loading this key was dropped or panicked before it could
                     // finish. Go round again. One of us will pick the work up.
@@ -297,6 +315,72 @@ where
 
             return self.finish_load(key, load_id, result);
         }
+    }
+
+    /// Look `keys` up, loading those that aren't here with one call to
+    /// `load`. The answer leaves out the keys that `load` did not find, and
+    /// may hold extra keys `load` returned, which are not cached.
+    ///
+    /// Each key coalesces with the loads in flight as in
+    /// [`Cache::get_or_load`], whether those are single or batched: a key
+    /// that another caller is loading is waited for rather than loaded
+    /// again, and the rest are loaded together. A key invalidated while its
+    /// load is in flight is answered but not cached.
+    ///
+    /// `load` runs again, for the keys still missing, only if a caller we
+    /// were waiting on went away before answering.
+    pub async fn get_or_load_many<F, Fut>(
+        &self,
+        keys: &[K],
+        mut load: F,
+    ) -> Result<HashMap<K, V>, SharedError>
+    where
+        F: FnMut(Vec<K>) -> Fut,
+        Fut: Future<Output = Result<HashMap<K, V>, anyhow::Error>>,
+    {
+        let mut found: HashMap<K, V> = HashMap::with_capacity(keys.len());
+        let mut wanted: Vec<K> = Vec::with_capacity(keys.len());
+        let mut seen: HashSet<&K> = HashSet::with_capacity(keys.len());
+        for key in keys {
+            if seen.insert(key) {
+                wanted.push(key.clone());
+            }
+        }
+
+        while !wanted.is_empty() {
+            let StartedLoads { leads, waiting } = self.start_loads(&wanted, &mut found);
+            wanted.clear();
+
+            if !leads.is_empty() {
+                // As in `get_or_load`, the guard clears our pending markers
+                // if `load` panics or this future is dropped.
+                let guard = BatchLoadGuard {
+                    cache: self,
+                    leads: &leads,
+                    armed: true,
+                };
+                let lead_keys = leads.iter().map(|(key, _)| key.clone()).collect();
+                let result = load(lead_keys).await.map_err(SharedError::new);
+                guard.finish();
+                found.extend(self.finish_loads(leads, result)?);
+            }
+
+            for (key, receiver) in waiting {
+                match receiver.await {
+                    Ok(Ok(Some(value))) => {
+                        self.hits.fetch_add(1, Ordering::Relaxed);
+                        found.insert(key, value);
+                    }
+                    // The load we joined did not find it either.
+                    Ok(Ok(None)) => {}
+                    Ok(Err(e)) => return Err(e),
+                    // The caller loading it went away. Go round again.
+                    Err(_) => wanted.push(key),
+                }
+            }
+        }
+
+        Ok(found)
     }
 
     /// Drop `key` from the cache, and stop any in-flight load from caching what
@@ -379,6 +463,16 @@ where
             .fetch_add(removed.len() as u64, Ordering::Relaxed);
 
         removed
+    }
+
+    /// Stop every in-flight load from caching what it finds, leaving the
+    /// cached entries alone. Callers waiting on those loads still get their
+    /// results.
+    ///
+    /// For an invalidation that cannot name the keys of the loads it
+    /// affects, such as [`Cache::invalidate_index`].
+    pub fn abandon_loads(&self) {
+        self.lock().pending.clear();
     }
 
     /// Empty the cache, and stop every in-flight load from caching what it
@@ -625,6 +719,91 @@ where
         Started::Lead(load_id)
     }
 
+    /// [`Cache::start_load`] for each of `keys`, under one lock: hits go
+    /// into `found`, and the rest come back as the keys this caller loads,
+    /// with their load ids, and the keys it waits on someone else for.
+    fn start_loads(&self, keys: &[K], found: &mut HashMap<K, V>) -> StartedLoads<K, V> {
+        let mut leads = Vec::new();
+        let mut waiting = Vec::new();
+        let mut inner = self.lock();
+        let now = self.clock.now();
+        for key in keys {
+            if let Some(value) = inner.get(key, now) {
+                self.hits.fetch_add(1, Ordering::Relaxed);
+                found.insert(key.clone(), value);
+                continue;
+            }
+            if let Some(&load_id) = inner.pending.get(key) {
+                // Counted as a hit once the load answers.
+                let (sender, receiver) = oneshot::channel();
+                inner.waiters.entry(load_id).or_default().push(sender);
+                waiting.push((key.clone(), receiver));
+                continue;
+            }
+            self.misses.fetch_add(1, Ordering::Relaxed);
+            let load_id = inner.next_load_id;
+            inner.next_load_id += 1;
+            inner.pending.insert(key.clone(), load_id);
+            leads.push((key.clone(), load_id));
+        }
+        StartedLoads { leads, waiting }
+    }
+
+    /// [`Cache::finish_load`] for a batch: cache each loaded key that is
+    /// still wanted, and answer everyone waiting on one, with `None` for a
+    /// key the load did not find. Returns everything the load returned.
+    fn finish_loads(
+        &self,
+        leads: Vec<(K, u64)>,
+        result: Result<HashMap<K, V>, SharedError>,
+    ) -> Result<HashMap<K, V>, SharedError> {
+        let mut answers = Vec::new();
+        let mut displaced_values = Vec::new();
+        {
+            let mut inner = self.lock();
+            let now = self.clock.now();
+            for (key, load_id) in leads {
+                let still_current = inner.pending.get(&key) == Some(&load_id);
+                if still_current {
+                    inner.pending.remove(&key);
+                }
+                let waiters = inner.waiters.remove(&load_id).unwrap_or_default();
+                let answer = match &result {
+                    Ok(loaded) => {
+                        let value = loaded.get(&key).cloned();
+                        if let (Some(value), true) = (&value, still_current) {
+                            let weight = (self.weigher)(value);
+                            let mut displaced = inner.insert(key, value.clone(), weight, now);
+                            // As in `finish_load`: what `insert` put there
+                            // meanwhile is no fresher than this.
+                            displaced.evicted.extend(displaced.old.take());
+                            self.evicted_size
+                                .fetch_add(displaced.evicted.len() as u64, Ordering::Relaxed);
+                            displaced_values.extend(displaced.evicted);
+                        }
+                        Ok(value)
+                    }
+                    Err(e) => Err(e.clone()),
+                };
+                if !waiters.is_empty() {
+                    answers.push((waiters, answer));
+                }
+            }
+        }
+
+        // With the lock released. See the module docs.
+        drop(displaced_values);
+
+        for (waiters, answer) in answers {
+            for waiter in waiters {
+                // An error means the waiter gave up, which is fine.
+                let _ = waiter.send(answer.clone());
+            }
+        }
+
+        result
+    }
+
     /// Publish the result of a load: cache it if it is still wanted, and hand
     /// it to everyone who was waiting.
     fn finish_load(
@@ -670,7 +849,7 @@ where
 
         for waiter in waiters {
             // An error means the waiter gave up, which is fine.
-            let _ = waiter.send(result.clone());
+            let _ = waiter.send(result.clone().map(Some));
         }
 
         result
@@ -869,7 +1048,15 @@ enum Started<V> {
     Lead(u64),
     Cached(V),
     /// Someone else is loading this key. The result arrives here.
-    Waiting(oneshot::Receiver<Result<V, SharedError>>),
+    Waiting(oneshot::Receiver<LoadAnswer<V>>),
+}
+
+/// What [`Cache::start_loads`] decided for the keys it did not find cached.
+struct StartedLoads<K, V> {
+    /// The keys the caller loads, with their load ids.
+    leads: Vec<(K, u64)>,
+    /// The keys someone else is loading, with where their answers arrive.
+    waiting: Vec<(K, oneshot::Receiver<LoadAnswer<V>>)>,
 }
 
 /// Releases a key's pending marker if the load never completes.
@@ -912,6 +1099,43 @@ impl<K: Eq + Hash + Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'sta
         // Dropping the senders wakes everyone waiting on us with a cancelled
         // channel, which sends them back around to retry.
         inner.waiters.remove(&self.load_id);
+    }
+}
+
+/// [`LoadGuard`] for the keys of a batch load.
+struct BatchLoadGuard<
+    'a,
+    K: Eq + Hash + Clone + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+> {
+    cache: &'a Cache<K, V>,
+    leads: &'a [(K, u64)],
+    armed: bool,
+}
+
+impl<K: Eq + Hash + Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static>
+    BatchLoadGuard<'_, K, V>
+{
+    fn finish(mut self) {
+        self.armed = false;
+    }
+}
+
+impl<K: Eq + Hash + Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static> Drop
+    for BatchLoadGuard<'_, K, V>
+{
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+
+        let mut inner = self.cache.lock();
+        for (key, load_id) in self.leads {
+            if inner.pending.get(key) == Some(load_id) {
+                inner.pending.remove(key);
+            }
+            inner.waiters.remove(load_id);
+        }
     }
 }
 
@@ -1331,6 +1555,240 @@ mod tests {
         // going back to 1.0 restores the original.
         assert!(cache.set_cache_factor(1.0).is_empty());
         assert_eq!(cache.max_size(), 4);
+    }
+
+    /// A batch loader over `values`, recording the keys of each call.
+    fn batch_loader<'a>(
+        values: &'a [(&'static str, u32)],
+        calls: &'a Mutex<Vec<Vec<&'static str>>>,
+    ) -> impl FnMut(
+        Vec<&'static str>,
+    ) -> std::future::Ready<Result<HashMap<&'static str, u32>, anyhow::Error>>
+           + 'a {
+        move |keys| {
+            let mut sorted = keys.clone();
+            sorted.sort_unstable();
+            calls.lock().unwrap().push(sorted);
+            let found = values
+                .iter()
+                .filter(|(key, _)| keys.contains(key))
+                .cloned()
+                .collect();
+            std::future::ready(Ok(found))
+        }
+    }
+
+    #[test]
+    fn a_batch_loads_only_the_misses_in_one_call() {
+        let cache = cache(10);
+        cache.insert("a", 1);
+        let calls = Mutex::new(Vec::new());
+        let values = [("b", 2), ("c", 3)];
+
+        let found = block_on(cache.get_or_load_many(
+            &["a", "b", "c", "b", "missing"],
+            batch_loader(&values, &calls),
+        ))
+        .unwrap();
+
+        assert_eq!(found, HashMap::from([("a", 1), ("b", 2), ("c", 3)]));
+        assert_eq!(*calls.lock().unwrap(), vec![vec!["b", "c", "missing"]]);
+        // Found keys are cached, a key that was not found is not.
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.hit_counts(), (1, 3));
+    }
+
+    #[test]
+    fn a_batch_returns_but_does_not_cache_extra_keys() {
+        let cache = cache(10);
+        let found = block_on(cache.get_or_load_many(&["a"], |_| {
+            std::future::ready(Ok(HashMap::from([("a", 1), ("extra", 2)])))
+        }))
+        .unwrap();
+
+        assert_eq!(found, HashMap::from([("a", 1), ("extra", 2)]));
+        assert_eq!(cache.get(&"extra"), None);
+        assert_eq!(cache.get(&"a"), Some(1));
+    }
+
+    #[test]
+    fn a_batch_joins_a_load_in_flight() {
+        let cache = cache(10);
+        let starts = AtomicUsize::new(0);
+        let (loader, release) = GatedLoader::new(7, &starts);
+        let calls = Mutex::new(Vec::new());
+        let values = [("a", 99), ("b", 2)];
+
+        let (single, batch) = block_on(async {
+            let mut single = pin!(cache.get_or_load("a", || loader.load()));
+            poll_fn(|cx| {
+                assert!(single.poll_unpin(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+
+            let mut batch =
+                pin!(cache.get_or_load_many(&["a", "b"], batch_loader(&values, &calls)));
+            poll_fn(|cx| {
+                // "b" is loaded at once, and the batch waits on "a".
+                assert!(batch.poll_unpin(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+
+            release.send(()).unwrap();
+            (single.await.unwrap(), batch.await.unwrap())
+        });
+
+        assert_eq!(single, 7);
+        assert_eq!(batch, HashMap::from([("a", 7), ("b", 2)]));
+        assert_eq!(*calls.lock().unwrap(), vec![vec!["b"]]);
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn invalidating_a_key_of_a_batch_in_flight_does_not_cache_it() {
+        let cache = cache(10);
+        let (release, gate) = oneshot::channel::<()>();
+        let gate = gate.shared();
+
+        block_on(async {
+            let mut batch = pin!(cache.get_or_load_many(&["a", "b"], |keys| {
+                let gate = gate.clone();
+                async move {
+                    let _ = gate.await;
+                    Ok(keys.into_iter().map(|key| (key, 1)).collect())
+                }
+            }));
+            poll_fn(|cx| {
+                assert!(batch.poll_unpin(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+
+            cache.invalidate(&"a");
+            release.send(()).unwrap();
+            assert_eq!(batch.await.unwrap().len(), 2);
+        });
+
+        assert_eq!(cache.get(&"a"), None);
+        assert_eq!(cache.get(&"b"), Some(1));
+    }
+
+    #[test]
+    fn abandoned_loads_answer_but_do_not_cache() {
+        let cache = cache(10);
+        let starts = AtomicUsize::new(0);
+        let (loader, release) = GatedLoader::new(7, &starts);
+
+        block_on(async {
+            let mut load = pin!(cache.get_or_load("a", || loader.load()));
+            poll_fn(|cx| {
+                assert!(load.poll_unpin(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+
+            cache.abandon_loads();
+            release.send(()).unwrap();
+            assert_eq!(load.await.unwrap(), 7);
+        });
+
+        assert_eq!(cache.len(), 0);
+    }
+
+    /// A single load waiting on a batch that did not find its key runs its
+    /// own load rather than failing.
+    #[test]
+    fn a_single_load_waiting_on_a_batch_miss_loads_itself() {
+        let cache = cache(10);
+        let (release, gate) = oneshot::channel::<()>();
+        let gate = gate.shared();
+        let loads = AtomicUsize::new(0);
+
+        let value = block_on(async {
+            let mut batch = pin!(cache.get_or_load_many(&["a"], |_| {
+                let gate = gate.clone();
+                async move {
+                    let _ = gate.await;
+                    Ok(HashMap::new())
+                }
+            }));
+            let mut single = pin!(cache.get_or_load("a", counting_loader(5, &loads)));
+            poll_fn(|cx| {
+                assert!(batch.poll_unpin(cx).is_pending());
+                assert!(single.poll_unpin(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+
+            release.send(()).unwrap();
+            assert!(batch.await.unwrap().is_empty());
+            single.await.unwrap()
+        });
+
+        assert_eq!(value, 5);
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
+    }
+
+    /// A batch waiting on a load whose caller goes away loads the key itself.
+    #[test]
+    fn a_batch_waiting_on_a_dropped_load_loads_itself() {
+        let cache = cache(10);
+        let starts = AtomicUsize::new(0);
+        let (gated, _release) = GatedLoader::new(7, &starts);
+        let calls = Mutex::new(Vec::new());
+        let values = [("a", 1)];
+
+        let found = block_on(async {
+            let mut batch = pin!(cache.get_or_load_many(&["a"], batch_loader(&values, &calls)));
+            {
+                let mut leader = pin!(cache.get_or_load("a", || gated.load()));
+                poll_fn(|cx| {
+                    assert!(leader.poll_unpin(cx).is_pending());
+                    Poll::Ready(())
+                })
+                .await;
+                poll_fn(|cx| {
+                    assert!(batch.poll_unpin(cx).is_pending());
+                    Poll::Ready(())
+                })
+                .await;
+            }
+            batch.await.unwrap()
+        });
+
+        assert_eq!(found, HashMap::from([("a", 1)]));
+        assert_eq!(*calls.lock().unwrap(), vec![vec!["a"]]);
+    }
+
+    /// A dropped batch leaves none of its keys marked as loading.
+    #[test]
+    fn a_dropped_batch_does_not_wedge_its_keys() {
+        let cache = cache(10);
+        let loads = AtomicUsize::new(0);
+
+        block_on(async {
+            {
+                let mut batch = pin!(cache.get_or_load_many(&["a", "b"], |_| {
+                    futures::future::pending::<Result<HashMap<&str, u32>, anyhow::Error>>()
+                }));
+                poll_fn(|cx| {
+                    assert!(batch.poll_unpin(cx).is_pending());
+                    Poll::Ready(())
+                })
+                .await;
+            }
+            assert_eq!(
+                cache
+                    .get_or_load("b", counting_loader(2, &loads))
+                    .await
+                    .unwrap(),
+                2
+            );
+        });
+
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
     }
 
     #[test]
