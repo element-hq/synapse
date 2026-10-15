@@ -95,6 +95,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<transaction::python::RustTransactionManager>()?;
     child_module.add_class::<queue::python::RustDestinationQueues>()?;
     child_module.add_class::<queue::python::RustDestinationQueue>()?;
+    child_module.add_class::<crate::storage::federation_store::PyFederationStoreForTest>()?;
 
     m.add_submodule(&child_module)?;
 

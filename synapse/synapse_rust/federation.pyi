@@ -252,3 +252,26 @@ class RustDestinationQueue:
     def start_catching_up(self) -> None: ...
     def pending_pdu_ids(self) -> list[str]:
         """The event IDs of the queued PDUs, oldest first. For tests."""
+
+class FederationStoreForTest:
+    """The Rust federation store, for tests that compare it with Python's.
+    Each method blocks until its query is done."""
+
+    def __init__(
+        self, pool: Any, allow_device_name_lookup_over_federation: bool
+    ) -> None: ...
+    def get_new_device_msgs_for_remote(
+        self, destination: str, last_stream_id: int, current_stream_id: int, limit: int
+    ) -> tuple[list[JsonDict], int]: ...
+    def delete_device_msgs_for_remote(
+        self, destination: str, up_to_stream_id: int
+    ) -> None: ...
+    def get_device_updates_by_remote(
+        self, destination: str, from_stream_id: int, now_stream_id: int, limit: int
+    ) -> tuple[int, list[tuple[str, JsonDict]]]: ...
+    def mark_as_sent_devices_by_remote(
+        self, destination: str, stream_id: int
+    ) -> None: ...
+    def set_destination_last_successful_stream_ordering(
+        self, destination: str, stream_ordering: int
+    ) -> None: ...
