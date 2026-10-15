@@ -234,6 +234,40 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
     @override_config(
         {
             "media_retention": {
+                "local_media_lifetime": "30d",
+                # Spare any local media smaller than 100 bytes. The media created in
+                # `prepare` is only a few bytes long, so none of it should be purged.
+                "keep_local_media_below_filesize": 100,
+            }
+        }
+    )
+    def test_local_media_retention_keeps_small_media(self) -> None:
+        """
+        Tests that local media smaller than `keep_local_media_below_filesize` is not
+        purged, even if it has not been accessed recently.
+        """
+        # Advance 31 days (in seconds)
+        self.reactor.advance(31 * 24 * 60 * 60)
+
+        # Nothing should have been purged, as all of the media is below the size
+        # threshold.
+        self._assert_if_mxc_uris_purged(
+            purged=[],
+            not_purged=[
+                self.local_recently_accessed_media,
+                self.local_not_recently_accessed_media,
+                self.local_never_accessed_media,
+                self.local_not_recently_accessed_quarantined_media,
+                self.local_not_recently_accessed_protected_media,
+                self.remote_recently_accessed_media,
+                self.remote_not_recently_accessed_media,
+                self.remote_not_recently_accessed_quarantined_media,
+            ],
+        )
+
+    @override_config(
+        {
+            "media_retention": {
                 # Enable retention for cached remote media
                 "remote_media_lifetime": "30d"
                 # Local media should not be purged
