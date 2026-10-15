@@ -247,7 +247,7 @@ class DelayedEventsTestCaseBase(DelayedEventsHelperMixin):
         """
         self.assertGreaterEqual(event["delayed_since_ts"], requested_ts, event)
         self.assertLessEqual(
-            event["delayed_since_ts"], self.hs.get_clock().time_msec(), event
+            event["delayed_since_ts"], self.clock.time_msec(), event
         )
 
     def _get_delayed_event_content(self, event: JsonDict) -> JsonDict:
