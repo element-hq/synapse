@@ -249,7 +249,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         self.store._get_rooms_for_local_user_where_membership_is_inner.invalidate_all()
         self.store._get_event_cache.clear()
         self.store._event_ref.clear()
-        self.hs.get_rust_store().clear_event_cache()
 
         # The rooms should be excluded from the sync response.
         # Get a new request key.

@@ -101,11 +101,16 @@ pub struct Store {
 
 impl Store {
     /// A store over `db_pool`, with its caches built in `registry`, the
-    /// registry of the homeserver's Rust runtime.
-    pub fn new(db_pool: Box<dyn DatabasePool>, registry: &CacheRegistry) -> Store {
+    /// registry of the homeserver's Rust runtime, and an event cache of
+    /// `event_cache_size` events.
+    pub fn new(
+        db_pool: Box<dyn DatabasePool>,
+        registry: &CacheRegistry,
+        event_cache_size: usize,
+    ) -> Store {
         Store {
             db_pool,
-            caches: Arc::new(StoreCaches::new(registry)),
+            caches: Arc::new(StoreCaches::new(registry, event_cache_size)),
             is_feature_enabled_for_user_cache: registry
                 .new_cache("is_feature_enabled_for_user", 1000),
         }

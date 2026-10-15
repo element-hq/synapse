@@ -42,11 +42,11 @@ class RustWorkerStore(SQLBaseStore):
     ) -> None:
         super().__init__(database, db_conn, hs)
 
-        self.rust_store = RustStore(hs.get_rust_runtime(), self.db_pool)
+        self.get_or_build_rust_store(hs)
 
-        # The store's event and related caches are emptied through the store
-        # itself, by `EventsWorkerStore`, so they are registered for metrics
-        # and cache factors only.
+        # The chain cover and state group caches are emptied with the event
+        # cache, which `EventsWorkerStore` binds and registers, so they are
+        # registered for metrics and cache factors only.
         for cache in self.rust_store.caches:
             register_rust_cache(cache, server_name=hs.hostname)
 
@@ -55,3 +55,21 @@ class RustWorkerStore(SQLBaseStore):
             assert hasattr(cached_function, "cache"), f"{python_name} is not @cached"
             mirror_rust_cache(cached_function, rust_cache)
             register_rust_cache(rust_cache, server_name=hs.hostname)
+
+    def get_or_build_rust_store(self, hs: "HomeServer") -> RustStore:
+        """The Rust store, built on the first call.
+
+        `EventsWorkerStore.__init__` needs the store too, to bind its event
+        cache. Whether that runs before or after this class's `__init__`
+        depends on where each falls in the datastore's MRO, which differs
+        between datastores, so whichever runs first builds it.
+        """
+        rust_store: RustStore | None = getattr(self, "rust_store", None)
+        if rust_store is None:
+            rust_store = RustStore(
+                hs.get_rust_runtime(),
+                self.db_pool,
+                hs.config.caches.event_cache_size,
+            )
+            self.rust_store = rust_store
+        return rust_store

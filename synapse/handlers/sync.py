@@ -4289,8 +4289,10 @@ def _diff_room_entries(
 
     def state_event_summary(event: EventBase) -> tuple[str, JsonDict]:
         # State and sticky events are fetched without their previous content.
-        # A Python event has it anyway if an earlier fetch of the cached event
-        # added it, so whether it is there depends on the cache's history.
+        # A cached event has it anyway if an earlier fetch added it. Python
+        # and Rust share the cached event, so they usually agree. But Python
+        # keeps any object it still holds after the cache has evicted the
+        # event, and a Rust reader then loads a fresh copy without it.
         event_id, event_dict = event_summary(event)
         unsigned = event_dict.get("unsigned")
         if isinstance(unsigned, dict):

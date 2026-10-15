@@ -67,7 +67,6 @@ from synapse.storage.database import (
     make_tuple_in_list_sql_clause,
 )
 from synapse.storage.databases.main.event_federation import EventFederationStore
-from synapse.storage.databases.main.events_worker import EventCacheEntry
 from synapse.storage.databases.main.search import SearchEntry
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import AbstractStreamIdGenerator
@@ -529,8 +528,6 @@ class PersistEventsStore:
                     # by an arriving redaction event, but since we are not creating redaction
                     # events we invalidate manually
                     self.store._invalidate_local_get_event_cache_room_id(event.room_id)
-
-                    self.store._invalidate_async_get_event_cache_room_id(event.room_id)
 
             if new_forward_extremities:
                 self.store.get_latest_event_ids_in_room.prefill(
@@ -3422,7 +3419,7 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         events_and_contexts: list[EventPersistencePair],
     ) -> None:
-        to_prefill: list[EventCacheEntry] = []
+        to_prefill: list[EventBase] = []
 
         ev_map = {e.event_id: e for e, _ in events_and_contexts}
         if not ev_map:
@@ -3447,23 +3444,12 @@ class PersistEventsStore:
         for event_id, redacts, rejects in txn:
             event = ev_map[event_id]
             if not rejects and not redacts:
-                to_prefill.append(EventCacheEntry(event=event, redacted_event=None))
-
-        async def external_prefill() -> None:
-            for cache_entry in to_prefill:
-                await self.store._get_event_cache.set_external(
-                    (cache_entry.event.event_id,), cache_entry
-                )
+                to_prefill.append(event)
 
         def local_prefill() -> None:
-            for cache_entry in to_prefill:
-                self.store._get_event_cache.set_local(
-                    (cache_entry.event.event_id,), cache_entry
-                )
+            for event in to_prefill:
+                self.store._get_event_cache.set_local((event.event_id,), event, None)
 
-        # The order these are called here is not as important as knowing that after the
-        # transaction is finished, the async_call_after will run before the call_after.
-        txn.async_call_after(external_prefill)
         txn.call_after(local_prefill)
 
     def _store_state_dag_edges(

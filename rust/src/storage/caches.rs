@@ -21,12 +21,15 @@
 //! keys in one statement.
 //!
 //! - [`EventCache`]: events loaded from the database, keyed on event ID and
-//!   sized by count. An entry holds the event as persisted, rejected or
-//!   not, and its redacted form if it had a valid redaction when loaded,
-//!   so it goes stale when the event is redacted, its rejection status
-//!   changes, or its internal metadata does. `EventsWorkerStore`
-//!   invalidates it alongside its own event cache, by event ID and on a
-//!   room purge, so the two stay in step.
+//!   sized by `caches.event_cache_size`. It is `EventsWorkerStore`'s
+//!   `_get_event_cache` as well, bound there as
+//!   [`RustEventCache`](super::python::RustEventCache), so each event is
+//!   held once whichever side loaded it. An entry holds the event as
+//!   persisted, rejected or not, and its redacted form if it had a valid
+//!   redaction when loaded, so it goes stale when the event is redacted,
+//!   its rejection status changes, or its internal metadata does.
+//!   `EventsWorkerStore` invalidates it by event ID, and by room on a purge,
+//!   through the room index.
 //! - [`ChainPositionCache`]: the chain cover position of an event, which is
 //!   fixed once assigned. Invalidated with the event.
 //! - [`ChainLinkCache`]: the links out of a chain, which only grow as events
@@ -86,9 +89,20 @@ pub type ChainLinkCache = Cache<i64, CachedChainLinks>;
 /// State group ID to its state, weighed by entries.
 pub type StateGroupCache = Cache<i64, Arc<StateMap>>;
 
-/// The bound on the event cache, in events.
-/// TODO: size this from `event_cache_size`, as the Python event cache is.
-const EVENT_CACHE_MAX_SIZE: usize = 10_000;
+/// The event cache's name: the metrics label and the cache factor name, as
+/// for the Python cache it replaced.
+pub const EVENT_CACHE_NAME: &str = "*getEvent*";
+
+/// Build an event cache of `max_size` events, indexed by room, in
+/// `registry`. [`StoreCaches::new`] builds the homeserver's.
+pub fn new_event_cache(registry: &CacheRegistry, max_size: usize) -> Arc<EventCache> {
+    registry.new_indexed_cache(EVENT_CACHE_NAME, max_size, room_of)
+}
+
+/// The event cache's index: the room of an event, for a room purge.
+fn room_of(event: &CachedEvent) -> &str {
+    event.room_id()
+}
 
 /// The bound on the chain position cache, in events. A state resolution needs
 /// the position of every event in its state sets, so this holds more than the
@@ -144,10 +158,10 @@ pub(crate) struct MirroredCache {
 
 impl StoreCaches {
     /// Build the caches in `registry`, the registry of the homeserver's Rust
-    /// runtime.
-    pub fn new(registry: &CacheRegistry) -> Self {
+    /// runtime, with an event cache of `event_cache_size` events.
+    pub fn new(registry: &CacheRegistry, event_cache_size: usize) -> Self {
         StoreCaches {
-            events: registry.new_cache("rust_events", EVENT_CACHE_MAX_SIZE),
+            events: new_event_cache(registry, event_cache_size),
             chain_positions: registry
                 .new_cache("rust_chain_positions", CHAIN_POSITION_CACHE_MAX_SIZE),
             chain_links: registry.new_weighted_cache(
@@ -215,9 +229,18 @@ impl StoreCaches {
         self.chain_positions.invalidate(&event_id);
     }
 
-    /// Empty every cache. A room purge deletes its chains, links and state
-    /// groups, and the chain links and state groups are keyed on IDs rather
-    /// than room, so all go.
+    /// Drop what is cached about a room's events, for a purge: the events,
+    /// by the event cache's room index, and every chain position, chain link
+    /// and state group. A purge deletes the room's chains, links and state
+    /// groups, and those caches are keyed on IDs rather than room.
+    pub fn invalidate_room(&self, room_id: &str) {
+        drop(self.events.invalidate_index(room_id));
+        drop(self.chain_positions.invalidate_all());
+        drop(self.chain_links.invalidate_all());
+        drop(self.state_groups.invalidate_all());
+    }
+
+    /// Empty every cache.
     pub fn clear(&self) {
         drop(self.events.invalidate_all());
         drop(self.chain_positions.invalidate_all());
@@ -233,7 +256,7 @@ mod tests {
     #[test]
     fn store_caches_invalidate_together() {
         let registry = CacheRegistry::new();
-        let caches = StoreCaches::new(&registry);
+        let caches = StoreCaches::new(&registry, 10);
         caches.chain_positions.insert(Arc::from("$a"), (1, 1));
         caches.chain_positions.insert(Arc::from("$b"), (1, 2));
         caches.chain_links.insert(
@@ -259,7 +282,7 @@ mod tests {
     #[test]
     fn chain_links_are_weighed_by_link() {
         let registry = CacheRegistry::new();
-        let caches = StoreCaches::new(&registry);
+        let caches = StoreCaches::new(&registry, 10);
         caches.chain_links.insert(
             1,
             CachedChainLinks {

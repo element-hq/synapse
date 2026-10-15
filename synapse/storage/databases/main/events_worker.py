@@ -83,19 +83,21 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_tuple_in_list_sql_clause,
 )
+from synapse.storage.databases.main.rust_store import RustWorkerStore
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import (
     AbstractStreamIdGenerator,
     MultiWriterIdGenerator,
 )
 from synapse.storage.util.sequence import build_sequence_generator
+from synapse.synapse_rust.storage import RustEventCache
 from synapse.types import JsonDict, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import ObservableDeferred, delay_cancellation
+from synapse.util.caches import register_rust_cache
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.caches.lrucache import AsyncLruCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.duration import Duration
@@ -301,16 +303,17 @@ class EventsWorkerStore(SQLBaseStore):
                 Duration(minutes=5),
             )
 
-        self._get_event_cache: AsyncLruCache[tuple[str], EventCacheEntry] = (
-            AsyncLruCache(
-                clock=hs.get_clock(),
-                server_name=self.server_name,
-                cache_name="*getEvent*",
-                max_size=hs.config.caches.event_cache_size,
-                # `extra_index_cb` Returns a tuple as that is the key type
-                extra_index_cb=lambda _, v: (v.event.room_id,),
+        # The event cache lives in Rust, so that the Rust sync handler and
+        # state resolution read the same events. A datastore without a Rust
+        # store, such as the database port script's, gets a cache of its own.
+        self._get_event_cache: RustEventCache
+        if isinstance(self, RustWorkerStore):
+            self._get_event_cache = self.get_or_build_rust_store(hs).event_cache
+        else:
+            self._get_event_cache = RustEventCache(
+                hs.get_rust_runtime(), hs.config.caches.event_cache_size
             )
-        )
+        register_rust_cache(self._get_event_cache, server_name=self.server_name)
 
         # Map from event ID to a deferred that will result in a map from event
         # ID to cache entry. Note that the returned dict may not have the
@@ -319,10 +322,12 @@ class EventsWorkerStore(SQLBaseStore):
             str, ObservableDeferred[dict[str, EventCacheEntry]]
         ] = {}
 
-        # We keep track of the events we have currently loaded in memory so that
-        # we can reuse them even if they've been evicted from the cache. We only
-        # track events that don't need redacting in here (as then we don't need
-        # to track redaction status).
+        # The event objects handed out that are still alive, so that a lookup
+        # returns the same object for as long as anyone holds it. The event
+        # cache holds Rust events rather than these objects, and a hit there
+        # builds a new object, so this is checked first. It also answers for
+        # events the cache has evicted. We only track events that don't need
+        # redacting in here (as then we don't need to track redaction status).
         self._event_ref: MutableMapping[str, EventBase] = weakref.WeakValueDictionary()
 
         self._event_fetch_lock = threading.Condition()
@@ -927,16 +932,9 @@ class EventsWorkerStore(SQLBaseStore):
                 # out of the database to check it.
                 #
                 try:
-                    # Try to fetch from any external cache. We already checked the
-                    # in-memory cache above.
-                    missing_events = await self._get_events_from_external_cache(
+                    missing_events = await self._get_events_from_db(
                         missing_events_ids,
                     )
-                    # Now actually fetch any remaining events from the DB
-                    db_missing_events = await self._get_events_from_db(
-                        missing_events_ids - missing_events.keys(),
-                    )
-                    missing_events.update(db_missing_events)
                 except Exception as e:
                     with PreserveLoggingContext():
                         fetching_deferred.errback(e)
@@ -993,32 +991,19 @@ class EventsWorkerStore(SQLBaseStore):
     ) -> None:
         """
         Prepares a database transaction to invalidate the get event cache for a given
-        event ID when executed successfully. This is achieved by attaching two callbacks
-        to the transaction, one to invalidate the async cache and one for the in memory
-        sync cache (importantly called in that order).
+        event ID when executed successfully.
 
         Arguments:
-            txn: the database transaction to attach the callbacks to
+            txn: the database transaction to attach the callback to
             event_id: the event ID to be invalidated from caches
         """
 
-        txn.async_call_after(self._invalidate_async_get_event_cache, event_id)
         txn.call_after(self._invalidate_local_get_event_cache, event_id)
-
-    async def _invalidate_async_get_event_cache(self, event_id: str) -> None:
-        """
-        Invalidates an event in the asynchronous get event cache, which may be remote.
-
-        Arguments:
-            event_id: the event ID to invalidate
-        """
-
-        await self._get_event_cache.invalidate((event_id,))
 
     def _invalidate_local_get_event_cache(self, event_id: str) -> None:
         """
-        Invalidates an event in local in-memory get event caches, including
-        the Rust store's.
+        Invalidates an event in the in-memory get event caches. The event
+        cache is shared with the Rust store, so this reaches its readers too.
 
         Arguments:
             event_id: the event ID to invalidate
@@ -1027,8 +1012,6 @@ class EventsWorkerStore(SQLBaseStore):
         self._get_event_cache.invalidate_local((event_id,))
         self._event_ref.pop(event_id, None)
         self._current_event_fetches.pop(event_id, None)
-
-        self.hs.get_rust_store().invalidate_event(event_id)
 
     def _invalidate_local_get_event_cache_room_id(self, room_id: str) -> None:
         """Clears the in-memory get event caches for a room.
@@ -1039,66 +1022,27 @@ class EventsWorkerStore(SQLBaseStore):
         self._event_ref.clear()
         self._current_event_fetches.clear()
 
-        self.hs.get_rust_store().clear_event_cache()
-
-    def _invalidate_async_get_event_cache_room_id(self, room_id: str) -> None:
+    def _attempt_to_invalidate_cache(
+        self, cache_name: str, key: Collection[Any] | None
+    ) -> bool:
+        """Invalidations of the event cache by name, which the censor and
+        re-sign paths send to other workers, also drop the event from
+        `_event_ref`. Otherwise the next lookup would answer with the stale
+        object and put it back in the cache, which the Rust readers share.
         """
-        Clears the async get_event cache for a room. Currently a no-op until
-        an async get_event cache is implemented - see https://github.com/matrix-org/synapse/pull/13242
-        for preliminary work.
-        """
+        if cache_name != "_get_event_cache":
+            return super()._attempt_to_invalidate_cache(cache_name, key)
 
-    async def _get_events_from_cache(
-        self, events: Iterable[str], update_metrics: bool = True
-    ) -> dict[str, EventCacheEntry]:
-        """Fetch events from the caches, both in memory and any external.
-
-        May return rejected events.
-
-        Args:
-            events: list of event_ids to fetch
-            update_metrics: Whether to update the cache hit ratio metrics
-        """
-        event_map = await self._get_events_from_local_cache(
-            events, update_metrics=update_metrics
-        )
-
-        missing_event_ids = [e for e in events if e not in event_map]
-        event_map.update(
-            await self._get_events_from_external_cache(
-                events=missing_event_ids,
-                update_metrics=update_metrics,
-            )
-        )
-
-        return event_map
-
-    @trace
-    async def _get_events_from_external_cache(
-        self, events: Collection[str], update_metrics: bool = True
-    ) -> dict[str, EventCacheEntry]:
-        """Fetch events from any configured external cache.
-
-        May return rejected events.
-
-        Args:
-            events: list of event_ids to fetch
-            update_metrics: Whether to update the cache hit ratio metrics
-        """
-        set_tag(
-            SynapseTags.FUNC_ARG_PREFIX + "events.length",
-            str(len(events)),
-        )
-        event_map = {}
-
-        for event_id in events:
-            ret = await self._get_event_cache.get_external(
-                (event_id,), None, update_metrics=update_metrics
-            )
-            if ret:
-                event_map[event_id] = ret
-
-        return event_map
+        if key is None:
+            self._get_event_cache.clear()
+            self._event_ref.clear()
+            self._current_event_fetches.clear()
+        else:
+            # A key of another shape matches nothing, as for any cache.
+            key = tuple(key)
+            if len(key) == 1 and isinstance(key[0], str):
+                self._invalidate_local_get_event_cache(key[0])
+        return True
 
     async def _get_events_from_local_cache(
         self, events: Iterable[str], update_metrics: bool = True
@@ -1122,30 +1066,34 @@ class EventsWorkerStore(SQLBaseStore):
             if i % ITERATIONS_BEFORE_YIELDING == 0:
                 await self.clock.sleep(Duration(seconds=0))
 
-            # First check if it's in the event cache
-            ret = self._get_event_cache.get_local(
-                (event_id,), None, update_metrics=update_metrics
-            )
-            if ret:
-                event_map[event_id] = ret
-                continue
-
-            # Otherwise check if we still have the event in memory.
+            # First check if we still have the event in memory, so that we hand
+            # back the same object for as long as anyone holds it.
             event = self._event_ref.get(event_id)
             if event:
-                # Reconstruct an event cache entry
-
-                cache_entry = EventCacheEntry(
+                # Keep recently queried events in the cache, putting it back if
+                # it was evicted.
+                self._get_event_cache.touch(
+                    (event_id,), event, update_metrics=update_metrics
+                )
+                event_map[event_id] = EventCacheEntry(
                     event=event,
                     # We don't cache weakrefs to redacted events, so we know
                     # this is None.
                     redacted_event=None,
                 )
-                event_map[event_id] = cache_entry
+                continue
 
-                # We add the entry back into the cache as we want to keep
-                # recently queried events in the cache.
-                self._get_event_cache.set_local((event_id,), cache_entry)
+            # Otherwise check the event cache.
+            ret = self._get_event_cache.get_local(
+                (event_id,), update_metrics=update_metrics
+            )
+            if ret:
+                event, redacted_event = ret
+                event_map[event_id] = EventCacheEntry(
+                    event=event, redacted_event=redacted_event
+                )
+                if not redacted_event:
+                    self._event_ref[event_id] = event
 
         return event_map
 
@@ -1607,7 +1555,7 @@ class EventsWorkerStore(SQLBaseStore):
                 event=original_ev, redacted_event=redacted_event
             )
 
-            await self._get_event_cache.set((event_id,), cache_entry)
+            self._get_event_cache.set_local((event_id,), original_ev, redacted_event)
             result_map[event_id] = cache_entry
 
             if not redacted_event:

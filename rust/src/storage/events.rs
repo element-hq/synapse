@@ -250,7 +250,7 @@ impl<'a> EventLoader<'a> {
             if events.contains_key(id) || missing.contains(id) {
                 continue;
             }
-            match self.cache.and_then(|cache| cache.get(id)) {
+            match self.cache.and_then(|cache| cache.get_or_count_miss(id)) {
                 Some(event) => {
                     events.insert(Arc::clone(id), event);
                 }

@@ -862,7 +862,7 @@ impl StateResolutionHandler {
     }
 
     /// Empty the store's event, chain and state group caches. For tests:
-    /// `RustStore.clear_event_cache` is the production path.
+    /// `EventsWorkerStore._get_event_cache` is the production path.
     fn clear_event_cache(&self) {
         self.store.caches.clear();
     }

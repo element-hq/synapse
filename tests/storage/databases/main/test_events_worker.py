@@ -183,7 +183,8 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
             # Check `_get_event_cache` again and we should see the updated fact
             # that we now have the event cached after persisting it.
             res = self.store._get_event_cache.get_local((event.event_id,))
-            self.assertEqual(res.event, event, "Event not cached as expected.")  # type: ignore
+            assert res is not None, "Event not cached as expected."
+            self.assertEqual(res[0].event_id, event.event_id)
 
             # Try and fetch the event from the database.
             self.get_success(self.store.get_event(event.event_id))
@@ -293,6 +294,84 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
 
             # We should have fetched the event from the DB
             self.assertEqual(ctx.get_resource_usage().evt_db_fetch_count, 1)
+
+    def test_cache_is_the_rust_stores(self) -> None:
+        """The datastore reads through the Rust store's event cache, whichever
+        order the datastore's MRO runs the two stores' `__init__` in."""
+        self.assertIs(self.store._get_event_cache, self.hs.get_rust_store().event_cache)
+
+    @unittest.override_config({"event_cache_size": 1000})
+    def test_invalidation_by_name_drops_held_object(self) -> None:
+        """An invalidation by cache name, as other workers get from the
+        censor and re-sign paths, also forgets the live object, so it is not
+        served or put back in the cache."""
+        event = self.get_success(self.store.get_event(self.event_id))
+        self.assertIs(self.store._event_ref[self.event_id], event)
+
+        self.store._attempt_to_invalidate_cache("_get_event_cache", [self.event_id])
+        self.assertNotIn(self.event_id, self.store._event_ref)
+        self.assertIsNone(self.store._get_event_cache.get_local((self.event_id,)))
+
+        again = self.get_success(self.store.get_event(self.event_id))
+        self.assertIsNot(again, event)
+
+        # And by name with no key, as for the whole cache.
+        self.store._attempt_to_invalidate_cache("_get_event_cache", None)
+        self.assertEqual(len(self.store._event_ref), 0)
+        self.assertEqual(len(self.store._get_event_cache), 0)
+
+    @unittest.override_config({"event_cache_size": 1000})
+    def test_same_object_while_held(self) -> None:
+        """While anything holds an event, fetching it again returns that same
+        object, though the cache itself holds Rust events."""
+        first = self.get_success(self.store.get_event(self.event_id))
+        second = self.get_success(self.store.get_event(self.event_id))
+        self.assertIs(first, second)
+
+        hits = self.store._get_event_cache.hits
+        self.get_success(self.store.get_event(self.event_id))
+        # A hit on the map of live events counts as a cache hit.
+        self.assertEqual(self.store._get_event_cache.hits, hits + 1)
+
+    @unittest.override_config({"event_cache_size": 1000})
+    def test_cache_hit_once_released(self) -> None:
+        """An event nothing holds any more is still served from the cache,
+        as a new object, which is then the one handed out while held."""
+        event = self.get_success(self.store.get_event(self.event_id))
+        content = dict(event.content)
+        # As if the last reference had gone.
+        del self.store._event_ref[self.event_id]
+
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
+            again = self.get_success(self.store.get_event(self.event_id))
+            self.assertEqual(ctx.get_resource_usage().evt_db_fetch_count, 0)
+
+        self.assertIsNot(again, event)
+        self.assertEqual(dict(again.content), content)
+        self.assertIs(self.store._event_ref[self.event_id], again)
+
+    @unittest.override_config({"event_cache_size": 1000})
+    def test_changes_to_an_event_reach_the_cache(self) -> None:
+        """Adding `prev_content` to a fetched event, as `get_prev_content`
+        does, changes the cached event, so every later copy has it."""
+        self.helper.send_state(
+            self.room, "m.room.name", {"name": "first"}, tok=self.token
+        )
+        second = self.helper.send_state(
+            self.room, "m.room.name", {"name": "second"}, tok=self.token
+        )["event_id"]
+        self.store._get_event_cache.clear()
+        self.store._event_ref.clear()
+
+        fetched = self.get_success(
+            self.store.get_events_as_list([second], get_prev_content=True)
+        )
+        self.assertEqual(fetched[0].unsigned["prev_content"], {"name": "first"})
+
+        del fetched
+        self.store._event_ref.clear()
+        again = self.get_success(self.store.get_event(second))
+        self.assertEqual(again.unsigned["prev_content"], {"name": "first"})
 
 
 class GetEventsTestCase(unittest.HomeserverTestCase):

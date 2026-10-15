@@ -22,8 +22,11 @@
 
 from unittest.mock import Mock, patch
 
+from synapse.api.room_versions import RoomVersions
+from synapse.events import make_event_from_dict
 from synapse.metrics.jemalloc import JemallocStats
 from synapse.rest.admin.experimental_features import ExperimentalFeature
+from synapse.synapse_rust.storage import RustEventCache
 from synapse.types import JsonDict
 from synapse.util.caches.lrucache import LruCache, setup_expire_lru_cache_entries
 from synapse.util.caches.treecache import TreeCache
@@ -544,6 +547,51 @@ class MemoryEvictionTestCase(unittest.HomeserverTestCase):
         self.assertNotIn("old", cache)
         self.assertEqual(len(rust_cache), 0)
         self.assertIn("new", cache)
+
+    @override_config(
+        {
+            "caches": {
+                "cache_autotuning": {
+                    "max_cache_memory_usage": "700M",
+                    "target_cache_memory_usage": "500M",
+                    "min_cache_ttl": "5m",
+                }
+            }
+        }
+    )
+    @patch("synapse.util.caches.lrucache.get_jemalloc_stats")
+    def test_evict_memory_drains_a_big_rust_cache(
+        self, jemalloc_interface: Mock
+    ) -> None:
+        """Draining more Rust entries than the walk does between yields still
+        empties the cache, yielding to the reactor on the way."""
+        mock_jemalloc_class = Mock(spec=JemallocStats)
+        jemalloc_interface.return_value = mock_jemalloc_class
+        mock_jemalloc_class.get_stat.return_value = 924288000
+
+        setup_expire_lru_cache_entries(self.hs)
+        cache = RustEventCache(self.hs.get_rust_runtime(), 30000)
+        event = make_event_from_dict(
+            {
+                "type": "m.room.message",
+                "room_id": "!room:test",
+                "sender": "@alice:test",
+                "content": {},
+                "auth_events": [],
+                "prev_events": [],
+                "depth": 1,
+                "origin_server_ts": 1,
+                "hashes": {"sha256": "x"},
+                "signatures": {},
+            },
+            RoomVersions.V10,
+        )
+        for i in range(25000):
+            cache.set_local((f"$event{i}",), event, None)
+        self.assertEqual(len(cache), 25000)
+
+        self.reactor.advance(60 * 6)
+        self.assertEqual(len(cache), 0)
 
 
 class ExtraIndexLruCacheTestCase(unittest.HomeserverTestCase):

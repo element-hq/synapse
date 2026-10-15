@@ -339,7 +339,8 @@ class TestResignEventsBgUpdate(HomeserverTestCase):
         # Ensure the message event is in the cache so that we test the cache is
         # invalidated properly
         res = self.store._get_event_cache.get_local((old_event.event_id,))
-        self.assertEqual(res.event, old_event, "Event not cached as expected.")  # type: ignore
+        assert res is not None, "Event not cached as expected."
+        self.assertEqual(res[0].event_id, old_event.event_id)
 
         # Ensure message event is signed with original signing key
         self.assertIn(

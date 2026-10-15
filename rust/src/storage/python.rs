@@ -27,11 +27,12 @@
 //! it by that name exactly as it would a `@cached` function. See
 //! [`crate::caches::python`].
 //!
-//! The store's event and related caches ([`crate::storage::caches`]) are not
-//! invalidated by name: `EventsWorkerStore` empties them through
-//! [`RustStore::invalidate_event`] and [`RustStore::clear_event_cache`]
-//! whenever it empties its own event cache. They reach `register_cache`
-//! through [`RustStore::caches`], for metrics and cache factors.
+//! The event cache is `EventsWorkerStore._get_event_cache`, bound as a
+//! [`RustEventCache`]: Python reads and fills the same cache as the Rust
+//! readers, and its invalidations drop the store's chain cover and state
+//! group caches along with the events. Those other caches reach
+//! `register_cache` through [`RustStore::caches`], for metrics and cache
+//! factors.
 //!
 //! The caches that mirror a Python `@cached` function reach the datastore
 //! through [`RustStore::mirrored_caches`], which attaches each to the
@@ -43,16 +44,19 @@ use std::sync::Arc;
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     pyclass, pymethods,
-    types::{PyAnyMethods, PyModule, PyModuleMethods},
+    types::{PyAnyMethods, PyModule, PyModuleMethods, PyTuple},
     Bound, Py, PyAny, PyClassInitializer, PyResult, Python,
 };
 
 use crate::{
-    caches::python::RustCache,
+    caches::python::{PyCacheKey, RustCache},
     deferred::{create_deferred, succeed},
+    events::Event,
     runtime::RustRuntime,
     storage::{
+        caches::{new_event_cache, EventCache, StoreCaches},
         db::python_db_pool::PythonDatabasePoolWrapper,
+        events::CachedEvent,
         store::{IsFeatureEnabledKey, PerUserExperimentalFeature, Store},
     },
 };
@@ -62,7 +66,9 @@ use crate::{
 pub struct RustStore {
     store: Arc<Store>,
     is_feature_enabled_for_user: Py<IsFeatureEnabledForUser>,
-    /// The store's event and related caches, as Python sees them.
+    /// The event cache, for `EventsWorkerStore` to bind.
+    event_cache: Py<RustEventCache>,
+    /// The chain cover and state group caches, as Python sees them.
     caches: Vec<Py<RustCache>>,
     /// The caches that mirror a Python cache, with the Python cache's name.
     mirrored_caches: Vec<(&'static str, Py<RustCache>)>,
@@ -77,11 +83,21 @@ impl RustStore {
 #[pymethods]
 impl RustStore {
     /// Build the store over `db_pool`, the datastore's `DatabasePool`, with
-    /// its caches in the runtime's registry.
+    /// its caches in the runtime's registry and an event cache of
+    /// `event_cache_size` events.
     #[new]
-    fn py_new(py: Python<'_>, runtime: &RustRuntime, db_pool: &Bound<'_, PyAny>) -> PyResult<Self> {
+    fn py_new(
+        py: Python<'_>,
+        runtime: &RustRuntime,
+        db_pool: &Bound<'_, PyAny>,
+        event_cache_size: usize,
+    ) -> PyResult<Self> {
         let db_pool = PythonDatabasePoolWrapper::new(db_pool, runtime.clone())?;
-        let store = Arc::new(Store::new(Box::new(db_pool), runtime.caches()));
+        let store = Arc::new(Store::new(
+            Box::new(db_pool),
+            runtime.caches(),
+            event_cache_size,
+        ));
 
         let is_feature_enabled_for_user = Py::new(
             py,
@@ -95,8 +111,14 @@ impl RustStore {
         )?;
 
         let store_caches = &store.caches;
+        let event_cache = Py::new(
+            py,
+            RustEventCache::initializer(
+                store_caches.events.clone(),
+                Some(Arc::clone(store_caches)),
+            ),
+        )?;
         let caches = vec![
-            Py::new(py, RustCache::new(store_caches.events.clone()))?,
             Py::new(py, RustCache::new(store_caches.chain_positions.clone()))?,
             Py::new(py, RustCache::new(store_caches.chain_links.clone()))?,
             Py::new(py, RustCache::new(store_caches.state_groups.clone()))?,
@@ -116,6 +138,7 @@ impl RustStore {
         Ok(RustStore {
             store,
             is_feature_enabled_for_user,
+            event_cache,
             caches,
             mirrored_caches,
         })
@@ -132,9 +155,9 @@ impl RustStore {
             .collect()
     }
 
-    /// The event, chain cover and state group caches, for the datastore to
-    /// register for metrics and cache factors. Nothing invalidates them by
-    /// name.
+    /// The chain cover and state group caches, for the datastore to register
+    /// for metrics and cache factors. Nothing invalidates them by name: the
+    /// event cache drops them with the events.
     #[getter]
     fn caches(&self, py: Python<'_>) -> Vec<Py<RustCache>> {
         self.caches
@@ -143,17 +166,11 @@ impl RustStore {
             .collect()
     }
 
-    /// Drop an event from the event and chain position caches. Called
-    /// whenever the Python event cache drops it, so a change to its rejection
-    /// status or internal metadata reaches the next reader.
-    fn invalidate_event(&self, event_id: &str) {
-        self.store.caches.invalidate_event(event_id);
-    }
-
-    /// Empty the event, chain cover and state group caches. Called when a
-    /// room is purged.
-    fn clear_event_cache(&self) {
-        self.store.caches.clear();
+    /// The event cache, for `EventsWorkerStore` to bind as its
+    /// `_get_event_cache`.
+    #[getter]
+    fn event_cache(&self, py: Python<'_>) -> Py<RustEventCache> {
+        self.event_cache.clone_ref(py)
     }
 
     /// `Store::is_feature_enabled_for_user` as a callable cache, for the
@@ -216,11 +233,178 @@ impl IsFeatureEnabledForUser {
     }
 }
 
+/// A hit in [`RustEventCache`]: the event, and its redacted form if it has one.
+type PyCacheHit = (Py<Event>, Option<Py<Event>>);
+
+/// The event cache, as `EventsWorkerStore` holds it in `_get_event_cache`.
+///
+/// The same cache the Rust readers fill and read, so an event is held once
+/// whichever side loaded it. An entry holds Rust events, and each hit hands
+/// Python a new `Event` object sharing the cached event's data, internal
+/// metadata and unsigned data included. So a change Python makes to one,
+/// such as adding `prev_content`, shows on every copy. `EventsWorkerStore`
+/// keeps its own weak map of the objects it handed out, and checks that
+/// first, so that while Python holds an event it gets that same object back.
+///
+/// Keys are one-tuples of the event ID, as for the Python cache this
+/// replaced, so that name-based invalidation reaches it. Invalidating an
+/// event drops its chain position too, and invalidating a room drops the
+/// store's chain cover and state group caches, which a purge deletes from.
+#[pyclass(frozen, extends = RustCache, name = "RustEventCache")]
+pub struct RustEventCache {
+    events: Arc<EventCache>,
+    /// The store's caches, when this is the store's event cache.
+    store_caches: Option<Arc<StoreCaches>>,
+}
+
+impl RustEventCache {
+    fn initializer(
+        events: Arc<EventCache>,
+        store_caches: Option<Arc<StoreCaches>>,
+    ) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(RustCache::new(events.clone())).add_subclass(RustEventCache {
+            events,
+            store_caches,
+        })
+    }
+
+    /// The event ID in a key, or `None` if the tuple is not a key of this
+    /// cache. Such a key matches nothing.
+    fn event_id(key: &Bound<'_, PyTuple>) -> Option<Arc<str>> {
+        <Arc<str> as PyCacheKey>::from_py_key(key)
+    }
+
+    fn invalidate_event(&self, key: &Bound<'_, PyTuple>) {
+        let Some(event_id) = Self::event_id(key) else {
+            return;
+        };
+        match &self.store_caches {
+            Some(store_caches) => store_caches.invalidate_event(&event_id),
+            None => drop(self.events.invalidate(&event_id)),
+        }
+    }
+
+    fn clear_all(&self) {
+        match &self.store_caches {
+            Some(store_caches) => store_caches.clear(),
+            None => drop(self.events.invalidate_all()),
+        }
+    }
+}
+
+#[pymethods]
+impl RustEventCache {
+    /// An event cache of its own, for a datastore without a Rust store, such
+    /// as the database port script's. It is in the runtime's registry, so it
+    /// takes part in age and memory-pressure eviction like any other.
+    #[new]
+    fn py_new(runtime: &RustRuntime, max_size: usize) -> PyClassInitializer<Self> {
+        Self::initializer(new_event_cache(runtime.caches(), max_size), None)
+    }
+
+    /// The cached event and its redacted form, if it had a valid redaction
+    /// when loaded, each as a new Python object. `None` if it isn't cached.
+    #[pyo3(signature = (key, update_metrics = true))]
+    fn get_local(
+        &self,
+        py: Python<'_>,
+        key: &Bound<'_, PyTuple>,
+        update_metrics: bool,
+    ) -> PyResult<Option<PyCacheHit>> {
+        let Some(event_id) = Self::event_id(key) else {
+            return Ok(None);
+        };
+        let cached = if update_metrics {
+            self.events.get_or_count_miss(&event_id)
+        } else {
+            self.events.get_uncounted(&event_id)
+        };
+        match cached {
+            Some(cached) => Ok(Some((cached.to_py(py)?, cached.redacted_to_py(py)?))),
+            None => Ok(None),
+        }
+    }
+
+    /// Mark the event as read, for a hit Python answered from its own map of
+    /// live events. `event` is that Python object: if the cache had evicted
+    /// the event, it goes back in, sharing the object's data.
+    #[pyo3(signature = (key, event, update_metrics = true))]
+    fn touch(&self, key: &Bound<'_, PyTuple>, event: &Bound<'_, Event>, update_metrics: bool) {
+        let Some(event_id) = Self::event_id(key) else {
+            return;
+        };
+        // One lock for the check and the insert, so that an entry a Rust
+        // reader loaded meanwhile, perhaps with a redaction this object
+        // doesn't know of, is kept.
+        let evicted = self
+            .events
+            .touch_or_insert_with(event_id, || CachedEvent::new(event.get().shallow_clone()));
+        drop(evicted);
+        if update_metrics {
+            self.events.count_hit();
+        }
+    }
+
+    /// Cache an event and its redacted form, if it has a valid redaction.
+    /// The cache shares the objects' data, so later changes to their internal
+    /// metadata or unsigned data show in the cache too.
+    fn set_local(
+        &self,
+        key: &Bound<'_, PyTuple>,
+        event: &Bound<'_, Event>,
+        redacted_event: Option<&Bound<'_, Event>>,
+    ) {
+        let Some(event_id) = Self::event_id(key) else {
+            return;
+        };
+        let cached = CachedEvent::with_redaction(
+            event.get().shallow_clone(),
+            redacted_event.map(|redacted| redacted.get().shallow_clone()),
+        );
+        drop(self.events.insert(event_id, cached));
+    }
+
+    /// Drop an event, and its chain position.
+    fn invalidate(&self, key: &Bound<'_, PyTuple>) {
+        self.invalidate_event(key);
+    }
+
+    /// As [`RustEventCache::invalidate`]. There is no cache beyond this one
+    /// to invalidate first.
+    fn invalidate_local(&self, key: &Bound<'_, PyTuple>) {
+        self.invalidate_event(key);
+    }
+
+    /// Drop a room's events, for a purge, along with every chain position,
+    /// chain link and state group. `index_key` is a one-tuple of the room
+    /// ID.
+    fn invalidate_on_extra_index_local(&self, index_key: &Bound<'_, PyTuple>) {
+        let Some(room_id) = Self::event_id(index_key) else {
+            return;
+        };
+        match &self.store_caches {
+            Some(store_caches) => store_caches.invalidate_room(&room_id),
+            None => drop(self.events.invalidate_index(&room_id)),
+        }
+    }
+
+    /// Empty the cache, and the store's chain cover and state group caches.
+    fn invalidate_all(&self) {
+        self.clear_all();
+    }
+
+    /// As [`RustEventCache::invalidate_all`].
+    fn clear(&self) {
+        self.clear_all();
+    }
+}
+
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "storage")?;
 
     child_module.add_class::<RustStore>()?;
     child_module.add_class::<IsFeatureEnabledForUser>()?;
+    child_module.add_class::<RustEventCache>()?;
 
     m.add_submodule(&child_module)?;
 

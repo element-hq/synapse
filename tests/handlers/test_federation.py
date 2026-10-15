@@ -40,7 +40,6 @@ from synapse.federation.federation_client import SendJoinResult
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.storage.databases.main.events_worker import EventCacheEntry
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -311,11 +310,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         # As a result, backfill should not rely on the event cache to check whether
         # we already have an event in the DB.
         # TODO: Remove this bit when the event cache is properly invalidated.
-        cache_entry = EventCacheEntry(
-            event=event,
-            redacted_event=None,
-        )
-        self.store._get_event_cache.set_local((event.event_id,), cache_entry)
+        self.store._get_event_cache.set_local((event.event_id,), event, None)
 
         # We now call FederationEventHandler.backfill (a separate method) to trigger
         # a backfill request. It should receive the fake event.

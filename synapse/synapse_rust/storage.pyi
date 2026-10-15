@@ -14,6 +14,7 @@ from twisted.internet.defer import Deferred
 
 from synapse.storage.database import DatabasePool
 from synapse.synapse_rust.caches import RustCache
+from synapse.synapse_rust.events import Event
 from synapse.synapse_rust.runtime import RustRuntime
 
 class IsFeatureEnabledForUser(RustCache):
@@ -31,6 +32,43 @@ class IsFeatureEnabledForUser(RustCache):
         means `ExperimentalFeature` and `PerUserExperimentalFeature` have
         drifted apart."""
 
+class RustEventCache(RustCache):
+    """The event cache, shared by `EventsWorkerStore` and the Rust readers.
+
+    Keys are one-tuples of the event ID. A hit hands back new `Event` objects
+    that share the cached event's data, internal metadata and unsigned data
+    included, so a change made through one shows through every other.
+    """
+
+    def __init__(self, runtime: RustRuntime, max_size: int) -> None:
+        """An event cache of its own, for a datastore without a `RustStore`,
+        in the runtime's cache registry."""
+
+    def get_local(
+        self, key: tuple[str], update_metrics: bool = True
+    ) -> tuple[Event, Event | None] | None:
+        """The event and its redacted form, if it had a valid redaction when
+        it was cached. None if it isn't cached."""
+
+    def touch(self, key: tuple[str], event: Event, update_metrics: bool = True) -> None:
+        """Count a hit answered from the caller's own map of live events,
+        and mark the entry as read, putting `event` back if it was evicted."""
+
+    def set_local(
+        self, key: tuple[str], event: Event, redacted_event: Event | None
+    ) -> None:
+        """Cache an event, and its redacted form if it has a valid redaction."""
+
+    def invalidate_local(self, key: tuple[str]) -> None:
+        """Drop an event, and its chain position."""
+
+    def invalidate_on_extra_index_local(self, index_key: tuple[str]) -> None:
+        """Drop a room's events, for a purge, and the store's chain cover and
+        state group caches."""
+
+    def clear(self) -> None:
+        """Empty the cache, and the store's chain cover and state group caches."""
+
 class RustStore:
     """The Rust side of the main datastore.
 
@@ -39,24 +77,24 @@ class RustStore:
     `hs.get_rust_store()`.
     """
 
-    def __init__(self, runtime: RustRuntime, db_pool: DatabasePool) -> None: ...
+    def __init__(
+        self, runtime: RustRuntime, db_pool: DatabasePool, event_cache_size: int
+    ) -> None: ...
     @property
     def is_feature_enabled_for_user(self) -> IsFeatureEnabledForUser: ...
     @property
+    def event_cache(self) -> RustEventCache:
+        """The event cache, for `EventsWorkerStore` to bind as
+        `_get_event_cache`."""
+
+    @property
     def caches(self) -> list[RustCache]:
-        """The event, chain cover and state group caches, to register for
-        metrics and cache factors. Nothing invalidates them by name."""
+        """The chain cover and state group caches, to register for metrics
+        and cache factors. Nothing invalidates them by name: the event cache
+        drops them with the events."""
 
     @property
     def mirrored_caches(self) -> list[tuple[str, RustCache]]:
         """The caches that mirror a `@cached` function of the datastore, each
         with the function's name: attach each as a mirror of that function's
         cache (`mirror_rust_cache`) and register it for metrics."""
-
-    def invalidate_event(self, event_id: str) -> None:
-        """Drop an event from the event and chain position caches. Called
-        whenever the Python event cache drops it."""
-
-    def clear_event_cache(self) -> None:
-        """Empty the event, chain cover and state group caches. Called when a
-        room is purged."""

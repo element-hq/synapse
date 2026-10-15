@@ -36,6 +36,7 @@ from synapse.api.constants import (
     RelationTypes,
 )
 from synapse.events import EventBase
+from synapse.logging.context import LoggingContext
 from synapse.rest import admin
 from synapse.rest.client import login, receipts, room
 from synapse.server import HomeServer
@@ -481,6 +482,40 @@ class SyncStoreTestCase(unittest.HomeserverTestCase):
         self._invalidate_event_caches(first, second, third)
         self._assert_events_agree([third, second, first], get_prev_content=False)
         self._assert_events_agree([third, second, first], get_prev_content=True)
+
+    @unittest.override_config({"event_cache_size": 1000})
+    def test_events_share_one_cache(self) -> None:
+        """Python and the Rust readers read and fill the same event cache."""
+        first = self.helper.send_state(
+            self.room_id, EventTypes.Name, {"name": "a"}, tok=self.alice_tok
+        )["event_id"]
+        second = self.helper.send_state(
+            self.room_id, EventTypes.Name, {"name": "b"}, tok=self.alice_tok
+        )["event_id"]
+        self._invalidate_event_caches(first, second)
+
+        # Python adds `prev_content` to the event it fetched, and the Rust
+        # reader sees it on the same cached event, though it did not ask.
+        self.get_success(self.store.get_events_as_list([second], get_prev_content=True))
+        [rust_event] = self.rust.events(
+            [second],
+            redact_behaviour="redact",
+            allow_rejected=False,
+            get_prev_content=False,
+        )
+        self.assertEqual(rust_event.unsigned.get("prev_content"), {"name": "a"})
+
+        # An event the Rust reader loaded is a cache hit for Python.
+        self._invalidate_event_caches(first)
+        self.rust.events(
+            [first],
+            redact_behaviour="redact",
+            allow_rejected=False,
+            get_prev_content=False,
+        )
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
+            self.get_success(self.store.get_event(first))
+            self.assertEqual(ctx.get_resource_usage().evt_db_fetch_count, 0)
 
     def _write_events(self, room_id: str, count: int) -> list[str]:
         """Send `count` events of a few kinds, spread over several writers."""

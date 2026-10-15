@@ -239,6 +239,8 @@ class RustStateResHandlerTestCase(unittest.HomeserverTestCase):
         rust.clear_event_cache()
         self.assertEqual(rust.state_map_cache_len(), 0)
 
+    # Big enough for every event the resolution reads. Trial's default is one.
+    @unittest.override_config({"event_cache_size": 1000})
     def test_event_cache(self) -> None:
         """A second resolution reads its events, chain positions and chain
         links from the handler's caches, which the store's event cache
