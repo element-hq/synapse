@@ -15,7 +15,11 @@ from collections.abc import Collection, Mapping, Sequence
 from twisted.internet.defer import Deferred
 
 from synapse.synapse_rust.database.postgres import ConnectionPool
-from synapse.synapse_rust.events import Event
+from synapse.synapse_rust.events import (
+    BundledAggregations,
+    Event,
+    SerializeEventConfig,
+)
 from synapse.types import JsonDict, JsonMapping, RoomStreamToken
 from synapse.types.state import StateFilter
 
@@ -165,10 +169,8 @@ class RoomChanges:
 class RoomsResult:
     """What `generate_room_entries` made of the rooms."""
 
-    def take_entries(self) -> list[tuple["RoomSyncResult", bool, RoomStreamToken]]:
-        """The entries as `(entry, upto_from_now, upto_room_key)`: the room's
-        upto token is the request's now or since token with that room key. A
-        second call returns an empty list."""
+    def take_entries(self) -> list["RoomSyncResult"]:
+        """The entries. A second call returns an empty list."""
 
     @property
     def empty(self) -> list[str]:
@@ -185,6 +187,8 @@ class RoomsResult:
 class RoomSyncResult:
     """A room's entry, less the bundled aggregations."""
 
+    def __bool__(self) -> bool:
+        """Whether the entry has anything to send."""
     @property
     def room_id(self) -> str: ...
     @property
@@ -202,6 +206,13 @@ class RoomSyncResult:
         token's."""
     @property
     def limited(self) -> bool: ...
+    @property
+    def upto_from_now(self) -> bool:
+        """Whether the room's upto token builds on the response's now token
+        rather than its since token."""
+    @property
+    def upto_room_key(self) -> RoomStreamToken:
+        """The room key of the room's upto token."""
     @property
     def bundle_aggregations(self) -> bool:
         """Whether to bundle aggregations for the timeline."""
@@ -221,6 +232,44 @@ class RoomSyncResult:
     def unread_count(self) -> int: ...
     @property
     def sticky(self) -> list[tuple[Event, str]]: ...
+
+class RoomsEncoder:
+    """Encodes the joined and archived rooms of one sync response, as the
+    servlet's `encode_room` does."""
+
+    def __init__(
+        self,
+        *,
+        now_room_key: RoomStreamToken,
+        now_suffix: str,
+        since_suffix: str | None,
+        instance_ids: Mapping[str, int],
+        state_key_name: str,
+        msc3773_enabled: bool,
+        msc2654_enabled: bool,
+    ) -> None:
+        """
+        Args:
+            now_suffix: The response's now token after its room key:
+                everything after the first `_`.
+            since_suffix: The same for the since token, if there is one.
+            instance_ids: `get_id_for_instance` of each writer the two
+                tokens' room keys name.
+            state_key_name: `state`, `state_after`, or MSC4222's unstable
+                name for it.
+        """
+    def encode(
+        self,
+        rooms: Sequence[RoomSyncResult],
+        time_now_ms: int,
+        config: SerializeEventConfig,
+        *,
+        bundle_aggregations: Mapping[str, BundledAggregations] | None = None,
+        redaction_map: Mapping[str, Event] | None = None,
+        unsigned_additions: Mapping[str, JsonMapping] | None = None,
+    ) -> list[JsonDict]:
+        """The encoded rooms, in order. The maps are as for
+        `serialize_events`, across all the rooms."""
 
 class FilterCollection:
     """The Rust port of `synapse.api.filtering.FilterCollection`, built from

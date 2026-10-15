@@ -418,6 +418,127 @@ class _RoomChanges:
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
+class RustRoomContext:
+    """The tokens of the response the Rust sync handler computed rooms for,
+    which a room's own tokens are built on."""
+
+    since_token: StreamToken | None
+    now_token: StreamToken
+
+
+class RustRoomEntry:
+    """The fields that `RustJoinedSyncResult` and `RustArchivedSyncResult`
+    share. Each becomes Python objects when first read: the servlet encodes
+    the room in Rust without reading them."""
+
+    def __init__(self, rust: RoomSyncResult, context: RustRoomContext) -> None:
+        # `ArchivedSyncResult` is frozen.
+        object.__setattr__(self, "rust", rust)
+        object.__setattr__(self, "context", context)
+        object.__setattr__(self, "bundled_aggregations", None)
+
+    rust: RoomSyncResult
+    context: RustRoomContext
+    # Set by the handler, before anything reads the timeline.
+    bundled_aggregations: dict[str, BundledAggregations] | None
+
+    def set_bundled_aggregations(
+        self, bundled_aggregations: dict[str, BundledAggregations]
+    ) -> None:
+        object.__setattr__(self, "bundled_aggregations", bundled_aggregations)
+
+    def __bool__(self) -> bool:
+        return bool(self.rust)
+
+    @property
+    def room_id(self) -> str:
+        return self.rust.room_id
+
+    @functools.cached_property
+    def upto_token(self) -> StreamToken:
+        base = (
+            self.context.now_token
+            if self.rust.upto_from_now
+            else self.context.since_token
+        )
+        assert base is not None
+        return base.copy_and_replace(StreamKeyType.ROOM, self.rust.upto_room_key)
+
+    @functools.cached_property
+    def timeline_events(self) -> list[FilteredEvent]:
+        return [
+            FilteredEvent(event=event, membership=membership)
+            for event, membership in self.rust.timeline
+        ]
+
+    @functools.cached_property
+    def timeline(self) -> TimelineBatch:
+        rust = self.rust
+        prev_batch = (
+            self.context.now_token if rust.prev_batch_from_now else self.upto_token
+        )
+        prev_batch_room_key = rust.prev_batch_room_key
+        if prev_batch_room_key is not None:
+            prev_batch = prev_batch.copy_and_replace(
+                StreamKeyType.ROOM, prev_batch_room_key
+            )
+        return TimelineBatch(
+            events=self.timeline_events,
+            prev_batch=prev_batch,
+            limited=rust.limited,
+            bundled_aggregations=self.bundled_aggregations,
+        )
+
+    @functools.cached_property
+    def state(self) -> StateMap[EventBase]:
+        state: MutableStateMap[EventBase] = {}
+        for event in self.rust.state:
+            assert event.state_key is not None
+            state[(event.type, event.state_key)] = event
+        return state
+
+    @functools.cached_property
+    def account_data(self) -> list[JsonDict]:
+        return self.rust.account_data
+
+
+# The read-only properties stand in for the frozen attributes of the base.
+class RustJoinedSyncResult(RustRoomEntry, JoinedSyncResult):  # type: ignore[override]
+    """A `JoinedSyncResult` the Rust sync handler computed."""
+
+    @functools.cached_property
+    def ephemeral(self) -> list[JsonDict]:  # type: ignore[override]
+        return self.rust.ephemeral
+
+    @functools.cached_property
+    def sticky(self) -> list[FilteredEvent]:  # type: ignore[override]
+        return [
+            FilteredEvent(event=event, membership=membership)
+            for event, membership in self.rust.sticky
+        ]
+
+    @functools.cached_property
+    def unread_notifications(self) -> JsonDict:  # type: ignore[override]
+        return self.rust.unread_notifications
+
+    @functools.cached_property
+    def unread_thread_notifications(self) -> JsonDict:  # type: ignore[override]
+        return self.rust.unread_thread_notifications
+
+    @functools.cached_property
+    def summary(self) -> JsonDict | None:  # type: ignore[override]
+        return self.rust.summary
+
+    @property
+    def unread_count(self) -> int:  # type: ignore[override]
+        return self.rust.unread_count
+
+
+class RustArchivedSyncResult(RustRoomEntry, ArchivedSyncResult):
+    """An `ArchivedSyncResult` the Rust sync handler computed."""
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
 class _RoomExtras:
     """What `_generate_sync_entry_for_rooms` fetches for each room before
     working out which rooms to report."""
@@ -442,6 +563,11 @@ class _RoomsSection:
     # In shadow mode, the rooms the Rust handler left to Python, which are
     # not compared.
     uncompared_rooms: set[str] = attr.Factory(set)
+    # In shadow mode, the Rust handler's entries, for the servlet to compare
+    # their encoding with Python's.
+    rust_shadow_rooms: list["RustJoinedSyncResult | RustArchivedSyncResult"] = (
+        attr.Factory(list)
+    )
 
     def add(self, entry: "JoinedSyncResult | ArchivedSyncResult | None") -> None:
         if isinstance(entry, JoinedSyncResult):
@@ -521,6 +647,9 @@ class SyncResult:
     device_lists: DeviceListUpdates
     device_one_time_keys_count: JsonMapping
     device_unused_fallback_key_types: list[str]
+    # In `rust_sync: shadow` mode, the Rust sync handler's entries for the
+    # rooms, which the servlet encodes and compares with Python's.
+    rust_shadow_rooms: Sequence["RustJoinedSyncResult | RustArchivedSyncResult"] = ()
 
     def __bool__(self) -> bool:
         """Make the result appear empty if there are no updates. This is used
@@ -2314,6 +2443,7 @@ class SyncHandler:
             device_one_time_keys_count=one_time_keys_count,
             device_unused_fallback_key_types=unused_fallback_key_types,
             next_batch=sync_result_builder.now_token,
+            rust_shadow_rooms=sync_result_builder.rust_shadow_rooms,
         )
 
     async def get_sync_result_builder(
@@ -3074,6 +3204,7 @@ class SyncHandler:
         sync_result_builder.archived.extend(section.archived)
         sync_result_builder.invited.extend(section.invited)
         sync_result_builder.knocked.extend(section.knocked)
+        sync_result_builder.rust_shadow_rooms.extend(section.rust_shadow_rooms)
 
         return section.newly_joined_rooms, section.newly_left_rooms
 
@@ -3548,6 +3679,11 @@ class SyncHandler:
             python_section,
             rust_section,
         )
+        python_section.rust_shadow_rooms = [
+            entry
+            for entry in itertools.chain(rust_section.joined, rust_section.archived)
+            if isinstance(entry, (RustJoinedSyncResult, RustArchivedSyncResult))
+        ]
         return python_section
 
     async def _generate_rooms_section(
@@ -3763,17 +3899,14 @@ class SyncHandler:
                 len(entries) + len(result.empty)
             )
 
-        async def from_rust(
-            entry: tuple[RoomSyncResult, bool, RoomStreamToken],
-        ) -> None:
-            room_result, upto_from_now, upto_room_key = entry
-            base = now_token if upto_from_now else since_token
-            assert base is not None
+        context = RustRoomContext(since_token=since_token, now_token=now_token)
+
+        async def from_rust(entry: RoomSyncResult) -> None:
             section.add(
                 await self._room_entry_from_rust(
                     sync_result_builder,
-                    base.copy_and_replace(StreamKeyType.ROOM, upto_room_key),
-                    room_result,
+                    context,
+                    entry,
                     bundle_aggregations=not shadow,
                 )
             )
@@ -3849,34 +3982,65 @@ class SyncHandler:
             out_of_band=out_of_band,
         )
 
+    def _report_shadow_differences(self, subject: str, differences: list[str]) -> None:
+        """Count and log how the Python and Rust results for `subject`
+        differ in shadow mode, or raise in strict mode."""
+        if not differences:
+            rust_sync_shadow_counter.labels(
+                result="match", **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
+            return
+        rust_sync_shadow_counter.labels(
+            result="mismatch", **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
+        message = "Rust sync entry for %s differs from Python's: %s"
+        if self._rust_sync_strict:
+            raise AssertionError(message % (subject, "; ".join(differences)))
+        if subject in self._rust_sync_mismatched_rooms:
+            logger.debug(message, subject, "; ".join(differences))
+            return
+        if len(self._rust_sync_mismatched_rooms) >= _RUST_SYNC_MISMATCH_ROOMS_LOGGED:
+            self._rust_sync_mismatched_rooms.clear()
+        self._rust_sync_mismatched_rooms.add(subject)
+        logger.warning(message, subject, "; ".join(differences))
+
+    def compare_encoded_rooms(
+        self, python: Mapping[str, JsonDict], rust: Mapping[str, JsonDict]
+    ) -> None:
+        """Compare the servlet's encoding of the rooms in shadow mode with the
+        Rust encoding of the Rust handler's entries, by room ID.
+
+        A room only one side has is not compared again here: the comparison
+        of the entries reported it.
+        """
+        for room_id in sorted(python.keys() & rust.keys()):
+            self._report_shadow_differences(
+                f"the encoding of {room_id}",
+                _diff_encoded_rooms(python[room_id], rust[room_id]),
+            )
+
+    def report_rust_encode_error(
+        self, user_id: str, error: Exception, shadow: bool
+    ) -> None:
+        """Count and log that encoding the rooms of `user_id` in Rust failed,
+        or raise in strict mode. Outside shadow mode, the servlet then encodes
+        the rooms in Python."""
+        counter = rust_sync_shadow_counter if shadow else rust_sync_rooms_counter
+        counter.labels(result="error", **{SERVER_NAME_LABEL: self.server_name}).inc()
+        if self._rust_sync_strict:
+            raise error
+        logger.error(
+            "Encoding the rooms of %s in Rust failed",
+            user_id,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
     def _compare_rooms_sections(
         self, user_id: str, python: "_RoomsSection", rust: "_RoomsSection"
     ) -> None:
         """Compare the Python and Rust sections in shadow mode, counting and
         logging the differences, or raising in strict mode."""
-
-        def report(subject: str, differences: list[str]) -> None:
-            if not differences:
-                rust_sync_shadow_counter.labels(
-                    result="match", **{SERVER_NAME_LABEL: self.server_name}
-                ).inc()
-                return
-            rust_sync_shadow_counter.labels(
-                result="mismatch", **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
-            message = "Rust sync entry for %s differs from Python's: %s"
-            if self._rust_sync_strict:
-                raise AssertionError(message % (subject, "; ".join(differences)))
-            if subject in self._rust_sync_mismatched_rooms:
-                logger.debug(message, subject, "; ".join(differences))
-                return
-            if (
-                len(self._rust_sync_mismatched_rooms)
-                >= _RUST_SYNC_MISMATCH_ROOMS_LOGGED
-            ):
-                self._rust_sync_mismatched_rooms.clear()
-            self._rust_sync_mismatched_rooms.add(subject)
-            logger.warning(message, subject, "; ".join(differences))
+        report = self._report_shadow_differences
 
         # Each user's room changes are their own subject, so that a mismatch
         # for one user does not hide the next user's at debug level.
@@ -3897,71 +4061,26 @@ class SyncHandler:
     async def _room_entry_from_rust(
         self,
         sync_result_builder: "SyncResultBuilder",
-        upto_token: StreamToken,
+        context: RustRoomContext,
         result: RoomSyncResult,
         bundle_aggregations: bool,
-    ) -> "JoinedSyncResult | ArchivedSyncResult":
+    ) -> "RustJoinedSyncResult | RustArchivedSyncResult":
         """The room entry for a result of the Rust sync handler, with the
-        bundled aggregations added as `_load_filtered_recents` does.
+        bundled aggregations added as `_load_filtered_recents` does."""
+        entry: RustJoinedSyncResult | RustArchivedSyncResult
+        if result.rtype == "joined":
+            entry = RustJoinedSyncResult(result, context)
+        else:
+            entry = RustArchivedSyncResult(result, context)
 
-        Args:
-            upto_token: The room's `RoomSyncResultBuilder.upto_token`.
-        """
-        events = [
-            FilteredEvent(event=event, membership=membership)
-            for event, membership in result.timeline
-        ]
-
-        prev_batch = (
-            sync_result_builder.now_token if result.prev_batch_from_now else upto_token
-        )
-        prev_batch_room_key = result.prev_batch_room_key
-        if prev_batch_room_key is not None:
-            prev_batch = prev_batch.copy_and_replace(
-                StreamKeyType.ROOM, prev_batch_room_key
-            )
-
-        bundled_aggregations = None
         if bundle_aggregations and result.bundle_aggregations:
-            bundled_aggregations = (
+            entry.set_bundled_aggregations(
                 await self._relations_handler.get_bundled_aggregations(
-                    events, sync_result_builder.sync_config.user.to_string()
+                    entry.timeline_events,
+                    sync_result_builder.sync_config.user.to_string(),
                 )
             )
-
-        timeline = TimelineBatch(
-            events=events,
-            prev_batch=prev_batch,
-            limited=result.limited,
-            bundled_aggregations=bundled_aggregations,
-        )
-        state: MutableStateMap[EventBase] = {}
-        for event in result.state:
-            assert event.state_key is not None
-            state[(event.type, event.state_key)] = event
-
-        if result.rtype == "joined":
-            return JoinedSyncResult(
-                room_id=result.room_id,
-                timeline=timeline,
-                state=state,
-                ephemeral=result.ephemeral,
-                account_data=result.account_data,
-                sticky=[
-                    FilteredEvent(event=event, membership=membership)
-                    for event, membership in result.sticky
-                ],
-                unread_notifications=result.unread_notifications,
-                unread_thread_notifications=result.unread_thread_notifications,
-                summary=result.summary,
-                unread_count=result.unread_count,
-            )
-        return ArchivedSyncResult(
-            room_id=result.room_id,
-            timeline=timeline,
-            state=state,
-            account_data=result.account_data,
-        )
+        return entry
 
     async def _generate_room_entry(
         self,
@@ -4262,6 +4381,9 @@ def _entry_ids(entries: "list[object] | tuple[object, ...]") -> list[object]:
             entry = entry[0]
         if isinstance(entry, tuple) and entry and isinstance(entry[0], str):
             ids.append(entry[0])
+        elif isinstance(entry, dict) and "event_id" in entry:
+            # An encoded event.
+            ids.append(entry["event_id"])
         else:
             ids.append(entry)
     return ids
@@ -4281,7 +4403,8 @@ def _diff_room_entries(
         if python is rust:
             return []
         return [f"python {python!r} but rust {rust!r}"]
-    if type(python) is not type(rust):
+    # A Rust entry is a subclass of the Python one.
+    if isinstance(python, JoinedSyncResult) != isinstance(rust, JoinedSyncResult):
         return [f"python {type(python).__name__} but rust {type(rust).__name__}"]
 
     def event_summary(event: EventBase) -> tuple[str, JsonDict]:
@@ -4300,34 +4423,10 @@ def _diff_room_entries(
             unsigned.pop("prev_sender", None)
         return event_id, event_dict
 
-    differences = []
+    differences: list[str] = []
 
     def compare(field: str, python_value: object, rust_value: object) -> None:
-        if python_value == rust_value:
-            return
-        # Narrow the report down to the entries that differ.
-        if isinstance(python_value, dict) and isinstance(rust_value, dict):
-            for key in python_value.keys() | rust_value.keys():
-                compare(f"{field}[{key!r}]", python_value.get(key), rust_value.get(key))
-            return
-        if (
-            isinstance(python_value, (list, tuple))
-            and isinstance(rust_value, (list, tuple))
-            and len(python_value) == len(rust_value)
-        ):
-            for index, (p, r) in enumerate(zip(python_value, rust_value)):
-                compare(f"{field}[{index}]", p, r)
-            return
-        if isinstance(python_value, (list, tuple)) and isinstance(
-            rust_value, (list, tuple)
-        ):
-            differences.append(
-                f"{field}: python has {len(python_value)} entries, rust "
-                f"{len(rust_value)}: python {_entry_ids(python_value)}, rust "
-                f"{_entry_ids(rust_value)}"
-            )
-            return
-        differences.append(f"{field}: python {python_value!r}, rust {rust_value!r}")
+        _compare_values(differences, field, python_value, rust_value)
 
     compare(
         "timeline",
@@ -4362,6 +4461,86 @@ def _diff_room_entries(
             [(state_event_summary(e.event), e.membership) for e in python.sticky],
             [(state_event_summary(e.event), e.membership) for e in rust.sticky],
         )
+    return differences
+
+
+def _compare_values(
+    differences: list[str], field: str, python_value: object, rust_value: object
+) -> None:
+    """Add to `differences` how `python_value` and `rust_value` differ,
+    narrowed down to the entries that differ."""
+    if python_value == rust_value:
+        return
+    if isinstance(python_value, dict) and isinstance(rust_value, dict):
+        for key in python_value.keys() | rust_value.keys():
+            _compare_values(
+                differences,
+                f"{field}[{key!r}]",
+                python_value.get(key),
+                rust_value.get(key),
+            )
+        return
+    if (
+        isinstance(python_value, (list, tuple))
+        and isinstance(rust_value, (list, tuple))
+        and len(python_value) == len(rust_value)
+    ):
+        for index, (p, r) in enumerate(zip(python_value, rust_value)):
+            _compare_values(differences, f"{field}[{index}]", p, r)
+        return
+    if isinstance(python_value, (list, tuple)) and isinstance(
+        rust_value, (list, tuple)
+    ):
+        differences.append(
+            f"{field}: python has {len(python_value)} entries, rust "
+            f"{len(rust_value)}: python {_entry_ids(python_value)}, rust "
+            f"{_entry_ids(rust_value)}"
+        )
+        return
+    differences.append(f"{field}: python {python_value!r}, rust {rust_value!r}")
+
+
+def _diff_encoded_rooms(python: JsonDict, rust: JsonDict) -> list[str]:
+    """How the servlet's encoding of a room differs from the Rust encoding of
+    the Rust handler's entry for it, for `rust_sync: shadow` mode. Empty if
+    they do not."""
+
+    def without_prev_content(event: JsonDict) -> JsonDict:
+        # As in `_diff_room_entries`: whether a Python state or sticky event
+        # has its previous content depends on the event cache's history.
+        unsigned = event.get("unsigned")
+        if isinstance(unsigned, dict) and (
+            "prev_content" in unsigned or "prev_sender" in unsigned
+        ):
+            unsigned = dict(unsigned)
+            unsigned.pop("prev_content", None)
+            unsigned.pop("prev_sender", None)
+            event = {**event, "unsigned": unsigned}
+        return event
+
+    def normalise(room: JsonDict) -> JsonDict:
+        room = dict(room)
+        for key in ("state", "state_after", "org.matrix.msc4222.state_after"):
+            section = room.get(key)
+            if isinstance(section, dict) and isinstance(section.get("events"), list):
+                # Python lists the state in its state map's order.
+                room[key] = {
+                    **section,
+                    "events": sorted(
+                        (without_prev_content(e) for e in section["events"]),
+                        key=lambda e: str(e.get("event_id")),
+                    ),
+                }
+        sticky = room.get("msc4354_sticky")
+        if isinstance(sticky, dict) and isinstance(sticky.get("events"), list):
+            room["msc4354_sticky"] = {
+                **sticky,
+                "events": [without_prev_content(e) for e in sticky["events"]],
+            }
+        return room
+
+    differences: list[str] = []
+    _compare_values(differences, "room", normalise(python), normalise(rust))
     return differences
 
 
@@ -4606,6 +4785,9 @@ class SyncResultBuilder:
     invited: list[InvitedSyncResult] = attr.Factory(list)
     knocked: list[KnockedSyncResult] = attr.Factory(list)
     archived: list[ArchivedSyncResult] = attr.Factory(list)
+    rust_shadow_rooms: list["RustJoinedSyncResult | RustArchivedSyncResult"] = (
+        attr.Factory(list)
+    )
     to_device: list[JsonDict] = attr.Factory(list)
 
     def calculate_user_changes(self) -> tuple[AbstractSet[str], AbstractSet[str]]:

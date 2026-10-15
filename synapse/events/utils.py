@@ -268,6 +268,22 @@ class EventClientSerializer:
             unsigned_additions=unsigned_additions,
         )[0]
 
+    @property
+    def has_unsigned_callbacks(self) -> bool:
+        """Whether a module registered an
+        `add_extra_fields_to_unsigned_client_event` callback."""
+        return bool(self._add_extra_fields_to_unsigned_client_event_callbacks)
+
+    async def prepare_serialization(
+        self,
+        events: Collection[FilteredEvent],
+        bundle_aggregations: dict[str, "BundledAggregations"] | None,
+    ) -> tuple[dict[str, "EventBase"], dict[str, JsonDict]]:
+        """The redaction map and module-callback unsigned additions that
+        `serialize_events` needs for `events` and the events bundled with
+        them, for a caller that serializes events itself."""
+        return await self._prepare_serialization(events, bundle_aggregations)
+
     async def _prepare_serialization(
         self,
         events: Collection[FilteredEvent],

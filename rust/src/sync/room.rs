@@ -268,6 +268,8 @@ pub async fn generate_room_entry(
         unread_thread_notifications: Vec::new(),
         unread_count: 0,
         sticky: Vec::new(),
+        redactions: HashMap::new(),
+        upto: None,
     };
     let timeline = batch.events;
 
@@ -317,7 +319,37 @@ pub async fn generate_room_entry(
         }
     }
     result.timeline = timeline;
+    result.redactions = load_redactions(reader, &result).await?;
     Ok(Some(result))
+}
+
+/// The redactions of the redacted events of `result`, which the serializer
+/// adds to their unsigned data, as `_prepare_serialization` does.
+async fn load_redactions(
+    reader: &SyncReader<'_>,
+    result: &RoomSyncResultData,
+) -> anyhow::Result<HashMap<Arc<str>, Event>> {
+    let mut redaction_ids: Vec<Arc<str>> = Vec::new();
+    let events = result
+        .timeline
+        .iter()
+        .chain(&result.sticky)
+        .map(|filtered| &filtered.event)
+        .chain(&result.state);
+    for event in events {
+        if let Some(redacted_by) = event.internal_metadata().redacted_by()? {
+            let redacted_by: Arc<str> = Arc::from(redacted_by);
+            if !redaction_ids.contains(&redacted_by) {
+                redaction_ids.push(redacted_by);
+            }
+        }
+    }
+    Ok(reader
+        .events(&redaction_ids, RedactBehaviour::Redact, false, false)
+        .await?
+        .into_iter()
+        .map(|event| (Arc::from(event.event_id()), event))
+        .collect())
 }
 
 /// `compute_summary`: the member counts, and the heroes if the room has no

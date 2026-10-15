@@ -48,7 +48,7 @@ use crate::{
             relation_type, unsigned_field,
         },
         json_object::JsonObject,
-        relations::BundledAggregations,
+        relations::{BundledAggregations, ThreadAggregation},
         Event,
     },
     types::Requester,
@@ -157,6 +157,80 @@ impl SerializeEventConfig {
     }
 }
 
+/// One event's bundled aggregations, borrowed from wherever they are held.
+pub struct BundleRef<'a> {
+    /// The `m.reference` aggregation (e.g. `{"chunk": [{"event_id": ...}]}`).
+    pub references: Option<Map<String, Value>>,
+    /// The edit (`m.replace`) event that applies to the event.
+    pub replace: Option<&'a Event>,
+    pub thread: Option<ThreadRef<'a>>,
+}
+
+/// A thread's bundled summary. See [`ThreadAggregation`].
+pub struct ThreadRef<'a> {
+    pub latest_event: &'a Event,
+    pub count: i64,
+    pub current_user_participated: bool,
+}
+
+/// What the serializer folds into the events it serializes, fetched up
+/// front: the redaction events, the bundled aggregations, and the unsigned
+/// fields module callbacks add.
+pub trait SerializeLookups {
+    /// The redaction event with this ID.
+    fn redaction(&self, event_id: &str) -> Option<&Event>;
+    /// The bundled aggregations of the event with this ID.
+    fn bundle(&self, event_id: &str) -> Option<BundleRef<'_>>;
+    /// The unsigned fields module callbacks add to the event with this ID.
+    fn unsigned_additions(&self, event_id: &str) -> Option<&JsonObject>;
+}
+
+/// The lookups of [`serialize_events`]: Python's maps.
+pub struct PyLookups<'py> {
+    pub bundles: HashMap<String, Bound<'py, BundledAggregations>>,
+    pub redactions: HashMap<String, Bound<'py, Event>>,
+    pub unsigned_additions: HashMap<String, JsonObject>,
+}
+
+impl PyLookups<'_> {
+    /// The bundle of a Python `BundledAggregations`.
+    pub fn bundle_ref(aggregation: &BundledAggregations) -> BundleRef<'_> {
+        BundleRef {
+            references: aggregation.references.as_ref().map(|references| {
+                references
+                    .iter()
+                    .map(|(k, v)| (k.clone().into_string(), v.clone()))
+                    .collect()
+            }),
+            replace: aggregation.replace.as_ref().map(|event| event.get()),
+            thread: aggregation.thread.as_ref().map(|thread| {
+                let thread: &ThreadAggregation = thread.get();
+                ThreadRef {
+                    latest_event: thread.latest_event.get(),
+                    count: thread.count,
+                    current_user_participated: thread.current_user_participated,
+                }
+            }),
+        }
+    }
+}
+
+impl SerializeLookups for PyLookups<'_> {
+    fn redaction(&self, event_id: &str) -> Option<&Event> {
+        self.redactions.get(event_id).map(|event| event.get())
+    }
+
+    fn bundle(&self, event_id: &str) -> Option<BundleRef<'_>> {
+        self.bundles
+            .get(event_id)
+            .map(|aggregation| Self::bundle_ref(aggregation.get()))
+    }
+
+    fn unsigned_additions(&self, event_id: &str) -> Option<&JsonObject> {
+        self.unsigned_additions.get(event_id)
+    }
+}
+
 /// Synchronously serialize a batch of events for clients.
 ///
 /// `events` is a list of `(event, membership)` pairs, where `event` is a
@@ -187,8 +261,12 @@ pub fn serialize_events<'py>(
     redaction_map: Option<HashMap<String, Bound<'py, Event>>>,
     unsigned_additions: Option<HashMap<String, JsonObject>>,
 ) -> PyResult<Vec<Bound<'py, PyAny>>> {
-    let redaction_map = redaction_map.unwrap_or_default();
-    let unsigned_additions = unsigned_additions.unwrap_or_default();
+    let with_bundles = bundle_aggregations.is_some();
+    let lookups = PyLookups {
+        bundles: bundle_aggregations.unwrap_or_default(),
+        redactions: redaction_map.unwrap_or_default(),
+        unsigned_additions: unsigned_additions.unwrap_or_default(),
+    };
 
     events
         .iter()
@@ -198,9 +276,8 @@ pub fn serialize_events<'py>(
                 time_now_ms,
                 config,
                 membership.as_deref(),
-                bundle_aggregations.as_ref(),
-                &redaction_map,
-                &unsigned_additions,
+                with_bundles,
+                &lookups,
             )?;
             Ok(pythonize(py, &Value::Object(serialized))?)
         })
@@ -208,17 +285,15 @@ pub fn serialize_events<'py>(
 }
 
 /// The recursive core: serialize a single event, fold in its redaction,
-/// module-callback additions and field filtering, then recurse into any
-/// bundled aggregations.
-#[allow(clippy::too_many_arguments)]
-fn serialize_event(
+/// module-callback additions and field filtering, then, if `with_bundles`,
+/// recurse into any bundled aggregations.
+pub fn serialize_event(
     event: &Event,
     time_now_ms: i64,
     config: &SerializeEventConfig,
     membership: Option<&str>,
-    bundle_aggregations: Option<&HashMap<String, Bound<'_, BundledAggregations>>>,
-    redaction_map: &HashMap<String, Bound<'_, Event>>,
-    unsigned_additions: &HashMap<String, JsonObject>,
+    with_bundles: bool,
+    lookups: &dyn SerializeLookups,
 ) -> PyResult<Map<String, Value>> {
     let mut serialized = serialize_event_value(event, time_now_ms, config, membership)?;
 
@@ -230,9 +305,9 @@ fn serialize_event(
             Value::String(redacted_by.clone()),
         );
 
-        if let Some(redaction_event) = redaction_map.get(&redacted_by) {
+        if let Some(redaction_event) = lookups.redaction(&redacted_by) {
             let serialized_redaction = Value::Object(serialize_event_value(
-                redaction_event.get(),
+                redaction_event,
                 time_now_ms,
                 config,
                 None,
@@ -256,7 +331,7 @@ fn serialize_event(
     // Merge in the module-callback additions. Start from a copy of the additions
     // and overlay the event's own unsigned on top, so modules can't clobber
     // existing fields.
-    if let Some(adds) = unsigned_additions.get(event.event_id()) {
+    if let Some(adds) = lookups.unsigned_additions(event.event_id()) {
         let unsigned = unsigned_mut(&mut serialized)?;
         for (key, value) in adds {
             // Don't let modules clobber existing unsigned fields.
@@ -275,16 +350,14 @@ fn serialize_event(
 
     // Inject any bundled aggregations. Note this happens after field filtering;
     // aggregations are always returned.
-    if let Some(bundles) = bundle_aggregations {
-        if let Some(aggregation) = bundles.get(event.event_id()) {
+    if with_bundles {
+        if let Some(aggregation) = lookups.bundle(event.event_id()) {
             inject_bundled_aggregations(
                 time_now_ms,
                 config,
-                aggregation.get(),
+                &aggregation,
                 &mut serialized,
-                bundle_aggregations,
-                redaction_map,
-                unsigned_additions,
+                lookups,
             )?;
         }
     }
@@ -294,15 +367,12 @@ fn serialize_event(
 
 /// Inject an event's bundled aggregations (references, edit, thread summary)
 /// into the `m.relations` section of its serialized `unsigned`.
-#[allow(clippy::too_many_arguments)]
 fn inject_bundled_aggregations(
     time_now_ms: i64,
     config: &SerializeEventConfig,
-    aggregation: &BundledAggregations,
+    aggregation: &BundleRef<'_>,
     serialized_event: &mut Map<String, Value>,
-    bundle_aggregations: Option<&HashMap<String, Bound<'_, BundledAggregations>>>,
-    redaction_map: &HashMap<String, Bound<'_, Event>>,
-    unsigned_additions: &HashMap<String, JsonObject>,
+    lookups: &dyn SerializeLookups,
 ) -> PyResult<()> {
     let mut serialized_aggregations = Map::new();
 
@@ -310,46 +380,31 @@ fn inject_bundled_aggregations(
         if !references.is_empty() {
             serialized_aggregations.insert(
                 relation_type::REFERENCE.to_owned(),
-                Value::Object(
-                    references
-                        .iter()
-                        .map(|(k, v)| (k.clone().into_string(), v.clone()))
-                        .collect(),
-                ),
+                Value::Object(references.clone()),
             );
         }
     }
 
-    if let Some(replace) = &aggregation.replace {
+    if let Some(replace) = aggregation.replace {
         // Bundle the *whole* edit event (serialized without its own bundled
         // aggregations). The spec (v1.5) only requires event_id/origin_server_ts/
         // sender, but per MSC3925 we include the full edit.
         // https://spec.matrix.org/v1.5/client-server-api/#server-side-aggregation-of-mreplace-relationships
-        let serialized = serialize_event(
-            replace.get(),
-            time_now_ms,
-            config,
-            None,
-            None,
-            redaction_map,
-            unsigned_additions,
-        )?;
+        let serialized = serialize_event(replace, time_now_ms, config, None, false, lookups)?;
         serialized_aggregations
             .insert(relation_type::REPLACE.to_owned(), Value::Object(serialized));
     }
 
     if let Some(thread) = &aggregation.thread {
-        let thread = thread.get();
-        // The thread's latest event is serialized with the same bundle map, so
+        // The thread's latest event is serialized with the same bundles, so
         // it may recurse further.
         let serialized_latest = serialize_event(
-            thread.latest_event.get(),
+            thread.latest_event,
             time_now_ms,
             config,
             None,
-            bundle_aggregations,
-            redaction_map,
-            unsigned_additions,
+            true,
+            lookups,
         )?;
 
         let mut thread_summary = Map::new();

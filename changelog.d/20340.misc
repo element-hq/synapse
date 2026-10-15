@@ -1,0 +1,1 @@
+Encode the rooms of a sync response in Rust when the Rust sync handler computed them.

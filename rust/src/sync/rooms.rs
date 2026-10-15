@@ -843,10 +843,9 @@ impl RoomChanges {
 /// What [`generate_room_entries`] made of the rooms.
 #[pyclass(frozen, skip_from_py_object)]
 pub struct RoomsResult {
-    /// `(entry, upto_from_now, upto_room_key)` for each room with an entry:
-    /// the room's upto token is the request's now or since token with that
-    /// room key. Taken by [`RoomsResult::take_entries`].
-    pub(crate) entries: Mutex<Vec<(RoomSyncResultData, bool, RoomStreamToken)>>,
+    /// The entry of each room with one. Taken by
+    /// [`RoomsResult::take_entries`].
+    pub(crate) entries: Mutex<Vec<RoomSyncResultData>>,
     /// The rooms Rust computed with nothing to send.
     pub(crate) empty: Vec<Arc<str>>,
     pub(crate) fallbacks: Vec<(Arc<str>, String)>,
@@ -855,22 +854,13 @@ pub struct RoomsResult {
 
 #[pymethods]
 impl RoomsResult {
-    /// The entries as `(RoomSyncResult, upto_from_now, upto_room_key)`. A
-    /// second call returns an empty list.
+    /// The entries as `RoomSyncResult`s. A second call returns an empty
+    /// list.
     fn take_entries<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let entries = std::mem::take(&mut *lock_ignoring_poison(&self.entries));
         let items = entries
             .into_iter()
-            .map(|(data, from_now, room_key)| {
-                PyTuple::new(
-                    py,
-                    [
-                        Bound::new(py, RoomSyncResult { data })?.into_any(),
-                        PyBool::new(py, from_now).to_owned().into_any(),
-                        room_key.into_pyobject(py)?.into_any(),
-                    ],
-                )
-            })
+            .map(|data| Bound::new(py, RoomSyncResult { data }))
             .collect::<PyResult<Vec<_>>>()?;
         PyList::new(py, items)
     }
@@ -908,9 +898,9 @@ impl RoomsResult {
         let mut errors = Vec::new();
         for (room_id, outcome) in outcomes {
             match outcome {
-                RoomOutcome::Entry(Some(data)) => {
-                    let token = &changes.entries[changes.entry_index[&room_id]].upto;
-                    entries.push((*data, token.base == TokenBase::Now, token.room_key.clone()));
+                RoomOutcome::Entry(Some(mut data)) => {
+                    data.upto = Some(changes.entries[changes.entry_index[&room_id]].upto.clone());
+                    entries.push(*data);
                 }
                 RoomOutcome::Entry(None) => empty.push(room_id),
                 RoomOutcome::Fallback(reason) => fallbacks.push((room_id, reason)),

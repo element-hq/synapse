@@ -20,6 +20,7 @@
 #
 import json
 import logging
+from unittest.mock import Mock, patch
 
 from parameterized import parameterized
 
@@ -34,11 +35,14 @@ from synapse.api.constants import (
     RelationTypes,
 )
 from synapse.events import EventBase
+from synapse.handlers.sync import rust_sync_rooms_counter
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
 from synapse.util.clock import Clock
 
+import tests.utils
 from tests import unittest
 from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
@@ -2058,3 +2062,76 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         response = self._sync(use_state_after, t0, timeline_limit=1)
         self.assertNotIn(kick["event_id"], self._timeline_ids(response))
         self.assertIn(kick["event_id"], self._state_ids(response, use_state_after))
+
+
+class RustSyncEncodeTestCase(unittest.HomeserverTestCase):
+    """With `rust_sync` on, the servlet encodes the rooms the Rust sync handler
+    computed in Rust."""
+
+    if not tests.utils.USE_RUST_DRIVER_FOR_TESTS:
+        skip = "the Rust sync handler needs the Rust driver"
+    elif tests.utils.RUST_SYNC_FOR_TESTS not in (None, "on"):
+        skip = "SYNAPSE_TEST_RUST_SYNC overrides the config"
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"rust_sync": "on"}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sync_handler = hs.get_sync_handler()
+        self.user = self.register_user("alice", "password")
+        self.tok = self.login(self.user, "password")
+        self.room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        self.event_id = self.helper.send(self.room_id, "hello", tok=self.tok)[
+            "event_id"
+        ]
+
+    def _sync_timeline_event_ids(self) -> list[str]:
+        channel = self.make_request("GET", "/sync", access_token=self.tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        timeline = channel.json_body["rooms"]["join"][self.room_id]["timeline"]
+        return [event["event_id"] for event in timeline["events"]]
+
+    def test_rooms_encoded_in_rust(self) -> None:
+        encoder = Mock(wraps=sync.RustRoomsEncoder)
+        with patch.object(sync, "RustRoomsEncoder", encoder):
+            event_ids = self._sync_timeline_event_ids()
+        encoder.assert_called_once()
+        self.assertEqual(event_ids[-1], self.event_id)
+
+    def test_encode_error_falls_back_to_python(self) -> None:
+        """If encoding the rooms in Rust fails, Python encodes them, rather than
+        failing the response."""
+        # Tests otherwise fail on any Rust error.
+        self.sync_handler._rust_sync_strict = False
+        before = rust_sync_rooms_counter.labels(
+            result="error", **{SERVER_NAME_LABEL: self.hs.hostname}
+        )._value.get()
+        encoder = Mock()
+        encoder.return_value.encode.side_effect = RuntimeError("boom")
+        with patch.object(sync, "RustRoomsEncoder", encoder):
+            event_ids = self._sync_timeline_event_ids()
+        encoder.return_value.encode.assert_called_once()
+        after = rust_sync_rooms_counter.labels(
+            result="error", **{SERVER_NAME_LABEL: self.hs.hostname}
+        )._value.get()
+        self.assertEqual(after, before + 1)
+        self.assertEqual(event_ids[-1], self.event_id)
+
+    def test_shadow_mode_compares_the_encoding(self) -> None:
+        self.sync_handler._rust_sync_mode = "shadow"
+        compare = Mock(wraps=self.sync_handler.compare_encoded_rooms)
+        with patch.object(self.sync_handler, "compare_encoded_rooms", compare):
+            self._sync_timeline_event_ids()
+        compare.assert_called_once()
+        python, rust = compare.call_args.args
+        self.assertEqual(python.keys(), {self.room_id})
+        self.assertEqual(rust.keys(), {self.room_id})

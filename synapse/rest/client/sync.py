@@ -18,11 +18,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import itertools
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Literal, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
 
 import attr
+
+from twisted.internet.defer import CancelledError
 
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
 from synapse.api.errors import Codes, StoreError, SynapseError
@@ -36,12 +39,16 @@ from synapse.events.utils import (
     strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
+from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
 from synapse.handlers.sync import (
     ArchivedSyncResult,
     InvitedSyncResult,
     JoinedSyncResult,
     KnockedSyncResult,
+    RustArchivedSyncResult,
+    RustJoinedSyncResult,
+    RustRoomContext,
     SyncConfig,
     SyncResult,
 )
@@ -56,6 +63,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
+from synapse.synapse_rust.sync import RoomsEncoder as RustRoomsEncoder
 from synapse.types import (
     JsonDict,
     JsonMapping,
@@ -333,8 +341,32 @@ class SyncRestServlet(RestServlet):
             include_stripped_room_state=True,
         )
 
+        # The rooms the Rust sync handler computed are encoded in Rust, unless
+        # that fails.
+        rust_rooms = [
+            room
+            for room in itertools.chain(sync_result.joined, sync_result.archived)
+            if isinstance(room, (RustJoinedSyncResult, RustArchivedSyncResult))
+        ]
+        encoded_in_rust: dict[str, JsonDict] = {}
+        if rust_rooms:
+            try:
+                encoded_in_rust = await self._encode_rooms_in_rust(
+                    sync_config, rust_rooms, time_now, serialize_options
+                )
+            except CancelledError:
+                raise
+            except Exception as e:
+                self.sync_handler.report_rust_encode_error(
+                    sync_config.user.to_string(), e, shadow=False
+                )
+
         joined = await self.encode_joined(
-            sync_config, sync_result.joined, time_now, serialize_options
+            sync_config,
+            sync_result.joined,
+            time_now,
+            serialize_options,
+            encoded_in_rust,
         )
 
         invited = await self.encode_invited(
@@ -346,8 +378,21 @@ class SyncRestServlet(RestServlet):
         )
 
         archived = await self.encode_archived(
-            sync_config, sync_result.archived, time_now, serialize_options
+            sync_config,
+            sync_result.archived,
+            time_now,
+            serialize_options,
+            encoded_in_rust,
         )
+
+        if sync_result.rust_shadow_rooms:
+            await self._compare_rust_encoding(
+                sync_config,
+                sync_result,
+                {**joined, **archived},
+                time_now,
+                serialize_options,
+            )
 
         logger.debug("building sync response dict")
 
@@ -402,6 +447,136 @@ class SyncRestServlet(RestServlet):
 
         return response
 
+    async def _encode_rooms_in_rust(
+        self,
+        sync_config: SyncConfig,
+        rooms: Sequence[RustJoinedSyncResult | RustArchivedSyncResult],
+        time_now: int,
+        serialize_options: SerializeEventConfig,
+        bundle_aggregations: Mapping[str, BundledAggregations] | None = None,
+    ) -> dict[str, JsonDict]:
+        """`encode_room` of each of `rooms` in Rust, by room ID.
+
+        Args:
+            bundle_aggregations: Bundled aggregations to use as well as the
+                rooms' own.
+        """
+        bundles: dict[str, BundledAggregations] = dict(bundle_aggregations or {})
+        for room in rooms:
+            if room.bundled_aggregations:
+                bundles.update(room.bundled_aggregations)
+
+        # Module callbacks take Python events, so only then do the rooms'
+        # events become Python objects.
+        events: list[FilteredEvent] = []
+        if self._event_serializer.has_unsigned_callbacks:
+            for room in rooms:
+                events.extend(room.timeline_events)
+                events.extend(FilteredEvent.state(e) for e in room.state.values())
+                if isinstance(room, RustJoinedSyncResult):
+                    events.extend(room.sticky)
+        redaction_map: Mapping[str, Any] = {}
+        unsigned_additions: Mapping[str, JsonDict] = {}
+        if events or bundles:
+            (
+                redaction_map,
+                unsigned_additions,
+            ) = await self._event_serializer.prepare_serialization(events, bundles)
+
+        encoder = await self._rooms_encoder(sync_config, rooms[0].context)
+        encoded = encoder.encode(
+            [room.rust for room in rooms],
+            time_now,
+            serialize_options,
+            bundle_aggregations=bundles,
+            redaction_map=redaction_map,
+            unsigned_additions=unsigned_additions,
+        )
+        return {room.room_id: entry for room, entry in zip(rooms, encoded)}
+
+    async def _rooms_encoder(
+        self, sync_config: SyncConfig, context: RustRoomContext
+    ) -> RustRoomsEncoder:
+        """The Rust encoder of the rooms of one response."""
+
+        async def after_room_key(token: StreamToken) -> str:
+            # A room key never holds the separator.
+            return (await token.to_string(self.store)).split("_", 1)[1]
+
+        now_token = context.now_token
+        since_token = context.since_token
+        # The room keys of the rooms' tokens only name the writers that the
+        # response's tokens do.
+        instance_ids = {}
+        for token in (now_token, since_token):
+            if token is not None:
+                for name in token.room_key.instance_map:
+                    instance_ids[name] = await self.store.get_id_for_instance(name)
+
+        return RustRoomsEncoder(
+            now_room_key=now_token.room_key,
+            now_suffix=await after_room_key(now_token),
+            since_suffix=(
+                await after_room_key(since_token) if since_token is not None else None
+            ),
+            instance_ids=instance_ids,
+            state_key_name=self._state_key_name(sync_config),
+            msc3773_enabled=self._msc3773_enabled,
+            msc2654_enabled=self._msc2654_enabled,
+        )
+
+    async def _compare_rust_encoding(
+        self,
+        sync_config: SyncConfig,
+        sync_result: SyncResult,
+        encoded: Mapping[str, JsonDict],
+        time_now: int,
+        serialize_options: SerializeEventConfig,
+    ) -> None:
+        """In `rust_sync: shadow` mode, compare `encoded`, Python's encoding of
+        the joined and archived rooms, with the Rust encoding of the Rust
+        handler's entries for them.
+
+        The Rust entries have no bundled aggregations of their own in shadow
+        mode, so they are encoded with Python's.
+        """
+        bundles: dict[str, BundledAggregations] = {}
+        for timeline in itertools.chain(
+            (room.timeline for room in sync_result.joined),
+            (room.timeline for room in sync_result.archived),
+        ):
+            if timeline.bundled_aggregations:
+                bundles.update(timeline.bundled_aggregations)
+        try:
+            encoded_in_rust = await self._encode_rooms_in_rust(
+                sync_config,
+                sync_result.rust_shadow_rooms,
+                time_now,
+                serialize_options,
+                bundle_aggregations=bundles,
+            )
+        except CancelledError:
+            raise
+        except Exception as e:
+            self.sync_handler.report_rust_encode_error(
+                sync_config.user.to_string(), e, shadow=True
+            )
+            return
+        self.sync_handler.compare_encoded_rooms(encoded, encoded_in_rust)
+
+    @staticmethod
+    def _state_key_name(sync_config: SyncConfig) -> str:
+        """The key of a room's state: `state` or `state_after`, depending on
+        whether the client has opted in to the newer `state_after`
+        behavior."""
+        if sync_config.use_state_after:
+            # Clients which opted in via the unstable MSC4222 query parameter
+            # get the unstable field name back, for the transition period.
+            if sync_config.use_unstable_state_after_name:
+                return "org.matrix.msc4222.state_after"
+            return "state_after"
+        return "state"
+
     @staticmethod
     def encode_presence(events: list[UserPresenceState], time_now: int) -> JsonDict:
         return {
@@ -424,6 +599,7 @@ class SyncRestServlet(RestServlet):
         rooms: list[JoinedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
+        encoded_in_rust: Mapping[str, JsonDict] | None = None,
     ) -> JsonDict:
         """
         Encode the joined rooms in a sync result
@@ -433,11 +609,15 @@ class SyncRestServlet(RestServlet):
             rooms: list of sync results for rooms this user is joined to
             time_now: current time - used as a baseline for age calculations
             serialize_options: Event serializer options
+            encoded_in_rust: The rooms already encoded in Rust, by room ID.
         Returns:
             The joined rooms list, in our response format
         """
         joined = {}
         for room in rooms:
+            if encoded_in_rust and room.room_id in encoded_in_rust:
+                joined[room.room_id] = encoded_in_rust[room.room_id]
+                continue
             joined[room.room_id] = await self.encode_room(
                 sync_config,
                 room,
@@ -547,6 +727,7 @@ class SyncRestServlet(RestServlet):
         rooms: list[ArchivedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
+        encoded_in_rust: Mapping[str, JsonDict] | None = None,
     ) -> JsonDict:
         """
         Encode the archived rooms in a sync result
@@ -556,11 +737,15 @@ class SyncRestServlet(RestServlet):
             rooms: list of sync results for rooms this user is joined to
             time_now: current time - used as a baseline for age calculations
             serialize_options: Event serializer options
+            encoded_in_rust: The rooms already encoded in Rust, by room ID.
         Returns:
             The archived rooms list, in our response format
         """
         joined = {}
         for room in rooms:
+            if encoded_in_rust and room.room_id in encoded_in_rust:
+                joined[room.room_id] = encoded_in_rust[room.room_id]
+                continue
             joined[room.room_id] = await self.encode_room(
                 sync_config,
                 room,
@@ -634,17 +819,7 @@ class SyncRestServlet(RestServlet):
 
         account_data = room.account_data
 
-        # We either include a `state` or `state_after` field depending on
-        # whether the client has opted in to the newer `state_after` behavior.
-        if sync_config.use_state_after:
-            # Clients which opted in via the unstable MSC4222 query parameter
-            # get the unstable field name back, for the transition period.
-            if sync_config.use_unstable_state_after_name:
-                state_key_name = "org.matrix.msc4222.state_after"
-            else:
-                state_key_name = "state_after"
-        else:
-            state_key_name = "state"
+        state_key_name = self._state_key_name(sync_config)
 
         result: JsonDict = {
             "timeline": {

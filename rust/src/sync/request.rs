@@ -21,6 +21,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use pyo3::{
+    exceptions::PyRuntimeError,
     prelude::*,
     types::{PyDict, PyList, PyTuple},
 };
@@ -29,6 +30,7 @@ use serde_json::Value;
 
 use crate::events::Event;
 use crate::sync::filter::FilterCollection;
+use crate::sync::rooms::{RoomToken, TokenBase};
 use crate::types::stream_token::RoomStreamToken;
 use crate::visibility::{FilteredEvent, SoftFailedPolicy};
 
@@ -164,6 +166,10 @@ pub struct RoomSyncResultData {
     pub unread_thread_notifications: Vec<(Arc<str>, i64, i64)>,
     pub unread_count: i64,
     pub sticky: Vec<FilteredEvent>,
+    /// The redactions of the redacted events above, by ID.
+    pub redactions: HashMap<Arc<str>, Event>,
+    /// The room's upto token. Set once the room is computed.
+    pub upto: Option<RoomToken>,
 }
 
 /// See [`RoomSyncResultData`]. Each getter builds new Python objects.
@@ -189,11 +195,32 @@ fn filtered_to_py<'py>(py: Python<'py>, events: &[FilteredEvent]) -> PyResult<Bo
     PyList::new(py, items)
 }
 
+impl RoomSyncResult {
+    fn upto(&self) -> PyResult<&RoomToken> {
+        self.data
+            .upto
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("the room's upto token is not set"))
+    }
+}
+
 #[pymethods]
 impl RoomSyncResult {
     #[getter]
     fn room_id(&self) -> &str {
         &self.data.room_id
+    }
+
+    /// Whether the entry has anything to send, as `JoinedSyncResult` and
+    /// `ArchivedSyncResult` define it.
+    fn __bool__(&self) -> bool {
+        let data = &self.data;
+        let base =
+            !data.timeline.is_empty() || !data.state.is_empty() || !data.account_data.is_empty();
+        match data.rtype {
+            RoomType::Joined => base || !data.ephemeral.is_empty() || !data.sticky.is_empty(),
+            RoomType::Archived => base,
+        }
     }
 
     #[getter]
@@ -222,6 +249,19 @@ impl RoomSyncResult {
     #[getter]
     fn limited(&self) -> bool {
         self.data.limited
+    }
+
+    /// Whether the room's upto token is built on the response's now token
+    /// rather than its since token.
+    #[getter]
+    fn upto_from_now(&self) -> PyResult<bool> {
+        Ok(self.upto()?.base == TokenBase::Now)
+    }
+
+    /// The room key of the room's upto token.
+    #[getter]
+    fn upto_room_key(&self) -> PyResult<RoomStreamToken> {
+        Ok(self.upto()?.room_key.clone())
     }
 
     #[getter]
