@@ -50,7 +50,7 @@ class MSC3866Config:
     require_approval_for_new_accounts: bool = False
 
 
-RustFederationSendingLevel = Literal["off", "client", "transactions"]
+RustFederationSendingLevel = Literal["off", "client", "transactions", "queues"]
 
 # The levels of `rust_federation_sending`, in order. Each implies the ones
 # before it.
@@ -58,6 +58,7 @@ RUST_FEDERATION_SENDING_LEVELS: tuple[RustFederationSendingLevel, ...] = (
     "off",
     "client",
     "transactions",
+    "queues",
 )
 
 
@@ -377,6 +378,9 @@ class ExperimentalConfig(Config):
         #    federation traffic goes through a proxy worker, stay Python.
         #  - "transactions": the `TransactionManager` builds and sends `/send`
         #    transactions in Rust, PDU JSON included.
+        #  - "queues": each destination's queue and transmission loop run in
+        #    Rust. Catch-up, the sticky event backlog and the database work
+        #    of the loop stay Python, called from Rust.
         rust_federation_sending = experimental.get("rust_federation_sending", "off")
         if rust_federation_sending not in RUST_FEDERATION_SENDING_LEVELS:
             raise ConfigError(

@@ -22,7 +22,7 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 
-from tests.federation._rust_transactions import RustTransactionsMixin
+from tests.federation._rust_transactions import RustQueuesMixin, RustTransactionsMixin
 from tests.test_utils import event_injection
 from tests.unittest import FederatingHomeserverTestCase
 from tests.utils import USE_POSTGRES_FOR_TESTS
@@ -958,3 +958,13 @@ class FederationStickyEventCatchUpRustTestCase(
 ):
     """As `FederationStickyEventCatchUpTestCase`, with Rust building the
     transactions."""
+
+
+class FederationCatchUpQueuesTestCases(RustQueuesMixin, FederationCatchUpTestCases):
+    """As `FederationCatchUpTestCases`, with the queues in Rust."""
+
+
+class FederationStickyEventCatchUpQueuesTestCase(
+    RustQueuesMixin, FederationStickyEventCatchUpTestCase
+):
+    """As `FederationStickyEventCatchUpTestCase`, with the queues in Rust."""

@@ -154,6 +154,7 @@ from synapse.federation.sender.per_destination_queue import (
     CATCHUP_RETRY_INTERVAL,
     PerDestinationQueue,
 )
+from synapse.federation.sender.rust_queue import RustPerDestinationQueue
 from synapse.federation.sender.transaction_manager import TransactionManager
 from synapse.federation.units import Edu
 from synapse.logging.context import make_deferred_yieldable, run_in_background
@@ -167,6 +168,7 @@ from synapse.metrics import (
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
+from synapse.synapse_rust.federation import RustDestinationQueues
 from synapse.types import (
     JsonDict,
     ReadReceipt,
@@ -418,7 +420,22 @@ class FederationSender(AbstractFederationSender):
         self._federation_shard_config = hs.config.worker.federation_shard_config
 
         # map from destination to PerDestinationQueue
-        self._per_destination_queues: dict[str, PerDestinationQueue] = {}
+        self._per_destination_queues: dict[
+            str, PerDestinationQueue | RustPerDestinationQueue
+        ] = {}
+
+        # At `rust_federation_sending: queues`, the queues and their loops
+        # are Rust's. They send through the Rust transaction sender, so there
+        # are none where that is missing.
+        self._rust_queues: RustDestinationQueues | None = None
+        rust_transactions = self._transaction_manager._rust
+        if (
+            hs.config.experimental.rust_federation_sending_at_least("queues")
+            and rust_transactions is not None
+        ):
+            self._rust_queues = RustDestinationQueues(
+                rust_transactions, hs.config.experimental.msc4354_enabled
+            )
 
         transaction_queue_pending_destinations_gauge.register_hook(
             homeserver_instance_id=hs.get_instance_id(),
@@ -482,7 +499,7 @@ class FederationSender(AbstractFederationSender):
 
     def _get_per_destination_queue(
         self, destination: str
-    ) -> PerDestinationQueue | None:
+    ) -> PerDestinationQueue | RustPerDestinationQueue | None:
         """Get or create a PerDestinationQueue for the given destination
 
         Args:
@@ -499,7 +516,14 @@ class FederationSender(AbstractFederationSender):
 
         queue = self._per_destination_queues.get(destination)
         if not queue:
-            queue = PerDestinationQueue(self.hs, self._transaction_manager, destination)
+            if self._rust_queues is not None:
+                queue = RustPerDestinationQueue(
+                    self.hs, self._transaction_manager, destination, self._rust_queues
+                )
+            else:
+                queue = PerDestinationQueue(
+                    self.hs, self._transaction_manager, destination
+                )
             self._per_destination_queues[destination] = queue
         return queue
 

@@ -1,0 +1,1 @@
+Run the per-destination federation queues and their transmission loops in Rust at `experimental_features.rust_federation_sending: queues`.
