@@ -434,9 +434,13 @@ impl Event {
         };
 
         // Check for a valid duration field. The MSC requires `duration_ms` to
-        // be a non-negative integer. If it's missing or invalid, we treat the
+        // be a strictly positive integer. If it's missing or invalid, we treat the
         // event as non-sticky by returning `None`.
-        let Some(duration_ms) = sticky_obj.get("duration_ms").and_then(|v| v.as_u64()) else {
+        let Some(duration_ms) = sticky_obj
+            .get("duration_ms")
+            .and_then(|v| v.as_u64())
+            .filter(|duration| *duration > 0)
+        else {
             return Ok(None);
         };
 
