@@ -290,9 +290,13 @@ pub trait QueueHooks: Send + Sync + 'static {
         request: DeviceEdusRequest,
     ) -> Result<DeviceEdus, LoopError>;
 
-    /// `StickyEventBacklogTracker.prepare_transaction`: `None` once the
-    /// backlog is empty.
-    async fn sticky_backlog(&self, observer: &Observer) -> Result<Option<StickyBatch>, LoopError>;
+    /// `StickyEventBacklogTracker.prepare_transaction`, for `queue`: `None`
+    /// once the backlog is empty.
+    async fn sticky_backlog(
+        &self,
+        queue: &DestinationQueue,
+        observer: &Observer,
+    ) -> Result<Option<StickyBatch>, LoopError>;
 
     /// Record a finished transaction: the stream positions, the module
     /// callback and the metrics.
@@ -908,7 +912,7 @@ impl DestinationQueue {
             return Ok(None);
         }
 
-        let Some(batch) = self.hooks.sticky_backlog(observer).await? else {
+        let Some(batch) = self.hooks.sticky_backlog(self, observer).await? else {
             log::info!(
                 target: QUEUE_LOG,
                 "Caught up on federation sticky event backlog for destination '{}'",
@@ -1131,6 +1135,11 @@ impl DestinationQueue {
 
     pub fn set_sticky_backlogged(&self, backlogged: bool) {
         self.state().sticky_backlogged = backlogged;
+    }
+
+    /// The time now, by the sink's clock.
+    pub fn now_ms(&self) -> u64 {
+        self.sink.now_ms()
     }
 
     /// The event IDs of the queued PDUs, oldest first. For tests.

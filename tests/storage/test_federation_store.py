@@ -31,12 +31,13 @@ from signedjson.key import (
 from twisted.internet.testing import MemoryReactor
 
 from synapse.handlers.e2e_keys import SignatureListItem
+from synapse.replication.tcp.streams._base import StickyEventStreamPosition
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.federation import FederationStoreForTest
-from synapse.types import JsonDict
+from synapse.types import JsonDict, RoomID
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -540,3 +541,132 @@ class CatchUpStoreTestCase(unittest.HomeserverTestCase):
                 self.assertEqual(self._backlog(), python, (old, new, sent, existing))
         # The cases did backlog something.
         self.assertNotEqual(python, [])
+
+    def _seed_backlog(self) -> list[int]:
+        """Sticky and plain events in each room, with every room backlogged
+        for `DEST` from its start."""
+        orderings = [self._send(self.rooms[i % 3], sticky=i % 2 == 0) for i in range(9)]
+        self.get_success(
+            self.store.mark_backlogged_sticky_events_after_catchup_transaction(
+                DEST,
+                old_last_successfully_sent_stream_ordering=0,
+                new_last_successfully_sent_stream_ordering=orderings[-1] + 1,
+                event_stream_orderings_sent_in_transaction=[],
+            )
+        )
+        return orderings
+
+    def test_backlogged_sticky_events_for_destination(self) -> None:
+        self._seed_backlog()
+        now = self.clock.time_msec()
+        for limit in (1, 2, 50):
+            python = self.get_success(
+                self.store.get_backlogged_sticky_events_for_destination(
+                    DEST, limit=limit
+                )
+            )
+            assert python is not None
+            room_id, position, event_ids = python
+            self.assertEqual(
+                self.rust.get_backlogged_sticky_events_for_destination(
+                    DEST, limit, now
+                ),
+                (room_id.to_string(), position, event_ids),
+            )
+        self.assertIsNone(
+            self.rust.get_backlogged_sticky_events_for_destination(OTHER, 50, now)
+        )
+
+    def test_backlogged_sticky_events_expire(self) -> None:
+        """Once the sticky events expire, the backlog is cleaned up."""
+        self._seed_backlog()
+        self.assertNotEqual(self._backlog(), [])
+        later = self.clock.time_msec() + 60 * 60 * 1000
+        self.assertIsNone(
+            self.rust.get_backlogged_sticky_events_for_destination(DEST, 50, later)
+        )
+        self.assertEqual(self._backlog(), [])
+
+    def test_mark_backlogged_sticky_events_sent(self) -> None:
+        self._seed_backlog()
+        backlog = self.rust.get_backlogged_sticky_events_for_destination(
+            DEST, 50, self.clock.time_msec()
+        )
+        assert backlog is not None
+        room_id, position, _ = backlog
+
+        self.rust.mark_backlogged_sticky_events_sent(DEST, room_id, position)
+        rust = self._backlog()
+        self._clear_backlog()
+        self._seed_backlog_rows(rust)
+        self.get_success(
+            self.store.mark_backlogged_sticky_events_sent(
+                DEST, RoomID.from_string(room_id), StickyEventStreamPosition(position)
+            )
+        )
+        self.assertEqual(self._backlog(), rust)
+        self.assertIn((DEST, room_id, position + 1), rust)
+
+    def _seed_backlog_rows(self, rows: list[tuple[str, str, int]]) -> None:
+        for destination, room_id, position in rows:
+            self.get_success(
+                self.store.db_pool.simple_upsert(
+                    "destination_rooms_sticky_events_backlog",
+                    {"destination": destination, "room_id": room_id},
+                    {"sticky_events_stream_position": position},
+                )
+            )
+
+    def test_catch_up_outstanding_destinations(self) -> None:
+        # PDUs for `DEST` and `OTHER`, a to-device message for a third, a
+        # sticky backlog for a fourth, and a fifth that is backed off.
+        self._send(self.rooms[0], sticky=False)
+        self.get_success(
+            self.store.add_remote_messages_from_client_to_device_inbox(
+                {
+                    "todevice.example.com": {
+                        "sender": "@alice:test",
+                        "type": "m.test",
+                        "message_id": "1",
+                        "messages": {"@u:todevice.example.com": {"D": {}}},
+                    }
+                }
+            )
+        )
+        self._seed_backlog_rows([("sticky.example.com", self.rooms[0], 1)])
+        self.get_success(
+            self.store.store_destination_rooms_entries(
+                ["backoff.example.com"], self.rooms[0], 1_000_000
+            )
+        )
+        now = self.clock.time_msec()
+        self.get_success(
+            self.store.set_destination_retry_timings(
+                "backoff.example.com", now, now, 60_000
+            )
+        )
+
+        for after in (None, "", DEST, "zzz"):
+            for at in (now, now + 120_000):
+                # Python's reads the clock, so call its transaction directly.
+                python = self.get_success(
+                    self.store.db_pool.runInteraction(
+                        "outstanding",
+                        self.store._get_catch_up_outstanding_destinations_txn,
+                        at,
+                        after,
+                    )
+                )
+                self.assertEqual(
+                    self.rust.get_catch_up_outstanding_destinations(after, at),
+                    python,
+                    (after, at),
+                )
+        self.assertIn(
+            "backoff.example.com",
+            self.rust.get_catch_up_outstanding_destinations(None, now + 120_000),
+        )
+        self.assertNotIn(
+            "backoff.example.com",
+            self.rust.get_catch_up_outstanding_destinations(None, now),
+        )

@@ -165,7 +165,11 @@ impl QueueHooks for FakeHooks {
             }))
     }
 
-    async fn sticky_backlog(&self, _observer: &Observer) -> Result<Option<StickyBatch>, LoopError> {
+    async fn sticky_backlog(
+        &self,
+        _queue: &DestinationQueue,
+        _observer: &Observer,
+    ) -> Result<Option<StickyBatch>, LoopError> {
         Ok(self.sticky.lock().unwrap().pop_front().flatten())
     }
 

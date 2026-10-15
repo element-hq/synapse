@@ -51,6 +51,7 @@ from synapse.synapse_rust.federation import (
     federation_gil_stats,
 )
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.federation._rust_transactions import wait_for_rust_queues
@@ -118,7 +119,9 @@ class RustQueuesTestCase(unittest.HomeserverTestCase):
     def _make_queues(
         self, transactions: RustTransactionManager
     ) -> RustDestinationQueues:
-        return RustDestinationQueues(transactions, False, {DEST})
+        return RustDestinationQueues(
+            transactions, self.hs.config.experimental.msc4354_enabled, {DEST}
+        )
 
     def _send_event(self, body: str) -> EventBase:
         event_id = self.helper.send(self.room_id, body, tok=self.tok)["event_id"]
@@ -264,7 +267,13 @@ class RustQueuesTestCase(unittest.HomeserverTestCase):
 
 
 class RustQueuesNativeTestCase(RustQueuesTestCase):
-    """The same, with the database work done through the native driver."""
+    """The same, with the database work done through the native driver, and
+    sticky events on, so the loops look at the sticky event backlog."""
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config["experimental_features"]["msc4354_enabled"] = True
+        return config
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         hs = self.setup_test_homeserver()
@@ -393,6 +402,57 @@ class RustQueuesNativeTestCase(RustQueuesTestCase):
             [pdu["content"].get("body") for pdu in body["pdus"]],
             [self.event.content["body"]],
         )
+
+    def test_sticky_backlog(self) -> None:
+        """Catching up past a sticky event backlogs it, and the loop then
+        sends it, all without taking the GIL."""
+        self.hs.get_module_api_callbacks().federation._on_event_delivered_over_federation_callbacks.clear()
+        destination = "sticky.example.com"
+        self._catch_up_destination(destination, self.event)
+        self.helper.send_sticky_event(
+            self.room_id,
+            "m.room.message",
+            duration=Duration(minutes=10),
+            content={"body": "sticky", "msgtype": "m.text"},
+            tok=self.tok,
+        )
+        latest = self._send_event("latest")
+        stream_ordering = latest.internal_metadata.stream_ordering
+        assert stream_ordering is not None
+        self.get_success(
+            self.store.store_destination_rooms_entries(
+                [destination], self.room_id, stream_ordering
+            )
+        )
+        queue = self.sender._get_per_destination_queue(destination)
+        assert isinstance(queue, RustPerDestinationQueue)
+        self.transport.responses.extend([json_response(200, {})] * 2)
+
+        before = federation_gil_stats()
+        queue.attempt_new_transaction()
+        self._settle()
+
+        bodies = [
+            [pdu["content"].get("body") for pdu in json.loads(request.body)["pdus"]]
+            for request in self.transport.requests
+        ]
+        self.assertEqual(bodies, [["latest"], ["sticky"]])
+        # The loop looked again, found the backlog sent, and cleared it.
+        self.assertEqual(
+            self.get_success(
+                self.store.db_pool.simple_select_list(
+                    "destination_rooms_sticky_events_backlog",
+                    {"destination": destination},
+                    ["room_id"],
+                )
+            ),
+            [],
+        )
+        self.assertFalse(queue._rust.sticky_backlogged)
+        calls = self._queue_calls(before)
+        self.assertNotIn("queue_catch_up", calls)
+        self.assertNotIn("queue_sticky_backlog", calls)
+        self.assertNotIn("queue_complete", calls)
 
     def test_to_device(self) -> None:
         """A to-device message is sent, and deleted once sent. Reading the

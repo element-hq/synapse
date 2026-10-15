@@ -506,6 +506,199 @@ impl FederationStore {
             .collect()
     }
 
+    /// `get_backlogged_sticky_events_for_destination`: up to `limit` of
+    /// the local sticky events, live at `now_ms`, from one room whose
+    /// backlog for `destination` is not empty, oldest first, and the sticky
+    /// events stream position of the last. `None` if there is no backlog.
+    ///
+    /// A room in the backlog whose sticky events have all expired is
+    /// removed from it, and another room tried.
+    pub async fn get_backlogged_sticky_events_for_destination(
+        &self,
+        pool: &ConnectionPool,
+        destination: &str,
+        limit: usize,
+        now_ms: i64,
+    ) -> anyhow::Result<Option<(String, i64, Vec<String>)>> {
+        let pattern = self.config.local_users_pattern();
+        let mut conn = Conn::borrow(pool).await?;
+        conn.begin().await?;
+
+        let mut backlog = self
+            .try_backlogged_sticky_events(&conn, destination, limit, now_ms, &pattern)
+            .await?;
+        if matches!(&backlog, Some((_, _, events)) if events.is_empty()) {
+            // The room is backlogged but has no sticky events to send, as
+            // they expired, say. Clean up and try again.
+            conn.query(
+                "WITH to_clean_up AS (
+                    SELECT backlog.room_id
+                    FROM destination_rooms_sticky_events_backlog AS backlog
+                    LEFT JOIN sticky_events AS se
+                        ON se.room_id = backlog.room_id
+                        AND se.sender LIKE $1
+                        AND $2 < se.expires_at
+                        AND backlog.sticky_events_stream_position <= se.stream_id
+                    WHERE se.event_id IS NULL
+                        AND backlog.destination = $3
+                )
+                DELETE FROM destination_rooms_sticky_events_backlog
+                WHERE destination = $3 AND room_id IN (SELECT room_id FROM to_clean_up)",
+                &[&pattern, &now_ms, &destination],
+            )
+            .await?;
+            backlog = self
+                .try_backlogged_sticky_events(&conn, destination, limit, now_ms, &pattern)
+                .await?;
+            if matches!(&backlog, Some((_, _, events)) if events.is_empty()) {
+                anyhow::bail!("Sticky event backlog for {destination} not cleaned up");
+            }
+        }
+        conn.commit().await?;
+
+        Ok(backlog.map(|(room_id, position, events)| {
+            (room_id, position.unwrap_or_default(), events)
+        }))
+    }
+
+    /// One try of [`FederationStore::get_backlogged_sticky_events_for_destination`]:
+    /// a backlogged room, the position of its last event and its events,
+    /// which may be none.
+    async fn try_backlogged_sticky_events(
+        &self,
+        conn: &Conn,
+        destination: &str,
+        limit: usize,
+        now_ms: i64,
+        pattern: &str,
+    ) -> anyhow::Result<Option<(String, Option<i64>, Vec<String>)>> {
+        let rows = conn
+            .query(
+                "SELECT room_id, sticky_events_stream_position::bigint
+                FROM destination_rooms_sticky_events_backlog
+                WHERE destination = $1
+                LIMIT 1",
+                &[&destination],
+            )
+            .await?;
+        let Some(row) = rows.first() else {
+            return Ok(None);
+        };
+        let room_id: String = row.try_get(0)?;
+        let from_position: i64 = row.try_get(1)?;
+
+        let rows = conn
+            .query(
+                "SELECT event_id, stream_id::bigint
+                FROM sticky_events
+                WHERE room_id = $1
+                    AND $2::bigint <= stream_id
+                    AND $3 < expires_at
+                    AND sender LIKE $4
+                ORDER BY stream_id ASC
+                LIMIT $5",
+                &[&room_id, &from_position, &now_ms, &pattern, &(limit as i64)],
+            )
+            .await?;
+        let mut position = None;
+        let mut events = Vec::with_capacity(rows.len());
+        for row in &rows {
+            events.push(row.try_get(0)?);
+            let stream_id: i64 = row.try_get(1)?;
+            position = Some(position.map_or(stream_id, |p: i64| p.max(stream_id)));
+        }
+        Ok(Some((room_id, position, events)))
+    }
+
+    /// `mark_backlogged_sticky_events_sent`: the sticky events of the room
+    /// up to `position` reached `destination`.
+    pub async fn mark_backlogged_sticky_events_sent(
+        &self,
+        pool: &ConnectionPool,
+        destination: &str,
+        room_id: &str,
+        position: i64,
+    ) -> anyhow::Result<()> {
+        Conn::borrow(pool)
+            .await?
+            .query(
+                "INSERT INTO destination_rooms_sticky_events_backlog
+                    (destination, room_id, sticky_events_stream_position)
+                VALUES ($1, $2, $3::bigint)
+                ON CONFLICT (destination, room_id) DO UPDATE
+                    SET sticky_events_stream_position = EXCLUDED.sticky_events_stream_position",
+                // The position is an inclusive lower bound on what is left.
+                &[&destination, &room_id, &(position + 1)],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// `get_catch_up_outstanding_destinations`: up to 25 destinations after
+    /// `after_destination`, in order, that we are not backing off from at
+    /// `now_ms` and that have PDUs, to-device messages or sticky events
+    /// waiting.
+    pub async fn get_catch_up_outstanding_destinations(
+        &self,
+        pool: &ConnectionPool,
+        after_destination: Option<&str>,
+        now_ms: i64,
+    ) -> anyhow::Result<Vec<String>> {
+        // Everything sorts after "".
+        let after = after_destination.unwrap_or("");
+        let rows = Conn::borrow(pool)
+            .await?
+            .query(
+                "WITH pdu_destinations AS (
+                    SELECT DISTINCT destination FROM destination_rooms
+                    LEFT JOIN destinations USING (destination)
+                    WHERE
+                        destination > $1
+                        AND destination_rooms.stream_ordering
+                            > COALESCE(destinations.last_successful_stream_ordering, 0)
+                        AND (
+                            destinations.retry_last_ts IS NULL OR
+                            destinations.retry_last_ts + destinations.retry_interval < $2
+                        )
+                    ORDER BY destination
+                    LIMIT 25
+                ), to_device_destinations AS (
+                    SELECT DISTINCT destination FROM device_federation_outbox
+                    LEFT JOIN destinations USING (destination)
+                    WHERE
+                        destination > $1
+                        AND (
+                            destinations.retry_last_ts IS NULL OR
+                            destinations.retry_last_ts + destinations.retry_interval < $2
+                        )
+                    ORDER BY destination
+                    LIMIT 25
+                ), sticky_event_destinations AS (
+                    SELECT DISTINCT destination
+                    FROM destination_rooms_sticky_events_backlog
+                    LEFT JOIN destinations USING (destination)
+                    WHERE
+                        destination > $1
+                        AND (
+                            destinations.retry_last_ts IS NULL OR
+                            destinations.retry_last_ts + destinations.retry_interval < $2
+                        )
+                    ORDER BY destination
+                    LIMIT 25
+                )
+                SELECT destination FROM pdu_destinations
+                UNION SELECT destination FROM to_device_destinations
+                UNION SELECT destination FROM sticky_event_destinations
+                ORDER BY destination
+                LIMIT 25",
+                &[&after, &now_ms],
+            )
+            .await?;
+        rows.iter()
+            .map(|row| Ok(row.try_get(0)?))
+            .collect()
+    }
+
     /// `mark_backlogged_sticky_events_after_catchup_transaction`: a
     /// catch-up transaction moved `destination` on from `old_position` to
     /// `new_position`, skipping events. Record each room with local sticky
@@ -1053,6 +1246,53 @@ impl PyFederationStoreForTest {
 
     fn get_prev_events_for_room(&self, py: Python<'_>, room_id: &str) -> PyResult<Vec<String>> {
         self.run(py, self.store.get_prev_events_for_room(&self.pool, room_id))
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn get_backlogged_sticky_events_for_destination(
+        &self,
+        py: Python<'_>,
+        destination: &str,
+        limit: usize,
+        now_ms: i64,
+    ) -> PyResult<Option<(String, i64, Vec<String>)>> {
+        self.run(
+            py,
+            self.store.get_backlogged_sticky_events_for_destination(
+                &self.pool,
+                destination,
+                limit,
+                now_ms,
+            ),
+        )
+    }
+
+    fn mark_backlogged_sticky_events_sent(
+        &self,
+        py: Python<'_>,
+        destination: &str,
+        room_id: &str,
+        position: i64,
+    ) -> PyResult<()> {
+        self.run(
+            py,
+            self.store
+                .mark_backlogged_sticky_events_sent(&self.pool, destination, room_id, position),
+        )
+    }
+
+    #[pyo3(signature = (after_destination, now_ms))]
+    fn get_catch_up_outstanding_destinations(
+        &self,
+        py: Python<'_>,
+        after_destination: Option<&str>,
+        now_ms: i64,
+    ) -> PyResult<Vec<String>> {
+        self.run(
+            py,
+            self.store
+                .get_catch_up_outstanding_destinations(&self.pool, after_destination, now_ms),
+        )
     }
 
     fn mark_backlogged_sticky_events_after_catchup_transaction(

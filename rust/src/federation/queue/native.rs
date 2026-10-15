@@ -19,9 +19,8 @@
 //! the device EDUs and records finished transactions with the
 //! [`FederationStore`], on tokio. A transaction then needs no trip to the
 //! reactor, unless it finishes a sticky event batch or a module wants to
-//! hear about delivered events. Catch-up runs here too, reading events
-//! through the shared event cache. The sticky event backlog stays Python,
-//! through [`PyHooks`].
+//! hear about delivered events. Catch-up and the sticky event backlog run
+//! here too, reading events through the shared event cache.
 
 use std::sync::{Arc, Mutex};
 
@@ -31,7 +30,7 @@ use pyo3::{exceptions::PyRuntimeError, intern, prelude::*};
 use super::{
     changes::StreamChanges, metrics::QueueMetrics, python::PyHooks, Completion,
     DestinationQueue, DeviceEdus, DeviceEdusRequest, LoopError, Observer, PduBody, QueueHooks,
-    QueuedPdu, StickyBatch, QUEUE_LOG,
+    QueuedPdu, StickyBatch, MAX_PDUS_PER_TRANSACTION, QUEUE_LOG,
 };
 use crate::{
     database::postgres::pool::{ConnectionPool, PyConnectionPool},
@@ -128,6 +127,9 @@ pub(super) struct NativeHooks {
 fn db_error(err: anyhow::Error) -> LoopError {
     LoopError::Other(format!("{err:#}"))
 }
+
+/// A position in the sticky events stream, from the native store.
+struct NativeStickyPosition(i64);
 
 /// The stream ordering of an event read from the database, which has one.
 fn stream_ordering_of(event: &Event) -> Result<i64, LoopError> {
@@ -428,8 +430,71 @@ impl QueueHooks for NativeHooks {
         })
     }
 
-    async fn sticky_backlog(&self, observer: &Observer) -> Result<Option<StickyBatch>, LoopError> {
-        self.python.sticky_backlog(observer).await
+    /// `StickyEventBacklogTracker.load_backlog`, natively.
+    async fn sticky_backlog(
+        &self,
+        queue: &DestinationQueue,
+        observer: &Observer,
+    ) -> Result<Option<StickyBatch>, LoopError> {
+        let destination = self.destination.as_str();
+        let pool = self.native.pool.get()?;
+        let Some((room_id, position, event_ids)) = self
+            .native
+            .store
+            .get_backlogged_sticky_events_for_destination(
+                &pool,
+                destination,
+                MAX_PDUS_PER_TRANSACTION,
+                queue.now_ms() as i64,
+            )
+            .await
+            .map_err(db_error)?
+        else {
+            return Ok(None);
+        };
+        log::debug!(
+            target: QUEUE_LOG,
+            "Selected {} backlogged sticky events to send to destination '{destination}' in room '{room_id}' (up to stream position {position})",
+            event_ids.len()
+        );
+
+        let reader = self.native.sync.reader(pool);
+        let ids: Vec<Arc<str>> = event_ids.iter().map(|id| Arc::from(id.as_str())).collect();
+        let events = reader
+            .events(&ids, RedactBehaviour::Redact, false, false)
+            .await
+            .map_err(db_error)?;
+        // Leave out what the destination may not see, rather than send it
+        // redacted, which would lose the stickiness. An erased user's
+        // sticky events are not sent in catch-up. They are all local
+        // events, so partial state does not apply.
+        let filter = ServerFilter {
+            target_server_name: destination,
+            local_server_name: &self.native.server_name,
+            redact: false,
+            filter_out_erased_senders: true,
+            filter_out_remote_partial_state_events: false,
+        };
+        let events = match filter_events_for_server(&reader, &filter, events)
+            .await
+            .map_err(db_error)?
+        {
+            ServerFiltered::Events(events) => events,
+            // Python waits for the full state here. Let it.
+            ServerFiltered::NeedsFullState => {
+                return self.python.sticky_backlog(queue, observer).await;
+            }
+        };
+
+        let pdus = events
+            .into_iter()
+            .map(queued_pdu)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Some(StickyBatch {
+            room_id,
+            position: Arc::new(NativeStickyPosition(position)),
+            pdus,
+        }))
     }
 
     /// The database writes of `_rust_complete`, natively. Python is only
@@ -494,9 +559,19 @@ impl QueueHooks for NativeHooks {
             }
         }
 
-        // The sticky batch finishes last, as in Python.
-        if completion.sticky.is_none() {
+        // The sticky batch finishes last, as in Python. One the native
+        // store loaded finishes natively, and one Python loaded in Python.
+        let Some((room_id, position)) = completion.sticky else {
             return Ok(());
+        };
+        if let Some(NativeStickyPosition(position)) = position.downcast_ref() {
+            let pool = self.native.pool.get()?;
+            return self
+                .native
+                .store
+                .mark_backlogged_sticky_events_sent(&pool, destination, &room_id, *position)
+                .await
+                .map_err(db_error);
         }
         self.python
             .call_complete(
@@ -505,7 +580,7 @@ impl QueueHooks for NativeHooks {
                     to_device_stream_id: None,
                     device_list_stream_id: None,
                     last_stream_ordering: None,
-                    sticky: completion.sticky,
+                    sticky: Some((room_id, position)),
                     sent: None,
                 },
             )

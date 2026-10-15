@@ -550,7 +550,11 @@ impl QueueHooks for PyHooks {
         .await
     }
 
-    async fn sticky_backlog(&self, observer: &Observer) -> Result<Option<StickyBatch>, LoopError> {
+    async fn sticky_backlog(
+        &self,
+        _queue: &DestinationQueue,
+        observer: &Observer,
+    ) -> Result<Option<StickyBatch>, LoopError> {
         self.call(
             observer,
             "queue_sticky_backlog",

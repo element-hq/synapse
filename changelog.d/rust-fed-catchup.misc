@@ -1,0 +1,1 @@
+Run federation catch-up and the sticky event backlog in Rust when the native Postgres driver is in use, under the experimental `rust_federation_sending: queues` option.
