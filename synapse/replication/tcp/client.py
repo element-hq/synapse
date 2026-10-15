@@ -229,6 +229,9 @@ class ReplicationDataHandler:
                     continue
 
                 extra_users: tuple[UserID, ...] = ()
+                # The local user the membership state key names, for registering
+                # their event stream against the room; see `_PendingRoomEventEntry`.
+                joined_user_id: str | None = None
                 if row.data.type == EventTypes.Member and row.data.state_key:
                     if is_member_key(row.data.state_key):
                         # MSC4430: the member is a key. Wake the user behind it
@@ -240,8 +243,10 @@ class ReplicationDataHandler:
                             UserID.from_string(user_id)
                             for user_id in local_users.values()
                         )
+                        joined_user_id = local_users.get(row.data.state_key)
                     else:
                         extra_users = (UserID.from_string(row.data.state_key),)
+                        joined_user_id = row.data.state_key
 
                 max_token = self.store.get_room_max_token()
                 event_pos = PersistedEventPosition(instance_name, token)
@@ -252,6 +257,7 @@ class ReplicationDataHandler:
                     row.data.type,
                     row.data.state_key,
                     row.data.membership,
+                    joined_user_id,
                 )
                 await self.notifier.notify_new_room_events(
                     [(event_entry, row.data.event_id)], max_token

@@ -16,9 +16,11 @@ from collections import Counter
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
+import synapse.rest.admin
 from synapse.notifier import wait_for_stream_token_timeout_counter
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import MultiWriterStreamToken, StreamKeyType, StreamToken
+from synapse.types import JsonDict, MultiWriterStreamToken, StreamKeyType, StreamToken
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -193,3 +195,145 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
             counts[sample.labels["stream_key"]] = int(sample.value)
 
         return counts
+
+
+class NotifierMemberKeyRoomTestCase(tests.unittest.HomeserverTestCase):
+    """MSC4430: a member joining is registered against the room by their user ID.
+
+    The membership event's state key is the member's key, which names no event
+    stream: registering that instead leaves a user who was already syncing when
+    they joined never woken for the room again, so their /sync long-polls out and
+    messages appear only after the timeout.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4430_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.notifier = hs.get_notifier()
+        self.alice = self.register_user("alice", "pass")
+        self.alice_token = self.login("alice", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_token = self.login("bob", "pass")
+
+    def _assert_registered_on_join(self, room_version: str | None) -> None:
+        room_id = self.helper.create_room_as(
+            self.alice, tok=self.alice_token, is_public=True, room_version=room_version
+        )
+
+        # Give Bob a live user stream *before* he joins: this is the case the bug
+        # hits, as a stream created afterwards is built from `get_rooms_for_user`,
+        # which does know about member key rooms.
+        self.get_success(
+            self.notifier.wait_for_events(
+                self.bob, 0, lambda before, after: defer.succeed(True)
+            )
+        )
+        self.assertIn(self.bob, self.notifier.user_to_user_stream)
+
+        self.helper.join(room_id, self.bob, tok=self.bob_token)
+
+        streams = self.notifier.room_to_user_streams.get(room_id, set())
+        self.assertIn(
+            self.notifier.user_to_user_stream[self.bob],
+            streams,
+            f"Bob's event stream was not registered against the {room_version} room, "
+            "so he will never be woken for events in it",
+        )
+
+    def test_join_registers_stream_in_member_key_room(self) -> None:
+        self._assert_registered_on_join("org.matrix.msc4430.12")
+
+    def test_join_registers_stream_in_ordinary_room(self) -> None:
+        self._assert_registered_on_join(None)
+
+    def _assert_deregistered_on_leave(self, room_version: str | None) -> None:
+        room_id = self.helper.create_room_as(
+            self.alice, tok=self.alice_token, is_public=True, room_version=room_version
+        )
+        self.get_success(
+            self.notifier.wait_for_events(
+                self.bob, 0, lambda before, after: defer.succeed(True)
+            )
+        )
+        bob_stream = self.notifier.user_to_user_stream[self.bob]
+        self.helper.join(room_id, self.bob, tok=self.bob_token)
+        self.assertIn(room_id, bob_stream.rooms)
+
+        token_before_leave = bob_stream.current_token
+
+        self.helper.leave(room_id, self.bob, tok=self.bob_token)
+
+        # Bob must still have been notified of the leave itself, which is why
+        # deregistration happens after the notification rather than during it.
+        self.assertNotEqual(
+            bob_stream.current_token,
+            token_before_leave,
+            "Bob's stream was not notified of his own leave",
+        )
+        self.assertNotIn(
+            room_id,
+            bob_stream.rooms,
+            "Bob's stream is still registered against a room he has left, so he "
+            "will be woken for every event in it",
+        )
+        self.assertNotIn(
+            bob_stream, self.notifier.room_to_user_streams.get(room_id, set())
+        )
+
+    def test_kick_by_member_key_notifies_and_deregisters(self) -> None:
+        """A kick naming the member by key still wakes them, and drops the room.
+
+        Clients may name a member by their key rather than their user ID, which is a
+        different path through `parse_membership_target`; check the departing user is
+        both notified and deregistered either way.
+        """
+        room_id = self.helper.create_room_as(
+            self.alice,
+            tok=self.alice_token,
+            is_public=True,
+            room_version="org.matrix.msc4430.12",
+        )
+        self.helper.join(room_id, self.bob, tok=self.bob_token)
+        self.get_success(
+            self.notifier.wait_for_events(
+                self.bob, 0, lambda before, after: defer.succeed(True)
+            )
+        )
+        bob_stream = self.notifier.user_to_user_stream[self.bob]
+        self.assertIn(room_id, bob_stream.rooms)
+
+        key = self.get_success(
+            self.hs.get_datastores().main.get_local_member_key(room_id, self.bob)
+        )
+        assert key is not None
+        token_before = bob_stream.current_token
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{room_id}/kick",
+            {"user_id": key.member_key},
+            access_token=self.alice_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        self.assertNotEqual(
+            bob_stream.current_token,
+            token_before,
+            "Bob's stream was not notified of a kick naming him by member key",
+        )
+        self.assertNotIn(room_id, bob_stream.rooms)
+
+    def test_leave_deregisters_stream_in_member_key_room(self) -> None:
+        self._assert_deregistered_on_leave("org.matrix.msc4430.12")
+
+    def test_leave_deregisters_stream_in_ordinary_room(self) -> None:
+        self._assert_deregistered_on_leave(None)

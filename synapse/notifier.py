@@ -58,6 +58,7 @@ from synapse.types import (
     StreamKeyType,
     StreamToken,
     UserID,
+    is_member_key,
 )
 from synapse.util.async_helpers import (
     timeout_deferred,
@@ -253,6 +254,12 @@ class _PendingRoomEventEntry:
     state_key: str | None
     membership: str | None
 
+    # For a membership event, the local user the state key names. In an MSC4430
+    # member key room the state key is the member's key, which is not a user ID and
+    # so matches no user's event stream; `None` for everything else, and for members
+    # of other servers, who have no stream here to wake.
+    joined_user_id: str | None = None
+
 
 class Notifier:
     """This class is responsible for notifying any listeners when there are
@@ -371,9 +378,31 @@ class Notifier:
                 event.type,
                 event.get("state_key"),
                 event.content.get("membership"),
+                await self._local_user_for_membership(event),
             )
             event_entries.append((entry, event.event_id))
         await self.notify_new_room_events(event_entries, max_room_stream_token)
+
+    async def _local_user_for_membership(self, event: EventBase) -> str | None:
+        """The local user a membership event's state key names, for registering their
+        event stream against the room.
+
+        In an MSC4430 member key room the state key is the member's key, which is not a
+        user ID: taken literally it matches no stream, so a user who is already syncing
+        when they join is never woken for the room again. Returns `None` for anything
+        that is not one of our users joining.
+        """
+        if event.type != EventTypes.Member:
+            return None
+        state_key = event.get("state_key")
+        if not state_key:
+            return None
+        if not is_member_key(state_key):
+            return state_key
+        identity_map = await self.store.get_local_identity_map(
+            event.room_id, [state_key]
+        )
+        return identity_map.get(state_key)
 
     async def on_un_partial_stated_room(
         self,
@@ -448,6 +477,7 @@ class Notifier:
         event_type: str,
         state_key: str | None,
         membership: str | None,
+        joined_user_id: str | None = None,
     ) -> _PendingRoomEventEntry:
         """Creates and returns a _PendingRoomEventEntry"""
         return _PendingRoomEventEntry(
@@ -457,6 +487,7 @@ class Notifier:
             type=event_type,
             state_key=state_key,
             membership=membership,
+            joined_user_id=joined_user_id,
         )
 
     def _notify_pending_new_room_events(
@@ -473,17 +504,24 @@ class Notifier:
 
         users: set[UserID] = set()
         rooms: set[str] = set()
+        # Applied once the notification below has gone out, so that a departing
+        # user is woken for the very event that removed them. In practice they are
+        # also in `extra_users`, so the order is belt and braces rather than load
+        # bearing; it costs nothing and does not rely on that staying true.
+        departures: list[tuple[str, str]] = []
 
         for entry in pending:
             if entry.event_pos.persisted_after(max_room_stream_token):
                 self.pending_new_room_events.append(entry)
             else:
-                if (
-                    entry.type == EventTypes.Member
-                    and entry.membership == Membership.JOIN
-                    and entry.state_key
-                ):
-                    self._user_joined_room(entry.state_key, entry.room_id)
+                if entry.type == EventTypes.Member and entry.state_key:
+                    # Not `entry.state_key`: in a member key room that is the
+                    # member's key, which names no event stream.
+                    member_user_id = entry.joined_user_id or entry.state_key
+                    if entry.membership == Membership.JOIN:
+                        self._user_joined_room(member_user_id, entry.room_id)
+                    elif entry.membership in (Membership.LEAVE, Membership.BAN):
+                        departures.append((member_user_id, entry.room_id))
 
                 users.update(entry.extra_users)
                 rooms.add(entry.room_id)
@@ -496,6 +534,10 @@ class Notifier:
                 rooms=rooms,
             )
             self._on_updated_room_token(max_room_stream_token)
+
+        # Only now that the notification has gone out (see above).
+        for user_id, room_id in departures:
+            self._user_left_room(user_id, room_id)
 
     def _on_updated_room_token(self, max_room_stream_token: RoomStreamToken) -> None:
         """Poke services that might care that the room position has been
@@ -992,6 +1034,24 @@ class Notifier:
             room_streams = self.room_to_user_streams.setdefault(room_id, set())
             room_streams.add(new_user_stream)
             new_user_stream.rooms.add(room_id)
+
+    def _user_left_room(self, user_id: str, room_id: str) -> None:
+        """Stop waking this user's event stream for a room they are no longer in.
+
+        The mirror of `_user_joined_room`. Without it a long-lived stream keeps the
+        rooms it has ever joined for as long as it survives, and is woken for every
+        event in all of them; only a stream rebuilt from `get_rooms_for_user` (which
+        happens when it is recreated, not while it lives) drops them.
+        """
+        user_stream = self.user_to_user_stream.get(user_id)
+        if user_stream is None:
+            return
+        user_stream.rooms.discard(room_id)
+        room_streams = self.room_to_user_streams.get(room_id)
+        if room_streams is not None:
+            room_streams.discard(user_stream)
+            if not room_streams:
+                self.room_to_user_streams.pop(room_id, None)
 
     def notify_replication(self) -> None:
         """Notify the any replication listeners that there's a new event"""
