@@ -209,8 +209,39 @@ class EventTranslationTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             self._signers(event_dict),
-            [MemberKeys.SIGNATURE_ENTITY, MemberKeys.LINKAGE_SIGNATURE_ENTITY],
+            [
+                MemberKeys.SIGNATURE_ENTITY,
+                MemberKeys.STATE_KEY_SIGNATURE_ENTITY,
+                self.hs.hostname,
+            ],
         )
+
+    def test_moderation_asserts_nothing_about_its_target(self) -> None:
+        """A kick, ban or unban of one of our users carries no linkage
+        information, even though we hold the target's key and know who they are.
+        Only the member's own key may assert who a key belongs to, and it has not
+        signed this event, so the claim would be ignored by every other server —
+        and a moderator who could make it would be able to deface a member by
+        naming a localpart and a domain of their choosing."""
+        for membership in ("leave", "ban"):
+            event_dict = self._translate(
+                {
+                    "type": EventTypes.Member,
+                    "room_id": ROOM_ID,
+                    "sender": self.alice,
+                    "state_key": self.bob,
+                    "content": {
+                        "membership": membership,
+                        EventContentFields.MSC4430_LOCALPART: "some_abusive_localpart",
+                        EventContentFields.MSC4430_DOMAIN: "evil.example",
+                    },
+                }
+            )
+            self.assertEqual(event_dict["state_key"], self._key(self.bob))
+            self.assertEqual(event_dict["content"], {"membership": membership})
+            self.assertEqual(
+                self._signers(event_dict), [MemberKeys.SIGNATURE_ENTITY], membership
+            )
 
     def test_erased_user_gets_no_localpart(self) -> None:
         self.get_success(self.store.mark_user_erased(self.bob))
@@ -232,7 +263,7 @@ class EventTranslationTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             self._signers(event_dict),
-            [MemberKeys.SIGNATURE_ENTITY, MemberKeys.LINKAGE_SIGNATURE_ENTITY],
+            [MemberKeys.SIGNATURE_ENTITY, self.hs.hostname],
         )
 
     def test_remote_target_is_refused(self) -> None:
@@ -305,11 +336,7 @@ class EventTranslationTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             self._signers(event_dict),
-            [
-                MemberKeys.SIGNATURE_ENTITY,
-                MemberKeys.LINKAGE_SIGNATURE_ENTITY,
-                alice_key,
-            ],
+            [MemberKeys.SIGNATURE_ENTITY, self.hs.hostname, alice_key],
         )
 
     def _key_for(self, user_id: str) -> str:
@@ -466,7 +493,7 @@ class EventTranslationTestCase(unittest.HomeserverTestCase):
         }
         self.assertEqual(
             signers_for(ours),
-            [MemberKeys.SIGNATURE_ENTITY, MemberKeys.LINKAGE_SIGNATURE_ENTITY],
+            [MemberKeys.SIGNATURE_ENTITY, self.hs.hostname],
         )
         for wrong in (
             {**ours, EventContentFields.MSC4430_LOCALPART: "bob"},
@@ -481,7 +508,7 @@ class EventTranslationTestCase(unittest.HomeserverTestCase):
         self.assertEqual(signers_for(ours), [MemberKeys.SIGNATURE_ENTITY])
         self.assertEqual(
             signers_for({EventContentFields.MSC4430_DOMAIN: self.hs.hostname}),
-            [MemberKeys.SIGNATURE_ENTITY, MemberKeys.LINKAGE_SIGNATURE_ENTITY],
+            [MemberKeys.SIGNATURE_ENTITY, self.hs.hostname],
         )
 
     def test_remote_additional_creator_is_refused(self) -> None:

@@ -111,6 +111,24 @@ def record_unsupported_path(server_name: str, path: str) -> None:
         )
 
 
+def _may_assert_linkage(event_dict: JsonDict, content: JsonDict) -> bool:
+    """Whether a membership event we are building may carry its target's linkage
+    information.
+
+    Only the member themselves may assert who a member key belongs to, by signing
+    the event with that key: a claim made by anyone else is ignored by every other
+    server, since otherwise a moderator could kick a member while naming a
+    localpart and a domain of their choosing and have it believed. So an event the
+    member sent carries their linkage information, and an invite carries it because
+    the invitee's own server signs it with their key alongside its own. A kick, a
+    ban or an unban carries none, and so names nobody: it would be a claim nobody
+    believes, and would publish a localpart in a room that has no use for it.
+    """
+    return event_dict.get("sender") == event_dict.get("state_key") or (
+        content.get(EventContentFields.MEMBERSHIP) == Membership.INVITE
+    )
+
+
 class MemberKeyHandler:
     """Resolves room member identities (user IDs or member keys) to users and back,
     and chooses the member keys and signatures for the events our users create."""
@@ -353,10 +371,11 @@ class MemberKeyHandler:
         users gets our linkage information. Rooms without member keys are left
         untouched.
 
-        Linkage information is asserted by servers, never by clients: whatever
-        the client put in `localpart` / `domain` is dropped, and the fields are
-        filled in only for a target we can vouch for. An erased user gets no
-        `localpart`, so their name is not published again.
+        Linkage information is never asserted by clients: whatever the client put
+        in `localpart` / `domain` is dropped, and the fields are filled in only
+        for a target we can vouch for, on an event that may assert them at all
+        (see `_may_assert_linkage`). An erased user gets no `localpart`, so their
+        name is not published again.
 
         The `users` of an `m.room.power_levels` event are translated the same
         way (user IDs of ours become keys; keys stay as they are, so a client
@@ -468,7 +487,7 @@ class MemberKeyHandler:
                         Codes.INVALID_PARAM,
                     )
 
-            if target_user_id is not None:
+            if target_user_id is not None and _may_assert_linkage(event_dict, content):
                 target = UserID.from_string(target_user_id)
                 content[EventContentFields.MSC4430_DOMAIN] = target.domain
                 if not await self._store.is_user_erased(target_user_id):
@@ -544,11 +563,12 @@ class MemberKeyHandler:
         """Who signs an event we are building in a member key room:
 
         * the sender's member key, under the entity `sender`, if we hold it;
-        * our server signing key, under the entity `state_key`, on an
-          `m.room.member` event whose target is a key we hold and whose linkage
-          information is exactly what we vouch for (our domain, and the user's
-          localpart unless they are erased): that is what lets other servers
-          verify the member's link;
+        * on an `m.room.member` event whose target is a key we hold and whose
+          linkage information is exactly what we vouch for (our domain, and the
+          user's localpart unless they are erased): that member's own key, under
+          the entity `state_key`, if somebody else sent the event, asserting the
+          claim; and our server signing key, under our name, vouching for it.
+          Together they are what lets other servers verify the member's link;
         * the authorising member's key, under its own name, on a restricted join
           that names a key we hold.
 
@@ -584,9 +604,20 @@ class MemberKeyHandler:
             if target_user_id is not None and await self._is_our_linkage(
                 target_user_id, content
             ):
-                signers.append(
-                    (MemberKeys.LINKAGE_SIGNATURE_ENTITY, self._server_signing_key)
-                )
+                if state_key != sender:
+                    # Somebody else's event about our member (an invite): their
+                    # key asserts the claim, since ours is not enough for other
+                    # servers to believe it. An event the member sent themselves
+                    # needs no second signature.
+                    target_signing_key = await self._signing_key_for(room_id, state_key)
+                    if target_signing_key is not None:
+                        signers.append(
+                            (
+                                MemberKeys.STATE_KEY_SIGNATURE_ENTITY,
+                                target_signing_key,
+                            )
+                        )
+                signers.append((self.server_name, self._server_signing_key))
 
         authorising_member = content.get(EventContentFields.AUTHORISING_USER)
         if (

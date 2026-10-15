@@ -141,18 +141,24 @@ class _MemberKeyRoomsBase(unittest.HomeserverTestCase):
 
     def _assert_linked_and_cosigned(self, event: EventBase, user_id: str) -> None:
         """A membership event about one of our users: it names them and we
-        co-signed it, next to the member key signature."""
+        co-signed it, next to the member key signature. An event the member did
+        not send themselves — an invite — additionally carries their own key's
+        signature under `state_key`, which is what asserts the linkage: ours
+        alone is a claim no other server believes."""
         localpart, domain = user_id[1:].split(":", 1)
         self.assertEqual(event.content[EventContentFields.MSC4430_LOCALPART], localpart)
         self.assertEqual(event.content[EventContentFields.MSC4430_DOMAIN], domain)
+        expected = {
+            MemberKeys.SIGNATURE_ENTITY: {MemberKeys.KEY_ID},
+            self.hs.hostname: {
+                f"{self.hs.signing_key.alg}:{self.hs.signing_key.version}"
+            },
+        }
+        if event.sender != event.state_key:
+            expected[MemberKeys.STATE_KEY_SIGNATURE_ENTITY] = {MemberKeys.KEY_ID}
         self.assertEqual(
             {entity: set(sigs) for entity, sigs in event.signatures.as_dict().items()},
-            {
-                MemberKeys.SIGNATURE_ENTITY: {MemberKeys.KEY_ID},
-                MemberKeys.LINKAGE_SIGNATURE_ENTITY: {
-                    f"{self.hs.signing_key.alg}:{self.hs.signing_key.version}"
-                },
-            },
+            expected,
             event.signatures,
         )
 
@@ -365,8 +371,8 @@ class MemberKeyRoomsTestCase(_MemberKeyRoomsBase):
         self.assertEqual(
             leave.content[EventContentFields.MSC4430_DOMAIN], self.hs.hostname
         )
-        # Still ours, so still co-signed.
-        self.assertIn(MemberKeys.LINKAGE_SIGNATURE_ENTITY, leave.signatures)
+        # Their own event, so still co-signed.
+        self.assertIn(self.hs.hostname, leave.signatures)
 
     def test_additional_creators(self) -> None:
         """Additional creators are named by key in the create event, which is the
@@ -496,20 +502,16 @@ class MemberKeyModerationTestCase(_MemberKeyRoomsBase):
     def _membership(self, room_id: str, member_key: str) -> str:
         return self._member_event(room_id, member_key).membership
 
-    def _assert_moderated_by(
-        self, event: EventBase, sender_key: str, target_user_id: str | None = None
-    ) -> None:
-        """A membership event sent by `sender_key` about another member: with
-        the target's linkage information and our co-signature if the target is
-        one of our users, else with neither and signed by the sender's key alone
-        (we vouch for nothing about a key we do not hold)."""
+    def _assert_moderated_by(self, event: EventBase, sender_key: str) -> None:
+        """A kick, ban or unban: sent by `sender_key` about another member, and
+        naming nobody. Only the member's own key may assert who they are, and it
+        has not signed this, so linkage information here would be ignored by every
+        other server — including a target whose key we hold, whose localpart has
+        no business being published on somebody else's event."""
         self.assertEqual(event.sender, sender_key)
-        if target_user_id is not None:
-            self._assert_linked_and_cosigned(event, target_user_id)
-        else:
-            self.assertNotIn(EventContentFields.MSC4430_LOCALPART, event.content)
-            self.assertNotIn(EventContentFields.MSC4430_DOMAIN, event.content)
-            self._assert_signed_by_member_key_only(event)
+        self.assertNotIn(EventContentFields.MSC4430_LOCALPART, event.content)
+        self.assertNotIn(EventContentFields.MSC4430_DOMAIN, event.content)
+        self._assert_signed_by_member_key_only(event)
 
     def _power_levels(self, room_id: str) -> JsonDict:
         return dict(self._current_state(room_id)[(EventTypes.PowerLevels, "")].content)
@@ -548,12 +550,12 @@ class MemberKeyModerationTestCase(_MemberKeyRoomsBase):
         kick = self._member_event(room_id, bob_key)
         self.assertEqual(kick.membership, Membership.LEAVE)
         self.assertEqual(kick.content["reason"], "kick reason")
-        self._assert_moderated_by(kick, alice_key, self.bob)
+        self._assert_moderated_by(kick, alice_key)
 
         self._moderate(room_id, "ban", self.bob)
         ban = self._member_event(room_id, bob_key)
         self.assertEqual(ban.membership, Membership.BAN)
-        self._assert_moderated_by(ban, alice_key, self.bob)
+        self._assert_moderated_by(ban, alice_key)
         self.helper.join(
             room_id, self.bob, tok=self.bob_tok, expect_code=HTTPStatus.FORBIDDEN
         )
@@ -561,7 +563,7 @@ class MemberKeyModerationTestCase(_MemberKeyRoomsBase):
         self._moderate(room_id, "unban", self.bob)
         unban = self._member_event(room_id, bob_key)
         self.assertEqual(unban.membership, Membership.LEAVE)
-        self._assert_moderated_by(unban, alice_key, self.bob)
+        self._assert_moderated_by(unban, alice_key)
 
         # Back under the same key.
         self.helper.join(room_id, self.bob, tok=self.bob_tok)
@@ -579,7 +581,7 @@ class MemberKeyModerationTestCase(_MemberKeyRoomsBase):
         self._moderate(room_id, "kick", bob_key)
         kick = self._member_event(room_id, bob_key)
         self.assertEqual(kick.membership, Membership.LEAVE)
-        self._assert_moderated_by(kick, alice_key, self.bob)
+        self._assert_moderated_by(kick, alice_key)
         self.assertEqual(
             self.get_success(
                 self.store.get_local_current_membership_for_user_in_room(
@@ -598,19 +600,15 @@ class MemberKeyModerationTestCase(_MemberKeyRoomsBase):
         self._moderate(room_id, "unban", bob_key)
         unban = self._member_event(room_id, bob_key)
         self.assertEqual(unban.membership, Membership.LEAVE)
-        self._assert_moderated_by(unban, alice_key, self.bob)
+        self._assert_moderated_by(unban, alice_key)
         self.helper.join(room_id, self.bob, tok=self.bob_tok)
 
-        # Once erased, Bob is still ours (co-signed, our domain), unnamed.
+        # Erased or not, a ban names nobody: Bob's key has not signed it.
         self.get_success(self.store.mark_user_erased(self.bob))
         self._moderate(room_id, "ban", bob_key)
         ban = self._member_event(room_id, bob_key)
         self.assertEqual(ban.membership, Membership.BAN)
-        self.assertNotIn(EventContentFields.MSC4430_LOCALPART, ban.content)
-        self.assertEqual(
-            ban.content[EventContentFields.MSC4430_DOMAIN], self.hs.hostname
-        )
-        self.assertIn(MemberKeys.LINKAGE_SIGNATURE_ENTITY, ban.signatures.as_dict())
+        self._assert_moderated_by(ban, alice_key)
         self._assert_no_user_ids_in_room(room_id)
 
     def test_moderation_through_the_state_api(self) -> None:
@@ -630,7 +628,7 @@ class MemberKeyModerationTestCase(_MemberKeyRoomsBase):
         )
         ban = self._member_event(room_id, bob_key)
         self.assertEqual(ban.membership, Membership.BAN)
-        self._assert_moderated_by(ban, alice_key, self.bob)
+        self._assert_moderated_by(ban, alice_key)
 
         self.helper.send_state(
             room_id,
@@ -1028,7 +1026,7 @@ class MemberKeyModerationTestCase(_MemberKeyRoomsBase):
         self.assertEqual(self._power_levels(new_room)["users"], {new_bob_key: 50})
         ban = self._member_event(new_room, new_carol_key)
         self.assertEqual(ban.membership, Membership.BAN)
-        self._assert_moderated_by(ban, new_alice_key, self.carol)
+        self._assert_moderated_by(ban, new_alice_key)
         self.assertEqual(self._membership(new_room, new_alice_key), Membership.JOIN)
         self.assertNotIn(
             (EventTypes.Member, new_bob_key), self._current_state(new_room)

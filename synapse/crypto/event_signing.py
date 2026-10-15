@@ -200,10 +200,12 @@ def add_hashes_and_signatures_from_signers(
     * A member key string (the authorising member of a restricted join, MSC-Q §2):
       the event must be a join naming that key in `join_authorised_via_users_server`,
       and the key must be that member key.
-    * `MemberKeys.LINKAGE_SIGNATURE_ENTITY` (`state_key`), co-signing the linkage
+    * `MemberKeys.STATE_KEY_SIGNATURE_ENTITY` (`state_key`), asserting the linkage
       information of the member named by `state_key`: the event must be an
-      `m.room.member` event whose `content.domain` is us, and the key must be our
-      server signing key.
+      `m.room.member` event sent by somebody else, and the key must be the member
+      key its `state_key` names.
+    * Our own server name (`server_name`), vouching for linkage information: the
+      event must be an `m.room.member` event whose `content.domain` is us.
 
     Anything else is refused. To add one signature to an event that is already
     hashed (one received from another server), use
@@ -324,14 +326,29 @@ def _check_member_key_room_signer(
             )
         return
 
-    # The co-signature on linkage information. The entity is the constant
-    # `state_key`, naming the member the claim is about; the claim itself is
-    # `content.domain`, which must be us, since this server signs for nobody else.
-    if signature_name != MemberKeys.LINKAGE_SIGNATURE_ENTITY:
-        raise refuse(
-            "not a signature this event may carry (expected %s)"
-            % (MemberKeys.LINKAGE_SIGNATURE_ENTITY,)
-        )
+    if signature_name == MemberKeys.STATE_KEY_SIGNATURE_ENTITY:
+        # The member's own assertion of their linkage information on an event
+        # somebody else sent about them.
+        if signing_key.version != MemberKeys.KEY_VERSION:
+            raise refuse("member keys sign with key ID %s" % (MemberKeys.KEY_ID,))
+        state_key = event_dict.get("state_key")
+        if event_dict.get("type") != EventTypes.Member or not isinstance(
+            state_key, str
+        ):
+            raise refuse("only m.room.member events have a state key to sign for")
+        if MemberKey.from_signing_key(signing_key).to_string() != state_key:
+            raise refuse("the signing key is not the event's state key")
+        if event_dict.get("sender") == state_key:
+            raise refuse(
+                "the sender signature is already this member's; a second "
+                "signature under %s says nothing more"
+                % (MemberKeys.STATE_KEY_SIGNATURE_ENTITY,)
+            )
+        return
+
+    # Our server name: vouching for linkage information.
+    if signature_name != server_name:
+        raise refuse("not this server's name (%s)" % (server_name,))
     if event_dict.get("type") != EventTypes.Member:
         raise refuse("servers only co-sign m.room.member events")
     if content.get(EventContentFields.MSC4430_DOMAIN) != server_name:
