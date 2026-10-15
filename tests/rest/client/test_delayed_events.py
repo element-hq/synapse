@@ -592,6 +592,31 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         self.assertListEqual([], self._get_delayed_events())
 
+    def test_delayed_state_event_rejected_if_sender_lacks_power_level(self) -> None:
+        """A delayed state event is rejected when the sender is in the room but
+        their power level is too low to send it."""
+        room_id = self.helper.create_room_as(
+            self.user2_user_id,
+            tok=self.user2_access_token,
+            extra_content={"preset": "public_chat"},
+        )
+        self.helper.join(room_id, self.user1_user_id, tok=self.user1_access_token)
+
+        channel = self._make_delayed_event_request(
+            room_id=room_id,
+            delay=Duration(milliseconds=900),
+            event_type=EventTypes.Name,
+            state_key="",
+            content={EventContentFields.ROOM_NAME: "New name"},
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
+        )
+
+        self.assertListEqual([], self._get_delayed_events())
+
     def test_delayed_event_fails_on_timeout_if_sender_left_room(self) -> None:
         """A delayed event is not sent if its sender has left the room by the
         time it comes to be sent."""
