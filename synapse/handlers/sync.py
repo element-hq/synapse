@@ -81,6 +81,7 @@ from synapse.types import (
     StreamKeyType,
     StreamToken,
     UserID,
+    is_compliant_user_id,
 )
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
@@ -2787,6 +2788,11 @@ class SyncHandler:
             users = await self.store.get_users_in_room(room_id)
             extra_users_ids.update(users)
         extra_users_ids.discard(user.to_string())
+        extra_users_ids = {
+            extra_user_id
+            for extra_user_id in extra_users_ids
+            if self._is_mine_id(extra_user_id) or is_compliant_user_id(extra_user_id)
+        }
 
         if extra_users_ids:
             states = await self.presence_handler.get_states(extra_users_ids)
