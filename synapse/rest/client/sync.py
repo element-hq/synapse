@@ -32,6 +32,7 @@ from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
 from synapse.api.ratelimiting import Ratelimiter
+from synapse.events import EventBase
 from synapse.events.utils import (
     EventFormat,
     FilteredEvent,
@@ -39,7 +40,6 @@ from synapse.events.utils import (
     strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
-from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
 from synapse.handlers.sync import (
     ArchivedSyncResult,
@@ -453,43 +453,27 @@ class SyncRestServlet(RestServlet):
         rooms: Sequence[RustJoinedSyncResult | RustArchivedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
-        bundle_aggregations: Mapping[str, BundledAggregations] | None = None,
     ) -> dict[str, JsonDict]:
-        """`encode_room` of each of `rooms` in Rust, by room ID.
-
-        Args:
-            bundle_aggregations: Bundled aggregations to use as well as the
-                rooms' own.
-        """
-        bundles: dict[str, BundledAggregations] = dict(bundle_aggregations or {})
-        for room in rooms:
-            if room.bundled_aggregations:
-                bundles.update(room.bundled_aggregations)
-
+        """`encode_room` of each of `rooms` in Rust, by room ID. The Rust
+        handler loaded the rooms' bundled aggregations and redactions."""
         # Module callbacks take Python events, so only then do the rooms'
         # events become Python objects.
-        events: list[FilteredEvent] = []
-        if self._event_serializer.has_unsigned_callbacks:
-            for room in rooms:
-                events.extend(room.timeline_events)
-                events.extend(FilteredEvent.state(e) for e in room.state.values())
-                if isinstance(room, RustJoinedSyncResult):
-                    events.extend(room.sticky)
-        redaction_map: Mapping[str, Any] = {}
         unsigned_additions: Mapping[str, JsonDict] = {}
-        if events or bundles:
-            (
-                redaction_map,
-                unsigned_additions,
-            ) = await self._event_serializer.prepare_serialization(events, bundles)
+        if self._event_serializer.has_unsigned_callbacks:
+            events: list[EventBase] = []
+            for room in rooms:
+                events.extend(e.event for e in room.timeline_events)
+                events.extend(room.state.values())
+                if isinstance(room, RustJoinedSyncResult):
+                    events.extend(e.event for e in room.sticky)
+                events.extend(room.rust.bundled_events)
+            unsigned_additions = await self._event_serializer.unsigned_additions(events)
 
         encoder = await self._rooms_encoder(sync_config, rooms[0].context)
         encoded = encoder.encode(
             [room.rust for room in rooms],
             time_now,
             serialize_options,
-            bundle_aggregations=bundles,
-            redaction_map=redaction_map,
             unsigned_additions=unsigned_additions,
         )
         return {room.room_id: entry for room, entry in zip(rooms, encoded)}
@@ -535,25 +519,13 @@ class SyncRestServlet(RestServlet):
     ) -> None:
         """In `rust_sync: shadow` mode, compare `encoded`, Python's encoding of
         the joined and archived rooms, with the Rust encoding of the Rust
-        handler's entries for them.
-
-        The Rust entries have no bundled aggregations of their own in shadow
-        mode, so they are encoded with Python's.
-        """
-        bundles: dict[str, BundledAggregations] = {}
-        for timeline in itertools.chain(
-            (room.timeline for room in sync_result.joined),
-            (room.timeline for room in sync_result.archived),
-        ):
-            if timeline.bundled_aggregations:
-                bundles.update(timeline.bundled_aggregations)
+        handler's entries for them."""
         try:
             encoded_in_rust = await self._encode_rooms_in_rust(
                 sync_config,
                 sync_result.rust_shadow_rooms,
                 time_now,
                 serialize_options,
-                bundle_aggregations=bundles,
             )
         except CancelledError:
             raise

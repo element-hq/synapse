@@ -435,17 +435,9 @@ class RustRoomEntry:
         # `ArchivedSyncResult` is frozen.
         object.__setattr__(self, "rust", rust)
         object.__setattr__(self, "context", context)
-        object.__setattr__(self, "bundled_aggregations", None)
 
     rust: RoomSyncResult
     context: RustRoomContext
-    # Set by the handler, before anything reads the timeline.
-    bundled_aggregations: dict[str, BundledAggregations] | None
-
-    def set_bundled_aggregations(
-        self, bundled_aggregations: dict[str, BundledAggregations]
-    ) -> None:
-        object.__setattr__(self, "bundled_aggregations", bundled_aggregations)
 
     def __bool__(self) -> bool:
         return bool(self.rust)
@@ -486,7 +478,7 @@ class RustRoomEntry:
             events=self.timeline_events,
             prev_batch=prev_batch,
             limited=rust.limited,
-            bundled_aggregations=self.bundled_aggregations,
+            bundled_aggregations=rust.bundled_aggregations or None,
         )
 
     @functools.cached_property
@@ -3640,8 +3632,8 @@ class SyncHandler:
                 return await python()
 
         # Shadow mode: Python's answer is the one sent. The Rust one is only
-        # compared with it, so it skips the bundled aggregations. The two run
-        # at once, so the response waits for the slower rather than for both.
+        # compared with it. The two run at once, so the response waits for
+        # the slower rather than for both.
         # The comparison stays on the request, rather than after it, so that
         # it sees the lazy-loaded members caches as Python did.
         async def rust_outcome() -> tuple[_RoomsSection | None, Exception | None]:
@@ -3775,8 +3767,7 @@ class SyncHandler:
         Args:
             shadow: Whether the section is only compared with Python's. The
                 rooms the Rust handler leaves to Python are then left out of
-                it, and of the comparison, and the bundled aggregations are
-                skipped.
+                it, and of the comparison.
         """
         assert self._rust_sync is not None
         sync_config = sync_result_builder.sync_config
@@ -3902,14 +3893,10 @@ class SyncHandler:
         context = RustRoomContext(since_token=since_token, now_token=now_token)
 
         async def from_rust(entry: RoomSyncResult) -> None:
-            section.add(
-                await self._room_entry_from_rust(
-                    sync_result_builder,
-                    context,
-                    entry,
-                    bundle_aggregations=not shadow,
-                )
-            )
+            if entry.rtype == "joined":
+                section.add(RustJoinedSyncResult(entry, context))
+            else:
+                section.add(RustArchivedSyncResult(entry, context))
 
         async def in_python(room_id: str) -> None:
             section.add(
@@ -4057,30 +4044,6 @@ class SyncHandler:
                     python_entries.get(room_id), rust_entries.get(room_id)
                 ),
             )
-
-    async def _room_entry_from_rust(
-        self,
-        sync_result_builder: "SyncResultBuilder",
-        context: RustRoomContext,
-        result: RoomSyncResult,
-        bundle_aggregations: bool,
-    ) -> "RustJoinedSyncResult | RustArchivedSyncResult":
-        """The room entry for a result of the Rust sync handler, with the
-        bundled aggregations added as `_load_filtered_recents` does."""
-        entry: RustJoinedSyncResult | RustArchivedSyncResult
-        if result.rtype == "joined":
-            entry = RustJoinedSyncResult(result, context)
-        else:
-            entry = RustArchivedSyncResult(result, context)
-
-        if bundle_aggregations and result.bundle_aggregations:
-            entry.set_bundled_aggregations(
-                await self._relations_handler.get_bundled_aggregations(
-                    entry.timeline_events,
-                    sync_result_builder.sync_config.user.to_string(),
-                )
-            )
-        return entry
 
     async def _generate_room_entry(
         self,
@@ -4396,8 +4359,8 @@ def _diff_room_entries(
     """How the Python and Rust sync handlers' entries for a room differ, for
     `rust_sync: shadow` mode. Empty if they do not.
 
-    The bundled aggregations are not compared: the Rust entry is built
-    without them.
+    The bundled aggregations are compared in the encoding of the room, by
+    `_diff_encoded_rooms`.
     """
     if python is None or rust is None:
         if python is rust:

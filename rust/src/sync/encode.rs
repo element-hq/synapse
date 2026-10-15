@@ -37,8 +37,8 @@ use crate::sync::request::{PrevBatchBase, RoomSyncResult, RoomSyncResultData, Ro
 use crate::sync::rooms::TokenBase;
 use crate::types::stream_token::RoomStreamToken;
 
-/// The lookups of one room: the redactions the Rust handler loaded for it,
-/// then Python's maps.
+/// The lookups of one room: the bundles and redactions the Rust handler
+/// loaded for it, then Python's maps.
 struct RoomLookups<'a, 'py> {
     room: &'a RoomSyncResultData,
     python: &'a PyLookups<'py>,
@@ -53,7 +53,10 @@ impl SerializeLookups for RoomLookups<'_, '_> {
     }
 
     fn bundle(&self, event_id: &str) -> Option<BundleRef<'_>> {
-        self.python.bundle(event_id)
+        match self.room.bundles.get(event_id) {
+            Some(bundle) => Some(bundle.as_ref()),
+            None => self.python.bundle(event_id),
+        }
     }
 
     fn unsigned_additions(&self, event_id: &str) -> Option<&JsonObject> {

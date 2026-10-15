@@ -26,6 +26,7 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
+    Iterable,
     Mapping,
     MutableMapping,
 )
@@ -274,15 +275,27 @@ class EventClientSerializer:
         `add_extra_fields_to_unsigned_client_event` callback."""
         return bool(self._add_extra_fields_to_unsigned_client_event_callbacks)
 
-    async def prepare_serialization(
-        self,
-        events: Collection[FilteredEvent],
-        bundle_aggregations: dict[str, "BundledAggregations"] | None,
-    ) -> tuple[dict[str, "EventBase"], dict[str, JsonDict]]:
-        """The redaction map and module-callback unsigned additions that
-        `serialize_events` needs for `events` and the events bundled with
-        them, for a caller that serializes events itself."""
-        return await self._prepare_serialization(events, bundle_aggregations)
+    async def unsigned_additions(
+        self, events: Iterable["EventBase"]
+    ) -> dict[str, JsonDict]:
+        """The `unsigned` fields the module callbacks add to each of `events`,
+        by event ID, for a caller that serializes events itself. Each event
+        is passed to the callbacks once."""
+        unsigned_additions: dict[str, JsonDict] = {}
+        if not self._add_extra_fields_to_unsigned_client_event_callbacks:
+            return unsigned_additions
+        seen: set[str] = set()
+        for event in events:
+            if event.event_id in seen:
+                continue
+            seen.add(event.event_id)
+            new_unsigned: JsonDict = {}
+            for callback in self._add_extra_fields_to_unsigned_client_event_callbacks:
+                new_unsigned.update(await callback(event))
+
+            if new_unsigned:
+                unsigned_additions[event.event_id] = new_unsigned
+        return unsigned_additions
 
     async def _prepare_serialization(
         self,
@@ -348,20 +361,9 @@ class EventClientSerializer:
         # redactions
         fetched_redaction_map.update(redaction_map)
 
-        # Run the module callbacks for each event (once per event_id, since
-        # `collected` is already de-duplicated) to build up the additional
+        # Run the module callbacks for each event to build up the additional
         # `unsigned` fields they contribute.
-        unsigned_additions: dict[str, JsonDict] = {}
-        if self._add_extra_fields_to_unsigned_client_event_callbacks:
-            for collected_event in collected.values():
-                new_unsigned: JsonDict = {}
-                for (
-                    callback
-                ) in self._add_extra_fields_to_unsigned_client_event_callbacks:
-                    new_unsigned.update(await callback(collected_event))
-
-                if new_unsigned:
-                    unsigned_additions[collected_event.event_id] = new_unsigned
+        unsigned_additions = await self.unsigned_additions(collected.values())
 
         return fetched_redaction_map, unsigned_additions
 

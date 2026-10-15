@@ -161,6 +161,9 @@ impl SyncStoreConfig {
     }
 }
 
+/// `(event_id, sender)` of an event related to another.
+pub type RelatedEvent = (Arc<str>, Arc<str>);
+
 /// The sync handler's store: the caches and config its queries need.
 pub struct SyncStore {
     caches: Arc<StoreCaches>,
@@ -371,6 +374,225 @@ impl<'a> SyncReader<'a> {
             }
         }
         Ok(found)
+    }
+
+    /// `get_references_for_events`: the `(event_id, sender)` of each event
+    /// that references one of `event_ids`, oldest first.
+    pub async fn references_for_events(
+        &self,
+        event_ids: &[Arc<str>],
+    ) -> anyhow::Result<HashMap<Arc<str>, Vec<RelatedEvent>>> {
+        let mut references: HashMap<Arc<str>, Vec<RelatedEvent>> = HashMap::new();
+        if event_ids.is_empty() {
+            return Ok(references);
+        }
+        let borrowed = self.borrow().await?;
+        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
+            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+            let rows = borrowed
+                .query(
+                    "SELECT relates_to_id, ref.event_id, ref.sender
+                    FROM events AS ref
+                    INNER JOIN event_relations USING (event_id)
+                    INNER JOIN events AS parent ON
+                        parent.event_id = relates_to_id
+                        AND parent.room_id = ref.room_id
+                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.reference'
+                    ORDER BY ref.topological_ordering, ref.stream_ordering",
+                    &[&ids],
+                )
+                .await?;
+            for row in rows {
+                let parent: &str = row.try_get(0)?;
+                references.entry(Arc::from(parent)).or_default().push((
+                    Arc::from(row.try_get::<_, &str>(1)?),
+                    Arc::from(row.try_get::<_, &str>(2)?),
+                ));
+            }
+        }
+        Ok(references)
+    }
+
+    /// The IDs of `get_applicable_edits`: the latest edit of each of
+    /// `event_ids` with the same type and sender, if it has one.
+    pub async fn applicable_edit_ids(
+        &self,
+        event_ids: &[Arc<str>],
+    ) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
+        let mut edits = HashMap::new();
+        if event_ids.is_empty() {
+            return Ok(edits);
+        }
+        let borrowed = self.borrow().await?;
+        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
+            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+            // `DISTINCT ON` picks the first row of each original, so the
+            // ordering picks the latest edit.
+            let rows = borrowed
+                .query(
+                    "SELECT DISTINCT ON (original.event_id) original.event_id, edit.event_id
+                    FROM events AS edit
+                    INNER JOIN event_relations USING (event_id)
+                    INNER JOIN events AS original ON
+                        original.event_id = relates_to_id
+                        AND edit.type = original.type
+                        AND edit.sender = original.sender
+                        AND edit.room_id = original.room_id
+                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.replace'
+                    ORDER BY original.event_id DESC, edit.origin_server_ts DESC, edit.event_id DESC",
+                    &[&ids],
+                )
+                .await?;
+            for row in rows {
+                edits.insert(
+                    Arc::from(row.try_get::<_, &str>(0)?),
+                    Arc::from(row.try_get::<_, &str>(1)?),
+                );
+            }
+        }
+        Ok(edits)
+    }
+
+    /// The IDs and counts of `get_thread_summaries`: for each of
+    /// `event_ids` with threaded replies, the latest reply and how many
+    /// there are.
+    pub async fn thread_summary_ids(
+        &self,
+        event_ids: &[Arc<str>],
+    ) -> anyhow::Result<HashMap<Arc<str>, (Arc<str>, i64)>> {
+        let mut summaries = HashMap::new();
+        if event_ids.is_empty() {
+            return Ok(summaries);
+        }
+        // One snapshot, as Python's one transaction, so that a count never
+        // misses its latest reply.
+        let borrowed = self.begin().await?;
+        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
+            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+            let rows = borrowed
+                .query(
+                    "SELECT DISTINCT ON (parent.event_id) parent.event_id, child.event_id
+                    FROM events AS child
+                    INNER JOIN event_relations USING (event_id)
+                    INNER JOIN events AS parent ON
+                        parent.event_id = relates_to_id
+                        AND parent.room_id = child.room_id
+                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.thread'
+                    ORDER BY parent.event_id, child.topological_ordering DESC,
+                        child.stream_ordering DESC",
+                    &[&ids],
+                )
+                .await?;
+            let mut latest: HashMap<Arc<str>, Arc<str>> = HashMap::new();
+            for row in rows {
+                latest.insert(
+                    Arc::from(row.try_get::<_, &str>(0)?),
+                    Arc::from(row.try_get::<_, &str>(1)?),
+                );
+            }
+            if latest.is_empty() {
+                continue;
+            }
+            let parents: Vec<&str> = latest.keys().map(|id| &**id).collect();
+            let rows = borrowed
+                .query(
+                    "SELECT parent.event_id, COUNT(child.event_id)
+                    FROM events AS child
+                    INNER JOIN event_relations USING (event_id)
+                    INNER JOIN events AS parent ON
+                        parent.event_id = relates_to_id
+                        AND parent.room_id = child.room_id
+                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.thread'
+                    GROUP BY parent.event_id",
+                    &[&parents],
+                )
+                .await?;
+            let mut counts: HashMap<&str, i64> = HashMap::new();
+            for row in &rows {
+                counts.insert(row.try_get(0)?, row.try_get(1)?);
+            }
+            for (parent, latest_id) in &latest {
+                let count = counts.get(&**parent).copied().unwrap_or(0);
+                summaries.insert(Arc::clone(parent), (Arc::clone(latest_id), count));
+            }
+        }
+        borrowed.commit().await?;
+        Ok(summaries)
+    }
+
+    /// `get_threads_participated`: which of the threads of `event_ids` the
+    /// user has replied in.
+    pub async fn threads_participated(
+        &self,
+        event_ids: &[Arc<str>],
+        user_id: &str,
+    ) -> anyhow::Result<HashSet<Arc<str>>> {
+        let mut participated = HashSet::new();
+        if event_ids.is_empty() {
+            return Ok(participated);
+        }
+        let borrowed = self.borrow().await?;
+        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
+            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+            let rows = borrowed
+                .query(
+                    "SELECT DISTINCT relates_to_id
+                    FROM events AS child
+                    INNER JOIN event_relations USING (event_id)
+                    INNER JOIN events AS parent ON
+                        parent.event_id = relates_to_id
+                        AND parent.room_id = child.room_id
+                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.thread'
+                        AND child.sender = $2",
+                    &[&ids, &user_id],
+                )
+                .await?;
+            for row in rows {
+                participated.insert(Arc::from(row.try_get::<_, &str>(0)?));
+            }
+        }
+        Ok(participated)
+    }
+
+    /// `get_threaded_messages_per_user`: how many replies each of `users`
+    /// sent to each thread of `event_ids`.
+    pub async fn threaded_messages_per_user(
+        &self,
+        event_ids: &[Arc<str>],
+        users: &[&str],
+    ) -> anyhow::Result<HashMap<(Arc<str>, Arc<str>), i64>> {
+        let mut counts = HashMap::new();
+        if event_ids.is_empty() || users.is_empty() {
+            return Ok(counts);
+        }
+        let borrowed = self.borrow().await?;
+        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
+            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+            let rows = borrowed
+                .query(
+                    "SELECT parent.event_id, child.sender, COUNT(child.event_id)
+                    FROM events AS child
+                    INNER JOIN event_relations USING (event_id)
+                    INNER JOIN events AS parent ON
+                        parent.event_id = relates_to_id
+                        AND parent.room_id = child.room_id
+                    WHERE relation_type = 'm.thread' AND child.sender = ANY($1)
+                        AND relates_to_id = ANY($2)
+                    GROUP BY parent.event_id, child.sender",
+                    &[&users, &ids],
+                )
+                .await?;
+            for row in rows {
+                counts.insert(
+                    (
+                        Arc::from(row.try_get::<_, &str>(0)?),
+                        Arc::from(row.try_get::<_, &str>(1)?),
+                    ),
+                    row.try_get(2)?,
+                );
+            }
+        }
+        Ok(counts)
     }
 
     /// `get_timeline_gaps`: a token marking the last gap in the room's

@@ -29,6 +29,7 @@ use crate::storage::events::RedactBehaviour;
 use crate::storage::sync_store::SyncReader;
 use crate::sync::client_events::{filter_events_for_client, ClientFilterContext};
 use crate::sync::ll_members::{LazyLoadedMembersCache, LazyLoadedMembersCaches};
+use crate::sync::relations::{bundled_aggregations, Bundle};
 use crate::sync::request::{RoomSyncInputData, RoomSyncResultData, RoomType, SyncRequestData};
 use crate::sync::room_state::{compute_state_delta, RoomState};
 use crate::sync::summary::extract_heroes_from_room_summary;
@@ -259,7 +260,6 @@ pub async fn generate_room_entry(
         prev_batch_base: batch.prev_batch_base,
         prev_batch_room_key: batch.prev_batch_room_key,
         limited: batch.limited,
-        bundle_aggregations: batch.bundle_aggregations,
         state,
         ephemeral,
         account_data: account_data_events,
@@ -268,6 +268,7 @@ pub async fn generate_room_entry(
         unread_thread_notifications: Vec::new(),
         unread_count: 0,
         sticky: Vec::new(),
+        bundles: HashMap::new(),
         redactions: HashMap::new(),
         upto: None,
     };
@@ -318,6 +319,11 @@ pub async fn generate_room_entry(
             }
         }
     }
+    if batch.bundle_aggregations {
+        result.bundles =
+            bundled_aggregations(reader, &timeline, &request.user_id, &request.ignored_users)
+                .await?;
+    }
     result.timeline = timeline;
     result.redactions = load_redactions(reader, &result).await?;
     Ok(Some(result))
@@ -335,7 +341,8 @@ async fn load_redactions(
         .iter()
         .chain(&result.sticky)
         .map(|filtered| &filtered.event)
-        .chain(&result.state);
+        .chain(&result.state)
+        .chain(result.bundles.values().flat_map(Bundle::events));
     for event in events {
         if let Some(redacted_by) = event.internal_metadata().redacted_by()? {
             let redacted_by: Arc<str> = Arc::from(redacted_by);

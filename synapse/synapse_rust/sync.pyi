@@ -185,7 +185,7 @@ class RoomsResult:
         """`(room_id, error)` for each room the Rust handler failed on."""
 
 class RoomSyncResult:
-    """A room's entry, less the bundled aggregations."""
+    """A room's entry."""
 
     def __bool__(self) -> bool:
         """Whether the entry has anything to send."""
@@ -214,8 +214,12 @@ class RoomSyncResult:
     def upto_room_key(self) -> RoomStreamToken:
         """The room key of the room's upto token."""
     @property
-    def bundle_aggregations(self) -> bool:
-        """Whether to bundle aggregations for the timeline."""
+    def bundled_aggregations(self) -> dict[str, BundledAggregations]:
+        """The bundled aggregations of the timeline, by event ID."""
+    @property
+    def bundled_events(self) -> list[Event]:
+        """The events bundled with the timeline's events: edits and the
+        latest events of threads."""
     @property
     def state(self) -> list[Event]: ...
     @property

@@ -28,6 +28,7 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
+    AccountDataTypes,
     EventContentFields,
     EventTypes,
     JoinRules,
@@ -2135,3 +2136,100 @@ class RustSyncEncodeTestCase(unittest.HomeserverTestCase):
         python, rust = compare.call_args.args
         self.assertEqual(python.keys(), {self.room_id})
         self.assertEqual(rust.keys(), {self.room_id})
+
+    def test_thread_with_ignored_latest_reply_falls_back_to_python(self) -> None:
+        """Finding a thread's latest reply that is not from an ignored user is
+        left to Python."""
+        bob = self.register_user("bob", "password")
+        bob_tok = self.login(bob, "password")
+        self.helper.join(self.room_id, bob, tok=bob_tok)
+        root_id = self.helper.send(self.room_id, "root", tok=self.tok)["event_id"]
+        self.helper.send_event(
+            self.room_id,
+            "m.room.message",
+            {
+                "msgtype": "m.text",
+                "body": "reply",
+                "m.relates_to": {"rel_type": "m.thread", "event_id": root_id},
+            },
+            tok=bob_tok,
+        )
+        self.get_success(
+            self.hs.get_datastores().main.add_account_data_for_user(
+                self.user,
+                AccountDataTypes.IGNORED_USER_LIST,
+                {"ignored_users": {bob: {}}},
+            )
+        )
+
+        before = rust_sync_rooms_counter.labels(
+            result="fallback", **{SERVER_NAME_LABEL: self.hs.hostname}
+        )._value.get()
+        # Only a limited timeline bundles aggregations.
+        self.helper.send(self.room_id, "later", tok=self.tok)
+        filter = json.dumps({"room": {"timeline": {"limit": 2}}})
+        channel = self.make_request(
+            "GET", f"/sync?filter={filter}", access_token=self.tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        after = rust_sync_rooms_counter.labels(
+            result="fallback", **{SERVER_NAME_LABEL: self.hs.hostname}
+        )._value.get()
+        self.assertEqual(after, before + 1)
+
+        timeline = channel.json_body["rooms"]["join"][self.room_id]["timeline"]
+        [root] = [e for e in timeline["events"] if e["event_id"] == root_id]
+        # The only reply is ignored, so there is no thread to summarise.
+        self.assertNotIn("m.relations", root.get("unsigned", {}))
+
+    def test_module_unsigned_additions(self) -> None:
+        """The `unsigned` fields module callbacks add reach every event the
+        Rust encoder serializes, bundled events included."""
+
+        async def add_unsigned(event: EventBase) -> JsonDict:
+            return {"test_key": event.event_id}
+
+        self.hs.get_module_api().register_add_extra_fields_to_unsigned_client_event_callbacks(
+            add_field_to_unsigned_callback=add_unsigned
+        )
+
+        root_id = self.helper.send(self.room_id, "root", tok=self.tok)["event_id"]
+        # The reply is only in the thread summary: the timeline filter
+        # leaves it out.
+        reply_id = self.helper.send_event(
+            self.room_id,
+            "org.example.reply",
+            {
+                "msgtype": "m.text",
+                "body": "reply",
+                "m.relates_to": {"rel_type": "m.thread", "event_id": root_id},
+            },
+            tok=self.tok,
+        )["event_id"]
+        self.helper.send(self.room_id, "later", tok=self.tok)
+
+        # Only a limited timeline bundles aggregations.
+        filter = json.dumps(
+            {"room": {"timeline": {"limit": 2, "types": ["m.room.message"]}}}
+        )
+        encoder = Mock(wraps=sync.RustRoomsEncoder)
+        with patch.object(sync, "RustRoomsEncoder", encoder):
+            channel = self.make_request(
+                "GET", f"/sync?filter={filter}", access_token=self.tok
+            )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        encoder.assert_called_once()
+
+        room = channel.json_body["rooms"]["join"][self.room_id]
+        timeline = room["timeline"]["events"]
+        state = room["state"]["events"]
+        self.assertEqual(len(timeline), 2)
+        self.assertTrue(state)
+        for event in timeline + state:
+            self.assertEqual(event["unsigned"].get("test_key"), event["event_id"])
+
+        self.assertNotIn(reply_id, [e["event_id"] for e in timeline])
+        [root] = [e for e in timeline if e["event_id"] == root_id]
+        latest = root["unsigned"]["m.relations"]["m.thread"]["latest_event"]
+        self.assertEqual(latest["event_id"], reply_id)
+        self.assertEqual(latest["unsigned"].get("test_key"), reply_id)

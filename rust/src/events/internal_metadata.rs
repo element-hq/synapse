@@ -480,6 +480,11 @@ impl EventInternalMetadata {
             .map_err(|_| PyRuntimeError::new_err("EventInternalMetadata lock poisoned"))
     }
 
+    /// Whether the event has been redacted: `is_redacted()`.
+    pub fn redacted(&self) -> PyResult<bool> {
+        Ok(self.read_inner()?.is_redacted())
+    }
+
     /// The event ID of the redaction event, if this event has been redacted.
     pub fn redacted_by(&self) -> PyResult<Option<String>> {
         Ok(self.read_inner()?.redacted_by.clone())

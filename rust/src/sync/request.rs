@@ -28,8 +28,11 @@ use pyo3::{
 use pythonize::pythonize;
 use serde_json::Value;
 
+use crate::events::json_object::JsonObject;
+use crate::events::relations::{BundledAggregations, ThreadAggregation};
 use crate::events::Event;
 use crate::sync::filter::FilterCollection;
+use crate::sync::relations::Bundle;
 use crate::sync::rooms::{RoomToken, TokenBase};
 use crate::types::stream_token::RoomStreamToken;
 use crate::visibility::{FilteredEvent, SoftFailedPolicy};
@@ -154,8 +157,6 @@ pub struct RoomSyncResultData {
     /// The room key of `prev_batch`, if it differs from the base token's.
     pub prev_batch_room_key: Option<RoomStreamToken>,
     pub limited: bool,
-    /// Whether Python should bundle aggregations for the timeline.
-    pub bundle_aggregations: bool,
     pub state: Vec<Event>,
     pub ephemeral: Vec<Value>,
     pub account_data: Vec<Value>,
@@ -166,6 +167,8 @@ pub struct RoomSyncResultData {
     pub unread_thread_notifications: Vec<(Arc<str>, i64, i64)>,
     pub unread_count: i64,
     pub sticky: Vec<FilteredEvent>,
+    /// The bundled aggregations of the timeline, by event ID.
+    pub bundles: HashMap<Arc<str>, Bundle>,
     /// The redactions of the redacted events above, by ID.
     pub redactions: HashMap<Arc<str>, Event>,
     /// The room's upto token. Set once the room is computed.
@@ -264,9 +267,58 @@ impl RoomSyncResult {
         Ok(self.upto()?.room_key.clone())
     }
 
+    /// The bundled aggregations of the timeline, by event ID.
     #[getter]
-    fn bundle_aggregations(&self) -> bool {
-        self.data.bundle_aggregations
+    fn bundled_aggregations<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(py);
+        for (event_id, bundle) in &self.data.bundles {
+            let references = bundle
+                .as_ref()
+                .references
+                .map(|references| serde_json::from_value::<JsonObject>(Value::Object(references)))
+                .transpose()
+                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+            let replace = bundle
+                .replace
+                .as_ref()
+                .map(|event| Py::new(py, event.shallow_clone()))
+                .transpose()?;
+            let thread = bundle
+                .thread
+                .as_ref()
+                .map(|thread| -> PyResult<_> {
+                    Py::new(
+                        py,
+                        ThreadAggregation {
+                            latest_event: Py::new(py, thread.latest_event.shallow_clone())?,
+                            count: thread.count,
+                            current_user_participated: thread.current_user_participated,
+                        },
+                    )
+                })
+                .transpose()?;
+            let aggregations = BundledAggregations {
+                references,
+                replace,
+                thread,
+            };
+            dict.set_item(&**event_id, Bound::new(py, aggregations)?)?;
+        }
+        Ok(dict)
+    }
+
+    /// The events bundled with the timeline's events: edits and the latest
+    /// events of threads.
+    #[getter]
+    fn bundled_events<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let events = self
+            .data
+            .bundles
+            .values()
+            .flat_map(Bundle::events)
+            .map(|event| Bound::new(py, event.shallow_clone()))
+            .collect::<PyResult<Vec<_>>>()?;
+        PyList::new(py, events)
     }
 
     #[getter]

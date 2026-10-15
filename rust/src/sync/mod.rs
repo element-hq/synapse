@@ -46,6 +46,7 @@ pub mod client_events;
 pub mod encode;
 pub mod filter;
 pub mod ll_members;
+pub mod relations;
 pub mod request;
 pub mod room;
 pub mod room_state;
