@@ -530,6 +530,10 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         self._check_for_delayed_event_in_sync(self.user2_access_token, delay_id, False)
 
     def test_delayed_events_rejected_if_sender_not_in_room(self) -> None:
+        """Test that sending delayed events in rooms the user is not in are rejected.
+        
+        We test that this applies to both state and non-state events.
+        """
         room_id = self.helper.create_room_as(
             self.user2_user_id, tok=self.user2_access_token
         )
