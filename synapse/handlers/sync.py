@@ -1728,10 +1728,10 @@ class SyncHandler:
             #    other keys need no update.
             own_membership_key = (EventTypes.Member, sync_config.user.to_string())
             cleared_state_keys: set[tuple[str, str]] = set()
-            keys_with_deltas: set[StateKey] = set()
+            state_keys_with_deltas: set[StateKey] = set()
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
-                keys_with_deltas.add(key)
+                state_keys_with_deltas.add(key)
                 if delta.event_id is None:
                     # Look up the key if:
                     #  - it is in the timeline (see above).
@@ -1754,7 +1754,7 @@ class SyncHandler:
                 # made it leave, so the keys that batch added have no delta at
                 # all. Look up the keys in the timeline that have no delta too.
                 cleared_state_keys.update(
-                    key for key in timeline_state if key not in keys_with_deltas
+                    key for key in timeline_state if key not in state_keys_with_deltas
                 )
 
             if cleared_state_keys:
