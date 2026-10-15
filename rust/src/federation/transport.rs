@@ -53,18 +53,16 @@ pub trait FederationTransport: Send + Sync + 'static {
 /// Why a request got no response.
 ///
 /// The request layer needs to tell these apart: a DNS failure is not
-/// retried when the caller asked for `retry_on_dns_fail=False`, and a
-/// blocked IP address is reported as such.
+/// retried when the caller asked for `retry_on_dns_fail=False`.
 #[derive(Debug)]
 pub enum TransportError {
     /// Looking up the server's addresses (SRV or A/AAAA) failed, or found
-    /// nothing we may connect to.
+    /// nothing we may connect to. An address the IP range blocklist covers
+    /// counts as not found, as in Python.
     Dns(anyhow::Error),
     /// The server publishes a single SRV record with target `.`, which means
     /// it offers no federation service.
     ServiceUnavailable(String),
-    /// The destination is an IP address that the IP range blocklist covers.
-    IpBlocked(std::net::IpAddr),
     /// Every TCP connection attempt failed, or the proxy refused the tunnel.
     Connect(anyhow::Error),
     /// The TLS handshake or certificate verification failed.
@@ -92,7 +90,6 @@ impl fmt::Display for TransportError {
         match self {
             TransportError::Dns(e) => write!(f, "DNS lookup failed: {e:#}"),
             TransportError::ServiceUnavailable(name) => write!(f, "service {name} unavailable"),
-            TransportError::IpBlocked(ip) => write!(f, "IP address {ip} blocked"),
             TransportError::Connect(e) => write!(f, "connection failed: {e:#}"),
             TransportError::Tls(e) => write!(f, "TLS failed: {e:#}"),
             TransportError::InvalidRequest(e) => write!(f, "invalid request: {e:#}"),

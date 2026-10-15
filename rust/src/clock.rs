@@ -83,8 +83,12 @@ pub fn set_virtual_time_msec(millis: u64) {
 
     let due = {
         let mut sleepers = VIRTUAL_SLEEPERS.lock().expect("poisoned");
+        // Drop the sleeps nobody waits on any more. A later test case's
+        // reactor may start before their deadline, so they would otherwise
+        // linger.
         let (due, pending) = sleepers
             .drain(..)
+            .filter(|(_, waker)| !waker.is_closed())
             .partition::<Vec<_>, _>(|(wake_at, _)| *wake_at <= millis);
         *sleepers = pending;
         due
@@ -165,6 +169,9 @@ impl Clock {
                     if wake_at <= now {
                         let _ = tx.send(());
                     } else {
+                        // Also drop abandoned sleeps here, so they cannot
+                        // pile up while the virtual time stands still.
+                        sleepers.retain(|(_, waker)| !waker.is_closed());
                         sleepers.push((wake_at, tx));
                     }
                     Some(rx)
@@ -242,6 +249,11 @@ mod tests {
         assert!(sleep.as_mut().poll(&mut cx).is_pending());
         set_virtual_time_msec(500);
         assert!(sleep.as_mut().poll(&mut cx).is_ready());
+
+        // A dropped sleep is forgotten.
+        drop(clock.sleep(Duration::from_millis(1_000)));
+        set_virtual_time_msec(500);
+        assert!(VIRTUAL_SLEEPERS.lock().unwrap().is_empty());
 
         // A zero-length sleep is ready at once.
         let mut sleep = std::pin::pin!(clock.sleep(Duration::ZERO));
