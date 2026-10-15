@@ -22,6 +22,7 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 
+from tests.federation._rust_transactions import RustTransactionsMixin
 from tests.test_utils import event_injection
 from tests.unittest import FederatingHomeserverTestCase
 from tests.utils import USE_POSTGRES_FOR_TESTS
@@ -946,3 +947,14 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         transaction = self.run_transaction(per_dest_queue)
         assert transaction is not None
         self.assertEqual([pdu.event_id for pdu in transaction.pdus], [sticky_id])
+
+
+class FederationCatchUpRustTestCases(RustTransactionsMixin, FederationCatchUpTestCases):
+    """As `FederationCatchUpTestCases`, with Rust building the transactions."""
+
+
+class FederationStickyEventCatchUpRustTestCase(
+    RustTransactionsMixin, FederationStickyEventCatchUpTestCase
+):
+    """As `FederationStickyEventCatchUpTestCase`, with Rust building the
+    transactions."""

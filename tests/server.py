@@ -89,6 +89,7 @@ from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
+from synapse.federation.sender.transaction_manager import TransactionManager
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import ContextResourceUsage
@@ -123,6 +124,7 @@ from tests.utils import (
     POSTGRES_PASSWORD,
     POSTGRES_PORT,
     POSTGRES_USER,
+    RUST_FED_STRICT_FOR_TESTS,
     RUST_STATE_RES_FOR_TESTS,
     RUST_SYNC_FOR_TESTS,
     RUST_SYNC_STRICT_FOR_TESTS,
@@ -133,6 +135,8 @@ from tests.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+TransactionManager._rust_strict = RUST_FED_STRICT_FOR_TESTS
 
 R = TypeVar("R")
 P = ParamSpec("P")

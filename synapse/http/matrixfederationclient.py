@@ -497,7 +497,7 @@ class MatrixFederationHttpClient:
         # client only talks to federation directly.
         self._rust_client: RustFederationClient | None = None
         if (
-            hs.config.experimental.rust_federation_sending != "off"
+            hs.config.experimental.rust_federation_sending_at_least("client")
             and hs.get_instance_name() in outbound_federation_restricted_to
         ):
             self._rust_client = RustFederationClient(

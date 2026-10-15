@@ -39,6 +39,7 @@ from synapse.types import JsonDict, ReadReceipt
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
+from tests.federation._rust_transactions import RustTransactionsMixin
 from tests.unittest import HomeserverTestCase
 
 
@@ -966,3 +967,24 @@ def build_device_dict(user_id: str, device_id: str, sk: SigningKey) -> JsonDict:
             key_id(sk): encode_pubkey(sk),
         },
     }
+
+
+class FederationSenderReceiptsRustTestCases(
+    RustTransactionsMixin, FederationSenderReceiptsTestCases
+):
+    """As `FederationSenderReceiptsTestCases`, with Rust building the
+    transactions."""
+
+
+class FederationSenderPresenceRustTestCases(
+    RustTransactionsMixin, FederationSenderPresenceTestCases
+):
+    """As `FederationSenderPresenceTestCases`, with Rust building the
+    transactions."""
+
+
+class FederationSenderDevicesRustTestCases(
+    RustTransactionsMixin, FederationSenderDevicesTestCases
+):
+    """As `FederationSenderDevicesTestCases`, with Rust building the
+    transactions."""

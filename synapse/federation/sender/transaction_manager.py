@@ -17,6 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import functools
 import logging
 from typing import TYPE_CHECKING, Mapping
 
@@ -27,6 +28,7 @@ from synapse.api.errors import HttpResponseException
 from synapse.events import EventBase
 from synapse.federation.persistence import TransactionActions
 from synapse.federation.units import Edu, Transaction, serialize_and_filter_pdus
+from synapse.logging import opentracing
 from synapse.logging.opentracing import (
     extract_text_map,
     set_tag,
@@ -36,6 +38,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.module_api.callbacks.federation import FederatedEventDeliveryMethod
+from synapse.synapse_rust.federation import RustTransaction, RustTransactionManager
 from synapse.types import JsonDict
 from synapse.util.json import json_decoder
 from synapse.util.metrics import measure_func
@@ -57,7 +60,15 @@ class TransactionManager:
     """Helper class which handles building and sending transactions
 
     shared between PerDestinationQueue objects
+
+    At `rust_federation_sending: transactions` and above, Rust builds and sends
+    the transactions. This class keeps the tracing span and the module
+    callback.
     """
+
+    # For tests: check that each transaction Rust sends has the body Python
+    # would have sent.
+    _rust_strict = False
 
     def __init__(self, hs: "synapse.server.HomeServer"):
         self.server_name = hs.hostname  # nb must be called this for @measure_func
@@ -75,6 +86,16 @@ class TransactionManager:
         self._next_txn_id = int(self.clock.time_msec())
 
         self._is_shutdown = False
+
+        # The Rust transaction sender. It sends through the Rust request
+        # layer, so there is none on an instance whose federation traffic goes
+        # through a proxy worker.
+        self._rust: RustTransactionManager | None = None
+        self._is_mine_server_name = hs.is_mine_server_name
+        if hs.config.experimental.rust_federation_sending_at_least("transactions"):
+            rust_client = getattr(hs.get_federation_http_client(), "_rust_client", None)
+            if rust_client is not None:
+                self._rust = RustTransactionManager(rust_client)
 
     def shutdown(self) -> None:
         self._is_shutdown = True
@@ -117,6 +138,10 @@ class TransactionManager:
 
         with start_active_span_follows_from("send_transaction", span_contexts):
             logger.debug("TX [%s] _attempt_new_transaction", destination)
+
+            if self._rust is not None:
+                await self._send_rust_transaction(self._rust, destination, pdus, edus)
+                return
 
             txn_id = str(self._next_txn_id)
 
@@ -235,3 +260,79 @@ class TransactionManager:
                     destination_server_name=destination,
                     **{SERVER_NAME_LABEL: self.server_name},
                 ).set(last_pdu.origin_server_ts / 1000)
+
+    async def _send_rust_transaction(
+        self,
+        rust: RustTransactionManager,
+        destination: str,
+        pdus: list[EventBase],
+        edus: list[Edu],
+    ) -> None:
+        """Have Rust build and send the transaction, and handle the response
+        as `send_new_transaction` does.
+        """
+        if self._is_mine_server_name(destination):
+            raise RuntimeError("Transport layer cannot send to itself!")
+
+        headers_dict: dict[bytes, list[bytes]] = {}
+        opentracing.inject_header_dict(headers_dict, destination)
+        extra_headers = [
+            (name.decode("ascii"), value.decode("ascii"))
+            for name, values in headers_dict.items()
+            for value in values
+        ]
+
+        want_acknowledged = (
+            self._federation_callbacks.interested_in_events_delivered_over_federation()
+        )
+        check = (
+            functools.partial(self._check_rust_transaction, pdus, edus)
+            if self._rust_strict
+            else None
+        )
+
+        try:
+            acknowledged = await rust.send_transaction(
+                destination,
+                pdus,
+                [edu.get_dict() for edu in edus],
+                extra_headers=extra_headers,
+                want_acknowledged=want_acknowledged,
+                check=check,
+            )
+        except HttpResponseException:
+            set_tag(tags.ERROR, True)
+            raise
+
+        if want_acknowledged and acknowledged is not None:
+            acknowledged_ids = set(acknowledged)
+            await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                destination,
+                [p for p in pdus if p.event_id in acknowledged_ids],
+                FederatedEventDeliveryMethod.SEND,
+            )
+
+        if pdus and destination in self._federation_metrics_domains:
+            last_pdu = pdus[-1]
+            last_pdu_ts_metric.labels(
+                destination_server_name=destination,
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).set(last_pdu.origin_server_ts / 1000)
+
+    def _check_rust_transaction(
+        self, pdus: list[EventBase], edus: list[Edu], transaction: RustTransaction
+    ) -> None:
+        """Raise if Rust built a different body from the one Python would."""
+        expected = Transaction(
+            origin_server_ts=transaction.origin_server_ts,
+            transaction_id=transaction.transaction_id,
+            origin=self.server_name,
+            destination=transaction.destination,
+            pdus=serialize_and_filter_pdus(pdus),
+            edus=[edu.get_dict() for edu in edus],
+        ).get_dict()
+        actual = transaction.get_dict()
+        if actual != expected:
+            raise AssertionError(
+                f"Rust transaction body differs from Python's: {actual!r} != {expected!r}"
+            )

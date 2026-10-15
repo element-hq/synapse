@@ -50,6 +50,17 @@ class MSC3866Config:
     require_approval_for_new_accounts: bool = False
 
 
+RustFederationSendingLevel = Literal["off", "client", "transactions"]
+
+# The levels of `rust_federation_sending`, in order. Each implies the ones
+# before it.
+RUST_FEDERATION_SENDING_LEVELS: tuple[RustFederationSendingLevel, ...] = (
+    "off",
+    "client",
+    "transactions",
+)
+
+
 class ExperimentalConfig(Config):
     """Config section for enabling experimental features
 
@@ -364,12 +375,23 @@ class ExperimentalConfig(Config):
         #    through the Rust request layer (signing, retries, the backoff and
         #    the connection pool). Media downloads, and an instance whose
         #    federation traffic goes through a proxy worker, stay Python.
+        #  - "transactions": the `TransactionManager` builds and sends `/send`
+        #    transactions in Rust, PDU JSON included.
         rust_federation_sending = experimental.get("rust_federation_sending", "off")
-        if rust_federation_sending not in ("off", "client"):
+        if rust_federation_sending not in RUST_FEDERATION_SENDING_LEVELS:
             raise ConfigError(
                 "experimental_features.rust_federation_sending must be one of "
-                "'off' or 'client'",
+                + ", ".join(repr(level) for level in RUST_FEDERATION_SENDING_LEVELS),
                 ("experimental", "rust_federation_sending"),
             )
-        self.rust_federation_sending: Literal["off", "client"] = rust_federation_sending
+        self.rust_federation_sending: RustFederationSendingLevel = (
+            rust_federation_sending
+        )
 
+    def rust_federation_sending_at_least(
+        self, level: RustFederationSendingLevel
+    ) -> bool:
+        """Whether `rust_federation_sending` is `level` or a later one."""
+        return RUST_FEDERATION_SENDING_LEVELS.index(
+            self.rust_federation_sending
+        ) >= RUST_FEDERATION_SENDING_LEVELS.index(level)

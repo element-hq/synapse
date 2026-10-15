@@ -64,6 +64,9 @@ RUST_SYNC_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_SYNC")
 # Python one, fails the test, so that the suite is a differential test of the
 # two. Set to 0 to only count and log them, as production does.
 RUST_SYNC_STRICT_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_SYNC_STRICT", "1") != "0"
+# At `rust_federation_sending: transactions`, check every transaction body Rust
+# builds against the one Python would build, and fail the test if they differ.
+RUST_FED_STRICT_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_FED_STRICT", "1") != "0"
 LEAVE_DB = os.environ.get("SYNAPSE_LEAVE_DB", False)
 POSTGRES_USER = os.environ.get("SYNAPSE_POSTGRES_USER", None)
 POSTGRES_HOST = os.environ.get("SYNAPSE_POSTGRES_HOST", None)
