@@ -1727,7 +1727,7 @@ class SyncHandler:
             #    Keys that only changed earlier keep their earlier delta, and
             #    other keys need no update.
             own_membership_key = (EventTypes.Member, sync_config.user.to_string())
-            cleared_state_keys: set[tuple[str, str]] = set()
+            state_keys_to_look_up: set[tuple[str, str]] = set()
             state_keys_with_deltas: set[StateKey] = set()
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
@@ -1738,7 +1738,7 @@ class SyncHandler:
                     #  - OR it is the user's own membership, in case a filter
                     #    removed their leave from the timeline.
                     if key in timeline_state or key == own_membership_key:
-                        cleared_state_keys.add(key)
+                        state_keys_to_look_up.add(key)
                     continue
 
                 # Note that deltas are in stream ordering, so if there are
@@ -1746,22 +1746,22 @@ class SyncHandler:
                 # the latest one.
                 delta_state_ids[key] = delta.event_id
                 changed_keys.add(key)
-                cleared_state_keys.discard(key)
+                state_keys_to_look_up.discard(key)
 
-            if own_membership_key in cleared_state_keys:
+            if own_membership_key in state_keys_to_look_up:
                 # The server left the room in this window. It only wrote deltas
                 # for the keys that were in the room state before the batch that
                 # made it leave, so the keys that batch added have no delta at
                 # all. Look up the keys in the timeline that have no delta too.
-                cleared_state_keys.update(
+                state_keys_to_look_up.update(
                     key for key in timeline_state if key not in state_keys_with_deltas
                 )
 
-            if cleared_state_keys:
+            if state_keys_to_look_up:
                 state_at_end = await self._state_storage_controller.get_state_ids_at(
                     room_id,
                     stream_position=end_token,
-                    state_filter=StateFilter.from_types(cleared_state_keys),
+                    state_filter=StateFilter.from_types(state_keys_to_look_up),
                     # Don't wait for the full state. Partial state has every state
                     # event except remote memberships, and any remote membership
                     # we look up here is from an event in the timeline, which we
