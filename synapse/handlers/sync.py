@@ -1722,16 +1722,14 @@ class SyncHandler:
             #       any earlier delta for it is stale. That batch ends the
             #       timeline, so we look up the keys in the timeline in state
             #       groups, which still have the state at `end_token`.
-            #     - has no delta at all if it is new, so we also look up the keys
-            #       in the timeline that have no delta (see below).
+            #     - has no delta at all if it is new, so we also look up all the
+            #       keys in the timeline (see below).
             #    Keys that only changed earlier keep their earlier delta, and
             #    other keys need no update.
             own_membership_key = (EventTypes.Member, sync_config.user.to_string())
             state_keys_to_look_up: set[tuple[str, str]] = set()
-            state_keys_with_deltas: set[StateKey] = set()
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
-                state_keys_with_deltas.add(key)
                 if delta.event_id is None:
                     # Look up the key if:
                     #  - it is in the timeline (see above).
@@ -1752,10 +1750,9 @@ class SyncHandler:
                 # The server left the room in this window. It only wrote deltas
                 # for the keys that were in the room state before the batch that
                 # made it leave, so the keys that batch added have no delta at
-                # all. Look up the keys in the timeline that have no delta too.
-                state_keys_to_look_up.update(
-                    key for key in timeline_state if key not in state_keys_with_deltas
-                )
+                # all. Look up all the keys in the timeline: the ones with a delta
+                # are already in the set.
+                state_keys_to_look_up.update(timeline_state)
 
             if state_keys_to_look_up:
                 state_at_end = await self._state_storage_controller.get_state_ids_at(
