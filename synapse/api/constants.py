@@ -518,3 +518,7 @@ class StateDag:
     Arbitrary, servers usually never get this high so it's mostly to bound the max size of
     a single /get_missing_events response.
     """
+    MAX_PREV_STATE_EVENTS: Final = 20
+    """
+    Max number of prev_state_events allowed on an MSC4242 event as per the MSC.
+    """

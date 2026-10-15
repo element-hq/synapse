@@ -93,6 +93,7 @@ from synapse.storage.databases.main.push_rule import PushRulesWorkerStore
 from synapse.storage.databases.main.pusher import PusherWorkerStore
 from synapse.storage.databases.main.receipts import ReceiptsWorkerStore
 from synapse.storage.databases.main.registration import RegistrationWorkerStore
+from synapse.storage.databases.main.rejections import RejectionsStore
 from synapse.storage.databases.main.relations import RelationsWorkerStore
 from synapse.storage.databases.main.room import RoomWorkerStore
 from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
@@ -153,6 +154,7 @@ class GenericWorkerStore(
     EventFederationWorkerStore,
     EventPushActionsWorkerStore,
     PurgeEventsStore,
+    RejectionsStore,
     StateGroupWorkerStore,
     SignatureWorkerStore,
     UserErasureWorkerStore,
