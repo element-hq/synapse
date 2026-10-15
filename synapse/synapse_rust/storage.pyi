@@ -83,6 +83,40 @@ class RustStore:
     @property
     def is_feature_enabled_for_user(self) -> IsFeatureEnabledForUser: ...
     @property
+    def loads_events(self) -> bool:
+        """Whether `load_events` can be used: whether the database uses the
+        native Postgres driver."""
+
+    def load_events(
+        self, event_ids: list[str]
+    ) -> "Deferred[tuple[dict[str, tuple[Event, Event | None]], int]]":
+        """`_get_events_from_db` behind the event cache: the events by ID, each
+        with its redacted form if it has a valid redaction, rejected events
+        included and unknown ones left out. Each comes from the cache, from a
+        load already in flight, or from the database, and what is read from
+        the database is cached. Also the number of events this call read from
+        the database, which leaves out those of a load it joined.
+
+        May return events that weren't asked for: the redaction events read
+        to check an unconfirmed redaction. Cancelling the Deferred leaves the
+        load running for the other callers sharing it."""
+
+    def reload_events(
+        self, event_ids: list[str]
+    ) -> "Deferred[tuple[dict[str, tuple[Event, Event | None]], int]]":
+        """`load_events`, reading every event from the database. What it reads
+        replaces what was cached."""
+
+    def load_events_blocking(
+        self, event_ids: list[str]
+    ) -> tuple[dict[str, tuple[Event, Event | None]], int]:
+        """`load_events`, blocking. For tests."""
+
+    def reload_events_blocking(
+        self, event_ids: list[str]
+    ) -> tuple[dict[str, tuple[Event, Event | None]], int]:
+        """`reload_events`, blocking. For tests."""
+    @property
     def event_cache(self) -> RustEventCache:
         """The event cache, for `EventsWorkerStore` to bind as
         `_get_event_cache`."""

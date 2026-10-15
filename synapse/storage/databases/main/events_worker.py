@@ -90,7 +90,7 @@ from synapse.storage.util.id_generators import (
     MultiWriterIdGenerator,
 )
 from synapse.storage.util.sequence import build_sequence_generator
-from synapse.synapse_rust.storage import RustEventCache
+from synapse.synapse_rust.storage import RustEventCache, RustStore
 from synapse.types import JsonDict, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
@@ -307,8 +307,15 @@ class EventsWorkerStore(SQLBaseStore):
         # state resolution read the same events. A datastore without a Rust
         # store, such as the database port script's, gets a cache of its own.
         self._get_event_cache: RustEventCache
+        # With the native Postgres driver, events are loaded from the database
+        # in Rust too, through the same loader as the Rust readers. Loads of
+        # the same event from either side then share one database read.
+        self._rust_event_loader: RustStore | None = None
         if isinstance(self, RustWorkerStore):
-            self._get_event_cache = self.get_or_build_rust_store(hs).event_cache
+            rust_store = self.get_or_build_rust_store(hs)
+            self._get_event_cache = rust_store.event_cache
+            if rust_store.loads_events:
+                self._rust_event_loader = rust_store
         else:
             self._get_event_cache = RustEventCache(
                 hs.get_rust_runtime(), hs.config.caches.event_cache_size
@@ -317,7 +324,8 @@ class EventsWorkerStore(SQLBaseStore):
 
         # Map from event ID to a deferred that will result in a map from event
         # ID to cache entry. Note that the returned dict may not have the
-        # requested event in it if the event isn't in the DB.
+        # requested event in it if the event isn't in the DB. Unused when
+        # loading in Rust, where the event cache coalesces loads instead.
         self._current_event_fetches: dict[
             str, ObservableDeferred[dict[str, EventCacheEntry]]
         ] = {}
@@ -878,6 +886,15 @@ class EventsWorkerStore(SQLBaseStore):
 
         missing_events_ids = {e for e in event_ids if e not in event_entry_map}
 
+        if self._rust_event_loader is not None:
+            if missing_events_ids:
+                event_entry_map.update(
+                    await self._load_events_in_rust(
+                        self._rust_event_loader, missing_events_ids, reload=False
+                    )
+                )
+            return self._filter_rejected(event_entry_map, allow_rejected)
+
         # We now look up if we're already fetching some of the events in the DB,
         # if so we wait for those lookups to finish instead of pulling the same
         # events out of the DB multiple times.
@@ -977,14 +994,56 @@ class EventsWorkerStore(SQLBaseStore):
                     if event_id in already_fetching_ids
                 )
 
-        if not allow_rejected:
-            event_entry_map = {
-                event_id: entry
-                for event_id, entry in event_entry_map.items()
-                if not entry.event.rejected_reason
-            }
+        return self._filter_rejected(event_entry_map, allow_rejected)
 
-        return event_entry_map
+    @staticmethod
+    def _filter_rejected(
+        event_entry_map: dict[str, EventCacheEntry], allow_rejected: bool
+    ) -> dict[str, EventCacheEntry]:
+        if allow_rejected:
+            return event_entry_map
+        return {
+            event_id: entry
+            for event_id, entry in event_entry_map.items()
+            if not entry.event.rejected_reason
+        }
+
+    async def _load_events_in_rust(
+        self, rust_store: RustStore, event_ids: Collection[str], reload: bool
+    ) -> dict[str, EventCacheEntry]:
+        """Load events through the Rust store, which checks the event cache,
+        joins loads already in flight and reads the rest from the database,
+        caching what it reads. With `reload`, every event is read from the
+        database.
+
+        May return rejected events, and events that weren't asked for.
+        """
+        ids = list(event_ids)
+        # Cancelling this leaves the load running in Rust for any other
+        # callers sharing it. It never uses our logcontext, so we don't wait
+        # for it.
+        if reload:
+            loaded, fetched = await rust_store.reload_events(ids)
+        else:
+            loaded, fetched = await rust_store.load_events(ids)
+        current_context().record_event_fetch(fetched)
+
+        result_map: dict[str, EventCacheEntry] = {}
+        for event_id, (event, redacted_event) in loaded.items():
+            if redacted_event is None:
+                # Keep handing out one object per event: a caller that joined
+                # another's load gets a new object, so use the one already
+                # handed out if there is one.
+                live = None if reload else self._event_ref.get(event_id)
+                if live is not None:
+                    event = live
+                else:
+                    # We only cache references to unredacted events.
+                    self._event_ref[event_id] = event
+            result_map[event_id] = EventCacheEntry(
+                event=event, redacted_event=redacted_event
+            )
+        return result_map
 
     def invalidate_get_event_cache_after_txn(
         self, txn: LoggingTransaction, event_id: str
@@ -1362,6 +1421,11 @@ class EventsWorkerStore(SQLBaseStore):
             SynapseTags.FUNC_ARG_PREFIX + "event_ids.length",
             str(len(event_ids)),
         )
+
+        if self._rust_event_loader is not None:
+            return await self._load_events_in_rust(
+                self._rust_event_loader, event_ids, reload=True
+            )
 
         fetched_event_ids: set[str] = set()
         fetched_events: dict[str, _EventRow] = {}

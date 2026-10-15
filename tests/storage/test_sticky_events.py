@@ -1302,11 +1302,13 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         """
         room_id = self.helper.create_room_as(self.user_id, tok=self.token)
 
-        # A sticky event that expires almost immediately.
+        # A sticky event that expires soon. Not at once: making requests can
+        # advance the clock, and the background cleanup must not delete the
+        # event before we've read its stream ID.
         short_lived_event_id = self.helper.send_sticky_event(
             room_id,
             EventTypes.Message,
-            duration=Duration(milliseconds=1),
+            duration=Duration(minutes=10),
             content={"body": "short lived", "msgtype": "m.text"},
             tok=self.token,
         )["event_id"]
@@ -1326,7 +1328,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         )
 
         # Advance the reactor and trigger the deletion of expired sticky events
-        self.reactor.advance(0.002)
+        self.reactor.advance(Duration(minutes=10).as_secs() + 1)
         self.get_success(self.store._delete_expired_sticky_events())
 
         self.assertIsNone(

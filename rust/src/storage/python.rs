@@ -34,32 +34,85 @@
 //! `register_cache` through [`RustStore::caches`], for metrics and cache
 //! factors.
 //!
+//! When the main database uses the native driver, events are loaded from
+//! the database here too, for Python as for Rust: `EventsWorkerStore` calls
+//! [`RustStore::load_events`] for the events its caches miss. So every event
+//! load goes through the one [`EventLoader`], and loads of the same event
+//! from either side coalesce in the event cache.
+//!
 //! The caches that mirror a Python `@cached` function reach the datastore
 //! through [`RustStore::mirrored_caches`], which attaches each to the
 //! Python cache it names, so that every invalidation of the Python cache
 //! reaches it.
 
-use std::sync::Arc;
+use std::{collections::HashMap, future::Future, sync::Arc};
 
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
-    pyclass, pymethods,
-    types::{PyAnyMethods, PyModule, PyModuleMethods, PyTuple},
-    Bound, Py, PyAny, PyClassInitializer, PyResult, Python,
+    import_exception, intern, pyclass, pymethods,
+    types::{
+        PyAnyMethods, PyDict, PyDictMethods, PyModule, PyModuleMethods, PyTuple, PyWeakrefMethods,
+        PyWeakrefReference,
+    },
+    Bound, IntoPyObject, Py, PyAny, PyClassInitializer, PyErr, PyResult, Python,
 };
 
 use crate::{
-    caches::python::{PyCacheKey, RustCache},
+    caches::{
+        python::{PyCacheKey, RustCache},
+        SharedError,
+    },
+    database::postgres::pool::{ConnectionPool, PyConnectionPool},
     deferred::{create_deferred, succeed},
     events::Event,
     runtime::RustRuntime,
     storage::{
         caches::{new_event_cache, EventCache, StoreCaches},
         db::python_db_pool::PythonDatabasePoolWrapper,
-        events::CachedEvent,
+        events::{CachedEvent, EventLoadStats, EventLoader, UnusableEvent},
+        pool_querier::PoolQuerier,
         store::{IsFeatureEnabledKey, PerUserExperimentalFeature, Store},
     },
 };
+
+import_exception!(
+    synapse.storage.databases.main.events_worker,
+    InvalidEventError
+);
+import_exception!(
+    synapse.storage.databases.main.events_worker,
+    DatabaseCorruptionError
+);
+
+/// The Python error for a failed event load: `InvalidEventError` or
+/// `DatabaseCorruptionError` for an event that cannot be used, as the
+/// Python loader raises, and `RuntimeError` for anything else.
+fn event_load_error_to_py(error: anyhow::Error) -> PyErr {
+    match unusable_event(&error) {
+        Some(UnusableEvent::Invalid(message)) => InvalidEventError::new_err(message.clone()),
+        Some(UnusableEvent::Corrupt {
+            room_id,
+            persisted_event_id,
+            computed_event_id,
+        }) => DatabaseCorruptionError::new_err((
+            room_id.clone(),
+            persisted_event_id.clone(),
+            computed_event_id.clone(),
+        )),
+        None => PyRuntimeError::new_err(format!("loading events failed: {error:#}")),
+    }
+}
+
+/// The [`UnusableEvent`] behind `error`, which may have reached us through
+/// another caller's load in the event cache.
+fn unusable_event(error: &anyhow::Error) -> Option<&UnusableEvent> {
+    if let Some(unusable) = error.downcast_ref::<UnusableEvent>() {
+        return Some(unusable);
+    }
+    error
+        .downcast_ref::<SharedError>()
+        .and_then(|shared| unusable_event(shared.inner()))
+}
 
 /// The Rust [`Store`], as the main datastore holds it.
 #[pyclass(frozen, name = "RustStore")]
@@ -72,11 +125,131 @@ pub struct RustStore {
     caches: Vec<Py<RustCache>>,
     /// The caches that mirror a Python cache, with the Python cache's name.
     mirrored_caches: Vec<(&'static str, Py<RustCache>)>,
+    runtime: RustRuntime,
+    /// The datastore's `DatabasePool`, when it uses the native driver. Its
+    /// `_db_pool._pool` is read per call: `close()` and `start()` replace
+    /// the `_pool`, and the replication tests swap a worker's `_db_pool` for
+    /// the main process's. A weak reference, as the `DatabasePool` references
+    /// the homeserver, which owns this: see `PythonDatabasePoolWrapper`.
+    native_db_pool: Option<Py<PyWeakrefReference>>,
 }
 
 impl RustStore {
     pub fn store(&self) -> &Arc<Store> {
         &self.store
+    }
+
+    /// The native driver's pool, or an error if the database does not use
+    /// that driver or the pool is closed.
+    fn pool(&self, py: Python<'_>) -> PyResult<ConnectionPool> {
+        let Some(db_pool) = &self.native_db_pool else {
+            return Err(PyRuntimeError::new_err(
+                "loading events in Rust needs the native Postgres driver",
+            ));
+        };
+        let db_pool = db_pool
+            .bind(py)
+            .upgrade()
+            .ok_or_else(|| PyRuntimeError::new_err("the database pool has been dropped"))?;
+        let pool = db_pool
+            .getattr(intern!(py, "_db_pool"))?
+            .getattr(intern!(py, "_pool"))?;
+        if pool.is_none() {
+            return Err(PyRuntimeError::new_err("the database pool is closed"));
+        }
+        Ok(pool.cast::<PyConnectionPool>()?.get().pool.clone())
+    }
+
+    fn start_load<'py>(
+        &self,
+        py: Python<'py>,
+        event_ids: Vec<String>,
+        reload: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let load = self.load(py, event_ids, reload)?;
+        // Shared with other callers through the cache, so a cancelled caller
+        // must leave the load running for them.
+        create_deferred(py, &self.runtime, load)
+    }
+
+    /// [`RustStore::start_load`], blocking until the load is done, with the
+    /// GIL released.
+    fn load_blocking(
+        &self,
+        py: Python<'_>,
+        event_ids: Vec<String>,
+        reload: bool,
+    ) -> PyResult<LoadedEvents> {
+        let load = self.load(py, event_ids, reload)?;
+        let handle = self.runtime.tokio_handle()?;
+        py.detach(|| handle.block_on(load))
+    }
+
+    /// The future that loads `event_ids`, to run on the tokio runtime.
+    fn load(
+        &self,
+        py: Python<'_>,
+        event_ids: Vec<String>,
+        reload: bool,
+    ) -> PyResult<impl Future<Output = PyResult<LoadedEvents>> + Send + 'static> {
+        let pool = self.pool(py)?;
+        let store = Arc::clone(&self.store);
+        let ids: Vec<Arc<str>> = event_ids.into_iter().map(Arc::from).collect();
+        Ok(async move {
+            let mut stats = EventLoadStats::default();
+            let events = async {
+                let querier = PoolQuerier::checkout(&pool).await?;
+                let loader = EventLoader::new(&querier, Some(&store.caches.events));
+                if reload {
+                    loader.reload(&ids, &mut stats).await
+                } else {
+                    loader.load(&ids, &mut stats).await
+                }
+            }
+            .await;
+            events
+                .map(|events| LoadedEvents {
+                    events,
+                    fetched: stats.fetched,
+                })
+                .map_err(event_load_error_to_py)
+        })
+    }
+}
+
+/// `db_pool`, a `DatabasePool`, if it runs on the native driver.
+fn native_db_pool(db_pool: &Bound<'_, PyAny>) -> PyResult<Option<Py<PyWeakrefReference>>> {
+    let py = db_pool.py();
+    let connection_pool = db_pool.getattr(intern!(py, "_db_pool"))?;
+    let rust_connection_pool_class = py
+        .import("synapse.storage.rust_pool")?
+        .getattr("RustConnectionPool")?;
+    if !connection_pool.is_instance(&rust_connection_pool_class)? {
+        return Ok(None);
+    }
+    Ok(Some(PyWeakrefReference::new(db_pool)?.unbind()))
+}
+
+/// What [`RustStore::load_events`] answers: for each event ID, the event
+/// and its redacted form, as new Python objects sharing the cached data,
+/// and how many events this load read from the database. Events read by
+/// another caller's load that this one joined are not counted.
+struct LoadedEvents {
+    events: HashMap<Arc<str>, CachedEvent>,
+    fetched: u64,
+}
+
+impl<'py> IntoPyObject<'py> for LoadedEvents {
+    type Target = PyTuple;
+    type Output = Bound<'py, PyTuple>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        let dict = PyDict::new(py);
+        for (event_id, event) in self.events {
+            dict.set_item(&*event_id, (event.to_py(py)?, event.redacted_to_py(py)?))?;
+        }
+        (dict, self.fetched).into_pyobject(py)
     }
 }
 
@@ -92,6 +265,7 @@ impl RustStore {
         db_pool: &Bound<'_, PyAny>,
         event_cache_size: usize,
     ) -> PyResult<Self> {
+        let native_db_pool = native_db_pool(db_pool)?;
         let db_pool = PythonDatabasePoolWrapper::new(db_pool, runtime.clone())?;
         let store = Arc::new(Store::new(
             Box::new(db_pool),
@@ -141,7 +315,65 @@ impl RustStore {
             event_cache,
             caches,
             mirrored_caches,
+            runtime: runtime.clone(),
+            native_db_pool,
         })
+    }
+
+    /// Whether [`RustStore::load_events`] can be used: whether the database
+    /// uses the native driver.
+    #[getter]
+    fn loads_events(&self) -> bool {
+        self.native_db_pool.is_some()
+    }
+
+    /// `_get_events_from_db` behind the event cache: a deferred of the events
+    /// by ID, each with its redacted form if it has a valid redaction,
+    /// rejected events included and unknown ones left out, and the number of
+    /// events this call read from the database. Each event comes
+    /// from the cache, from a load already in flight, or from the database,
+    /// and those read from the database are cached.
+    ///
+    /// The result can hold events that were not asked for: the redaction
+    /// events read to check an unconfirmed redaction.
+    fn load_events<'py>(
+        &self,
+        py: Python<'py>,
+        event_ids: Vec<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.start_load(py, event_ids, false)
+    }
+
+    /// [`RustStore::load_events`] reading every event from the database,
+    /// for a caller that must not trust the cache. What it reads replaces
+    /// what was cached.
+    fn reload_events<'py>(
+        &self,
+        py: Python<'py>,
+        event_ids: Vec<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.start_load(py, event_ids, true)
+    }
+
+    /// As [`RustStore::load_events`], but blocks and returns the result.
+    /// For tests, which run Python's database transactions synchronously
+    /// too: see `_BlockingRustCalls`.
+    fn load_events_blocking(
+        &self,
+        py: Python<'_>,
+        event_ids: Vec<String>,
+    ) -> PyResult<LoadedEvents> {
+        self.load_blocking(py, event_ids, false)
+    }
+
+    /// As [`RustStore::reload_events`], but blocks and returns the result.
+    /// For tests.
+    fn reload_events_blocking(
+        &self,
+        py: Python<'_>,
+        event_ids: Vec<String>,
+    ) -> PyResult<LoadedEvents> {
+        self.load_blocking(py, event_ids, true)
     }
 
     /// The caches that mirror a Python `@cached` function, each with the
@@ -384,7 +616,10 @@ impl RustEventCache {
         };
         match &self.store_caches {
             Some(store_caches) => store_caches.invalidate_room(&room_id),
-            None => drop(self.events.invalidate_index(&room_id)),
+            None => {
+                drop(self.events.invalidate_index(&room_id));
+                self.events.abandon_loads();
+            }
         }
     }
 

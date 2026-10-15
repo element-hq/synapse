@@ -32,10 +32,12 @@ from synapse.logging.context import LoggingContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.storage.database import make_conn
 from synapse.storage.databases.main.events_worker import (
     EVENT_QUEUE_THREADS,
     EventsWorkerStore,
 )
+from synapse.storage.rust_pool import RustConnectionPool
 from synapse.storage.types import Connection
 from synapse.util.async_helpers import yieldable_gather_results
 from synapse.util.clock import Clock
@@ -497,6 +499,23 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
         """
         connection_pool = self.store.db_pool._db_pool
 
+        if self.store._rust_event_loader is not None:
+            # Events load through the native pool, which doesn't use the
+            # connection factory. Point it at a server that isn't there.
+            assert isinstance(connection_pool, RustConnectionPool)
+            dsn = connection_pool._dsn
+            connection_pool.close()
+            connection_pool._dsn = "host=127.0.0.1 port=1 connect_timeout=1"
+            connection_pool.start()
+            try:
+                yield
+            finally:
+                connection_pool.close()
+                connection_pool._dsn = dsn
+                connection_pool.start()
+                self._populate_events()
+            return
+
         # Close all connections and shut down the database `ThreadPool`.
         connection_pool.close()
 
@@ -524,10 +543,28 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
             failure = self.get_failure(
                 self.store.get_event(self.event_ids[0]), Exception
             )
-            self.assertEqual(str(failure.value), "Could not connect to the database.")
+            if self.store._rust_event_loader is not None:
+                self.assertIn("loading events failed", str(failure.value))
+            else:
+                self.assertEqual(
+                    str(failure.value), "Could not connect to the database."
+                )
 
     def test_recovery(self) -> None:
         """Test that event fetchers recover after a database outage."""
+        if self.store._rust_event_loader is not None:
+            # There are no fetch threads to exhaust: each fetch fails on its
+            # own, and the next one after the outage succeeds.
+            with self._outage():
+                event_deferreds = [
+                    ensureDeferred(self.store.get_event(event_id))
+                    for event_id in self.event_ids
+                ]
+                for event_deferred in event_deferreds:
+                    self.get_failure(event_deferred, Exception)
+            self.get_success(self.store.get_event(self.event_ids[0]))
+            return
+
         with self.assertLogs(
             "synapse.metrics.background_process_metrics", level="ERROR"
         ):
@@ -579,6 +616,11 @@ class GetEventCancellationTestCase(unittest.HomeserverTestCase):
         # Reset the event cache so the tests start with it empty
         self.store._get_event_cache.clear()
 
+        # The test harness makes Rust event loads block. These tests are about
+        # the deferreds, so use the store itself.
+        if self.store._rust_event_loader is not None:
+            self.store._rust_event_loader = hs.get_rust_store()
+
     @contextmanager
     def blocking_get_event_calls(
         self,
@@ -596,6 +638,11 @@ class GetEventCancellationTestCase(unittest.HomeserverTestCase):
              * A cancellable `Deferred` for the first `get_event` call.
              * A cancellable `Deferred` for the second `get_event` call.
         """
+        if self.store._rust_event_loader is not None:
+            with self._blocking_rust_get_event_calls() as calls:
+                yield calls
+            return
+
         # Patch `DatabasePool.runWithConnection` to block.
         unblock: "Deferred[None]" = Deferred()
         original_runWithConnection = self.store.db_pool.runWithConnection
@@ -630,6 +677,58 @@ class GetEventCancellationTestCase(unittest.HomeserverTestCase):
         self.assertEqual(ctx1.get_resource_usage().evt_db_fetch_count, 1)
         self.assertEqual(ctx2.get_resource_usage().evt_db_fetch_count, 0)
 
+    @contextmanager
+    def _blocking_rust_get_event_calls(
+        self,
+    ) -> Generator[
+        tuple["Deferred[None]", "Deferred[None]", "Deferred[None]"], None, None
+    ]:
+        """`blocking_get_event_calls` when events load in Rust, through the
+        native pool rather than `runWithConnection`: another connection holds
+        a lock on `event_json` until `unblock` fires, which blocks the load's
+        query."""
+        lock_conn = make_conn(
+            db_config=self.store.db_pool._database_config,
+            engine=self.store.db_pool.engine,
+            default_txn_name="lock_event_json",
+            server_name=self.hs.hostname,
+        )
+        cur = lock_conn.cursor()
+        cur.execute("LOCK TABLE event_json IN ACCESS EXCLUSIVE MODE")
+
+        unblock: "Deferred[None]" = Deferred()
+        unblock.addCallback(lambda _: lock_conn.rollback())
+
+        ctx1 = LoggingContext(name="get_event1", server_name=self.hs.hostname)
+        ctx2 = LoggingContext(name="get_event2", server_name=self.hs.hostname)
+
+        async def get_event(ctx: LoggingContext) -> None:
+            with ctx:
+                await self.store.get_event(self.event_id)
+
+        try:
+            get_event1 = ensureDeferred(get_event(ctx1))
+            get_event2 = ensureDeferred(get_event(ctx2))
+
+            # Both `get_event` calls ought to be blocked.
+            self.assertNoResult(get_event1)
+            self.assertNoResult(get_event2)
+
+            yield unblock, get_event1, get_event2
+        finally:
+            if not unblock.called:
+                unblock.callback(None)
+            lock_conn.close()
+
+        # Confirm that the two `get_event` calls shared the same database
+        # fetch. Each call's load runs as its own tokio task, so either may be
+        # the one that reads, and a cancelled call records nothing.
+        self.assertLessEqual(
+            ctx1.get_resource_usage().evt_db_fetch_count
+            + ctx2.get_resource_usage().evt_db_fetch_count,
+            1,
+        )
+
     def test_first_get_event_cancelled(self) -> None:
         """Test cancellation of the first `get_event` call sharing a database fetch.
 
@@ -638,6 +737,17 @@ class GetEventCancellationTestCase(unittest.HomeserverTestCase):
         call must not abort before the fetch is complete, otherwise the fetch will be
         using a finished logging context.
         """
+        if self.store._rust_event_loader is not None:
+            # The load runs in Rust, on no logcontext of ours, so the first call
+            # is cancelled at once and the load carries on for the second.
+            with self.blocking_get_event_calls() as (unblock, get_event1, get_event2):
+                get_event1.cancel()
+                self.get_failure(get_event1, CancelledError)
+                self.assertNoResult(get_event2)
+                unblock.callback(None)
+                self.get_success(get_event2)
+            return
+
         with self.blocking_get_event_calls() as (unblock, get_event1, get_event2):
             # Cancel the first `get_event` call.
             get_event1.cancel()

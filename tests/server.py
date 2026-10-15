@@ -110,6 +110,7 @@ from synapse.synapse_rust.runtime import RustRuntime, set_virtual_time_msec
 from synapse.synapse_rust.state import (
     StateResolutionHandler as RustStateResolutionHandler,
 )
+from synapse.synapse_rust.storage import RustStore
 from synapse.synapse_rust.sync import SyncHandler as RustSyncHandler
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
@@ -1530,9 +1531,20 @@ def setup_test_homeserver(
         sync_handler = hs.get_sync_handler()
         if sync_handler._rust_sync is not None:
             sync_handler._rust_sync = cast(
-                Any, _BlockingRustSyncHandler(sync_handler._rust_sync)
+                Any, _BlockingRustCalls(sync_handler._rust_sync)
             )
         sync_handler._rust_sync_strict = RUST_SYNC_STRICT_FOR_TESTS
+
+    # Likewise for event loads, when they run in Rust: code that loads events
+    # in the background would otherwise not have finished when a test checks.
+    # `GetEventCancellationTestCase` exercises the deferreds.
+    # (Some tests build a homeserver that is never set up.)
+    if hs.datastores is not None:
+        main_store = hs.get_datastores().main
+        if main_store._rust_event_loader is not None:
+            main_store._rust_event_loader = cast(
+                Any, _BlockingRustCalls(main_store._rust_event_loader)
+            )
 
     return hs
 
@@ -1584,16 +1596,16 @@ class _BlockingRustStateResolution:
             return fail()
 
 
-class _BlockingRustSyncHandler:
-    """Wraps the Rust `SyncHandler` so that each of its entry points blocks,
-    for the reason `_BlockingRustStateResolution` gives.
+class _BlockingRustCalls:
+    """Wraps the Rust `SyncHandler` or `RustStore` so that each of its entry
+    points blocks, for the reason `_BlockingRustStateResolution` gives.
 
-    Every entry point `name` on the Rust handler that returns a Deferred has a
-    `name_blocking` twin that returns the result directly. This wrapper
-    answers `name` with that twin's result in an already-fired Deferred.
+    Every entry point `name` that returns a Deferred has a `name_blocking`
+    twin that returns the result directly. This wrapper answers `name` with
+    that twin's result in an already-fired Deferred.
     """
 
-    def __init__(self, handler: "RustSyncHandler") -> None:
+    def __init__(self, handler: "RustSyncHandler | RustStore") -> None:
         self._handler = handler
 
     def __getattr__(self, name: str) -> Any:

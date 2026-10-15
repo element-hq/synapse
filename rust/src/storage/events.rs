@@ -28,16 +28,20 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     time::{Duration, Instant},
 };
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use pyo3::{Py, PyResult, Python};
 use tokio_postgres::{types::ToSql, Row};
 
+use crate::caches::lock_ignoring_poison;
 use crate::event_auth::get_domain_from_id;
 use crate::events::{
     constants::event_type::{M_ROOM_CREATE, M_ROOM_MEMBER, M_ROOM_REDACTION},
@@ -152,6 +156,39 @@ fn auth_event_ids_of(event: &Event) -> anyhow::Result<Box<[Arc<str>]>> {
     Ok(ids.into_iter().map(Arc::from).collect())
 }
 
+/// Why an event in the database cannot be used. Each kind is a Python
+/// error of the same name, which some callers catch to skip a broken room.
+#[derive(Debug)]
+pub enum UnusableEvent {
+    /// `InvalidEventError`.
+    Invalid(String),
+    /// `DatabaseCorruptionError`: the event ID computed from the stored
+    /// event doesn't match the stored ID.
+    Corrupt {
+        room_id: String,
+        persisted_event_id: String,
+        computed_event_id: String,
+    },
+}
+
+impl std::fmt::Display for UnusableEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnusableEvent::Invalid(message) => f.write_str(message),
+            UnusableEvent::Corrupt {
+                room_id,
+                persisted_event_id,
+                computed_event_id,
+            } => write!(
+                f,
+                "Database corruption: event {persisted_event_id} in room {room_id} has event ID {computed_event_id}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for UnusableEvent {}
+
 /// What to do with a redacted event. `EventRedactBehaviour`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RedactBehaviour {
@@ -185,6 +222,23 @@ pub struct EventLoadStats {
     /// Time spent building events from rows: parsing the JSON and computing
     /// the event IDs.
     pub parse_time: Duration,
+}
+
+impl EventLoadStats {
+    fn add(&mut self, other: &EventLoadStats) {
+        self.fetched += other.fetched;
+        self.cached += other.cached;
+        self.parse_time += other.parse_time;
+    }
+}
+
+/// `ids` without repeats, in order.
+fn dedup(ids: &[Arc<str>]) -> Vec<Arc<str>> {
+    let mut seen = HashSet::with_capacity(ids.len());
+    ids.iter()
+        .filter(|id| seen.insert(Arc::clone(id)))
+        .cloned()
+        .collect()
 }
 
 /// Loads events through `querier`, consulting `cache` first and filling it
@@ -239,38 +293,69 @@ impl<'a> EventLoader<'a> {
     /// database. Events that are not found are left out. The result can
     /// hold events that were not asked for: the redaction events read to
     /// check an unconfirmed redaction.
+    ///
+    /// With a cache, an event another caller is loading is waited for
+    /// rather than read again, and the rest are read in one go. Those that
+    /// were asked for are cached, unless invalidated while being read. The
+    /// extra redaction events are not, as nothing guards them against an
+    /// invalidation during the read.
     pub async fn load(
         &self,
         ids: &[Arc<str>],
         stats: &mut EventLoadStats,
     ) -> anyhow::Result<HashMap<Arc<str>, CachedEvent>> {
-        let mut events = HashMap::with_capacity(ids.len());
-        let mut missing: Vec<Arc<str>> = Vec::new();
-        for id in ids {
-            if events.contains_key(id) || missing.contains(id) {
-                continue;
-            }
-            match self.cache.and_then(|cache| cache.get_or_count_miss(id)) {
-                Some(event) => {
-                    events.insert(Arc::clone(id), event);
-                }
-                None => missing.push(Arc::clone(id)),
-            }
-        }
-        stats.cached += events.len() as u64;
-
-        if !missing.is_empty() {
-            let fetched = self.fetch_from_db(missing, stats).await?;
+        let Some(cache) = self.cache else {
+            let fetched = self.fetch_from_db(dedup(ids), stats).await?;
             stats.fetched += fetched.len() as u64;
-            for (event_id, event) in fetched {
-                if let Some(cache) = self.cache {
-                    drop(cache.insert(Arc::clone(&event_id), event.clone()));
+            return Ok(fetched);
+        };
+
+        // `get_or_load_many` takes a closure it may call more than once, so
+        // the closure cannot hold `stats` itself.
+        let load_stats = Mutex::new(EventLoadStats::default());
+        let loaded_requested = AtomicU64::new(0);
+        let events = cache
+            .get_or_load_many(ids, |missing| {
+                let load_stats = &load_stats;
+                let loaded_requested = &loaded_requested;
+                async move {
+                    let mut batch_stats = EventLoadStats::default();
+                    let fetched = self
+                        .fetch_from_db(missing.clone(), &mut batch_stats)
+                        .await?;
+                    let requested = missing.iter().filter(|id| fetched.contains_key(*id));
+                    loaded_requested.fetch_add(requested.count() as u64, Ordering::Relaxed);
+                    batch_stats.fetched += fetched.len() as u64;
+                    lock_ignoring_poison(load_stats).add(&batch_stats);
+                    Ok(fetched)
                 }
-                events.insert(event_id, event);
+            })
+            .await
+            .map_err(anyhow::Error::new)?;
+
+        let load_stats = lock_ignoring_poison(&load_stats);
+        stats.add(&load_stats);
+        let requested_found = ids.iter().filter(|id| events.contains_key(*id)).count() as u64;
+        stats.cached += requested_found.saturating_sub(loaded_requested.into_inner());
+        Ok(events)
+    }
+
+    /// [`EventLoader::load`] reading every event from the database, as
+    /// `_get_events_from_db`: for callers that must not trust the cache.
+    /// What it reads replaces what was cached.
+    pub async fn reload(
+        &self,
+        ids: &[Arc<str>],
+        stats: &mut EventLoadStats,
+    ) -> anyhow::Result<HashMap<Arc<str>, CachedEvent>> {
+        if let Some(cache) = self.cache {
+            // Invalidating also stops loads already in flight from caching
+            // what they read before ours.
+            for id in ids {
+                drop(cache.invalidate(id));
             }
         }
-
-        Ok(events)
+        self.load(ids, stats).await
     }
 
     /// `get_events_as_list`: the events in the order of `ids`, each as
@@ -777,17 +862,22 @@ fn event_from_row(row: &Row) -> anyhow::Result<Option<(Arc<str>, Event)>> {
     };
 
     if room_version_id.is_none() && event.type_() != M_ROOM_MEMBER {
-        bail!("Room for event {event_id} is unknown");
+        return Err(UnusableEvent::Invalid(format!(
+            "Room {} for event {event_id} is unknown",
+            event.room_id()
+        ))
+        .into());
     }
 
     // If the content was modified in the database, the computed event ID
     // will not match.
     if event.event_id() != event_id {
-        bail!(
-            "Database corruption: event {event_id} in room {} has event ID {}",
-            event.room_id(),
-            event.event_id()
-        );
+        return Err(UnusableEvent::Corrupt {
+            room_id: event.room_id().to_owned(),
+            persisted_event_id: event_id,
+            computed_event_id: event.event_id().to_owned(),
+        }
+        .into());
     }
 
     Ok(Some((Arc::from(event_id), event)))

@@ -83,8 +83,11 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         )
 
         # Since we use sqlite in memory databases we need to make sure the
-        # databases objects are the same.
-        self.worker_hs.get_datastores().main.db_pool = hs.get_datastores().main.db_pool
+        # databases objects are the same. The worker's Rust store keeps the
+        # worker's own `DatabasePool`, so point that at the same database too.
+        worker_store = self.worker_hs.get_datastores().main
+        worker_store.db_pool._db_pool = hs.get_datastores().main.db_pool._db_pool
+        worker_store.db_pool = hs.get_datastores().main.db_pool
 
         # Normally we'd pass in the handler to `setup_test_homeserver`, which would
         # eventually hit "Install @cache_in_self attributes" in tests/utils.py.
