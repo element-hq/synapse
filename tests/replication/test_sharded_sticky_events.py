@@ -22,7 +22,7 @@ import synapse.rest.admin
 from synapse.api.constants import EventTypes
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, SlidingSyncStreamToken
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -246,21 +246,18 @@ class ShardedStickyEventsTestCase(BaseMultiWorkerStreamTestCase):
             sticky_extension = channel.json_body["extensions"][
                 "org.matrix.msc4354.sticky_events"
             ]
-            next_batch = sticky_extension["next_batch"]
             self.assertEqual(
                 sticky_extension,
-                {
-                    "rooms": {self.room_id1: {"events": []}},
-                    "next_batch": next_batch,
-                },
+                {"rooms": {self.room_id1: {"events": []}}},
                 sticky_extension,
             )
-            # The token should carry the per-writer positions, as worker2 is stalled.
-            self.assertTrue(next_batch.startswith("sticky_m"), next_batch)
 
-            sync_body["extensions"]["org.matrix.msc4354.sticky_events"]["since"] = (
-                next_batch
-            )
+            # The sticky events position in `pos` should carry the per-writer
+            # positions, with worker1 ahead of the stalled worker2.
+            sticky_events_key = self.get_success(
+                SlidingSyncStreamToken.from_string(self.store, pos)
+            ).stream_token.sticky_events_key
+            self.assertIn("worker1", sticky_events_key.instance_map, sticky_events_key)
 
         # worker2 catches up, so an unsharded sticky events position is now free to
         # advance past worker1's write.

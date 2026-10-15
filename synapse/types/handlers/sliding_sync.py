@@ -48,7 +48,7 @@ from synapse.types import (
     ThreadSubscriptionsToken,
     UserID,
 )
-from synapse.types.rest.client import SlidingSyncBody, SlidingSyncStickyEventsToken
+from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -426,7 +426,7 @@ class SlidingSyncResult:
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
         class StickyEventsExtension:
-            """The Sticky Events extension (MSC4354)
+            """The Sticky Events extension (MSC4354 / MSC4480)
 
             Attributes:
                 room_id_to_sticky_events: map (room_id -> [unexpired_sticky_events])
@@ -437,7 +437,6 @@ class SlidingSyncResult:
             """
 
             room_id_to_sticky_events: Mapping[str, list[FilteredEvent]]
-            next_batch: SlidingSyncStickyEventsToken
 
             def __bool__(self) -> bool:
                 return bool(self.room_id_to_sticky_events)
