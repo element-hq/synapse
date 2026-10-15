@@ -508,6 +508,28 @@ where
         expired
     }
 
+    /// When the coldest entry was last read, or `None` if the cache is empty.
+    pub fn oldest_access(&self) -> Option<SystemTime> {
+        self.lock().oldest_access()
+    }
+
+    /// Evict up to `max` of the coldest entries, as long as they were last
+    /// read before `before`. Returns the evicted values, for the caller to
+    /// drop.
+    ///
+    /// For memory-pressure eviction, which works across every cache from the
+    /// coldest entry up. See [`registry::CacheRegistry::evict_coldest`].
+    /// Counted as evictions for size, as the cache is too big for the memory
+    /// it is allowed.
+    pub fn evict_coldest(&self, before: SystemTime, max: usize) -> Vec<V> {
+        let evicted = self.lock().evict_coldest(before, max);
+
+        self.evicted_size
+            .fetch_add(evicted.len() as u64, Ordering::Relaxed);
+
+        evicted
+    }
+
     /// Rescale the cache's bound to `original * factor`, evicting from the
     /// cold end if it shrank. Returns the evicted values, for the caller to
     /// drop.
@@ -765,6 +787,20 @@ where
                 Some(value) => evicted.push(value),
                 None => break,
             }
+        }
+        evicted
+    }
+
+    fn oldest_access(&self) -> Option<SystemTime> {
+        self.entries.peek_lru().map(|(_, entry)| entry.last_read)
+    }
+
+    /// Pop up to `max` of the coldest entries read before `before`, returning
+    /// the values for the caller to drop.
+    fn evict_coldest(&mut self, before: SystemTime, max: usize) -> Vec<V> {
+        let mut evicted = Vec::new();
+        while evicted.len() < max && self.oldest_access().is_some_and(|read| read < before) {
+            evicted.push(self.pop_lru().expect("oldest_access just found one"));
         }
         evicted
     }
@@ -1455,5 +1491,26 @@ mod tests {
         cache.count_hit();
         cache.count_miss();
         assert_eq!(cache.hit_counts(), (2, 2));
+    }
+
+    #[test]
+    fn evict_coldest_stops_at_the_bound_and_the_count() {
+        let cache = cache(10);
+        cache.insert_at("a", 1, at(1));
+        cache.insert_at("b", 2, at(2));
+        cache.insert_at("c", 3, at(3));
+        assert_eq!(cache.oldest_access(), Some(at(1)));
+
+        // Only entries read strictly before the bound go.
+        assert_eq!(cache.evict_coldest(at(2), 10), vec![1]);
+        assert_eq!(cache.oldest_access(), Some(at(2)));
+
+        // And no more than asked for.
+        assert_eq!(cache.evict_coldest(at(10), 1), vec![2]);
+        assert_eq!(cache.oldest_access(), Some(at(3)));
+        assert_eq!(cache.eviction_counts().0, 2);
+
+        cache.evict_coldest(at(10), 10);
+        assert_eq!(cache.oldest_access(), None);
     }
 }

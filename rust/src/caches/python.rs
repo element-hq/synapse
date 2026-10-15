@@ -118,6 +118,13 @@ pub(crate) trait CacheHandle: Send + Sync {
 
     /// Evict every entry not read since `cutoff`, returning how many went.
     fn expire_entries_before(&self, cutoff: SystemTime) -> usize;
+
+    /// When the coldest entry was last read, or `None` if the cache is empty.
+    fn oldest_access(&self) -> Option<SystemTime>;
+
+    /// Evict up to `max` of the coldest entries read before `before`,
+    /// returning how many went.
+    fn evict_coldest(&self, before: SystemTime, max: usize) -> usize;
 }
 
 /// What `register_cache` reads off a cache at each scrape.
@@ -188,6 +195,15 @@ where
         drop(expired);
 
         count
+    }
+
+    fn oldest_access(&self) -> Option<SystemTime> {
+        Cache::oldest_access(self)
+    }
+
+    fn evict_coldest(&self, before: SystemTime, max: usize) -> usize {
+        // Dropped at the end of the statement, with the cache lock released.
+        Cache::evict_coldest(self, before, max).len()
     }
 }
 

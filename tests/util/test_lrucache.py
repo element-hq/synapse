@@ -23,6 +23,7 @@
 from unittest.mock import Mock, patch
 
 from synapse.metrics.jemalloc import JemallocStats
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict
 from synapse.util.caches.lrucache import LruCache, setup_expire_lru_cache_entries
 from synapse.util.caches.treecache import TreeCache
@@ -436,6 +437,113 @@ class MemoryEvictionTestCase(unittest.HomeserverTestCase):
         # the items should still be in the cache
         self.assertEqual(cache.get("key1"), 1)
         self.assertEqual(cache.get("key2"), 2)
+
+    def _fill_rust_cache(self) -> None:
+        """Put one entry in a Rust cache, stamped with the current time."""
+        user_id = self.get_success(
+            self.hs.get_registration_handler().register_user(localpart="rust")
+        )
+        self.get_success(
+            self.hs.get_datastores().main.is_feature_enabled(
+                user_id, ExperimentalFeature.MSC3881
+            )
+        )
+
+    @override_config(
+        {
+            "caches": {
+                "cache_autotuning": {
+                    "max_cache_memory_usage": "700M",
+                    "target_cache_memory_usage": "500M",
+                    "min_cache_ttl": "5m",
+                }
+            }
+        }
+    )
+    @patch("synapse.util.caches.lrucache.get_jemalloc_stats")
+    def test_evict_memory_reaches_rust_caches(self, jemalloc_interface: Mock) -> None:
+        """Rust cache entries are evicted on memory pressure, in order of
+        last access together with the Python ones, and not before
+        `min_cache_ttl`."""
+        mock_jemalloc_class = Mock(spec=JemallocStats)
+        jemalloc_interface.return_value = mock_jemalloc_class
+        mock_jemalloc_class.get_stat.return_value = 924288000
+
+        rust_cache = self.hs.get_datastores().main.is_feature_enabled_for_user
+        setup_expire_lru_cache_entries(self.hs)
+        cache: LruCache[str, int] = LruCache(
+            max_size=4, server_name="test_server", clock=self.hs.get_clock()
+        )
+
+        cache["old"] = 1
+        self.reactor.advance(120)
+        self._fill_rust_cache()
+        self.assertEqual(len(rust_cache), 1)
+        self.reactor.advance(120)
+        cache["new"] = 2
+
+        # Past `min_cache_ttl` for the Python entry read first. The Rust entry
+        # is younger, so it stays.
+        self.reactor.advance(120)
+        self.assertNotIn("old", cache)
+        self.assertEqual(len(rust_cache), 1)
+        self.assertIn("new", cache)
+
+        # Then the Rust entry...
+        self.reactor.advance(120)
+        self.assertEqual(len(rust_cache), 0)
+        self.assertIn("new", cache)
+
+        # ...then the Python entry read last.
+        self.reactor.advance(120)
+        self.assertNotIn("new", cache)
+
+    @override_config(
+        {
+            "caches": {
+                "cache_autotuning": {
+                    "max_cache_memory_usage": "700M",
+                    "target_cache_memory_usage": "500M",
+                    "min_cache_ttl": "5m",
+                }
+            }
+        }
+    )
+    @patch("synapse.util.caches.lrucache.get_jemalloc_stats")
+    def test_evict_memory_stops_after_rust_batch(
+        self, jemalloc_interface: Mock
+    ) -> None:
+        """Memory is checked after each batch of Rust evictions, and once it
+        is under target, younger Python entries stay."""
+        mock_jemalloc_class = Mock(spec=JemallocStats)
+        jemalloc_interface.return_value = mock_jemalloc_class
+        mock_jemalloc_class.get_stat.return_value = 10000
+
+        rust_cache = self.hs.get_datastores().main.is_feature_enabled_for_user
+        setup_expire_lru_cache_entries(self.hs)
+        cache: LruCache[str, int] = LruCache(
+            max_size=4, server_name="test_server", clock=self.hs.get_clock()
+        )
+
+        cache["old"] = 1
+        self.reactor.advance(60)
+        self._fill_rust_cache()
+        self.reactor.advance(60)
+        cache["new"] = 2
+
+        # Everything is old enough to evict, but memory is fine.
+        self.reactor.advance(600)
+        self.assertIn("old", cache)
+        self.assertEqual(len(rust_cache), 1)
+        self.assertIn("new", cache)
+
+        # Memory is high on the next tick's first reading, and back under
+        # target once the Rust entry has gone.
+        mock_jemalloc_class.get_stat.side_effect = [924288000] + [10000] * 100
+        self.reactor.advance(30)
+        self.assertNotIn("old", cache)
+        self.assertEqual(len(rust_cache), 0)
+        self.assertIn("new", cache)
 
 
 class ExtraIndexLruCacheTestCase(unittest.HomeserverTestCase):

@@ -27,9 +27,14 @@
 //! Unlike Python, which threads every entry of every cache onto one global
 //! linked list, this expiry decomposes per cache: each cache's LRU order is
 //! also its age order, so each can find its own stale entries and stop at the
-//! first live one. (Memory-pressure eviction, which *does* need a global
-//! coldest-first order, isn't implemented yet. It will need a k-way merge over
-//! the per-cache LRU tails rather than a global list.)
+//! first live one.
+//!
+//! Memory-pressure eviction does need a global coldest-first order, and gets
+//! it without a global list: each cache's LRU order is a sorted run, so
+//! [`CacheRegistry::evict_coldest`] merges them by always evicting from the
+//! cache whose coldest entry is coldest. Python drives it in batches from the
+//! same looping call, interleaved with its own walk so that both sides go
+//! coldest first together.
 
 use std::{
     hash::Hash,
@@ -152,6 +157,57 @@ impl CacheRegistry {
             .sum()
     }
 
+    /// Evict up to `max` entries read before `before`, coldest first across
+    /// every cache in this registry.
+    ///
+    /// Returns how many went, and when the coldest entry left was last read,
+    /// or `None` if every cache is empty. A caller interleaving this with
+    /// another coldest-first walk can skip calling again until that walk
+    /// reaches entries younger than the returned time: anything inserted or
+    /// read since is younger still.
+    pub fn evict_coldest(&self, before: SystemTime, max: usize) -> (usize, Option<SystemTime>) {
+        let caches = self.live();
+        let mut evicted = 0;
+
+        loop {
+            // The coldest cache, and how cold the next coldest is. A linear
+            // scan, as there are only a handful of caches.
+            let mut coldest: Option<(SystemTime, &Arc<dyn CacheHandle>)> = None;
+            let mut runner_up: Option<SystemTime> = None;
+            for cache in &caches {
+                let Some(oldest) = cache.oldest_access() else {
+                    continue;
+                };
+                match coldest {
+                    Some((current, _)) if oldest >= current => {
+                        runner_up = Some(runner_up.map_or(oldest, |r| r.min(oldest)));
+                    }
+                    _ => {
+                        runner_up = coldest.map(|(current, _)| current).or(runner_up);
+                        coldest = Some((oldest, cache));
+                    }
+                }
+            }
+
+            let Some((oldest, cache)) = coldest else {
+                return (evicted, None);
+            };
+            if oldest >= before || evicted >= max {
+                return (evicted, Some(oldest));
+            }
+
+            // Take everything in this cache that is colder than every other
+            // cache's coldest entry, in one go. When the two tie, that is
+            // nothing, so take one entry to make progress.
+            let bound = runner_up.map_or(before, |r| r.min(before));
+            let mut count = cache.evict_coldest(bound, max - evicted);
+            if count == 0 {
+                count = cache.evict_coldest(before, 1);
+            }
+            evicted += count;
+        }
+    }
+
     /// Every cache that is still alive, pruning the ones that aren't.
     ///
     /// A copy, so that callers work outside the registry lock: expiring takes
@@ -233,5 +289,41 @@ mod tests {
         cache.insert_at("a", 1, at(0));
         assert_eq!(registry.expire_caches(at(10), THIRTY_SECS), 0);
         assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn evict_coldest_merges_caches_coldest_first() {
+        let registry = CacheRegistry::new();
+        let first: Arc<Cache<&'static str, u32>> = registry.new_cache("first", 10);
+        let second: Arc<Cache<&'static str, u32>> = registry.new_cache("second", 10);
+        first.insert_at("a", 1, at(1));
+        second.insert_at("b", 2, at(2));
+        first.insert_at("c", 3, at(3));
+        second.insert_at("d", 4, at(4));
+
+        // Three entries are colder than the bound, but only two are asked
+        // for, and they are the two coldest whichever cache holds them.
+        assert_eq!(registry.evict_coldest(at(4), 2), (2, Some(at(3))));
+        assert_eq!((first.len(), second.len()), (1, 1));
+        assert!(first.get_at(&"c", at(3)).is_some());
+
+        // The bound is exclusive, and the coldest survivor is reported.
+        assert_eq!(registry.evict_coldest(at(4), 10), (1, Some(at(4))));
+        assert_eq!(registry.evict_coldest(at(4), 10), (0, Some(at(4))));
+
+        assert_eq!(registry.evict_coldest(at(5), 10), (1, None));
+        assert_eq!(first.eviction_counts().0 + second.eviction_counts().0, 4);
+    }
+
+    #[test]
+    fn evict_coldest_makes_progress_on_ties() {
+        let registry = CacheRegistry::new();
+        let first: Arc<Cache<&'static str, u32>> = registry.new_cache("first", 10);
+        let second: Arc<Cache<&'static str, u32>> = registry.new_cache("second", 10);
+        first.insert_at("a", 1, at(1));
+        first.insert_at("b", 2, at(1));
+        second.insert_at("c", 3, at(1));
+
+        assert_eq!(registry.evict_coldest(at(2), 10), (3, None));
     }
 }

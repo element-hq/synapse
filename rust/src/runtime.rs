@@ -26,7 +26,7 @@
 
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::Context;
 use pyo3::{
@@ -258,6 +258,27 @@ impl RustRuntime {
             .inner
             .caches
             .expire_caches(self.inner.clock.now(), max_age))
+    }
+
+    /// Evict up to `max` entries last read before `before_secs` (seconds
+    /// since the Unix epoch), coldest first across every Rust cache of this
+    /// homeserver. For memory-pressure eviction, which Python drives.
+    ///
+    /// Returns how many went, and when the coldest entry left was last read,
+    /// in seconds since the epoch, or `None` if the caches are empty. See
+    /// [`crate::caches::registry::CacheRegistry::evict_coldest`].
+    fn evict_coldest(&self, before_secs: f64, max: usize) -> PyResult<(usize, Option<f64>)> {
+        let before = Duration::try_from_secs_f64(before_secs.max(0.0))
+            .map(|since_epoch| UNIX_EPOCH + since_epoch)
+            .map_err(|err| PyValueError::new_err(format!("bad time {before_secs}: {err}")))?;
+
+        let (evicted, coldest) = self.inner.caches.evict_coldest(before, max);
+        let coldest = coldest.map(|time| {
+            time.duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_secs_f64()
+        });
+        Ok((evicted, coldest))
     }
 }
 

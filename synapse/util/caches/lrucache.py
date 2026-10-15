@@ -136,9 +136,10 @@ def _expire_old_entries(
         #
         # `expiry_seconds` is infinite when only `cache_autotuning` is
         # configured, i.e. when age-based expiry is switched off and we are only
-        # here to evict on memory pressure, which Rust doesn't do yet.
+        # here to evict on memory pressure.
+        rust_runtime = hs.get_rust_runtime()
         if math.isfinite(expiry_seconds):
-            dropped = hs.get_rust_runtime().expire_caches(expiry_seconds)
+            dropped = rust_runtime.expire_caches(expiry_seconds)
             if dropped:
                 logger.info("Dropped %d items from Rust caches", dropped)
 
@@ -166,6 +167,52 @@ def _expire_old_entries(
                     "Unable to read allocated memory, skipping memory-based cache eviction."
                 )
 
+        def still_over_target() -> bool:
+            """Re-read the memory usage. False once it is under target, or if
+            it cannot be read, either of which ends memory-based eviction."""
+            assert jemalloc_interface is not None
+            try:
+                jemalloc_interface.refresh_stats()
+                mem_usage = jemalloc_interface.get_stat("allocated")
+                if mem_usage < target_cache_memory_usage:
+                    logger.info("Stop memory-based cache eviction.")
+                    return False
+                return True
+            except Exception:
+                logger.warning(
+                    "Unable to read allocated memory, this may affect memory-based cache eviction."
+                )
+                # If we've failed to read the current memory usage then we
+                # should stop trying to evict based on memory usage
+                return False
+
+        # Under memory pressure the Rust caches are evicted coldest first
+        # together with the Python ones: before evicting a Python entry, every
+        # Rust entry colder than it goes. `rust_coldest` is when the coldest
+        # Rust entry was last read, as of the last call into Rust, and nothing
+        # there gets colder, so Rust is only called again once the walk reaches
+        # entries younger than that. Minus infinity means "not asked yet".
+        rust_coldest: float | None = -math.inf
+        rust_evicted = 0
+
+        async def evict_rust_before(before: float) -> bool:
+            """Evict Rust entries read before `before` while memory is over
+            target. Returns whether it still is.
+
+            Yields to the reactor every 10000 entries, as the Python walk does.
+            """
+            nonlocal rust_coldest, rust_evicted
+            while rust_coldest is not None and rust_coldest < before:
+                evicted, rust_coldest = rust_runtime.evict_coldest(before, 100)
+                if (rust_evicted + evicted) // 10000 > rust_evicted // 10000:
+                    await clock.sleep(Duration(seconds=0))
+                rust_evicted += evicted
+                # Each batch is as many entries as the Python walk evicts
+                # between checks of the memory usage.
+                if evicted and not still_over_target():
+                    return False
+            return True
+
         while node is not GLOBAL_ROOT:
             # Only the root node isn't a `_TimedListNode`.
             assert isinstance(node, _TimedListNode)
@@ -185,6 +232,21 @@ def _expire_old_entries(
             ):
                 break
 
+            if evicting_due_to_memory:
+                evicting_due_to_memory = await evict_rust_before(
+                    node.last_access_ts_secs
+                )
+                # If we yielded, this node may have been evicted meanwhile.
+                if node.prev_node is None:
+                    break
+                # Evicting from Rust may have brought the usage under target,
+                # in which case this node only goes if it has expired.
+                if (
+                    not evicting_due_to_memory
+                    and node.last_access_ts_secs > now - expiry_seconds
+                ):
+                    break
+
             cache_entry = node.get_cache_entry()
             next_node = node.prev_node
 
@@ -197,19 +259,7 @@ def _expire_old_entries(
 
             # Check mem allocation periodically if we are evicting a bunch of caches
             if jemalloc_interface and evicting_due_to_memory and (i + 1) % 100 == 0:
-                try:
-                    jemalloc_interface.refresh_stats()
-                    mem_usage = jemalloc_interface.get_stat("allocated")
-                    if mem_usage < target_cache_memory_usage:
-                        evicting_due_to_memory = False
-                        logger.info("Stop memory-based cache eviction.")
-                except Exception:
-                    logger.warning(
-                        "Unable to read allocated memory, this may affect memory-based cache eviction."
-                    )
-                    # If we've failed to read the current memory usage then we
-                    # should stop trying to evict based on memory usage
-                    evicting_due_to_memory = False
+                evicting_due_to_memory = still_over_target()
 
             # If we do lots of work at once we yield to allow other stuff to happen.
             if (i + 1) % 10000 == 0:
@@ -229,6 +279,14 @@ def _expire_old_entries(
 
             i += 1
 
+        # The Python entries left are all too young to evict on memory, or
+        # there are none. If memory is still high, the Rust entries that are
+        # old enough go too.
+        if evicting_due_to_memory:
+            await evict_rust_before(now - min_cache_ttl)
+
+        if rust_evicted:
+            logger.info("Dropped %d items from Rust caches for memory", rust_evicted)
         logger.info("Dropped %d items from caches", i)
 
     return hs.run_as_background_process(

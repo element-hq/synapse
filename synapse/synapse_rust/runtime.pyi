@@ -30,6 +30,16 @@ class RustRuntime:
         Rust and Python caches expire off one tick and one set of config
         options."""
 
+    def evict_coldest(self, before_secs: float, max: int) -> tuple[int, float | None]:
+        """Evict up to `max` entries last read before `before_secs` (seconds
+        since the Unix epoch), coldest first across every Rust cache of this
+        homeserver.
+
+        Returns how many were evicted, and when the coldest entry left was last
+        read, or None if the Rust caches are empty. Nothing in them gets any
+        colder than that, so a caller can skip calling again until it wants to
+        evict entries read after it."""
+
 def set_virtual_time_msec(millis: int) -> None:
     """Pin the Rust clock to the given time. Only for tests, which run
     against a virtual reactor clock."""
