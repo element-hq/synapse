@@ -313,27 +313,55 @@ class RetryDestinationLimiter:
         # Whether the current request to the destination had been failing.
         currently_failing = bool(self.failure_ts)
 
-        async def store_retry_timings() -> None:
-            try:
-                await self.store.set_destination_retry_timings(
-                    self.destination,
-                    self.failure_ts,
-                    retry_last_ts,
-                    self.retry_interval,
-                )
+        store_retry_timings_in_background(
+            hs=self.hs,
+            store=self.store,
+            destination=self.destination,
+            failure_ts=self.failure_ts,
+            retry_last_ts=retry_last_ts,
+            retry_interval=self.retry_interval,
+            server_up=previously_failing and not currently_failing,
+            notifier=self.notifier,
+            replication_client=self.replication_client,
+        )
 
-                # If the server was previously failing, but is no longer.
-                if previously_failing and not currently_failing:
-                    if self.notifier:
-                        # Inform the relevant places that the remote server is back up.
-                        self.notifier.notify_remote_server_up(self.destination)
 
-                    if self.replication_client:
-                        # Inform other workers that the remote server is up.
-                        self.replication_client.send_remote_server_up(self.destination)
+def store_retry_timings_in_background(
+    *,
+    hs: "HomeServer",
+    store: DataStore,
+    destination: str,
+    failure_ts: int | None,
+    retry_last_ts: int,
+    retry_interval: int,
+    server_up: bool,
+    notifier: Optional["Notifier"],
+    replication_client: Optional["ReplicationCommandHandler"],
+) -> None:
+    """Write a destination's new retry timings, in the background.
 
-            except Exception:
-                logger.exception("Failed to store destination_retry_timings")
+    Args:
+        server_up: the destination was failing and now is not, so tell the
+            notifier and the other workers.
+    """
 
-        # we deliberately do this in the background.
-        self.hs.run_as_background_process("store_retry_timings", store_retry_timings)
+    async def store_retry_timings() -> None:
+        try:
+            await store.set_destination_retry_timings(
+                destination, failure_ts, retry_last_ts, retry_interval
+            )
+
+            if server_up:
+                if notifier:
+                    # Inform the relevant places that the remote server is back up.
+                    notifier.notify_remote_server_up(destination)
+
+                if replication_client:
+                    # Inform other workers that the remote server is up.
+                    replication_client.send_remote_server_up(destination)
+
+        except Exception:
+            logger.exception("Failed to store destination_retry_timings")
+
+    # we deliberately do this in the background.
+    hs.run_as_background_process("store_retry_timings", store_retry_timings)

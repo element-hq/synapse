@@ -356,3 +356,20 @@ class ExperimentalConfig(Config):
                 ("experimental", "rust_sync"),
             )
         self.rust_sync: Literal["off", "shadow", "on"] = rust_sync
+
+        # How much of outbound federation runs in Rust. One ordered level, each
+        # implying the ones before it:
+        #  - "off": all Python.
+        #  - "client": `MatrixFederationHttpClient` sends its JSON requests
+        #    through the Rust request layer (signing, retries, the backoff and
+        #    the connection pool). Media downloads, and an instance whose
+        #    federation traffic goes through a proxy worker, stay Python.
+        rust_federation_sending = experimental.get("rust_federation_sending", "off")
+        if rust_federation_sending not in ("off", "client"):
+            raise ConfigError(
+                "experimental_features.rust_federation_sending must be one of "
+                "'off' or 'client'",
+                ("experimental", "rust_federation_sending"),
+            )
+        self.rust_federation_sending: Literal["off", "client"] = rust_federation_sending
+

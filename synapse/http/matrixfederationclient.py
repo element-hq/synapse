@@ -84,11 +84,13 @@ from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.synapse_rust.federation import RustFederationClient
 from synapse.types import JsonDict
 from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
 from synapse.util.clock import Clock
 from synapse.util.json import json_decoder
 from synapse.util.metrics import Measure
+from synapse.util.retryutils import store_retry_timings_in_background
 from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
@@ -489,13 +491,140 @@ class MatrixFederationHttpClient:
         )
         self._is_shutdown = False
 
+        # At `rust_federation_sending: client` and above, the JSON requests go
+        # through the Rust request layer. Media downloads stay here, and so
+        # does an instance that sends through a proxy worker, since the Rust
+        # client only talks to federation directly.
+        self._rust_client: RustFederationClient | None = None
+        if (
+            hs.config.experimental.rust_federation_sending != "off"
+            and hs.get_instance_name() in outbound_federation_restricted_to
+        ):
+            self._rust_client = RustFederationClient(
+                hs,
+                hs.version_string,
+                user_agent,
+                self._write_retry_timings,
+                self._record_request_metrics,
+            )
+
     def shutdown(self) -> None:
         self._is_shutdown = True
+        if self._rust_client is not None:
+            self._rust_client.shutdown()
 
     def wake_destination(self, destination: str) -> None:
         """Called when the remote server may have come back online."""
 
         self._sleeper.wake(destination)
+        if self._rust_client is not None:
+            self._rust_client.wake_destination(destination)
+
+    def _write_retry_timings(
+        self,
+        destination: str,
+        failure_ts: int | None,
+        retry_last_ts: int,
+        retry_interval: int,
+        server_up: bool,
+    ) -> None:
+        """Called by the Rust client when a destination's backoff changes."""
+        store_retry_timings_in_background(
+            hs=self.hs,
+            store=self._store,
+            destination=destination,
+            failure_ts=failure_ts,
+            retry_last_ts=retry_last_ts,
+            retry_interval=retry_interval,
+            server_up=server_up,
+            notifier=self.hs.get_notifier(),
+            replication_client=self.hs.get_replication_command_handler(),
+        )
+
+    def _record_request_metrics(
+        self, method: str, attempts: int, response_codes: list[int]
+    ) -> None:
+        """Called by the Rust client once per request, with the number of
+        attempts it made and the status of each response."""
+        if attempts:
+            outgoing_requests_counter.labels(
+                method=method, **{SERVER_NAME_LABEL: self.server_name}
+            ).inc(attempts)
+        for code in response_codes:
+            incoming_responses_counter.labels(
+                method=method, code=code, **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
+
+    async def _send_rust_request(
+        self,
+        rust_client: RustFederationClient,
+        method: str,
+        destination: str,
+        path: str,
+        *,
+        args: QueryParams | None = None,
+        data: JsonDict | None = None,
+        parser: ByteParser[Any] | None = None,
+        want_headers: bool = False,
+        rewrite_age_ts: bool = False,
+        retry_on_dns_fail: bool = True,
+        timeout: int | None = None,
+        long_retries: bool = False,
+        ignore_backoff: bool = False,
+        backoff_on_404: bool = False,
+        backoff_on_all_error_codes: bool = False,
+        try_trailing_slash_on_400: bool = False,
+    ) -> tuple[Any, dict[bytes, list[bytes]] | None]:
+        """Send a request through the Rust client, which signs it, retries it,
+        applies the backoff and parses the response, as `_send_request` and
+        `_handle_response` do here. Returns the parsed body, and the response
+        headers if `want_headers`."""
+        if parser is None or type(parser) is JsonParser:
+            parser_kind = "json"
+            parser = None
+        elif type(parser) is LegacyJsonSendParser:
+            parser_kind = "legacy_json_send"
+            parser = None
+        else:
+            parser_kind = "custom"
+
+        with start_active_span(
+            "outgoing-federation-request",
+            tags={
+                tags.SPAN_KIND: tags.SPAN_KIND_RPC_CLIENT,
+                tags.PEER_ADDRESS: destination,
+                tags.HTTP_METHOD: method,
+                tags.HTTP_URL: path,
+            },
+            finish_on_close=True,
+        ):
+            headers_dict: dict[bytes, list[bytes]] = {}
+            opentracing.inject_header_dict(headers_dict, destination)
+            extra_headers = [
+                (name.decode("ascii"), value.decode("ascii"))
+                for name, values in headers_dict.items()
+                for value in values
+            ]
+
+            return await rust_client.request(
+                method,
+                destination,
+                path,
+                encode_query_args(args).decode("ascii"),
+                data,
+                parser_kind,
+                parser,
+                rewrite_age_ts=rewrite_age_ts,
+                extra_headers=extra_headers,
+                retry_on_dns_fail=retry_on_dns_fail,
+                timeout_ms=timeout,
+                long_retries=long_retries,
+                ignore_backoff=ignore_backoff,
+                backoff_on_404=backoff_on_404,
+                backoff_on_all_error_codes=backoff_on_all_error_codes,
+                try_trailing_slash_on_400=try_trailing_slash_on_400,
+                want_headers=want_headers,
+            )
 
     async def _send_request_with_optional_trailing_slash(
         self,
@@ -1063,6 +1192,35 @@ class MatrixFederationHttpClient:
             RequestSendFailed: If there were problems connecting to the
                 remote, due to e.g. DNS failures, connection timeouts etc.
         """
+        if self._rust_client is not None:
+            # The only `json_data_callback` is the transaction manager's,
+            # which rewrites each PDU's `age_ts` to an `age` on every attempt,
+            # and is given `data` as well. The Rust client does that rewrite
+            # itself, so the callback is not called once per attempt.
+            rewrite_age_ts = False
+            if json_data_callback is not None:
+                if data is None:
+                    data = json_data_callback()
+                else:
+                    rewrite_age_ts = True
+            body, _ = await self._send_rust_request(
+                self._rust_client,
+                "PUT",
+                destination,
+                path,
+                args=args,
+                data=data,
+                parser=parser,
+                rewrite_age_ts=rewrite_age_ts,
+                long_retries=long_retries,
+                timeout=timeout,
+                ignore_backoff=ignore_backoff,
+                backoff_on_404=backoff_on_404,
+                try_trailing_slash_on_400=try_trailing_slash_on_400,
+                backoff_on_all_error_codes=backoff_on_all_error_codes,
+            )
+            return body
+
         request = MatrixFederationRequest(
             method="PUT",
             destination=destination,
@@ -1152,6 +1310,19 @@ class MatrixFederationHttpClient:
             RequestSendFailed: If there were problems connecting to the
                 remote, due to e.g. DNS failures, connection timeouts etc.
         """
+        if self._rust_client is not None:
+            body, _ = await self._send_rust_request(
+                self._rust_client,
+                "POST",
+                destination,
+                path,
+                args=args,
+                data=data,
+                long_retries=long_retries,
+                timeout=timeout,
+                ignore_backoff=ignore_backoff,
+            )
+            return body
 
         request = MatrixFederationRequest(
             method="POST", destination=destination, path=path, query=args, json=data
@@ -1264,6 +1435,22 @@ class MatrixFederationHttpClient:
             RequestSendFailed: If there were problems connecting to the
                 remote, due to e.g. DNS failures, connection timeouts etc.
         """
+        if self._rust_client is not None:
+            # As below, without converting headers we would drop.
+            body, _ = await self._send_rust_request(
+                self._rust_client,
+                "GET",
+                destination,
+                path,
+                args=args,
+                parser=parser,
+                retry_on_dns_fail=retry_on_dns_fail,
+                timeout=timeout,
+                ignore_backoff=ignore_backoff,
+                try_trailing_slash_on_400=try_trailing_slash_on_400,
+            )
+            return body
+
         json_dict, _ = await self.get_json_with_headers(
             destination=destination,
             path=path,
@@ -1358,6 +1545,23 @@ class MatrixFederationHttpClient:
             RequestSendFailed: If there were problems connecting to the
                 remote, due to e.g. DNS failures, connection timeouts etc.
         """
+        if self._rust_client is not None:
+            body, headers = await self._send_rust_request(
+                self._rust_client,
+                "GET",
+                destination,
+                path,
+                args=args,
+                parser=parser,
+                want_headers=True,
+                retry_on_dns_fail=retry_on_dns_fail,
+                timeout=timeout,
+                ignore_backoff=ignore_backoff,
+                try_trailing_slash_on_400=try_trailing_slash_on_400,
+            )
+            assert headers is not None
+            return body, headers
+
         request = MatrixFederationRequest(
             method="GET", destination=destination, path=path, query=args
         )
@@ -1439,6 +1643,19 @@ class MatrixFederationHttpClient:
             RequestSendFailed: If there were problems connecting to the
                 remote, due to e.g. DNS failures, connection timeouts etc.
         """
+        if self._rust_client is not None:
+            body, _ = await self._send_rust_request(
+                self._rust_client,
+                "DELETE",
+                destination,
+                path,
+                args=args,
+                long_retries=long_retries,
+                timeout=timeout,
+                ignore_backoff=ignore_backoff,
+            )
+            return body
+
         request = MatrixFederationRequest(
             method="DELETE", destination=destination, path=path, query=args
         )
@@ -1508,6 +1725,24 @@ class MatrixFederationHttpClient:
             RequestSendFailed: If there were problems connecting to the
                 remote, due to e.g. DNS failures, connection timeouts etc.
         """
+        if self._rust_client is not None:
+            try:
+                body, _ = await self._send_rust_request(
+                    self._rust_client,
+                    method,
+                    destination,
+                    path,
+                    args=args,
+                    data=json_body,
+                    ignore_backoff=True,
+                    timeout=timeout,
+                )
+            except RequestSendFailed as e:
+                if isinstance(e.inner_exception, HttpResponseException):
+                    raise e.inner_exception from e
+                raise
+            return body
+
         request = MatrixFederationRequest(
             method=method,
             destination=destination,

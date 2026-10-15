@@ -1,0 +1,1 @@
+Add an experimental option, `rust_federation_sending`, to send federation requests through a Rust implementation of the request layer.
