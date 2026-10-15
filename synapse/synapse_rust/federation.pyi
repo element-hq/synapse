@@ -216,14 +216,15 @@ class RustDestinationQueues:
 
     def use_native_store(
         self,
+        homeserver: HomeServer,
         db_pool: Any,
         stream_tokens: Callable[[], tuple[int, int]],
         allow_device_name_lookup_over_federation: bool,
         to_device_since: int,
         device_lists_since: int,
     ) -> None:
-        """Do the loops' database work through the native driver. `db_pool`
-        is the `RustConnectionPool`, and `stream_tokens()` returns the current
+        """Do the loops' database work, and catch-up, through the native
+        driver. `db_pool` is the `RustConnectionPool`, and `stream_tokens()` returns the current
         to-device and device list stream positions. The change trackers know
         about the changes after the two positions given, and must be told of
         every later one."""
@@ -295,7 +296,10 @@ class FederationStoreForTest:
     Each method blocks until its query is done."""
 
     def __init__(
-        self, pool: Any, allow_device_name_lookup_over_federation: bool
+        self,
+        pool: Any,
+        allow_device_name_lookup_over_federation: bool,
+        server_name: str,
     ) -> None: ...
     def get_new_device_msgs_for_remote(
         self, destination: str, last_stream_id: int, current_stream_id: int, limit: int
@@ -311,4 +315,18 @@ class FederationStoreForTest:
     ) -> None: ...
     def set_destination_last_successful_stream_ordering(
         self, destination: str, stream_ordering: int
+    ) -> None: ...
+    def get_destination_last_successful_stream_ordering(
+        self, destination: str
+    ) -> int | None: ...
+    def get_catch_up_room_event_ids(
+        self, destination: str, last_successful_stream_ordering: int
+    ) -> list[str]: ...
+    def get_prev_events_for_room(self, room_id: str) -> list[str]: ...
+    def mark_backlogged_sticky_events_after_catchup_transaction(
+        self,
+        destination: str,
+        old_position: int,
+        new_position: int,
+        sent_stream_orderings: list[int],
     ) -> None: ...

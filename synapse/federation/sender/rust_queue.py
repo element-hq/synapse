@@ -83,6 +83,7 @@ def use_native_store(
         rust_queues.device_list_changed
     )
     rust_queues.use_native_store(
+        hs,
         db_pool,
         lambda: (
             store.get_to_device_stream_token(),

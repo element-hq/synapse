@@ -133,7 +133,11 @@ impl FakeHooks {
 
 #[async_trait]
 impl QueueHooks for FakeHooks {
-    async fn catch_up(&self, _observer: &Observer) -> Result<(), LoopError> {
+    async fn catch_up(
+        &self,
+        _queue: &DestinationQueue,
+        _observer: &Observer,
+    ) -> Result<(), LoopError> {
         self.catch_ups.fetch_add(1, Ordering::SeqCst);
         // As Python's, with nothing in the database to catch up on.
         let queue = self.queue.get().and_then(Weak::upgrade).unwrap();

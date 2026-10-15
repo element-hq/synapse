@@ -19,8 +19,9 @@
 //! the device EDUs and records finished transactions with the
 //! [`FederationStore`], on tokio. A transaction then needs no trip to the
 //! reactor, unless it finishes a sticky event batch or a module wants to
-//! hear about delivered events. Catch-up and the sticky event backlog stay
-//! Python, through [`PyHooks`].
+//! hear about delivered events. Catch-up runs here too, reading events
+//! through the shared event cache. The sticky event backlog stays Python,
+//! through [`PyHooks`].
 
 use std::sync::{Arc, Mutex};
 
@@ -28,13 +29,20 @@ use async_trait::async_trait;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*};
 
 use super::{
-    changes::StreamChanges, metrics::QueueMetrics, python::PyHooks, Completion, DeviceEdus,
-    DeviceEdusRequest, LoopError, Observer, QueueHooks, StickyBatch,
+    changes::StreamChanges, metrics::QueueMetrics, python::PyHooks, Completion,
+    DestinationQueue, DeviceEdus, DeviceEdusRequest, LoopError, Observer, PduBody, QueueHooks,
+    QueuedPdu, StickyBatch, QUEUE_LOG,
 };
 use crate::{
     database::postgres::pool::{ConnectionPool, PyConnectionPool},
+    events::Event,
     federation::gil::with_gil,
-    storage::federation_store::FederationStore,
+    storage::{
+        events::RedactBehaviour,
+        federation_store::FederationStore,
+        sync_store::{SyncReader, SyncStore},
+    },
+    visibility::{filter_events_for_server, ServerFilter, ServerFiltered},
 };
 
 /// The logger of `synapse.logging.issue9533_logger`.
@@ -51,6 +59,11 @@ pub struct Native {
     pub to_device: StreamChanges,
     /// Which destinations have new device list updates.
     pub device_lists: StreamChanges,
+    /// The queries over the shared event and state caches, which the sync
+    /// handler uses too.
+    pub sync: Arc<SyncStore>,
+    /// This server's name.
+    pub server_name: String,
 }
 
 impl Native {
@@ -116,10 +129,218 @@ fn db_error(err: anyhow::Error) -> LoopError {
     LoopError::Other(format!("{err:#}"))
 }
 
+/// The stream ordering of an event read from the database, which has one.
+fn stream_ordering_of(event: &Event) -> Result<i64, LoopError> {
+    event
+        .internal_metadata()
+        .stream_ordering()
+        .map(|so| so.get())
+        .ok_or_else(|| LoopError::Other(format!("Event {} has no stream ordering", event.event_id())))
+}
+
+fn queued_pdu(event: Event) -> Result<Arc<QueuedPdu>, LoopError> {
+    Ok(Arc::new(QueuedPdu {
+        event_id: event.event_id().to_owned(),
+        stream_ordering: Some(stream_ordering_of(&event)?),
+        origin_server_ts: event.origin_server_ts(),
+        body: PduBody::Native(event),
+    }))
+}
+
+impl NativeHooks {
+    /// The PDUs to catch `pdu`'s room up with: the room's latest forward
+    /// extremities that the destination may see, or `pdu` itself.
+    async fn room_catch_up_pdus(
+        &self,
+        reader: &SyncReader<'_>,
+        pool: &ConnectionPool,
+        pdu: Event,
+        last_successful_stream_ordering: i64,
+    ) -> Result<Vec<Event>, LoopError> {
+        // The PDU from the database is the newest PDU in the room from this
+        // server that we failed to send. Other servers may have sent lots
+        // since, and we would rather tell the destination about the latest
+        // events in the room only.
+        let extremities = self
+            .native
+            .store
+            .get_prev_events_for_room(pool, pdu.room_id())
+            .await
+            .map_err(db_error)?;
+        if extremities.iter().any(|id| id == pdu.event_id()) {
+            return Ok(vec![pdu]);
+        }
+        if reader
+            .is_partial_state_room(pdu.room_id())
+            .await
+            .map_err(db_error)?
+        {
+            // We cannot be sure which events the destination may see with
+            // partial state, so retry the newest PDU it is missing from us.
+            return Ok(vec![pdu]);
+        }
+
+        let ids: Vec<Arc<str>> = extremities.iter().map(|id| Arc::from(id.as_str())).collect();
+        let extremities = reader
+            .events(&ids, RedactBehaviour::Redact, false, false)
+            .await
+            .map_err(db_error)?;
+        let mut new_pdus = Vec::with_capacity(extremities.len());
+        for event in extremities {
+            // Leave out events from before the destination went offline.
+            if stream_ordering_of(&event)? >= last_successful_stream_ordering {
+                new_pdus.push(event);
+            }
+        }
+
+        // Leave out events the destination may not see, such as when it has
+        // left the room.
+        let filter = ServerFilter {
+            target_server_name: &self.destination,
+            local_server_name: &self.native.server_name,
+            redact: false,
+            filter_out_erased_senders: true,
+            filter_out_remote_partial_state_events: true,
+        };
+        match filter_events_for_server(reader, &filter, new_pdus)
+            .await
+            .map_err(db_error)?
+        {
+            ServerFiltered::Events(events) if !events.is_empty() => Ok(events),
+            // With every extremity filtered out, send the original event, so
+            // the destination gets at least some of what it missed. Python
+            // would wait for the full state where Rust gives up, and we do
+            // the same as for a room with partial state then.
+            ServerFiltered::Events(_) | ServerFiltered::NeedsFullState => Ok(vec![pdu]),
+        }
+    }
+}
+
 #[async_trait]
 impl QueueHooks for NativeHooks {
-    async fn catch_up(&self, observer: &Observer) -> Result<(), LoopError> {
-        self.python.catch_up(observer).await
+    /// `_catch_up_transmission_loop`, natively.
+    async fn catch_up(&self, queue: &DestinationQueue, observer: &Observer) -> Result<(), LoopError> {
+        let destination = self.destination.as_str();
+        let pool = self.native.pool.get()?;
+        let store = &self.native.store;
+        let reader = self.native.sync.reader(pool.clone());
+
+        let first_catch_up_check = queue.last_successful_stream_ordering().is_none();
+        if first_catch_up_check {
+            let last = store
+                .get_destination_last_successful_stream_ordering(&pool, destination)
+                .await
+                .map_err(db_error)?;
+            queue.set_last_successful_stream_ordering(last);
+        }
+        let Some(mut last_successful) = queue.last_successful_stream_ordering() else {
+            // We have never sent this destination a PDU, so we do not know
+            // what it is missing.
+            queue.set_catching_up(false);
+            return Ok(());
+        };
+
+        while queue.transmission_loop_enabled() {
+            let event_ids = store
+                .get_catch_up_room_event_ids(&pool, destination, last_successful)
+                .await
+                .map_err(db_error)?;
+            if event_ids.is_empty() {
+                // Check that no new event was skipped while we caught up.
+                let skipped = queue.catchup_last_skipped();
+                if skipped != 0 && skipped > last_successful {
+                    // Which is also how a room purged while we loop ends up,
+                    // so reset the flag rather than loop hot.
+                    queue.set_catchup_last_skipped(0);
+                    continue;
+                }
+                queue.set_catching_up(false);
+                break;
+            }
+
+            if first_catch_up_check {
+                // PDUs queued before we knew we had to catch up go.
+                queue.start_catching_up();
+            }
+
+            let ids: Vec<Arc<str>> = event_ids.iter().map(|id| Arc::from(id.as_str())).collect();
+            let pdus = reader
+                .events(&ids, RedactBehaviour::Redact, false, false)
+                .await
+                .map_err(db_error)?;
+            if pdus.is_empty() {
+                return Err(LoopError::Other(format!(
+                    "No events retrieved when we asked for {event_ids:?}. This should not happen."
+                )));
+            }
+            log::info!(
+                target: QUEUE_LOG,
+                "Catching up destination {destination} with {} PDUs",
+                pdus.len()
+            );
+
+            // One room per transaction, so the destination gets small
+            // amounts of work. There is one PDU per room.
+            for pdu in pdus {
+                let stream_ordering = stream_ordering_of(&pdu)?;
+                let room_id = pdu.room_id().to_owned();
+                let room_pdus = self
+                    .room_catch_up_pdus(&reader, &pool, pdu, last_successful)
+                    .await?;
+                if !queue.transmission_loop_enabled() {
+                    return Ok(());
+                }
+
+                log::info!(target: QUEUE_LOG, "Catching up rooms to {destination}: '{room_id}'");
+                let sent_stream_orderings = room_pdus
+                    .iter()
+                    .map(stream_ordering_of)
+                    .collect::<Result<Vec<_>, _>>()?;
+                let room_pdus = room_pdus
+                    .into_iter()
+                    .map(queued_pdu)
+                    .collect::<Result<Vec<_>, _>>()?;
+                let sent = queue.send_pdus(observer, room_pdus).await?;
+                self.complete(
+                    observer,
+                    Completion {
+                        to_device_stream_id: None,
+                        device_list_stream_id: None,
+                        last_stream_ordering: None,
+                        sticky: None,
+                        sent: Some(sent),
+                    },
+                )
+                .await?;
+
+                // Sticky events in the gap we skip over become a backlog.
+                store
+                    .mark_backlogged_sticky_events_after_catchup_transaction(
+                        &pool,
+                        destination,
+                        last_successful,
+                        stream_ordering,
+                        &sent_stream_orderings,
+                    )
+                    .await
+                    .map_err(db_error)?;
+                queue.set_sticky_backlogged(true);
+
+                // Our place in the queue of missed PDUs is the original PDU,
+                // not those we sent.
+                last_successful = stream_ordering;
+                queue.set_last_successful_stream_ordering(Some(stream_ordering));
+                store
+                    .set_destination_last_successful_stream_ordering(
+                        &pool,
+                        destination,
+                        stream_ordering,
+                    )
+                    .await
+                    .map_err(db_error)?;
+            }
+        }
+        Ok(())
     }
 
     /// `get_new_device_msgs_for_remote` and `get_device_updates_by_remote`,

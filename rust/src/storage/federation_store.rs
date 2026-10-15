@@ -44,11 +44,24 @@ const SIGNING_KEY_UPDATE: &str = "m.signing_key_update";
 const UNSTABLE_SIGNING_KEY_UPDATE: &str = "org.matrix.signing_key_update";
 
 /// The parts of the homeserver config the queries apply.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct FederationStoreConfig {
     /// `allow_device_name_lookup_over_federation`.
     pub allow_device_name_lookup_over_federation: bool,
+    /// This server's name, for the sticky event queries, which only send
+    /// local users' events.
+    pub server_name: String,
 }
+
+impl FederationStoreConfig {
+    /// `user_is_local_like_pattern`.
+    fn local_users_pattern(&self) -> String {
+        format!("@%:{}", self.server_name)
+    }
+}
+
+/// How many catch-up events to read at a time.
+const CATCH_UP_BATCH_SIZE: i64 = 50;
 
 /// The transmission loop's queries.
 pub struct FederationStore {
@@ -415,6 +428,122 @@ impl FederationStore {
                 ON CONFLICT (destination) DO UPDATE
                     SET last_successful_stream_ordering = EXCLUDED.last_successful_stream_ordering",
                 &[&destination, &last_successful_stream_ordering],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// `get_destination_last_successful_stream_ordering`: the stream
+    /// ordering of the last PDU sent to `destination`, if we know it.
+    pub async fn get_destination_last_successful_stream_ordering(
+        &self,
+        pool: &ConnectionPool,
+        destination: &str,
+    ) -> anyhow::Result<Option<i64>> {
+        let rows = Conn::borrow(pool)
+            .await?
+            .query(
+                "SELECT last_successful_stream_ordering FROM destinations
+                WHERE destination = $1",
+                &[&destination],
+            )
+            .await?;
+        match rows.first() {
+            Some(row) => Ok(row.try_get(0)?),
+            None => Ok(None),
+        }
+    }
+
+    /// `get_catch_up_room_event_ids`: the newest event of each room we
+    /// share with `destination` that it has not been sent, oldest first, up
+    /// to 50.
+    pub async fn get_catch_up_room_event_ids(
+        &self,
+        pool: &ConnectionPool,
+        destination: &str,
+        last_successful_stream_ordering: i64,
+    ) -> anyhow::Result<Vec<String>> {
+        let rows = Conn::borrow(pool)
+            .await?
+            .query(
+                "SELECT event_id FROM destination_rooms
+                JOIN events USING (stream_ordering)
+                WHERE destination = $1 AND stream_ordering > $2
+                ORDER BY stream_ordering
+                LIMIT $3",
+                &[
+                    &destination,
+                    &last_successful_stream_ordering,
+                    &CATCH_UP_BATCH_SIZE,
+                ],
+            )
+            .await?;
+        rows.iter()
+            .map(|row| Ok(row.try_get(0)?))
+            .collect()
+    }
+
+    /// `get_prev_events_for_room`: the room's 10 deepest forward
+    /// extremities.
+    pub async fn get_prev_events_for_room(
+        &self,
+        pool: &ConnectionPool,
+        room_id: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        let rows = Conn::borrow(pool)
+            .await?
+            .query(
+                "SELECT e.event_id FROM event_forward_extremities AS f
+                INNER JOIN events AS e USING (event_id)
+                WHERE f.room_id = $1
+                ORDER BY e.depth DESC
+                LIMIT 10",
+                &[&room_id],
+            )
+            .await?;
+        rows.iter()
+            .map(|row| Ok(row.try_get(0)?))
+            .collect()
+    }
+
+    /// `mark_backlogged_sticky_events_after_catchup_transaction`: a
+    /// catch-up transaction moved `destination` on from `old_position` to
+    /// `new_position`, skipping events. Record each room with local sticky
+    /// events in that gap as backlogged, from its first such event, except
+    /// those just sent.
+    pub async fn mark_backlogged_sticky_events_after_catchup_transaction(
+        &self,
+        pool: &ConnectionPool,
+        destination: &str,
+        old_position: i64,
+        new_position: i64,
+        sent_stream_orderings: &[i64],
+    ) -> anyhow::Result<()> {
+        Conn::borrow(pool)
+            .await?
+            .query(
+                "INSERT INTO destination_rooms_sticky_events_backlog AS backlog
+                (destination, room_id, sticky_events_stream_position)
+                    SELECT $1, dr.room_id, MIN(se.stream_id)
+                    FROM destination_rooms AS dr
+                    INNER JOIN sticky_events se USING (room_id)
+                    WHERE dr.destination = $1
+                        AND $2::bigint < dr.stream_ordering
+                        AND $2::bigint < se.event_stream_ordering
+                        AND se.event_stream_ordering < $3::bigint
+                        AND se.sender LIKE $4
+                        AND NOT (se.event_stream_ordering = ANY($5::bigint[]))
+                    GROUP BY dr.room_id
+                ON CONFLICT (destination, room_id)
+                DO UPDATE SET sticky_events_stream_position = EXCLUDED.sticky_events_stream_position
+                    WHERE EXCLUDED.sticky_events_stream_position < backlog.sticky_events_stream_position",
+                &[
+                    &destination,
+                    &old_position,
+                    &new_position,
+                    &self.config.local_users_pattern(),
+                    &sent_stream_orderings,
+                ],
             )
             .await?;
         Ok(())
@@ -792,11 +921,13 @@ impl PyFederationStoreForTest {
     fn new(
         pool: &Bound<'_, PyConnectionPool>,
         allow_device_name_lookup_over_federation: bool,
+        server_name: String,
     ) -> Self {
         let pool = pool.get();
         PyFederationStoreForTest {
             store: FederationStore::new(FederationStoreConfig {
                 allow_device_name_lookup_over_federation,
+                server_name,
             }),
             pool: pool.pool.clone(),
             handle: pool.handle.clone(),
@@ -889,6 +1020,59 @@ impl PyFederationStoreForTest {
                 destination,
                 stream_ordering,
             ),
+        )
+    }
+
+    fn get_destination_last_successful_stream_ordering(
+        &self,
+        py: Python<'_>,
+        destination: &str,
+    ) -> PyResult<Option<i64>> {
+        self.run(
+            py,
+            self.store
+                .get_destination_last_successful_stream_ordering(&self.pool, destination),
+        )
+    }
+
+    fn get_catch_up_room_event_ids(
+        &self,
+        py: Python<'_>,
+        destination: &str,
+        last_successful_stream_ordering: i64,
+    ) -> PyResult<Vec<String>> {
+        self.run(
+            py,
+            self.store.get_catch_up_room_event_ids(
+                &self.pool,
+                destination,
+                last_successful_stream_ordering,
+            ),
+        )
+    }
+
+    fn get_prev_events_for_room(&self, py: Python<'_>, room_id: &str) -> PyResult<Vec<String>> {
+        self.run(py, self.store.get_prev_events_for_room(&self.pool, room_id))
+    }
+
+    fn mark_backlogged_sticky_events_after_catchup_transaction(
+        &self,
+        py: Python<'_>,
+        destination: &str,
+        old_position: i64,
+        new_position: i64,
+        sent_stream_orderings: Vec<i64>,
+    ) -> PyResult<()> {
+        self.run(
+            py,
+            self.store
+                .mark_backlogged_sticky_events_after_catchup_transaction(
+                    &self.pool,
+                    destination,
+                    old_position,
+                    new_position,
+                    &sent_stream_orderings,
+                ),
         )
     }
 }

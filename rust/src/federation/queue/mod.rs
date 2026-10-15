@@ -156,6 +156,8 @@ impl Receipt {
 pub enum PduBody {
     /// The event. Its JSON is read on tokio, without the GIL.
     Event(Py<Event>),
+    /// An event loaded in Rust, for catch-up.
+    Native(Event),
     /// The JSON itself, for tests.
     #[cfg(test)]
     Json(Value),
@@ -174,6 +176,7 @@ impl QueuedPdu {
     fn to_value(&self) -> serde_json::Result<Value> {
         match &self.body {
             PduBody::Event(event) => event.get().to_pdu_value(),
+            PduBody::Native(event) => event.to_pdu_value(),
             #[cfg(test)]
             PduBody::Json(value) => Ok(value.clone()),
         }
@@ -276,8 +279,9 @@ pub type Observer = Arc<dyn AwaitableObserver>;
 /// calling loop's [`Observer`].
 #[async_trait]
 pub trait QueueHooks: Send + Sync + 'static {
-    /// `_catch_up_transmission_loop`.
-    async fn catch_up(&self, observer: &Observer) -> Result<(), LoopError>;
+    /// `_catch_up_transmission_loop`, for `queue`.
+    async fn catch_up(&self, queue: &DestinationQueue, observer: &Observer)
+        -> Result<(), LoopError>;
 
     /// The to-device messages and device list updates to send.
     async fn device_edus(
@@ -713,7 +717,7 @@ impl DestinationQueue {
         }
 
         if self.state().catching_up {
-            self.hooks.catch_up(observer).await?;
+            self.hooks.catch_up(self, observer).await?;
             if self.state().catching_up {
                 // Not caught up yet.
                 return Ok(());
@@ -792,6 +796,24 @@ impl DestinationQueue {
             acknowledged: outcome.acknowledged,
             stats: outcome.stats,
         })
+    }
+
+    /// Send `pdus` in a transaction of their own, as catch-up does. The
+    /// caller records it.
+    pub(super) async fn send_pdus(
+        &self,
+        observer: &Observer,
+        pdus: Vec<Arc<QueuedPdu>>,
+    ) -> Result<Sent, LoopError> {
+        let prepared = Prepared {
+            pdus,
+            edus: Vec::new(),
+            to_device_stream_id: None,
+            device_list_stream_id: None,
+            last_stream_ordering: None,
+            sticky: None,
+        };
+        self.send_transaction(observer, &prepared).await
     }
 
     /// The exception handlers of `_transaction_transmission_loop`.

@@ -31,11 +31,14 @@ from signedjson.key import (
 from twisted.internet.testing import MemoryReactor
 
 from synapse.handlers.e2e_keys import SignatureListItem
+from synapse.rest import admin
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.federation import FederationStoreForTest
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 
@@ -76,8 +79,8 @@ class FederationStoreTestCase(unittest.HomeserverTestCase):
         db_pool = self.store.db_pool._db_pool
         assert isinstance(db_pool, RustConnectionPool)
         assert db_pool._pool is not None
-        self.rust = FederationStoreForTest(db_pool._pool, False)
-        self.rust_with_names = FederationStoreForTest(db_pool._pool, True)
+        self.rust = FederationStoreForTest(db_pool._pool, False, hs.hostname)
+        self.rust_with_names = FederationStoreForTest(db_pool._pool, True, hs.hostname)
 
     # To-device messages.
 
@@ -365,3 +368,175 @@ class FederationStoreTestCase(unittest.HomeserverTestCase):
             ),
             7,
         )
+
+
+class CatchUpStoreTestCase(unittest.HomeserverTestCase):
+    """The catch-up queries against Python's, on the same database."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4354_enabled": True}
+        return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        hs = self.setup_test_homeserver()
+        if not isinstance(
+            hs.get_datastores().main.db_pool._db_pool, RustConnectionPool
+        ):
+            raise SkipTest("needs the native Rust Postgres driver")
+        return hs
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        db_pool = self.store.db_pool._db_pool
+        assert isinstance(db_pool, RustConnectionPool)
+        assert db_pool._pool is not None
+        self.rust = FederationStoreForTest(db_pool._pool, False, hs.hostname)
+
+        self.user = self.register_user("alice", "pass")
+        self.tok = self.login("alice", "pass")
+        self.rooms = [
+            self.helper.create_room_as(self.user, tok=self.tok) for _ in range(3)
+        ]
+
+    def _send(self, room_id: str, sticky: bool) -> int:
+        """Send a message, record it as due to both destinations, and return
+        its stream ordering."""
+        content = {"body": "hi", "msgtype": "m.text"}
+        if sticky:
+            event_id = self.helper.send_sticky_event(
+                room_id,
+                "m.room.message",
+                duration=Duration(minutes=10),
+                content=content,
+                tok=self.tok,
+            )["event_id"]
+        else:
+            event_id = self.helper.send_event(
+                room_id, "m.room.message", content, tok=self.tok
+            )["event_id"]
+        event = self.get_success(self.store.get_event(event_id))
+        stream_ordering = event.internal_metadata.stream_ordering
+        assert stream_ordering is not None
+        self.get_success(
+            self.store.store_destination_rooms_entries(
+                [DEST, OTHER], room_id, stream_ordering
+            )
+        )
+        return stream_ordering
+
+    def test_last_successful_stream_ordering(self) -> None:
+        self.assertIsNone(
+            self.rust.get_destination_last_successful_stream_ordering(DEST)
+        )
+        self.get_success(
+            self.store.set_destination_last_successful_stream_ordering(DEST, 9)
+        )
+        self.assertEqual(
+            self.rust.get_destination_last_successful_stream_ordering(DEST), 9
+        )
+
+    def test_catch_up_room_event_ids(self) -> None:
+        orderings = [
+            self._send(room_id, sticky=False)
+            for room_id in self.rooms
+            for _ in range(2)
+        ]
+        for last in [0, *orderings]:
+            for destination in (DEST, OTHER, "unknown"):
+                self.assertEqual(
+                    self.rust.get_catch_up_room_event_ids(destination, last),
+                    self.get_success(
+                        self.store.get_catch_up_room_event_ids(destination, last)
+                    ),
+                )
+
+    def test_prev_events_for_room(self) -> None:
+        for room_id in self.rooms:
+            self._send(room_id, sticky=False)
+        for room_id in [*self.rooms, "!unknown:test"]:
+            self.assertEqual(
+                self.rust.get_prev_events_for_room(room_id),
+                self.get_success(self.store.get_prev_events_for_room(room_id)),
+            )
+
+    def _backlog(self) -> list[tuple[str, str, int]]:
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "destination_rooms_sticky_events_backlog",
+                None,
+                ["destination", "room_id", "sticky_events_stream_position"],
+            )
+        )
+        return sorted(rows)
+
+    def _clear_backlog(self) -> None:
+        self.get_success(
+            self.store.db_pool.runInteraction(
+                "clear_backlog",
+                lambda txn: txn.execute(
+                    "DELETE FROM destination_rooms_sticky_events_backlog"
+                ),
+            )
+        )
+
+    def test_mark_backlogged_sticky_events_after_catchup_transaction(self) -> None:
+        orderings = []
+        for i in range(9):
+            orderings.append(self._send(self.rooms[i % 3], sticky=i % 2 == 0))
+
+        cases = [
+            (0, orderings[-1] + 1, []),
+            (0, orderings[-1] + 1, orderings[::3]),
+            (orderings[2], orderings[7], [orderings[4]]),
+            (orderings[5], orderings[6], []),
+        ]
+        for old, new, sent in cases:
+            # With and without a backlog already further on.
+            for existing in (None, 1_000_000):
+                self._clear_backlog()
+                if existing is not None:
+                    self.get_success(
+                        self.store.db_pool.simple_insert(
+                            "destination_rooms_sticky_events_backlog",
+                            {
+                                "destination": DEST,
+                                "room_id": self.rooms[0],
+                                "sticky_events_stream_position": existing,
+                            },
+                        )
+                    )
+                self.get_success(
+                    self.store.mark_backlogged_sticky_events_after_catchup_transaction(
+                        DEST,
+                        old_last_successfully_sent_stream_ordering=old,
+                        new_last_successfully_sent_stream_ordering=new,
+                        event_stream_orderings_sent_in_transaction=sent,
+                    )
+                )
+                python = self._backlog()
+
+                self._clear_backlog()
+                if existing is not None:
+                    self.get_success(
+                        self.store.db_pool.simple_insert(
+                            "destination_rooms_sticky_events_backlog",
+                            {
+                                "destination": DEST,
+                                "room_id": self.rooms[0],
+                                "sticky_events_stream_position": existing,
+                            },
+                        )
+                    )
+                self.rust.mark_backlogged_sticky_events_after_catchup_transaction(
+                    DEST, old, new, sent
+                )
+                self.assertEqual(self._backlog(), python, (old, new, sent, existing))
+        # The cases did backlog something.
+        self.assertNotEqual(python, [])

@@ -56,7 +56,11 @@ use crate::{
         },
     },
     runtime::RustRuntime,
-    storage::federation_store::{FederationStore, FederationStoreConfig},
+    homeserver::HomeServer,
+    storage::{
+        federation_store::{FederationStore, FederationStoreConfig},
+        sync_store::{SyncStore, SyncStoreConfig},
+    },
 };
 
 /// Makes the queues, and tells tests when their loops are idle.
@@ -105,22 +109,35 @@ impl RustDestinationQueues {
     /// `to_device_changed` and `device_list_changed`.
     ///
     /// Only the queues made after this use the native driver.
+    #[allow(clippy::too_many_arguments)]
     fn use_native_store(
         &self,
+        py: Python<'_>,
+        homeserver: HomeServer,
         db_pool: Py<PyAny>,
         stream_tokens: Py<PyAny>,
         allow_device_name_lookup_over_federation: bool,
         to_device_since: i64,
         device_lists_since: i64,
     ) -> PyResult<()> {
+        let config = homeserver.config(py)?;
+        let server_name = homeserver.hostname(py)?;
+        let store = homeserver.get_rust_store(py)?;
+        let sync = SyncStore::new(
+            Arc::clone(&store.caches),
+            SyncStoreConfig::from_config(&config),
+        );
         let native = Arc::new(Native {
             store: FederationStore::new(FederationStoreConfig {
                 allow_device_name_lookup_over_federation,
+                server_name: server_name.clone(),
             }),
             pool: NativePool::new(db_pool),
             stream_tokens,
             to_device: StreamChanges::new(to_device_since),
             device_lists: StreamChanges::new(device_lists_since),
+            sync: Arc::new(sync),
+            server_name,
         });
         self.native.set(native).map_err(|_| {
             pyo3::exceptions::PyRuntimeError::new_err("the native store is already in use")
@@ -469,7 +486,11 @@ impl PyHooks {
 
 #[async_trait]
 impl QueueHooks for PyHooks {
-    async fn catch_up(&self, observer: &Observer) -> Result<(), LoopError> {
+    async fn catch_up(
+        &self,
+        _queue: &DestinationQueue,
+        observer: &Observer,
+    ) -> Result<(), LoopError> {
         self.call(
             observer,
             "queue_catch_up",
@@ -601,6 +622,7 @@ fn completion_args<'py>(py: Python<'py>, completion: &Completion) -> PyResult<Bo
             for pdu in &sent.pdus {
                 match &pdu.body {
                     PduBody::Event(event) => pdus.append(event.clone_ref(py))?,
+                    PduBody::Native(event) => pdus.append(Py::new(py, event.shallow_clone())?)?,
                     #[cfg(test)]
                     PduBody::Json(_) => {}
                 }

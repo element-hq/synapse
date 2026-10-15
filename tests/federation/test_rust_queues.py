@@ -321,6 +321,79 @@ class RustQueuesNativeTestCase(RustQueuesTestCase):
         self.assertEqual(len(self.transport.requests), 1)
         self.assertEqual(self._queue_calls(before), {})
 
+    def _catch_up_destination(self, destination: str, missed: EventBase) -> None:
+        """Make `destination` one we sent nothing to since before `missed`."""
+        stream_ordering = missed.internal_metadata.stream_ordering
+        assert stream_ordering is not None
+        self.get_success(
+            self.store.set_destination_last_successful_stream_ordering(
+                destination, stream_ordering - 1
+            )
+        )
+        self.get_success(
+            self.store.store_destination_rooms_entries(
+                [destination], missed.room_id, stream_ordering
+            )
+        )
+
+    def test_catch_up(self) -> None:
+        """Catch-up runs in Rust: it sends the room's latest event in place of
+        the one the destination missed, and records how far it got, without
+        taking the GIL."""
+        self.hs.get_module_api_callbacks().federation._on_event_delivered_over_federation_callbacks.clear()
+        destination = "catchup.example.com"
+        self._catch_up_destination(destination, self.event)
+        latest = self._send_event("newer")
+        queue = self.sender._get_per_destination_queue(destination)
+        assert isinstance(queue, RustPerDestinationQueue)
+        self.transport.responses.append(json_response(200, {}))
+
+        before = federation_gil_stats()
+        queue.attempt_new_transaction()
+        self._settle()
+
+        [request] = self.transport.requests
+        body = json.loads(request.body)
+        self.assertEqual(
+            [pdu["content"].get("body") for pdu in body["pdus"]],
+            [latest.content["body"]],
+        )
+        self.assertEqual(
+            self.get_success(
+                self.store.get_destination_last_successful_stream_ordering(destination)
+            ),
+            self.event.internal_metadata.stream_ordering,
+        )
+        self.assertFalse(queue._catching_up)
+        self.assertNotIn("queue_catch_up", self._queue_calls(before))
+
+    def test_catch_up_falls_back(self) -> None:
+        """With history visible to members only, the destination, which has
+        no members, may not see the room's latest events, so catch-up sends
+        the event it missed."""
+        destination = "catchup.example.com"
+        self._catch_up_destination(destination, self.event)
+        self.helper.send_state(
+            self.room_id,
+            "m.room.history_visibility",
+            {"history_visibility": "joined"},
+            tok=self.tok,
+        )
+        self._send_event("newer")
+        queue = self.sender._get_per_destination_queue(destination)
+        assert isinstance(queue, RustPerDestinationQueue)
+        self.transport.responses.append(json_response(200, {}))
+
+        queue.attempt_new_transaction()
+        self._settle()
+
+        [request] = self.transport.requests
+        body = json.loads(request.body)
+        self.assertEqual(
+            [pdu["content"].get("body") for pdu in body["pdus"]],
+            [self.event.content["body"]],
+        )
+
     def test_to_device(self) -> None:
         """A to-device message is sent, and deleted once sent. Reading the
         stream position is the one GIL crossing."""
