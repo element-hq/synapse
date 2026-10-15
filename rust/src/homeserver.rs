@@ -20,6 +20,7 @@ use std::sync::Arc;
 use pyo3::{intern, prelude::*, types::PyDict};
 
 use crate::config::SynapseHomeServerConfig;
+use crate::federation::signing::FederationSigningKey;
 use crate::reactor::Reactor;
 use crate::runtime::RustRuntime;
 use crate::storage::{python::RustStore, store::Store};
@@ -82,6 +83,20 @@ impl HomeServer {
     /// The Rust-side view of `hs.config`.
     pub fn config(&self, py: Python<'_>) -> PyResult<SynapseHomeServerConfig> {
         self.0.bind(py).getattr(intern!(py, "config"))?.extract()
+    }
+
+    /// This homeserver's name (`hs.hostname`).
+    pub fn hostname(&self, py: Python<'_>) -> PyResult<String> {
+        self.0.bind(py).getattr(intern!(py, "hostname"))?.extract()
+    }
+
+    /// The key this homeserver signs federation requests with
+    /// (`hs.signing_key`).
+    pub fn signing_key(&self, py: Python<'_>) -> PyResult<FederationSigningKey> {
+        self.0
+            .bind(py)
+            .getattr(intern!(py, "signing_key"))?
+            .extract()
     }
 
     /// The Synapse `Clock` (`hs.get_clock()`).

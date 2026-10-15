@@ -102,6 +102,9 @@ tokio-postgres-rustls = { version = "0.14.0", default-features = false, features
     "ring",
 ] }
 lru = "0.16.4"
+# Signing outbound federation requests. 2.x rather than 3.x, which needs a
+# newer rustc than our MSRV.
+ed25519-dalek = "2.2.0"
 
 [dev-dependencies]
 tokio = { version = "1.44.2", features = ["macros", "test-util"] }
