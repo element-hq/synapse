@@ -120,7 +120,7 @@ async fn send_puts_the_body() {
 
     let mut stats = RequestStats::default();
     let response = sender
-        .send(&transaction, Vec::new(), &mut stats)
+        .send(transaction.clone(), Vec::new(), &mut stats)
         .await
         .unwrap();
     let TransactionResponse::Acknowledged(acked) = response else {
@@ -155,7 +155,7 @@ async fn send_retries_server_errors() {
 
     let mut stats = RequestStats::default();
     sender
-        .send(&transaction, Vec::new(), &mut stats)
+        .send(transaction.clone(), Vec::new(), &mut stats)
         .await
         .unwrap();
     assert_eq!(stats.attempts, 2);
@@ -169,7 +169,11 @@ async fn send_fails_on_client_errors() {
     let transaction = sender.build(DEST, vec![], vec![]);
 
     let err = sender
-        .send(&transaction, Vec::new(), &mut RequestStats::default())
+        .send(
+            transaction.clone(),
+            Vec::new(),
+            &mut RequestStats::default(),
+        )
         .await
         .unwrap_err();
     assert!(
@@ -185,7 +189,11 @@ async fn send_rejects_a_non_object() {
     let transaction = sender.build(DEST, vec![], vec![]);
 
     let err = sender
-        .send(&transaction, Vec::new(), &mut RequestStats::default())
+        .send(
+            transaction.clone(),
+            Vec::new(),
+            &mut RequestStats::default(),
+        )
         .await
         .unwrap_err();
     assert!(
@@ -207,7 +215,11 @@ async fn send_hands_back_what_serde_refuses() {
     let transaction = sender.build(DEST, vec![], vec![]);
 
     let response = sender
-        .send(&transaction, Vec::new(), &mut RequestStats::default())
+        .send(
+            transaction.clone(),
+            Vec::new(),
+            &mut RequestStats::default(),
+        )
         .await
         .unwrap();
     assert!(matches!(response, TransactionResponse::Unparsed(_)));

@@ -31,6 +31,8 @@ from synapse.synapse_rust.federation import RustTransaction, RustTransactionMana
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
+from tests.utils import RUST_FED_STRICT_FOR_TESTS
+
 if TYPE_CHECKING:
     from unittest.mock import Mock
 
@@ -94,6 +96,7 @@ class RustTransactionsMixin(_Base):
         assert isinstance(sender, FederationSender)
         manager = sender._transaction_manager
         assert manager._rust is not None
+        manager._rust_strict = RUST_FED_STRICT_FOR_TESTS
         manager._rust = _MockedRustTransactions(  # type: ignore[assignment]
             manager._rust, self.federation_transport_client
         )

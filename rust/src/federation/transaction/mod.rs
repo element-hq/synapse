@@ -52,6 +52,12 @@ const CANONICALJSON_MAX_INT: i64 = (1 << 53) - 1;
 /// `CANONICALJSON_MIN_INT`.
 const CANONICALJSON_MIN_INT: i64 = -CANONICALJSON_MAX_INT;
 
+/// The logger of Python's `TX [dest] {txn}` lines. Rust logs them under the
+/// same name, so log configs that set its level still apply.
+const TX_LOG: &str = "synapse.federation.sender.transaction_manager";
+/// The logger of Python's lines about reading the response.
+const CLIENT_LOG: &str = "synapse.http.matrixfederationclient";
+
 /// The EDU types whose contents the issue 8631 debug log records.
 const DEVICE_UPDATE_EDUS: [&str; 2] = ["m.device_list_update", "m.signing_key_update"];
 
@@ -72,18 +78,23 @@ impl Transaction {
     /// The request body: `Transaction.get_dict`. PDUs with a depth canonical
     /// JSON cannot hold are dropped, and `edus` is left out when empty.
     pub fn body(&self) -> Value {
+        self.clone().into_body()
+    }
+
+    /// As [`Transaction::body`], moving the PDUs and EDUs into it.
+    pub fn into_body(self) -> Value {
+        let mut pdus = self.pdus;
+        pdus.retain(has_valid_depth);
+
         let mut body = Map::new();
-        body.insert("origin".to_owned(), Value::from(self.origin.as_str()));
+        body.insert("origin".to_owned(), Value::from(self.origin));
         body.insert(
             "origin_server_ts".to_owned(),
             Value::from(self.origin_server_ts),
         );
-        body.insert(
-            "pdus".to_owned(),
-            Value::Array(filter_pdus_for_valid_depth(&self.pdus)),
-        );
+        body.insert("pdus".to_owned(), Value::Array(pdus));
         if !self.edus.is_empty() {
-            body.insert("edus".to_owned(), Value::Array(self.edus.clone()));
+            body.insert("edus".to_owned(), Value::Array(self.edus));
         }
         Value::Object(body)
     }
@@ -96,30 +107,38 @@ impl Transaction {
 
     /// The prefix of the transaction's log lines, `TX [dest] {txn}`.
     fn log_prefix(&self) -> String {
-        format!("TX [{}] {{{}}}", self.destination, self.transaction_id)
+        log_prefix(&self.destination, &self.transaction_id)
     }
+}
+
+/// `TX [dest] {txn}`.
+fn log_prefix(destination: &str, transaction_id: &str) -> String {
+    format!("TX [{destination}] {{{transaction_id}}}")
 }
 
 /// `filter_pdus_for_valid_depth`: keep the PDUs whose `depth` is an integer
 /// that canonical JSON allows.
 pub fn filter_pdus_for_valid_depth(pdus: &[Value]) -> Vec<Value> {
     pdus.iter()
-        .filter(|pdu| {
-            let Some(depth) = pdu.get("depth") else {
-                return false;
-            };
-            // Python compares whatever is there. An event's depth is always
-            // an integer, but compare a float as Python would.
-            if let Some(depth) = depth.as_i64() {
-                (CANONICALJSON_MIN_INT..=CANONICALJSON_MAX_INT).contains(&depth)
-            } else if let Some(depth) = depth.as_f64() {
-                (CANONICALJSON_MIN_INT as f64..=CANONICALJSON_MAX_INT as f64).contains(&depth)
-            } else {
-                false
-            }
-        })
+        .filter(|pdu| has_valid_depth(pdu))
         .cloned()
         .collect()
+}
+
+/// Whether the PDU has a `depth` that canonical JSON allows.
+fn has_valid_depth(pdu: &Value) -> bool {
+    let Some(depth) = pdu.get("depth") else {
+        return false;
+    };
+    // Python compares whatever is there. An event's depth is always an
+    // integer, but compare a float as Python would.
+    if let Some(depth) = depth.as_i64() {
+        (CANONICALJSON_MIN_INT..=CANONICALJSON_MAX_INT).contains(&depth)
+    } else if let Some(depth) = depth.as_f64() {
+        (CANONICALJSON_MIN_INT as f64..=CANONICALJSON_MAX_INT as f64).contains(&depth)
+    } else {
+        false
+    }
 }
 
 /// The remote's answer to a transaction.
@@ -141,7 +160,7 @@ pub fn acknowledged_pdus(log_prefix: &str, response: &Map<String, Value>) -> Vec
         return Vec::new();
     };
     let Some(pdus) = pdus.as_object() else {
-        log::warn!("{log_prefix} Remote returned invalid type for `pdus`");
+        log::warn!(target: TX_LOG, "{log_prefix} Remote returned invalid type for `pdus`");
         return Vec::new();
     };
 
@@ -151,7 +170,10 @@ pub fn acknowledged_pdus(log_prefix: &str, response: &Map<String, Value>) -> Vec
             Some(result) if !result.contains_key("error") => {
                 acknowledged.push(event_id.clone());
             }
-            _ => log::warn!("{log_prefix} Remote returned error for {event_id}: {result}"),
+            _ => log::warn!(
+                target: TX_LOG,
+                "{log_prefix} Remote returned error for {event_id}: {result}"
+            ),
         }
     }
     acknowledged
@@ -182,6 +204,7 @@ impl TransactionSender {
     pub fn build(&self, destination: &str, pdus: Vec<Value>, edus: Vec<Value>) -> Transaction {
         let transaction_id = self.next_txn_id.fetch_add(1, Ordering::Relaxed).to_string();
         log::debug!(
+            target: TX_LOG,
             "TX [{destination}] {{{transaction_id}}} Attempting new transaction (pdus: {}, edus: {})",
             pdus.len(),
             edus.len()
@@ -198,29 +221,34 @@ impl TransactionSender {
 
     /// Send `transaction` and read the remote's answer.
     ///
+    /// The PDUs and EDUs move into the request body, so the transaction holds
+    /// one copy of them while it is retried, besides the canonical JSON.
     /// `extra_headers` carries the tracing span. The request's attempts and
     /// response codes go to `stats`, for the Python counters.
     pub async fn send(
         &self,
-        transaction: &Transaction,
+        transaction: Transaction,
         extra_headers: Vec<(String, String)>,
         stats: &mut RequestStats,
     ) -> Result<TransactionResponse, ClientError> {
         let log_prefix = transaction.log_prefix();
         log::info!(
+            target: TX_LOG,
             "{log_prefix} Sending transaction [{}], (PDUs: {}, EDUs: {})",
             transaction.transaction_id,
             transaction.pdus.len(),
             transaction.edus.len(),
         );
-        log_device_list_updates(transaction);
+        log_device_list_updates(&transaction);
 
+        let transaction_id = transaction.transaction_id.clone();
+        let destination = transaction.destination.clone();
         let request = FederationRequest {
             method: Method::PUT,
-            destination: transaction.destination.clone(),
+            destination: destination.clone(),
             path: transaction.path(),
             query: String::new(),
-            body: Some(transaction.body()),
+            body: Some(transaction.into_body()),
             rewrite_age_ts: false,
             extra_headers,
         };
@@ -238,18 +266,14 @@ impl TransactionSender {
             Ok(response) => response,
             Err(err) => {
                 if let ClientError::Http(http) = &err {
-                    log::info!("{log_prefix} got {} response", http.code);
+                    log::info!(target: TX_LOG, "{log_prefix} got {} response", http.code);
                 }
                 return Err(err);
             }
         };
 
         let body = self
-            .read_json(
-                response,
-                &transaction.destination,
-                self.client.config().default_timeout,
-            )
+            .read_json(response, &destination, self.client.config().default_timeout)
             .await?;
 
         let value = match serde_json::from_slice::<Value>(&body) {
@@ -258,9 +282,8 @@ impl TransactionSender {
         };
         let Value::Object(value) = value else {
             log::warn!(
-                "{{{}}} [{}] Failed to parse response",
-                transaction.transaction_id,
-                transaction.destination
+                target: CLIENT_LOG,
+                "{{{transaction_id}}} [{destination}] Failed to parse response"
             );
             return Err(ClientError::SendFailed {
                 cause: FailureCause::InvalidBody(format!(
@@ -270,7 +293,7 @@ impl TransactionSender {
                 can_retry: false,
             });
         };
-        log::info!("{log_prefix} got 200 response");
+        log::info!(target: TX_LOG, "{log_prefix} got 200 response");
         Ok(TransactionResponse::Acknowledged(acknowledged_pdus(
             &log_prefix,
             &value,
@@ -292,7 +315,10 @@ impl TransactionSender {
         let phrase = response.phrase.clone();
 
         if let Err(err) = check_content_type(&response.headers, "application/json") {
-            log::warn!("{log_prefix} Error reading response {description}: {err}");
+            log::warn!(
+                target: CLIENT_LOG,
+                "{log_prefix} Error reading response {description}: {err}"
+            );
             return Err(err);
         }
 
@@ -317,13 +343,20 @@ impl TransactionSender {
                         cause: FailureCause::TooLarge { limit },
                         ..
                     } => log::warn!(
+                        target: CLIENT_LOG,
                         "{log_prefix} JSON response exceeded max size {limit} - {description}"
                     ),
                     ClientError::SendFailed {
                         cause: FailureCause::BodyTimeout,
                         ..
-                    } => log::warn!("{log_prefix} Timed out reading response - {description}"),
-                    _ => log::warn!("{log_prefix} Failed to read response - {description}"),
+                    } => log::warn!(
+                        target: CLIENT_LOG,
+                        "{log_prefix} Timed out reading response - {description}"
+                    ),
+                    _ => log::warn!(
+                        target: CLIENT_LOG,
+                        "{log_prefix} Failed to read response - {description}"
+                    ),
                 }
                 return Err(err);
             }
@@ -331,6 +364,7 @@ impl TransactionSender {
 
         let secs = self.client.now_ms().saturating_sub(start_ms) as f64 / 1000.0;
         log::info!(
+            target: CLIENT_LOG,
             "{log_prefix} Completed request: {status} {phrase} in {secs:.2} secs, got {length} bytes - {description}"
         );
         Ok(collected.freeze())

@@ -38,7 +38,11 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.module_api.callbacks.federation import FederatedEventDeliveryMethod
-from synapse.synapse_rust.federation import RustTransaction, RustTransactionManager
+from synapse.synapse_rust.federation import (
+    RustFederationClient,
+    RustTransaction,
+    RustTransactionManager,
+)
 from synapse.types import JsonDict
 from synapse.util.json import json_decoder
 from synapse.util.metrics import measure_func
@@ -66,10 +70,6 @@ class TransactionManager:
     callback.
     """
 
-    # For tests: check that each transaction Rust sends has the body Python
-    # would have sent.
-    _rust_strict = False
-
     def __init__(self, hs: "synapse.server.HomeServer"):
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
@@ -93,9 +93,15 @@ class TransactionManager:
         self._rust: RustTransactionManager | None = None
         self._is_mine_server_name = hs.is_mine_server_name
         if hs.config.experimental.rust_federation_sending_at_least("transactions"):
+            # Tests may replace the federation client with a mock, which has
+            # no Rust client to send through.
             rust_client = getattr(hs.get_federation_http_client(), "_rust_client", None)
-            if rust_client is not None:
+            if isinstance(rust_client, RustFederationClient):
                 self._rust = RustTransactionManager(rust_client)
+
+        # For tests: check that each transaction Rust sends has the body Python
+        # would have sent.
+        self._rust_strict = False
 
     def shutdown(self) -> None:
         self._is_shutdown = True

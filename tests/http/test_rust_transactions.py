@@ -22,7 +22,7 @@ Python builds.
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 from twisted.internet.testing import MemoryReactor
 
@@ -41,6 +41,7 @@ from synapse.module_api.callbacks.federation import (
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.synapse_rust import reset_logging_config
 from synapse.synapse_rust.federation import (
     RustFederationClient,
     RustTransactionManager,
@@ -54,6 +55,7 @@ from tests.http.test_rust_federation_client import (
     FakeTransport,
     json_response,
 )
+from tests.utils import RUST_FED_STRICT_FOR_TESTS
 
 
 class RustTransactionsTestCase(unittest.HomeserverTestCase):
@@ -85,6 +87,7 @@ class RustTransactionsTestCase(unittest.HomeserverTestCase):
 
         self.manager = TransactionManager(hs)
         assert self.manager._rust is not None
+        self.manager._rust_strict = RUST_FED_STRICT_FOR_TESTS
         self.manager._rust = RustTransactionManager(rust_client)
 
         user = self.register_user("user", "pass")
@@ -121,6 +124,37 @@ class RustTransactionsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(body["origin"], self.hs.hostname)
         self.assertEqual(body["edus"], [edu.get_dict()])
         self.assertEqual(body["pdus"], [self.event.get_pdu_json()])
+
+    def test_tracing_headers(self) -> None:
+        """The headers of the tracing span reach the request."""
+
+        def inject(headers: dict[bytes, list[bytes]], destination: str) -> None:
+            headers[b"uber-trace-id"] = [b"abc:def:0:1"]
+
+        self.transport.responses.append(json_response(200, {}))
+        with patch(
+            "synapse.federation.sender.transaction_manager.opentracing.inject_header_dict",
+            side_effect=inject,
+        ):
+            self._send([self.event])
+
+        [request] = self.transport.requests
+        self.assertEqual(request.header(b"uber-trace-id"), b"abc:def:0:1")
+
+    def test_log_lines(self) -> None:
+        """The `TX` lines are logged under the Python transaction manager's
+        logger name, so log configs that name it still apply."""
+        self.transport.responses.append(json_response(200, {}))
+        with self.assertLogs(
+            "synapse.federation.sender.transaction_manager", level="INFO"
+        ) as logs:
+            # pyo3_log caches levels. Make it see the level assertLogs set.
+            reset_logging_config()
+            self._send([self.event])
+
+        messages = [record.getMessage() for record in logs.records]
+        self.assertTrue(any("Sending transaction" in m for m in messages), messages)
+        self.assertTrue(any("got 200 response" in m for m in messages), messages)
 
     def test_txn_ids_increase(self) -> None:
         self.transport.responses.extend([json_response(200, {})] * 2)
@@ -289,3 +323,19 @@ class RustTransactionsLevelTestCase(unittest.HomeserverTestCase):
         """An instance that sends through a proxy worker has no Rust client,
         so it builds transactions in Python."""
         self.assertIsNone(self._manager()._rust)
+
+
+class MockedHttpClientTestCase(unittest.HomeserverTestCase):
+    """A test that mocks the federation client gets the Python transaction
+    builder at any level."""
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        return self.setup_test_homeserver(federation_http_client=Mock())
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config["experimental_features"] = {"rust_federation_sending": "transactions"}
+        return config
+
+    def test_no_rust_sender(self) -> None:
+        self.assertIsNone(TransactionManager(self.hs)._rust)

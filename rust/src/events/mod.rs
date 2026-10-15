@@ -747,22 +747,13 @@ impl Event {
         &self.internal_metadata
     }
 
-    /// The event as `get_pdu_json` returns it, built without the GIL.
+    /// The event as `get_pdu_json()` returns it, built without the GIL.
     ///
-    /// With `time_now`, an `age_ts` in `unsigned` becomes `age`. An `age_ts`
-    /// out of `i64` range is left as it is (Python would raise). The Rust
-    /// `unsigned` never holds `redacted_because`, so there is nothing to strip.
-    pub fn to_pdu_value(&self, time_now: Option<i64>) -> serde_json::Result<Value> {
-        let mut value = serde_json::to_value(&self.parsed_event)?;
-        if let Some(time_now) = time_now {
-            if let Some(unsigned) = value.get_mut(UNSIGNED).and_then(Value::as_object_mut) {
-                if let Some(age_ts) = unsigned.get(AGE_TS).and_then(Value::as_i64) {
-                    unsigned.insert(AGE.to_owned(), Value::from(time_now - age_ts));
-                    unsigned.remove(AGE_TS);
-                }
-            }
-        }
-        Ok(value)
+    /// Without a `time_now`, Python leaves `age_ts` in `unsigned`, and so does
+    /// this. The Rust `unsigned` never holds `redacted_because`, so there is
+    /// nothing to strip.
+    pub fn to_pdu_value(&self) -> serde_json::Result<Value> {
+        serde_json::to_value(&self.parsed_event)
     }
 
     /// Returns the `redacts` field of this event, if it has one.
@@ -1124,7 +1115,7 @@ mod tests {
     }
 
     #[test]
-    fn to_pdu_value_rewrites_age_ts() {
+    fn to_pdu_value_is_the_stored_json() {
         let json = r#"{"auth_events":[],"prev_events":[],"type":"m.room.message","sender":"@a:example.com","content":{"body":"hi"},"depth":3,"room_id":"!r:example.com","origin_server_ts":5,"hashes":{"sha256":"aaa"},"signatures":{},"unsigned":{"age_ts":1000}}"#;
         let event = Event::from_json_str(
             json,
@@ -1134,12 +1125,8 @@ mod tests {
         )
         .unwrap();
 
-        // Without a time, the PDU is the event JSON as stored.
+        // `age_ts` stays in `unsigned`, as `get_pdu_json()` leaves it.
         let as_stored: Value = serde_json::from_str(json).unwrap();
-        assert_eq!(event.to_pdu_value(None).unwrap(), as_stored);
-
-        let pdu = event.to_pdu_value(Some(1500)).unwrap();
-        assert_eq!(pdu["unsigned"], serde_json::json!({"age": 500}));
-        assert_eq!(pdu["content"], as_stored["content"]);
+        assert_eq!(event.to_pdu_value().unwrap(), as_stored);
     }
 }

@@ -25,7 +25,10 @@ use std::sync::Arc;
 use pyo3::{intern, prelude::*, types::PyDict};
 use serde_json::Value;
 
-use super::{acknowledged_pdus, Transaction, TransactionResponse, TransactionSender};
+use super::{
+    acknowledged_pdus, log_prefix, Transaction, TransactionResponse, TransactionSender, CLIENT_LOG,
+    TX_LOG,
+};
 use crate::{
     deferred::{create_deferred_with, OnCancel},
     events::Event,
@@ -133,7 +136,7 @@ impl RustTransactionManager {
             // GIL.
             let pdus = pdus
                 .iter()
-                .map(|pdu| pdu.get().to_pdu_value(None))
+                .map(|pdu| pdu.get().to_pdu_value())
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|err| {
                     pyo3::exceptions::PyValueError::new_err(format!(
@@ -151,8 +154,9 @@ impl RustTransactionManager {
                 })?;
             }
 
+            let transaction_id = transaction.transaction_id.clone();
             let mut stats = RequestStats::default();
-            let result = sender.send(&transaction, extra_headers, &mut stats).await;
+            let result = sender.send(transaction, extra_headers, &mut stats).await;
 
             with_gil("transaction_response", |py| -> PyResult<Py<PyAny>> {
                 let recorded =
@@ -166,7 +170,7 @@ impl RustTransactionManager {
                 let acknowledged = match result {
                     Ok(TransactionResponse::Acknowledged(ids)) => ids,
                     Ok(TransactionResponse::Unparsed(body)) => {
-                        python_acknowledged(py, &transaction, &body)?
+                        python_acknowledged(py, &destination, &transaction_id, &body)?
                     }
                     Err(err) => return Err(client_error_to_py(py, err, &destination)),
                 };
@@ -192,7 +196,7 @@ impl RustTransactionManager {
     ) -> PyResult<RustTransaction> {
         let pdus = pdus
             .iter()
-            .map(|pdu| pdu.to_pdu_value(None))
+            .map(|pdu| pdu.to_pdu_value())
             .collect::<Result<Vec<_>, _>>()
             .map_err(|err| {
                 pyo3::exceptions::PyValueError::new_err(format!("Failed to serialize event: {err}"))
@@ -229,15 +233,15 @@ impl RustTransactionManager {
 /// result.
 fn python_acknowledged(
     py: Python<'_>,
-    transaction: &Transaction,
+    destination: &str,
+    transaction_id: &str,
     body: &[u8],
 ) -> PyResult<Vec<String>> {
-    let log_prefix = transaction.log_prefix();
+    let log_prefix = log_prefix(destination, transaction_id);
     let failed = |err: PyErr| -> PyErr {
         log::warn!(
-            "{{{}}} [{}] Failed to parse response",
-            transaction.transaction_id,
-            transaction.destination
+            target: CLIENT_LOG,
+            "{{{transaction_id}}} [{destination}] Failed to parse response"
         );
         request_send_failed(py, err.into_value(py).into_bound(py).into_any(), false)
     };
@@ -262,13 +266,13 @@ fn python_acknowledged(
             "Received incorrect JSON value: {name}"
         ))));
     };
-    log::info!("{log_prefix} got 200 response");
+    log::info!(target: TX_LOG, "{log_prefix} got 200 response");
 
     let Some(pdus) = response.get_item("pdus")? else {
         return Ok(Vec::new());
     };
     let Ok(pdus) = pdus.cast::<PyDict>() else {
-        log::warn!("{log_prefix} Remote returned invalid type for `pdus`");
+        log::warn!(target: TX_LOG, "{log_prefix} Remote returned invalid type for `pdus`");
         return Ok(Vec::new());
     };
     let mut acknowledged = Vec::with_capacity(pdus.len());
@@ -280,7 +284,10 @@ fn python_acknowledged(
         // An id Rust cannot hold is not one of ours.
         match (accepted, event_id.extract::<String>()) {
             (true, Ok(event_id)) => acknowledged.push(event_id),
-            _ => log::warn!("{log_prefix} Remote returned error for {event_id}: {result}"),
+            _ => log::warn!(
+                target: TX_LOG,
+                "{log_prefix} Remote returned error for {event_id}: {result}"
+            ),
         }
     }
     Ok(acknowledged)
