@@ -570,7 +570,9 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
     def test_delayed_member_event_for_other_user_rejected_if_sender_not_in_room(
         self,
     ) -> None:
-        """Only changes to the sender's own membership are exempt."""
+        """A delayed change to another user's membership is rejected when the
+        sender is not in the room: only changes to their own membership are exempt.
+        """
         room_id = self.helper.create_room_as(
             self.user2_user_id, tok=self.user2_access_token
         )
@@ -616,6 +618,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
 
     def test_delayed_self_join_accepted_if_sender_not_in_room(self) -> None:
+        """A delayed join is accepted from outside a public room, and the sender is
+        joined when it comes to be sent."""
         room_id = self.helper.create_room_as(
             self.user2_user_id,
             tok=self.user2_access_token,
