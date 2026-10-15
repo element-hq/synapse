@@ -21,8 +21,16 @@
 //! job, so that this can serve the sync handler and any later port alike.
 //! [`check_event_for_client`] is the whole per-event decision; the
 //! functions below it are the steps, named as the Python ones are.
+//!
+//! [`filter_events_for_server`] is the server half,
+//! `synapse.visibility.filter_events_for_server`. It loads what it needs
+//! itself, through a [`SyncReader`], and leaves the per-event decision to
+//! [`event_visible_to_server`].
 
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use pyo3::{
     prelude::*,
@@ -36,8 +44,11 @@ use crate::events::{
         join_rules_field::JOIN_RULE,
         membership_field::MEMBERSHIP,
     },
+    filter::event_visible_to_server,
     redact_event_py, Event,
 };
+use crate::state::StateKey;
+use crate::storage::{events::RedactBehaviour, sync_store::SyncReader};
 
 /// `EventTypes.Dummy`.
 const M_DUMMY: &str = "org.matrix.dummy_event";
@@ -398,6 +409,207 @@ pub fn keep_soft_failed(event: &Event, policy: Option<&SoftFailedPolicy>) -> boo
             .unwrap_or(false),
         _ => false,
     }
+}
+
+// The server half.
+
+/// What [`filter_events_for_server`] is asked to do: its arguments, less
+/// the events.
+#[derive(Debug, Clone, Copy)]
+pub struct ServerFilter<'a> {
+    pub target_server_name: &'a str,
+    pub local_server_name: &'a str,
+    /// Include the redacted form of an event the server may not see, rather
+    /// than leave it out.
+    pub redact: bool,
+    /// Also leave out the events of senders who asked to be erased.
+    pub filter_out_erased_senders: bool,
+    /// Also leave out remote events in rooms we only have partial state
+    /// for.
+    pub filter_out_remote_partial_state_events: bool,
+}
+
+/// What [`filter_events_for_server`] found.
+pub enum ServerFiltered {
+    Events(Vec<Event>),
+    /// An event needs the memberships at it and has only partial state.
+    /// Python waits for the full state there. We do not, and leave it to
+    /// the caller.
+    NeedsFullState,
+}
+
+/// The server name of a user ID, as `get_domain_from_id`.
+fn domain_of(user_id: &str) -> anyhow::Result<&str> {
+    user_id
+        .split_once(':')
+        .map(|(_, domain)| domain)
+        .ok_or_else(|| anyhow::anyhow!("Invalid ID: {user_id}"))
+}
+
+/// `filter_events_for_server`: the events the target server may see, in
+/// order. Each event it may not see is left out, or redacted if
+/// `filter.redact`.
+pub async fn filter_events_for_server(
+    reader: &SyncReader<'_>,
+    filter: &ServerFilter<'_>,
+    events: Vec<Event>,
+) -> anyhow::Result<ServerFiltered> {
+    let erased = if filter.filter_out_erased_senders {
+        let mut senders: Vec<Arc<str>> = events.iter().map(|e| Arc::from(e.sender())).collect();
+        senders.sort();
+        senders.dedup();
+        reader.are_users_erased(&senders).await?
+    } else {
+        HashMap::new()
+    };
+
+    // Python checks this first, so that a room fully joined while we look
+    // cannot let its events through on an old view of the memberships.
+    let mut partial_state_invisible: HashSet<&str> = HashSet::new();
+    if filter.filter_out_remote_partial_state_events {
+        for event in &events {
+            if domain_of(event.sender())? != filter.local_server_name
+                && reader.is_partial_state_room(event.room_id()).await?
+            {
+                partial_state_invisible.insert(event.event_id());
+            }
+        }
+    }
+
+    // `_event_to_history_vis`. An outlier has no state, and counts as
+    // shared.
+    let mut with_state: Vec<Arc<str>> = Vec::with_capacity(events.len());
+    for event in &events {
+        if !event.internal_metadata().is_outlier()? {
+            with_state.push(Arc::from(event.event_id()));
+        }
+    }
+    let event_to_group = reader.state_group_for_events(&with_state).await?;
+    if let Some(missing) = with_state.iter().find(|id| !event_to_group.contains_key(*id)) {
+        anyhow::bail!("No state group for event {missing}");
+    }
+    let mut groups: Vec<i64> = event_to_group.values().copied().collect();
+    groups.sort_unstable();
+    groups.dedup();
+    let group_state = reader.state_for_groups(&groups).await?;
+    let state_of = |event_id: &str| {
+        event_to_group
+            .get(event_id)
+            .and_then(|group| group_state.get(group))
+    };
+
+    let vis_key = StateKey::new(M_ROOM_HISTORY_VISIBILITY, "");
+    let mut vis_ids: Vec<Arc<str>> = group_state
+        .values()
+        .filter_map(|state| state.get(&vis_key).cloned())
+        .collect();
+    vis_ids.sort();
+    vis_ids.dedup();
+    let vis_events = reader
+        .events(&vis_ids, RedactBehaviour::Redact, false, false)
+        .await?;
+    let vis_events: HashMap<&str, &Event> = vis_events
+        .iter()
+        .map(|event| (event.event_id(), event))
+        .collect();
+
+    let mut history_visibility: HashMap<&str, &str> = HashMap::with_capacity(events.len());
+    for event in &events {
+        let mut vis = SHARED;
+        if let Some(vis_id) = state_of(event.event_id()).and_then(|state| state.get(&vis_key)) {
+            let vis_event = vis_events
+                .get(&**vis_id)
+                .ok_or_else(|| anyhow::anyhow!("Missing history visibility event {vis_id}"))?;
+            if let Some(value) = vis_event.content().get_field(HISTORY_VISIBILITY) {
+                vis = value.as_str().ok_or_else(|| {
+                    anyhow::anyhow!("Invalid history visibility in {vis_id}")
+                })?;
+            }
+        }
+        history_visibility.insert(event.event_id(), vis);
+    }
+
+    // `_event_to_memberships`, for the events with restricted visibility:
+    // the memberships at each of the target server's users.
+    let restricted: Vec<Arc<str>> = events
+        .iter()
+        .filter(|event| {
+            !matches!(
+                history_visibility[event.event_id()],
+                SHARED | WORLD_READABLE
+            )
+        })
+        .map(|event| Arc::from(event.event_id()))
+        .collect();
+    let mut member_events: HashMap<Arc<str>, Event> = HashMap::new();
+    if !restricted.is_empty() {
+        // Python waits for the full state of these.
+        if !reader.partial_state_events(&restricted).await?.is_empty() {
+            return Ok(ServerFiltered::NeedsFullState);
+        }
+        let mut member_ids: Vec<Arc<str>> = restricted
+            .iter()
+            .filter_map(|id| state_of(id))
+            .flat_map(|state| state.iter())
+            .filter(|(key, _)| is_target_member(key, filter.target_server_name))
+            .map(|(_, event_id)| Arc::clone(event_id))
+            .collect();
+        member_ids.sort();
+        member_ids.dedup();
+        for event in reader
+            .events(&member_ids, RedactBehaviour::Redact, false, false)
+            .await?
+        {
+            member_events.insert(Arc::from(event.event_id()), event);
+        }
+    }
+
+    let mut visible = Vec::with_capacity(events.len());
+    for event in &events {
+        let event_id = event.event_id();
+        let mut memberships: Vec<(&str, &str)> = Vec::new();
+        if restricted.iter().any(|id| &**id == event_id) {
+            for (key, member_id) in state_of(event_id).into_iter().flat_map(|state| state.iter()) {
+                if !is_target_member(key, filter.target_server_name) {
+                    continue;
+                }
+                let Some(member) = member_events.get(member_id) else {
+                    continue;
+                };
+                let membership = membership_of(member).ok_or_else(|| {
+                    anyhow::anyhow!("Membership event {member_id} has no membership")
+                })?;
+                memberships.push((&key.1, membership));
+            }
+        }
+        let sender_erased = erased.get(event.sender()).copied().unwrap_or(false);
+        visible.push(event_visible_to_server(
+            filter.target_server_name,
+            history_visibility[event_id],
+            sender_erased,
+            partial_state_invisible.contains(event_id),
+            memberships,
+        )?);
+    }
+
+    let mut filtered = Vec::with_capacity(events.len());
+    for (event, visible) in events.into_iter().zip(visible) {
+        if visible {
+            filtered.push(event);
+        } else if filter.redact {
+            filtered.push(redact_event_py(&event).map_err(|err| anyhow::anyhow!("{err}"))?);
+        }
+    }
+    Ok(ServerFiltered::Events(filtered))
+}
+
+/// Whether `key` is the membership of one of `server_name`'s users.
+fn is_target_member(key: &StateKey, server_name: &str) -> bool {
+    &*key.0 == M_ROOM_MEMBER
+        && key
+            .1
+            .split_once(':')
+            .is_some_and(|(_, domain)| domain == server_name)
 }
 
 // The entry point for the differential test.

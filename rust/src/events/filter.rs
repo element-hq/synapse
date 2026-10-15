@@ -33,12 +33,13 @@ pub fn event_visible_to_server_py(
     memberships: Vec<(String, String)>, // (state_key, membership)
 ) -> PyResult<bool> {
     event_visible_to_server(
-        sender,
-        target_server_name,
-        history_visibility,
-        erased_senders,
+        &target_server_name,
+        &history_visibility,
+        erased_senders.get(&sender).copied().unwrap_or(false),
         partial_state_invisible,
-        memberships,
+        memberships
+            .iter()
+            .map(|(state_key, membership)| (state_key.as_str(), membership.as_str())),
     )
     .map_err(|e| PyValueError::new_err(format!("{e}")))
 }
@@ -53,18 +54,19 @@ pub fn event_visible_to_server_py(
 ///   - E was created by this homeserver, AND:
 ///       - the partial state at E has world readable or shared history vis, OR
 ///       - the partial state at E says that the target server is in the room.
-pub fn event_visible_to_server(
-    sender: String,
-    target_server_name: String,
-    history_visibility: String,
-    erased_senders: HashMap<String, bool>,
+///
+/// `sender_erased` is whether the sender has asked to be erased, and
+/// `memberships` the `(state_key, membership)` at E of the target server's
+/// users.
+pub fn event_visible_to_server<'a>(
+    target_server_name: &str,
+    history_visibility: &str,
+    sender_erased: bool,
     partial_state_invisible: bool,
-    memberships: Vec<(String, String)>, // (state_key, membership)
+    memberships: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> anyhow::Result<bool> {
-    if let Some(&erased) = erased_senders.get(&sender) {
-        if erased {
-            return Ok(false);
-        }
+    if sender_erased {
+        return Ok(false);
     }
 
     if partial_state_invisible {
@@ -79,7 +81,7 @@ pub fn event_visible_to_server(
 
     let mut visible = false;
     for (state_key, membership) in memberships {
-        let state_key = UserID::try_from(state_key.as_ref())
+        let state_key = UserID::try_from(state_key)
             .map_err(|e| anyhow::anyhow!(format!("invalid user_id ({state_key}): {e}")))?;
         if state_key.server_name() != target_server_name {
             return Err(anyhow::anyhow!(
@@ -88,7 +90,7 @@ pub fn event_visible_to_server(
             ));
         }
 
-        match membership.as_str() {
+        match membership {
             MEMBERSHIP_INVITE => {
                 if history_visibility == HISTORY_VISIBILITY_INVITED {
                     visible = true;

@@ -374,6 +374,19 @@ class SyncStoreForTest:
     Rust sync handler's caches. For `tests/storage/test_sync_store.py`."""
 
     def __init__(self, pool: ConnectionPool, handler: SyncHandler) -> None: ...
+    def filter_events_for_server(
+        self,
+        target_server_name: str,
+        local_server_name: str,
+        events: Sequence[Event],
+        *,
+        redact: bool,
+        filter_out_erased_senders: bool,
+        filter_out_remote_partial_state_events: bool,
+    ) -> list[Event] | None:
+        """`synapse.visibility.filter_events_for_server` in Rust. `None` where
+        Python would wait for the full state."""
+
     def rooms_for_user(self, user_id: str) -> set[str]:
         """`get_rooms_for_user`."""
 

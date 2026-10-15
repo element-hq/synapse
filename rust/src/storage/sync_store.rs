@@ -679,6 +679,33 @@ impl<'a> SyncReader<'a> {
         Ok(result)
     }
 
+    /// `get_partial_state_events`, less the cache: which of the events
+    /// have only partial state, from a faster join.
+    pub async fn partial_state_events(
+        &self,
+        event_ids: &[Arc<str>],
+    ) -> anyhow::Result<HashSet<Arc<str>>> {
+        let mut partial = HashSet::new();
+        if event_ids.is_empty() {
+            return Ok(partial);
+        }
+        let borrowed = self.borrow().await?;
+        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
+            let batch: Vec<&str> = batch.iter().map(|id| &**id).collect();
+            let rows = borrowed
+                .query(
+                    "SELECT event_id FROM partial_state_events WHERE event_id = ANY($1)",
+                    &[&batch],
+                )
+                .await?;
+            for row in rows {
+                let event_id: String = row.try_get(0)?;
+                partial.insert(Arc::from(event_id));
+            }
+        }
+        Ok(partial)
+    }
+
     /// `is_partial_state_room`.
     pub async fn is_partial_state_room(&self, room_id: &str) -> anyhow::Result<bool> {
         let rooms = self.partial_state_rooms(&[Arc::from(room_id)]).await?;
@@ -2168,6 +2195,40 @@ impl PySyncStoreForTest {
             pool: pool.pool.clone(),
             handle: pool.handle.clone(),
         }
+    }
+
+    /// [`crate::visibility::filter_events_for_server`]. `None` where Python
+    /// would wait for the full state.
+    #[pyo3(signature = (target_server_name, local_server_name, events, *, redact, filter_out_erased_senders, filter_out_remote_partial_state_events))]
+    #[allow(clippy::too_many_arguments)]
+    fn filter_events_for_server(
+        &self,
+        py: Python<'_>,
+        target_server_name: String,
+        local_server_name: String,
+        events: Vec<Bound<'_, Event>>,
+        redact: bool,
+        filter_out_erased_senders: bool,
+        filter_out_remote_partial_state_events: bool,
+    ) -> PyResult<Option<Vec<Event>>> {
+        let events: Vec<Event> = events.iter().map(|e| e.get().shallow_clone()).collect();
+        let filtered = self.run(py, |reader| {
+            async move {
+                let filter = crate::visibility::ServerFilter {
+                    target_server_name: &target_server_name,
+                    local_server_name: &local_server_name,
+                    redact,
+                    filter_out_erased_senders,
+                    filter_out_remote_partial_state_events,
+                };
+                crate::visibility::filter_events_for_server(&reader, &filter, events).await
+            }
+            .boxed()
+        })?;
+        Ok(match filtered {
+            crate::visibility::ServerFiltered::Events(events) => Some(events),
+            crate::visibility::ServerFiltered::NeedsFullState => None,
+        })
     }
 
     fn rooms_for_user(&self, py: Python<'_>, user_id: String) -> PyResult<HashSet<String>> {
