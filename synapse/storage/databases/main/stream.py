@@ -1196,10 +1196,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             min_from_id = from_key.stream
             max_to_id = to_key.get_max_stream_pos()
 
-            # This query looks at membership changes in
-            # `sliding_sync_membership_snapshots` which will not include users
-            # that were state reset out of rooms; so we need to look for that
-            # case in `current_state_delta_stream`.
+            # Collect membership changes from two source tables:
+            # - `current_state_delta_stream` for most changes
+            # - `sliding_sync_membership_snapshots` for out-of-band (outlier) membership changes.
+            #   For out-of-band memberships, we don't know the previous membership, so
+            #   set the `prev_membership` to NULL and treat them as always having changed.
             sql = """
                 SELECT
                     room_id,
@@ -1219,19 +1220,20 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         s.event_stream_ordering,
                         s.membership,
                         s.sender,
-                        m_prev.membership AS prev_membership
-                    FROM sliding_sync_membership_snapshots as s
-                        LEFT JOIN event_edges AS e ON e.event_id = s.membership_event_id
-                        LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = e.prev_event_id
-                    WHERE s.user_id = ?
+                        NULL AS prev_membership
+                    FROM sliding_sync_membership_snapshots AS s
+                        INNER JOIN events AS e ON e.event_id = s.membership_event_id
+                    WHERE
+                        s.user_id = ?
+                        AND e.outlier
 
                     UNION ALL
 
                     SELECT
                         s.room_id,
-                        e.event_id,
-                        s.instance_name,
-                        s.stream_id,
+                        e.event_id AS membership_event_id,
+                        s.instance_name AS event_instance_name,
+                        s.stream_id AS event_stream_ordering,
                         m.membership,
                         e.sender,
                         m_prev.membership AS prev_membership
@@ -1287,12 +1289,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         membership_event_id is None
                         and prev_membership == Membership.LEAVE
                     ):
-                        continue
-
-                    if membership_event_id is None and room_id in membership_changes:
-                        # SUSPICIOUS: if we join a room and get state reset out of it
-                        # in the same queried window,
-                        # won't this ignore the 'state reset out of it' part?
                         continue
 
                     # When `s.event_id = null`, we won't be able to get respective

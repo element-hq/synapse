@@ -445,6 +445,12 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         sticky_duration_ms: int | None = None
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.REQUEST_PARAM_NAME)
+            if sticky_duration_ms is not None and sticky_duration_ms <= 0:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"{StickyEvent.REQUEST_PARAM_NAME} must be strictly positive",
+                    Codes.INVALID_PARAM,
+                )
 
         # FIXME(MSC4140): remove by 2026-12-31, once RoomDelayedEventRestServlet has been stable for a suitable amount of time.
         delay = _parse_request_for_delayed_event_delay(request, self._msc4140_enabled)
@@ -597,6 +603,13 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
                         f"Conflicting values given for {StickyEvent.REQUEST_PARAM_NAME}",
                         Codes.INVALID_PARAM,
                     )
+
+            if sticky_duration_ms is not None and sticky_duration_ms <= 0:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"{StickyEvent.REQUEST_PARAM_NAME} must be strictly positive",
+                    Codes.INVALID_PARAM,
+                )
 
         if request_body.state_key is not Absent:
             if sticky_duration_ms is not None:

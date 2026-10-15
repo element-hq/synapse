@@ -242,6 +242,13 @@ class AbstractFederationSender(metaclass=abc.ABCMeta):
         raise NotImplementedError()
 
     @abc.abstractmethod
+    def notify_new_server_joined(self, *, server: str, room_id: str) -> None:
+        """This gets called when we a new server has joined a room. We might
+        want to send out some events to this server.
+        """
+        raise NotImplementedError()
+
+    @abc.abstractmethod
     async def send_read_receipt(self, receipt: ReadReceipt) -> None:
         """Send a RR to any other servers in the room
 
@@ -502,6 +509,22 @@ class FederationSender(AbstractFederationSender):
             queue = PerDestinationQueue(self.hs, self._transaction_manager, destination)
             self._per_destination_queues[destination] = queue
         return queue
+
+    def notify_new_server_joined(self, *, server: str, room_id: str) -> None:
+        # We currently only use this notification for MSC4354: Sticky Events.
+        if not self.hs.config.experimental.msc4354_enabled:
+            return
+
+        if not self._federation_shard_config.should_handle(self._instance_name, server):
+            # Another federation sender instance is responsible for this destination
+            return
+
+        queue = self._get_per_destination_queue(server)
+        if not queue:
+            # Destination not allowed
+            return
+
+        queue.notify_sticky_event_backlog()
 
     def notify_new_events(self, max_token: RoomStreamToken) -> None:
         """This gets called when we have some new events we might want to

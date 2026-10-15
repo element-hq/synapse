@@ -392,6 +392,14 @@ class PerDestinationQueue:
 
         self._new_data_to_send = True
 
+    def notify_sticky_event_backlog(self) -> None:
+        """Marks that there may be a new backlog of sticky events to send to
+        this destination (e.g. because it newly joined a room containing sticky
+        events), and tries to start a new transaction to send them.
+        """
+        self._sticky_event_backlog_tracker.notify_potential_new_backlog()
+        self.attempt_new_transaction()
+
     def attempt_new_transaction(self) -> None:
         """Try to start a new transaction to this destination
 

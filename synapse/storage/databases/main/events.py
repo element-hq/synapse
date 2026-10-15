@@ -317,6 +317,7 @@ class PersistEventsStore:
         use_negative_stream_ordering: bool = False,
         inhibit_local_membership_updates: bool = False,
         new_state_dag_forward_extremities: set[str] | None = None,
+        newly_joined_servers: Set[str] = frozenset(),
     ) -> None:
         """Persist a set of events alongside updates to the current state and
                 forward extremities tables.
@@ -339,6 +340,8 @@ class PersistEventsStore:
                 not affect the current local state.
             new_state_dag_forward_extremities: A set of event IDs that are the new forward
                 extremities for the state DAG for this room. MSC4242 only.
+            newly_joined_servers: set of server names that have newly joined this room
+                as a result of these events. Only calculated with MSC4354 enabled.
 
         Returns:
             Resolves when the events have been persisted
@@ -424,6 +427,7 @@ class PersistEventsStore:
                 sliding_sync_table_changes=sliding_sync_table_changes,
                 new_state_dag_forward_extremities=new_state_dag_forward_extremities,
                 sticky_events_to_un_soft_fail=sticky_events_to_un_soft_fail,
+                newly_joined_servers=newly_joined_servers,
             )
             persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
                 len(events_and_contexts)
@@ -1090,6 +1094,7 @@ class PersistEventsStore:
         sliding_sync_table_changes: SlidingSyncTableChanges | None,
         new_state_dag_forward_extremities: set[str] | None = None,
         sticky_events_to_un_soft_fail: Set[str] = frozenset(),
+        newly_joined_servers: Set[str] = frozenset(),
     ) -> None:
         """Insert some number of room events into the necessary database tables.
 
@@ -1120,6 +1125,8 @@ class PersistEventsStore:
                 `_calculate_sliding_sync_table_changes(...)`)
             sticky_events_to_un_soft_fail:
                 Sticky events which will be un-soft-failed when persisting the events.
+            newly_joined_servers: set of server names that have newly joined this room
+                as a result of these events. Only calculated with MSC4354 enabled.
 
         Raises:
             PartialStateConflictError: if attempting to persist a partial state event in
@@ -1272,6 +1279,13 @@ class PersistEventsStore:
             if sticky_events_to_un_soft_fail:
                 self.store.un_soft_fail_sticky_events_txn(
                     txn, sticky_events_to_un_soft_fail
+                )
+
+            # If any servers joined the room, then we should write down the fact that we
+            # need to send them all historical sticky events
+            if newly_joined_servers:
+                self.store.mark_backlogged_sticky_events_for_newly_joined_servers_txn(
+                    txn, room_id=room_id, destinations=newly_joined_servers
                 )
 
         # We only update the sliding sync tables for non-backfilled events.

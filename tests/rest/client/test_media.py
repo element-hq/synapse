@@ -1605,7 +1605,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
 
 # We test this here because this endpoint must still work
-# even if lxml is not installed.
+# even if beautifulsoup4 is not installed.
 class URLPreviewDisabledTests(unittest.HomeserverTestCase):
     servlets = [
         admin.register_servlets,
@@ -1625,26 +1625,12 @@ class URLPreviewDisabledTests(unittest.HomeserverTestCase):
             "experimental_features": {"msc4452_enabled": False},
         }
     )
-    def test_disabled_previews(self) -> None:
-        """Tests that disabling URL previews gives back a sane response."""
-        channel = self.make_request(
-            "GET",
-            "/_matrix/client/v1/media/preview_url?url=" + quote("http://example.com"),
-            access_token=self.tok,
-        )
-        self.assertEqual(channel.code, 404, channel.result)
-        self.assertEqual(
-            channel.json_body,
-            {"errcode": "M_UNRECOGNIZED", "error": "Unrecognized request"},
-        )
-
     @override_config(
         {
             "url_preview_enabled": False,
-            "experimental_features": {"msc4452_enabled": True},
         }
     )
-    def test_disabled_previews_with_msc4452(self) -> None:
+    def test_disabled_previews(self) -> None:
         """Tests that disabling URL previews gives back a sane response."""
         channel = self.make_request(
             "GET",
