@@ -13,7 +13,7 @@
  *
  */
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use pyo3::prelude::*;
 
@@ -35,6 +35,8 @@ pub struct SynapseHomeServerConfig {
     pub server: ServerConfig,
     pub experimental: ExperimentalConfig,
     pub retention: RetentionConfig,
+    pub federation: FederationConfig,
+    pub tls: TlsConfig,
 }
 
 #[derive(FromPyObject, Clone)]
@@ -51,6 +53,53 @@ pub struct ServerConfig {
     pub msc4140_enabled: bool,
     pub public_baseurl: String,
     pub include_profile_updates_in_sync: bool,
+    /// IP ranges outbound federation may not connect to.
+    pub federation_ip_range_blocklist: types::IpRangeSet,
+    /// Exceptions to `federation_ip_range_blocklist`.
+    pub federation_ip_range_allowlist: Option<types::IpRangeSet>,
+    pub user_agent_suffix: Option<String>,
+    pub proxy_config: types::ProxyConfig,
+}
+
+/// `config.federation`: outbound federation request settings.
+#[derive(FromPyObject, Clone)]
+pub struct FederationConfig {
+    /// If set, the only server names we federate with. Python keeps this as
+    /// a dict of name to `True`.
+    pub federation_domain_whitelist: Option<HashMap<String, bool>>,
+    /// The destinations to label per-destination metrics with.
+    pub federation_metrics_domains: HashSet<String>,
+    pub client_timeout_ms: u64,
+    pub max_long_retry_delay_ms: u64,
+    pub max_short_retry_delay_ms: u64,
+    pub max_long_retries: u32,
+    pub max_short_retries: u32,
+    pub destination_min_retry_interval_ms: u64,
+    pub destination_retry_multiplier: f64,
+    pub destination_max_retry_interval_ms: u64,
+}
+
+impl FederationConfig {
+    /// Whether the federation whitelist (if any) lets us talk to `domain`.
+    /// Mirrors `is_domain_allowed_according_to_federation_whitelist`.
+    pub fn is_domain_allowed(&self, domain: &str) -> bool {
+        self.federation_domain_whitelist
+            .as_ref()
+            .is_none_or(|whitelist| whitelist.contains_key(domain))
+    }
+}
+
+/// `config.tls`: the TLS policy for outbound federation.
+#[derive(FromPyObject, Clone)]
+pub struct TlsConfig {
+    pub federation_verify_certificates: bool,
+    /// One of `1`, `1.1`, `1.2` or `1.3`.
+    pub federation_client_minimum_tls_version: String,
+    /// Hosts whose certificates are not verified, as anchored regexes.
+    pub federation_certificate_verification_whitelist: Vec<types::PythonRegex>,
+    /// The PEM text of `federation_custom_ca_list`, which replaces the
+    /// platform trust roots when set.
+    pub federation_custom_ca_pems: Option<Vec<String>>,
 }
 
 /// `config.retention`: the message retention policy settings.

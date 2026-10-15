@@ -105,6 +105,8 @@ lru = "0.16.4"
 # Signing outbound federation requests. 2.x rather than 3.x, which needs a
 # newer rustc than our MSRV.
 ed25519-dalek = "2.2.0"
+# The IP range lists in config.
+ipnet = "2.11.0"
 
 [dev-dependencies]
 tokio = { version = "1.44.2", features = ["macros", "test-util"] }

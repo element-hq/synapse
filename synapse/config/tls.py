@@ -102,6 +102,8 @@ class TlsConfig(Config):
 
         # Read in and parse custom CA certificates
         self.federation_ca_trust_root = None
+        # The PEM text of the same certificates, for the Rust federation agent.
+        self.federation_custom_ca_pems: list[str] | None = None
         if custom_ca_list is not None:
             if len(custom_ca_list) == 0:
                 # A trustroot cannot be generated without any CA certificates.
@@ -112,6 +114,7 @@ class TlsConfig(Config):
                 )
 
             certs = []
+            pems = []
             for ca_file in custom_ca_list:
                 logger.debug("Reading custom CA certificate file: %s", ca_file)
                 content = self.read_file(ca_file, "federation_custom_ca_list")
@@ -120,12 +123,14 @@ class TlsConfig(Config):
                 try:
                     cert_base = Certificate.loadPEM(content.encode("ascii"))
                     certs.append(cert_base)
+                    pems.append(content)
                 except Exception as e:
                     raise ConfigError(
                         "Error parsing custom CA certificate file %s: %s" % (ca_file, e)
                     )
 
             self.federation_ca_trust_root = trustRootFromCertificates(certs)
+            self.federation_custom_ca_pems = pems
 
         # This config option applies to non-federation HTTP clients
         # (e.g. for talking to recaptcha, identity servers, and such)
