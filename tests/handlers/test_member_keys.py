@@ -209,7 +209,7 @@ class EventTranslationTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             self._signers(event_dict),
-            [MemberKeys.SIGNATURE_ENTITY, self.hs.hostname],
+            [MemberKeys.SIGNATURE_ENTITY, MemberKeys.LINKAGE_SIGNATURE_ENTITY],
         )
 
     def test_erased_user_gets_no_localpart(self) -> None:
@@ -232,7 +232,7 @@ class EventTranslationTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             self._signers(event_dict),
-            [MemberKeys.SIGNATURE_ENTITY, self.hs.hostname],
+            [MemberKeys.SIGNATURE_ENTITY, MemberKeys.LINKAGE_SIGNATURE_ENTITY],
         )
 
     def test_remote_target_is_refused(self) -> None:
@@ -305,7 +305,11 @@ class EventTranslationTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             self._signers(event_dict),
-            [MemberKeys.SIGNATURE_ENTITY, self.hs.hostname, alice_key],
+            [
+                MemberKeys.SIGNATURE_ENTITY,
+                MemberKeys.LINKAGE_SIGNATURE_ENTITY,
+                alice_key,
+            ],
         )
 
     def _key_for(self, user_id: str) -> str:
@@ -461,7 +465,8 @@ class EventTranslationTestCase(unittest.HomeserverTestCase):
             EventContentFields.MSC4430_DOMAIN: self.hs.hostname,
         }
         self.assertEqual(
-            signers_for(ours), [MemberKeys.SIGNATURE_ENTITY, self.hs.hostname]
+            signers_for(ours),
+            [MemberKeys.SIGNATURE_ENTITY, MemberKeys.LINKAGE_SIGNATURE_ENTITY],
         )
         for wrong in (
             {**ours, EventContentFields.MSC4430_LOCALPART: "bob"},
@@ -476,7 +481,7 @@ class EventTranslationTestCase(unittest.HomeserverTestCase):
         self.assertEqual(signers_for(ours), [MemberKeys.SIGNATURE_ENTITY])
         self.assertEqual(
             signers_for({EventContentFields.MSC4430_DOMAIN: self.hs.hostname}),
-            [MemberKeys.SIGNATURE_ENTITY, self.hs.hostname],
+            [MemberKeys.SIGNATURE_ENTITY, MemberKeys.LINKAGE_SIGNATURE_ENTITY],
         )
 
     def test_remote_additional_creator_is_refused(self) -> None:

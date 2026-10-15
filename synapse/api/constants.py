@@ -356,7 +356,18 @@ class MemberKeys:
     SIGNATURE_ENTITY: Final = "sender"
     """The entity name under which the sender's member key signs an event. (The
     authorising member key of a restricted join signs under the member key string
-    itself, and a server co-signing linkage information signs under its name.)"""
+    itself.)"""
+
+    LINKAGE_SIGNATURE_ENTITY: Final = "state_key"
+    """The entity name under which a server co-signs the linkage information of an
+    `m.room.member` event: the claim that the member key in `state_key` belongs to
+    `content.localpart` at `content.domain`. Naming the entity for the member it is
+    about, rather than for the server making the claim, is what lets a third party
+    tell an assertion about the target from one about the sender: an invite is sent
+    by one member key and co-signed by the *invitee's* server. The signature is made
+    with the server's own key, so the key ID is a real server key ID rather than the
+    member keys' constant `ed25519:1`, and names the published key to check it
+    against."""
 
     KEY_ALGORITHM: Final = "ed25519"
     KEY_VERSION: Final = "1"

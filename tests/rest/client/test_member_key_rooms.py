@@ -149,7 +149,7 @@ class _MemberKeyRoomsBase(unittest.HomeserverTestCase):
             {entity: set(sigs) for entity, sigs in event.signatures.as_dict().items()},
             {
                 MemberKeys.SIGNATURE_ENTITY: {MemberKeys.KEY_ID},
-                self.hs.hostname: {
+                MemberKeys.LINKAGE_SIGNATURE_ENTITY: {
                     f"{self.hs.signing_key.alg}:{self.hs.signing_key.version}"
                 },
             },
@@ -366,7 +366,7 @@ class MemberKeyRoomsTestCase(_MemberKeyRoomsBase):
             leave.content[EventContentFields.MSC4430_DOMAIN], self.hs.hostname
         )
         # Still ours, so still co-signed.
-        self.assertIn(self.hs.hostname, leave.signatures)
+        self.assertIn(MemberKeys.LINKAGE_SIGNATURE_ENTITY, leave.signatures)
 
     def test_additional_creators(self) -> None:
         """Additional creators are named by key in the create event, which is the
@@ -610,7 +610,7 @@ class MemberKeyModerationTestCase(_MemberKeyRoomsBase):
         self.assertEqual(
             ban.content[EventContentFields.MSC4430_DOMAIN], self.hs.hostname
         )
-        self.assertIn(self.hs.hostname, ban.signatures.as_dict())
+        self.assertIn(MemberKeys.LINKAGE_SIGNATURE_ENTITY, ban.signatures.as_dict())
         self._assert_no_user_ids_in_room(room_id)
 
     def test_moderation_through_the_state_api(self) -> None:

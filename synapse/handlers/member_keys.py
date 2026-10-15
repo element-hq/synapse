@@ -544,10 +544,11 @@ class MemberKeyHandler:
         """Who signs an event we are building in a member key room:
 
         * the sender's member key, under the entity `sender`, if we hold it;
-        * our server signing key on an `m.room.member` event whose target is a
-          key we hold and whose linkage information is exactly what we vouch for
-          (our domain, and the user's localpart unless they are erased): that is
-          what lets other servers verify the member's link;
+        * our server signing key, under the entity `state_key`, on an
+          `m.room.member` event whose target is a key we hold and whose linkage
+          information is exactly what we vouch for (our domain, and the user's
+          localpart unless they are erased): that is what lets other servers
+          verify the member's link;
         * the authorising member's key, under its own name, on a restricted join
           that names a key we hold.
 
@@ -583,7 +584,9 @@ class MemberKeyHandler:
             if target_user_id is not None and await self._is_our_linkage(
                 target_user_id, content
             ):
-                signers.append((self.server_name, self._server_signing_key))
+                signers.append(
+                    (MemberKeys.LINKAGE_SIGNATURE_ENTITY, self._server_signing_key)
+                )
 
         authorising_member = content.get(EventContentFields.AUTHORISING_USER)
         if (

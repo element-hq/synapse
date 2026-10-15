@@ -200,8 +200,10 @@ def add_hashes_and_signatures_from_signers(
     * A member key string (the authorising member of a restricted join, MSC-Q §2):
       the event must be a join naming that key in `join_authorised_via_users_server`,
       and the key must be that member key.
-    * Our own server name (`server_name`), co-signing linkage information: the event
-      must be an `m.room.member` event whose `content.domain` is us.
+    * `MemberKeys.LINKAGE_SIGNATURE_ENTITY` (`state_key`), co-signing the linkage
+      information of the member named by `state_key`: the event must be an
+      `m.room.member` event whose `content.domain` is us, and the key must be our
+      server signing key.
 
     Anything else is refused. To add one signature to an event that is already
     hashed (one received from another server), use
@@ -322,9 +324,14 @@ def _check_member_key_room_signer(
             )
         return
 
-    # Our server name: the co-signature on linkage information.
-    if signature_name != server_name:
-        raise refuse("not this server's name (%s)" % (server_name,))
+    # The co-signature on linkage information. The entity is the constant
+    # `state_key`, naming the member the claim is about; the claim itself is
+    # `content.domain`, which must be us, since this server signs for nobody else.
+    if signature_name != MemberKeys.LINKAGE_SIGNATURE_ENTITY:
+        raise refuse(
+            "not a signature this event may carry (expected %s)"
+            % (MemberKeys.LINKAGE_SIGNATURE_ENTITY,)
+        )
     if event_dict.get("type") != EventTypes.Member:
         raise refuse("servers only co-sign m.room.member events")
     if content.get(EventContentFields.MSC4430_DOMAIN) != server_name:

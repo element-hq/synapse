@@ -339,23 +339,34 @@ class MemberKeySigningTestCase(unittest.TestCase):
             )
 
     def test_server_cosignature(self) -> None:
+        """The server co-signs linkage information under the entity `state_key`,
+        naming the member the claim is about rather than itself, with its own key
+        ID: a verifier reads `content.domain`, fetches that server's published key
+        of that ID, and checks the `state_key` signature."""
         event = self._sign(
             self._member_event_dict(),
             (MemberKeys.SIGNATURE_ENTITY, self.member_signing_key),
-            (self.server_name, self.server_signing_key),
+            (MemberKeys.LINKAGE_SIGNATURE_ENTITY, self.server_signing_key),
         )
 
-        # Both signatures are present: the second signer added to the first.
+        # Both signatures are present: the second signer added to the first. The
+        # co-signature carries the server's own key ID, not the member keys'
+        # constant `ed25519:1`, and the server's name appears nowhere.
         self.assertEqual(
-            set(self._signatures(event)),
-            {MemberKeys.SIGNATURE_ENTITY, self.server_name},
+            {k: list(v) for k, v in self._signatures(event).items()},
+            {
+                MemberKeys.SIGNATURE_ENTITY: [MemberKeys.KEY_ID],
+                MemberKeys.LINKAGE_SIGNATURE_ENTITY: ["ed25519:srv"],
+            },
         )
         redacted = self._redacted_pdu(event)
         verify_signed_json(
             redacted, MemberKeys.SIGNATURE_ENTITY, self.member_key.verify_key()
         )
         verify_signed_json(
-            redacted, self.server_name, get_verify_key(self.server_signing_key)
+            redacted,
+            MemberKeys.LINKAGE_SIGNATURE_ENTITY,
+            get_verify_key(self.server_signing_key),
         )
 
     def test_authorising_member_key_signature(self) -> None:
@@ -436,7 +447,7 @@ class MemberKeySigningTestCase(unittest.TestCase):
         event = self._sign(
             self._member_event_dict(),
             (MemberKeys.SIGNATURE_ENTITY, self.member_signing_key),
-            (self.server_name, self.server_signing_key),
+            (MemberKeys.LINKAGE_SIGNATURE_ENTITY, self.server_signing_key),
         )
 
         redacted = prune_event(event)
@@ -451,7 +462,9 @@ class MemberKeySigningTestCase(unittest.TestCase):
             pdu, MemberKeys.SIGNATURE_ENTITY, self.member_key.verify_key()
         )
         verify_signed_json(
-            pdu, self.server_name, get_verify_key(self.server_signing_key)
+            pdu,
+            MemberKeys.LINKAGE_SIGNATURE_ENTITY,
+            get_verify_key(self.server_signing_key),
         )
         # ... and cover `domain`: changing it invalidates both.
         tampered = copy.deepcopy(pdu)
@@ -462,7 +475,9 @@ class MemberKeySigningTestCase(unittest.TestCase):
             )
         with self.assertRaises(SignatureVerifyException):
             verify_signed_json(
-                tampered, self.server_name, get_verify_key(self.server_signing_key)
+                tampered,
+                MemberKeys.LINKAGE_SIGNATURE_ENTITY,
+                get_verify_key(self.server_signing_key),
             )
 
         # The event ID (the reference hash) covers `domain` too...
@@ -558,21 +573,18 @@ class MemberKeySigningTestCase(unittest.TestCase):
     def test_refuses_server_cosignature_on_wrong_event(self) -> None:
         """A server co-signs only `m.room.member` events whose `content.domain` is
         itself: our co-signature is a statement about our own user."""
-        # Another server's name, even if it matches `content.domain`.
+        linkage = MemberKeys.LINKAGE_SIGNATURE_ENTITY
+        # Another domain's linkage information.
         event_dict = self._member_event_dict()
         event_dict["content"]["domain"] = "other.example"
         self._assert_refused(
-            event_dict, ("other.example", self.server_signing_key), "not this server"
-        )
-        # Our name, on another domain's linkage information.
-        self._assert_refused(
-            event_dict, (self.server_name, self.server_signing_key), "content.domain"
+            event_dict, (linkage, self.server_signing_key), "content.domain"
         )
         # No linkage information at all.
         event_dict = self._member_event_dict()
         del event_dict["content"]["domain"]
         self._assert_refused(
-            event_dict, (self.server_name, self.server_signing_key), "content.domain"
+            event_dict, (linkage, self.server_signing_key), "content.domain"
         )
         # Not a membership event.
         event_dict = self._member_event_dict()
@@ -580,9 +592,20 @@ class MemberKeySigningTestCase(unittest.TestCase):
         del event_dict["state_key"]
         self._assert_refused(
             event_dict,
-            (self.server_name, self.server_signing_key),
+            (linkage, self.server_signing_key),
             "only co-sign m.room.member",
         )
+
+    def test_refuses_signature_under_a_server_name(self) -> None:
+        """Linkage is co-signed under the constant `state_key`, so a signature
+        under a server's name — ours or anyone else's — is not a signature a
+        member key room event may carry."""
+        for entity in (self.server_name, "other.example"):
+            self._assert_refused(
+                self._member_event_dict(),
+                (entity, self.server_signing_key),
+                "not a signature this event may carry",
+            )
 
     def test_refuses_non_member_key_room(self) -> None:
         for fn in (
