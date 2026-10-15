@@ -55,7 +55,10 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpStream,
 };
-use tokio_rustls::TlsConnector;
+use tokio_rustls::{
+    rustls::{pki_types::ServerName, ClientConfig},
+    TlsConnector,
+};
 
 use super::{
     policy::{IpPolicy, Proxy},
@@ -74,6 +77,12 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long to wait for one address before also trying the next, as
 /// Twisted's `HostnameEndpoint` does.
 const ATTEMPT_DELAY: Duration = Duration::from_millis(300);
+
+/// How long the TLS handshake, and a proxy's answer to `CONNECT`, may each
+/// take. Twisted bounds neither, relying on the request's own timeout. We
+/// need a bound here too: hyper finishes some connections in a background
+/// task that no request timeout reaches.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The longest `CONNECT` response head we read from a proxy.
 const MAX_PROXY_RESPONSE: usize = 16 * 1024;
@@ -144,14 +153,13 @@ impl ConnectorInner {
         let mut first_error = None;
         for server in servers {
             match self.connect_to(&server).await {
-                Ok(tcp) => {
-                    let connector = TlsConnector::from(tls_config.clone());
-                    return match connector.connect(tls_name.clone(), tcp).await {
-                        Ok(tls) => Ok(FederationStream::new(Box::new(tls))),
-                        Err(err) => Err(TransportError::Tls(
-                            anyhow!(err).context(format!("TLS handshake with {host}")),
-                        )),
-                    };
+                Ok(stream) => {
+                    let tls = tls_handshake(tls_config.clone(), tls_name.clone(), stream)
+                        .await
+                        .map_err(|err| {
+                            TransportError::Tls(err.context(format!("TLS handshake with {host}")))
+                        })?;
+                    return Ok(FederationStream::new(tls));
                 }
                 Err(err) => {
                     info!(
@@ -216,18 +224,26 @@ impl ConnectorInner {
 
         let mut stream: Box<dyn Io> = if proxy.tls {
             let name = server_name(&proxy.host).map_err(TransportError::Tls)?;
-            let connector = TlsConnector::from(self.tls.config_for(&proxy.host));
-            let tls = connector.connect(name, tcp).await.map_err(|err| {
-                TransportError::Tls(anyhow!(err).context(format!("TLS to proxy {}", proxy.host)))
-            })?;
-            Box::new(tls)
+            tls_handshake(self.tls.config_for(&proxy.host), name, Box::new(tcp))
+                .await
+                .map_err(|err| {
+                    TransportError::Tls(err.context(format!("TLS to proxy {}", proxy.host)))
+                })?
         } else {
             Box::new(tcp)
         };
 
-        proxy_connect(&mut stream, host, port, proxy.authorization.as_deref())
-            .await
-            .map_err(TransportError::Connect)?;
+        tokio::time::timeout(
+            HANDSHAKE_TIMEOUT,
+            proxy_connect(&mut stream, host, port, proxy.authorization.as_deref()),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(anyhow!(
+                "proxy did not answer CONNECT in {HANDSHAKE_TIMEOUT:?}"
+            ))
+        })
+        .map_err(TransportError::Connect)?;
 
         Ok(stream)
     }
@@ -286,6 +302,20 @@ async fn connect_tcp(ips: Vec<IpAddr>, port: u16) -> Result<TcpStream, Transport
         Err(_) => Err(TransportError::Connect(anyhow!(
             "timed out after {CONNECT_TIMEOUT:?}"
         ))),
+    }
+}
+
+/// Speak TLS over `stream`, verifying the server as `name`.
+async fn tls_handshake(
+    config: Arc<ClientConfig>,
+    name: ServerName<'static>,
+    stream: Box<dyn Io>,
+) -> anyhow::Result<Box<dyn Io>> {
+    let connector = TlsConnector::from(config);
+    match tokio::time::timeout(HANDSHAKE_TIMEOUT, connector.connect(name, stream)).await {
+        Ok(Ok(tls)) => Ok(Box::new(tls)),
+        Ok(Err(err)) => Err(anyhow!(err)),
+        Err(_) => bail!("timed out after {HANDSHAKE_TIMEOUT:?}"),
     }
 }
 
@@ -442,6 +472,30 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("403"), "{err}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_tls_handshake_times_out() {
+        // The peer never answers the ClientHello.
+        let (client, _server) = duplex(4096);
+        let config = TlsPolicy::new(&crate::config::TlsConfig {
+            federation_verify_certificates: true,
+            federation_client_minimum_tls_version: "1.2".to_owned(),
+            federation_certificate_verification_whitelist: Vec::new(),
+            federation_custom_ca_pems: None,
+        })
+        .unwrap()
+        .config_for("remote.example");
+
+        let err = tls_handshake(
+            config,
+            server_name("remote.example").unwrap(),
+            Box::new(client),
+        )
+        .await
+        .err()
+        .expect("handshake should fail");
+        assert!(err.to_string().contains("timed out"), "{err}");
     }
 
     #[tokio::test]

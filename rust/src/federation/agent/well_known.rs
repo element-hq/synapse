@@ -17,7 +17,9 @@
 //!
 //! The caching rules are Python's, constant for constant. Two things are
 //! new: each fetch attempt has a timeout (Python's has none), and
-//! concurrent lookups of one server name share a single fetch.
+//! concurrent lookups of one server name share a single fetch. That fetch
+//! runs as its own task, so it finishes and caches its result even if every
+//! request waiting on it gives up.
 
 use std::{
     collections::HashMap,
@@ -184,14 +186,22 @@ impl WellKnownResolver {
                 .or_insert_with(|| {
                     let this = self.clone();
                     let server_name = server_name.to_owned();
-                    async move {
-                        let result = this.lookup(&server_name, prev).await;
-                        this.in_flight
-                            .lock()
-                            .expect("poisoned")
-                            .remove(&server_name);
-                        result
-                    }
+                    // A future only its callers poll would stall when they
+                    // all go away, and resume on the next request with its
+                    // fetch timeout long expired.
+                    let task = tokio::spawn(async move {
+                        let _done = InFlightGuard {
+                            resolver: &this,
+                            server_name: &server_name,
+                        };
+                        this.lookup(&server_name, prev).await
+                    });
+                    task.map(|joined| {
+                        joined.unwrap_or_else(|err| {
+                            warn!("Well-known lookup failed: {err}");
+                            None
+                        })
+                    })
                     .boxed()
                     .shared()
                 })
@@ -351,6 +361,20 @@ impl WellKnownResolver {
         }
 
         Err(FetchError::Other(anyhow!("too many redirects")))
+    }
+}
+
+/// Removes a lookup from `in_flight` when it finishes, or panics.
+struct InFlightGuard<'a> {
+    resolver: &'a WellKnownResolver,
+    server_name: &'a str,
+}
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut in_flight) = self.resolver.in_flight.lock() {
+            in_flight.remove(self.server_name);
+        }
     }
 }
 
@@ -801,5 +825,27 @@ mod tests {
         assert_eq!(b.as_deref(), Some("target"));
         assert_eq!(fetcher.calls(), 1);
         assert!(resolver.in_flight.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn abandoned_lookup_still_completes() {
+        let fetcher = FakeFetcher::new(delegate("target"));
+        let (resolver, _) = make_resolver(fetcher.clone());
+
+        // Start a lookup, then give up on it before the fetch returns.
+        {
+            let lookup = std::pin::pin!(resolver.get_well_known("example.com"));
+            assert!(futures::poll!(lookup).is_pending());
+        }
+
+        // The fetch carries on without us, and its result is cached.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(resolver.in_flight.lock().unwrap().is_empty());
+        assert_eq!(fetcher.calls(), 1);
+        assert_eq!(
+            resolver.get_well_known("example.com").await.as_deref(),
+            Some("target")
+        );
+        assert_eq!(fetcher.calls(), 0);
     }
 }
