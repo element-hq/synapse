@@ -1,0 +1,1 @@
+In legacy sync, lazy-load the memberships of the senders of [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354).
