@@ -404,7 +404,7 @@ class DelayedEventsHandler:
         # MSC4140: don't store delayed events for rooms the sender is not in. A
         # change to their own membership (e.g. a delayed join) is left to the auth
         # rules, which are applied in full when the event is sent.
-        if not (event_type == EventTypes.Member and state_key == str(requester.user)):
+        if not (event_type == EventTypes.Member and state_key == requester.user.to_string()):
             await self._auth.check_user_in_room(room_id, requester)
 
         creation_ts = self._get_current_ts()
