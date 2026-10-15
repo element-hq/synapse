@@ -102,6 +102,24 @@ tokio-postgres-rustls = { version = "0.14.0", default-features = false, features
     "ring",
 ] }
 lru = "0.16.4"
+# Outbound federation (`federation::agent`): the TLS policy.
+tokio-rustls = { version = "0.26.2", default-features = false, features = [
+    "ring",
+    "logging",
+    "tls12",
+] }
+# SRV lookups. A/AAAA go through the system resolver, as in Python. 0.25
+# rather than 0.26, which needs a newer rustc than our MSRV.
+hickory-resolver = { version = "0.25.2", default-features = false, features = [
+    "tokio",
+    "system-config",
+] }
+# SRV record ordering and cache period jitter.
+rand = "0.10.2"
+# The `Expires` header of `.well-known` responses.
+httpdate = "1.0.3"
+# Resolving `.well-known` redirects.
+url = "2.5.4"
 # Signing outbound federation requests. 2.x rather than 3.x, which needs a
 # newer rustc than our MSRV.
 ed25519-dalek = "2.2.0"

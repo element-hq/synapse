@@ -17,12 +17,15 @@
 //!
 //! This is being built up from the network end, one layer at a time.
 //!
+//! - [`agent`]: the parts of the agent that will send requests: server
+//!   name resolution, and the IP range and TLS policies.
 //! - [`signing`]: the `X-Matrix` request signature.
 //! - [`transport`]: the seam between the request layer and the network, with
 //!   a Python-backed implementation for tests.
 
 use pyo3::prelude::*;
 
+pub mod agent;
 pub mod signing;
 pub mod transport;
 
