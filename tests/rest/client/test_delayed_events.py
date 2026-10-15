@@ -546,6 +546,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
         )
 
+        # Check that a state event is rejected
         channel = self._make_delayed_event_request(
             room_id=room_id,
             delay=Duration(milliseconds=900),
