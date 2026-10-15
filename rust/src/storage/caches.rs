@@ -52,6 +52,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use crate::caches::{python::CacheHandle, registry::CacheRegistry, Cache};
+use crate::federation::client::limiter::RetryTimings;
 use crate::state::StateMap;
 use crate::storage::events::CachedEvent;
 use crate::storage::sync_store::{RetentionRow, RoomNotifCounts, RoomSummary};
@@ -142,6 +143,8 @@ pub struct StoreCaches {
     /// user, weighed by threads, and invalidated by room alone as well,
     /// which the Python cache does as a `tree=True` cache.
     pub unread_counts: Arc<UnreadCountsCache>,
+    /// `get_destination_retry_timings`.
+    pub destination_retry_timings: Arc<Cache<Arc<str>, Option<RetryTimings>>>,
 }
 
 /// User ID to the rooms they are joined to.
@@ -184,6 +187,8 @@ impl StoreCaches {
             erased_users: registry.new_cache("rust_is_user_erased", 1000),
             retention_policies: registry.new_cache("rust_get_retention_policy_for_room", 1000),
             event_to_state_group: registry.new_cache("rust_get_state_group_for_event", 10_000),
+            destination_retry_timings: registry
+                .new_cache("rust_get_destination_retry_timings", 10_000),
             unread_counts: registry.new_weighted_cache(
                 "rust_get_unread_event_push_actions_by_room_for_user",
                 5000,
@@ -217,6 +222,10 @@ impl StoreCaches {
             mirror(
                 "get_unread_event_push_actions_by_room_for_user",
                 &self.unread_counts,
+            ),
+            mirror(
+                "get_destination_retry_timings",
+                &self.destination_retry_timings,
             ),
         ]
     }

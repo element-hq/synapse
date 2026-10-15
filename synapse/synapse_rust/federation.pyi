@@ -10,9 +10,11 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from signedjson.types import SigningKey
+
+from twisted.internet.defer import Deferred
 
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -69,3 +71,75 @@ class RustFederationAgentForTest:
             RuntimeError: `"<kind>: <message>"` if no response arrived, where
                 `kind` is e.g. `dns`, `connect`, `tls` or `service_unavailable`.
         """
+
+def federation_gil_stats() -> dict[str, tuple[int, float]]:
+    """How often the Rust federation code has taken the GIL: call site to
+    `(calls, seconds held)`."""
+
+class RustFederationClient:
+    """The Rust federation request layer: signing, retries, the backoff and the
+    connection pool. `MatrixFederationHttpClient` sends its JSON requests
+    through it at `rust_federation_sending: client`.
+    """
+
+    def __init__(
+        self,
+        hs: HomeServer,
+        user_agent: str,
+        agent_user_agent: str,
+        write_retry_timings: Callable[[str, int | None, int, int, bool], None],
+        record_metrics: Callable[[str, int, list[int]], None],
+        transport: Callable[
+            [str, str, str, list[tuple[bytes, bytes]], bytes],
+            tuple[int, list[tuple[bytes, bytes]], bytes],
+        ]
+        | None = None,
+    ) -> None:
+        """
+        Args:
+            hs: The homeserver whose config, signing key and Rust runtime to use.
+            user_agent: The `User-Agent` header of federation requests.
+            agent_user_agent: The `User-Agent` header of `.well-known` fetches.
+            write_retry_timings: Called on the reactor as
+                `(destination, failure_ts, retry_last_ts, retry_interval,
+                server_up)` when a destination's backoff changes.
+            record_metrics: Called once per request as `(method, attempts,
+                response_codes)`.
+            transport: For tests: send through this callable, as
+                `(destination, method, path, headers, body) -> (status,
+                headers, body)`, instead of the network.
+        """
+
+    def request(
+        self,
+        method: str,
+        destination: str,
+        path: str,
+        query: str,
+        body: JsonDict | None,
+        parser_kind: str,
+        parser: Any = None,
+        *,
+        rewrite_age_ts: bool = False,
+        extra_headers: Sequence[tuple[str, str]] = (),
+        retry_on_dns_fail: bool = True,
+        timeout_ms: int | None = None,
+        long_retries: bool = False,
+        ignore_backoff: bool = False,
+        backoff_on_404: bool = False,
+        backoff_on_all_error_codes: bool = False,
+        try_trailing_slash_on_400: bool = False,
+        want_headers: bool = False,
+    ) -> Deferred[tuple[Any, dict[bytes, list[bytes]] | None]]:
+        """Send a request and parse the response, raising what
+        `MatrixFederationHttpClient` raises.
+
+        `parser_kind` is `"json"`, `"legacy_json_send"` or `"custom"`, for
+        which `parser` is the `ByteParser`.
+        """
+
+    def shutdown(self) -> None:
+        """Stop retrying requests."""
+
+    def wake_destination(self, destination: str) -> None:
+        """End the sleep before any retry to `destination`."""

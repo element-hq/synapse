@@ -184,7 +184,7 @@ pub fn user_id_is_valid(s: &str) -> bool {
 }
 
 /// Port of `parse_and_validate_server_name`, returning whether it succeeds.
-fn is_valid_server_name(server_name: &str) -> bool {
+pub(crate) fn is_valid_server_name(server_name: &str) -> bool {
     // `parse_server_name`.
     let host = if server_name.ends_with(']') {
         server_name

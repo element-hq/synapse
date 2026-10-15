@@ -22,6 +22,7 @@ use pyo3::{
 };
 
 use crate::caches::{python::PyCacheKey, registry::CacheRegistry, Cache};
+use crate::federation::client::limiter::RetryTimings;
 use crate::storage::caches::StoreCaches;
 use crate::storage::db::{DatabasePool, DatabasePoolExt, DbRowExt};
 
@@ -134,6 +135,61 @@ impl Store {
             })
             .await
             .map_err(anyhow::Error::new)
+    }
+
+    /// `get_destination_retry_timings`: the destination's backoff, or `None`
+    /// if we are not backing off from it. Cached in a mirror of the Python
+    /// cache, which every write invalidates.
+    pub async fn get_destination_retry_timings(
+        &self,
+        destination: &str,
+    ) -> anyhow::Result<Option<RetryTimings>> {
+        let destination: Arc<str> = Arc::from(destination);
+        self.caches
+            .destination_retry_timings
+            .get_or_load(Arc::clone(&destination), || {
+                self.load_destination_retry_timings(Arc::clone(&destination))
+            })
+            .await
+            .map_err(anyhow::Error::new)
+    }
+
+    async fn load_destination_retry_timings(
+        &self,
+        destination: Arc<str>,
+    ) -> anyhow::Result<Option<RetryTimings>> {
+        self.db_pool
+            .run_interaction("get_destination_retry_timings", move |txn| {
+                let destination = Arc::clone(&destination);
+                async move {
+                    let rows = txn
+                        .query(
+                            "SELECT failure_ts, retry_last_ts, retry_interval \
+                             FROM destinations WHERE destination = ?",
+                            &[destination.as_ref()],
+                        )
+                        .await?;
+                    let Some(row) = rows.first() else {
+                        return Ok(None);
+                    };
+                    let failure_ts: Option<i64> = row.try_get(0)?;
+                    let retry_last_ts: Option<i64> = row.try_get(1)?;
+                    let retry_interval: Option<i64> = row.try_get(2)?;
+
+                    // As Python: no backoff unless `retry_last_ts` is set and
+                    // not zero.
+                    Ok(match retry_last_ts {
+                        Some(retry_last_ts) if retry_last_ts != 0 => Some(RetryTimings {
+                            failure_ts: failure_ts.map(|ts| ts.max(0) as u64),
+                            retry_last_ts: retry_last_ts.max(0) as u64,
+                            retry_interval: retry_interval.unwrap_or(0).max(0) as u64,
+                        }),
+                        _ => None,
+                    })
+                }
+                .boxed()
+            })
+            .await
     }
 
     /// The uncached body of [`Store::is_feature_enabled_for_user`].

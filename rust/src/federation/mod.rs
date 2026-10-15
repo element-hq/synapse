@@ -19,6 +19,8 @@
 //!
 //! - [`agent`]: sends requests: server name resolution, the IP range and
 //!   TLS policies, and the connection pool.
+//! - [`client`]: the request layer: signing, retries and the backoff.
+//! - [`gil`]: accounting for every time this code takes the GIL.
 //! - [`signing`]: the `X-Matrix` request signature.
 //! - [`transport`]: the seam between the request layer and the network, with
 //!   a Python-backed implementation for tests.
@@ -26,6 +28,8 @@
 use pyo3::prelude::*;
 
 pub mod agent;
+pub mod client;
+pub mod gil;
 pub mod signing;
 pub mod transport;
 
@@ -80,7 +84,9 @@ fn build_auth_header_for_test(
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "federation")?;
     child_module.add_function(wrap_pyfunction!(build_auth_header_for_test, &child_module)?)?;
+    child_module.add_function(wrap_pyfunction!(gil::federation_gil_stats, &child_module)?)?;
     child_module.add_class::<agent::python::RustFederationAgentForTest>()?;
+    child_module.add_class::<client::python::RustFederationClient>()?;
 
     m.add_submodule(&child_module)?;
 
