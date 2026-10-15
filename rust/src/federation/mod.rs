@@ -17,8 +17,8 @@
 //!
 //! This is being built up from the network end, one layer at a time.
 //!
-//! - [`agent`]: the parts of the agent that will send requests: server
-//!   name resolution, and the IP range and TLS policies.
+//! - [`agent`]: sends requests: server name resolution, the IP range and
+//!   TLS policies, and the connection pool.
 //! - [`signing`]: the `X-Matrix` request signature.
 //! - [`transport`]: the seam between the request layer and the network, with
 //!   a Python-backed implementation for tests.
@@ -80,6 +80,7 @@ fn build_auth_header_for_test(
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "federation")?;
     child_module.add_function(wrap_pyfunction!(build_auth_header_for_test, &child_module)?)?;
+    child_module.add_class::<agent::python::RustFederationAgentForTest>()?;
 
     m.add_submodule(&child_module)?;
 

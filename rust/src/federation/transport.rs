@@ -83,6 +83,40 @@ impl TransportError {
     pub fn is_dns(&self) -> bool {
         matches!(self, TransportError::Dns(_))
     }
+
+    /// A short name for the kind of failure.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            TransportError::Dns(_) => "dns",
+            TransportError::ServiceUnavailable(_) => "service_unavailable",
+            TransportError::Connect(_) => "connect",
+            TransportError::Tls(_) => "tls",
+            TransportError::InvalidRequest(_) => "invalid_request",
+            TransportError::Request(_) => "request",
+            TransportError::Timeout => "timeout",
+            TransportError::Python(_) => "python",
+        }
+    }
+
+    /// A copy of this error of the same kind, with the source chain
+    /// flattened into the message. hyper only lends us the error our
+    /// connector returned, so this is how we get it back out.
+    pub fn duplicate(&self) -> TransportError {
+        let flat = |e: &anyhow::Error| anyhow::anyhow!("{e:#}");
+        match self {
+            TransportError::Dns(e) => TransportError::Dns(flat(e)),
+            TransportError::ServiceUnavailable(name) => {
+                TransportError::ServiceUnavailable(name.clone())
+            }
+            TransportError::Connect(e) => TransportError::Connect(flat(e)),
+            TransportError::Tls(e) => TransportError::Tls(flat(e)),
+            TransportError::InvalidRequest(e) => TransportError::InvalidRequest(flat(e)),
+            TransportError::Request(e) => TransportError::Request(flat(e)),
+            TransportError::Timeout => TransportError::Timeout,
+            // Cloning a `PyErr` needs the GIL, which we may not hold.
+            TransportError::Python(e) => TransportError::Request(anyhow::anyhow!("{e}")),
+        }
+    }
 }
 
 impl fmt::Display for TransportError {

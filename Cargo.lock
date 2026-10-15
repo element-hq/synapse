@@ -2025,6 +2025,8 @@ dependencies = [
  "http",
  "http-body-util",
  "httpdate",
+ "hyper",
+ "hyper-util",
  "icu_segmenter",
  "ipnet",
  "itertools",
@@ -2054,6 +2056,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-postgres-rustls",
  "tokio-rustls",
+ "tower-service",
  "ulid",
  "url",
 ]

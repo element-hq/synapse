@@ -102,12 +102,22 @@ tokio-postgres-rustls = { version = "0.14.0", default-features = false, features
     "ring",
 ] }
 lru = "0.16.4"
-# Outbound federation (`federation::agent`): the TLS policy.
+# Outbound federation (`federation::agent`). We drive hyper's connection pool
+# with our own connector, which does Matrix server name resolution, the IP
+# range policy and the TLS policy.
+hyper = { version = "1.6.0", features = ["client", "http1"] }
+hyper-util = { version = "0.1.16", features = [
+    "client",
+    "client-legacy",
+    "http1",
+    "tokio",
+] }
 tokio-rustls = { version = "0.26.2", default-features = false, features = [
     "ring",
     "logging",
     "tls12",
 ] }
+tower-service = "0.3.3"
 # SRV lookups. A/AAAA go through the system resolver, as in Python. 0.25
 # rather than 0.26, which needs a newer rustc than our MSRV.
 hickory-resolver = { version = "0.25.2", default-features = false, features = [
