@@ -3328,16 +3328,21 @@ class SyncHandler:
                 leave_token = now_token.copy_and_replace(
                     StreamKeyType.ROOM, RoomStreamToken(stream=event.event_pos.stream)
                 )
+                leave_event = await self.store.get_event(event.event_id)
+                out_of_band = leave_event.internal_metadata.is_out_of_band_membership()
+                # As for incremental sync, OOB leaves must be supplied explicitly:
+                # timeline queries exclude outliers, and there may be no room state.
                 room_entries.append(
                     RoomSyncResultBuilder(
                         room_id=event.room_id,
                         rtype="archived",
-                        events=None,
+                        events=[leave_event] if out_of_band else None,
                         newly_joined=False,
                         full_state=True,
                         since_token=since_token,
                         upto_token=leave_token,
                         end_token=leave_token,
+                        out_of_band=out_of_band,
                     )
                 )
 

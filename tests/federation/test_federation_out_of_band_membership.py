@@ -24,7 +24,7 @@ import time
 import urllib.parse
 from http import HTTPStatus
 from typing import Any, Callable, TypeVar
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import attr
 from parameterized import parameterized
@@ -43,7 +43,7 @@ from synapse.http.types import QueryParams
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, MutableStateMap, StateMap
+from synapse.types import JsonDict, MutableStateMap, StateMap, StrCollection
 from synapse.types.handlers.sliding_sync import (
     StateValues,
 )
@@ -466,10 +466,15 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self._invite_local_user_to_remote_room_and_join()
 
     @parameterized.expand(
-        [("accept invite", Membership.JOIN), ("reject invite", Membership.LEAVE)]
+        [
+            ("accept invite, warm cache", Membership.JOIN, False),
+            ("accept invite, cold cache", Membership.JOIN, True),
+            ("reject invite, warm cache", Membership.LEAVE, False),
+            ("reject invite, cold cache", Membership.LEAVE, True),
+        ]
     )
     def test_can_x_from_out_of_band_invite_after_we_are_already_participating_in_the_room(
-        self, _test_description: str, membership_action: str
+        self, _test_description: str, membership_action: str, cold_cache: bool
     ) -> None:
         """
         Test to make sure that we can do either a) join the room (accept the invite) or
@@ -511,6 +516,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             backoff_on_all_error_codes: bool = False,
         ) -> JsonDict | T:
             if path.startswith("/_matrix/federation/v1/send/") and data is not None:
+                self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 for pdu in data.get("pdus", []):
                     event = make_test_pdu_event(pdu, room_version)
                     collected_pdus_from_hs1_federation_send.add(event.event_id)
@@ -601,6 +607,24 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 # Prevent tight-looping to allow the `test_timeout` to work
                 time.sleep(0.1)
 
+        state_handler = self.hs.get_state_handler()
+        get_hosts = state_handler.get_hosts_in_room_at_events
+
+        async def get_hosts_for_sender(
+            room_id: str, event_ids: StrCollection
+        ) -> frozenset[str]:
+            invite = await self.store.get_event(user2_invite_membership_event.event_id)
+            self.assertTrue(invite.internal_metadata.is_outlier())
+            if cold_cache:
+                # A sender worker does not share the event creator's warmed state
+                # group cache. Evict only at the sender boundary, after creation.
+                for event_id in event_ids:
+                    self.store._get_state_group_for_event.invalidate((event_id,))
+            return await get_hosts(room_id, event_ids)
+
+        sender_lookup = AsyncMock(side_effect=get_hosts_for_sender)
+        self.patch(state_handler, "get_hosts_in_room_at_events", sender_lookup)
+
         if membership_action == Membership.JOIN:
             # User2 joins the room
             join_event = self.helper.join(
@@ -649,6 +673,8 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
                 # Prevent tight-looping to allow the `test_timeout` to work
                 time.sleep(0.1)
+
+        sender_lookup.assert_awaited()
 
         # Make sure that we let hs2 know about the new membership event
         self.assertIncludes(

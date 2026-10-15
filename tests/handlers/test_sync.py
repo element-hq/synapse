@@ -26,7 +26,13 @@ from parameterized import parameterized, parameterized_class
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, ProfileFields
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventTypes,
+    JoinRules,
+    Membership,
+    ProfileFields,
+)
 from synapse.api.errors import Codes, ResourceLimitError
 from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
@@ -152,6 +158,92 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             ResourceLimitError,
         )
         self.assertEqual(e.value.errcode, Codes.RESOURCE_LIMIT_EXCEEDED)
+
+    @parameterized.expand(
+        [
+            ("rejected_initial", True, False),
+            ("rescinded_initial", False, False),
+            ("rejected_incremental", True, True),
+            ("rescinded_incremental", False, True),
+        ]
+    )
+    def test_out_of_band_leave(
+        self, _name: str, rejected: bool, incremental: bool
+    ) -> None:
+        """Sync includes invite rejections/rescissions even without a room timeline."""
+        user_id = self.register_user("invitee", "pass")
+        inviter = "@inviter:remote"
+        room_id = "!room:remote"
+        room_version = RoomVersions.V10
+        self.get_success(
+            self.store.maybe_store_room_on_outlier_membership(room_id, room_version)
+        )
+        storage = self.hs.get_storage_controllers()
+        persistence = storage.persistence
+        assert persistence is not None
+
+        invite = make_test_pdu_event(
+            {
+                "room_id": room_id,
+                "type": EventTypes.Member,
+                "sender": inviter,
+                "state_key": user_id,
+                "content": {"membership": Membership.INVITE},
+            },
+            room_version,
+        )
+        invite.internal_metadata.outlier = True
+        invite.internal_metadata.out_of_band_membership = True
+        self.get_success(
+            persistence.persist_event(invite, EventContext.for_outlier(storage))
+        )
+        sync_config = generate_sync_config(
+            user_id,
+            use_state_after=self.use_state_after,
+            filter_collection=FilterCollection(
+                self.hs, {"room": {"include_leave": rejected}}
+            ),
+        )
+        requester = create_requester(user_id)
+        initial = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester, sync_config, request_key=generate_request_key()
+            )
+        )
+        self.assertEqual([r.room_id for r in initial.invited], [room_id])
+
+        leave = make_test_pdu_event(
+            {
+                "room_id": room_id,
+                "type": EventTypes.Member,
+                "sender": user_id if rejected else inviter,
+                "state_key": user_id,
+                "content": {"membership": Membership.LEAVE},
+                "prev_events": [invite.event_id],
+                "auth_events": [invite.event_id],
+            },
+            room_version,
+        )
+        leave.internal_metadata.outlier = True
+        leave.internal_metadata.out_of_band_membership = True
+        self.get_success(
+            persistence.persist_event(leave, EventContext.for_outlier(storage))
+        )
+
+        result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config,
+                request_key=generate_request_key(),
+                since_token=initial.next_batch if incremental else None,
+            )
+        )
+        self.assertEqual([r.room_id for r in result.archived], [room_id])
+        self.assertEqual(
+            [e.event.event_id for e in result.archived[0].timeline.events],
+            [leave.event_id],
+        )
+        self.assertEqual(result.archived[0].state, {})
 
     def test_unknown_room_version(self) -> None:
         """

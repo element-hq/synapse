@@ -149,7 +149,6 @@ import synapse.metrics
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.presence import UserPresenceState
 from synapse.events import EventBase
-from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.federation.sender.per_destination_queue import (
     CATCHUP_RETRY_INTERVAL,
     PerDestinationQueue,
@@ -654,17 +653,12 @@ class FederationSender(AbstractFederationSender):
 
                     if destinations is None:
                         try:
-                            # Get the state from before the event.
-                            # We need to make sure that this is the state from before
-                            # the event and not from after it.
-                            # Otherwise if the last member on a server in a room is
-                            # banned then it won't receive the event because it won't
-                            # be in the room after the ban.
+                            # The persisted event has state even if some predecessors
+                            # are still outliers, e.g. when accepting an OOB invite.
+                            # Use that state rather than resolving the predecessors
+                            # again. Restore any departed member's destination below.
                             destinations = await self.state.get_hosts_in_room_at_events(
-                                event.room_id,
-                                event_ids=event.prev_state_events
-                                if supports_msc4242_state_dag(event)
-                                else event.prev_event_ids(),
+                                event.room_id, event_ids=[event.event_id]
                             )
                         except Exception:
                             logger.exception(
@@ -673,18 +667,16 @@ class FederationSender(AbstractFederationSender):
                             )
                             return
 
-                    # If we've rescinded an invite then we want to tell the
-                    # other server.
-                    if (
-                        event.type == EventTypes.Member
-                        and event.membership == Membership.LEAVE
-                        and event.sender != event.state_key
+                    # The state after a leave/ban excludes the departing user. If
+                    # they were their server's last joined user, it still needs the
+                    # event. Invite rescissions also need to reach the invitee.
+                    if event.type == EventTypes.Member and event.membership in (
+                        Membership.LEAVE,
+                        Membership.BAN,
                     ):
-                        # We check if this leave event is rescinding an invite
-                        # by looking if there is an invite event for the user in
-                        # the auth events. It could otherwise be a kick or
-                        # unban, which we don't want to send (if the user wasn't
-                        # already in the room).
+                        # Check the previous membership rather than unconditionally
+                        # adding the target's server: unbans and bans of non-members
+                        # must not be sent to servers outside the room.
                         auth_events = await self.store.get_events_as_list(
                             event.auth_event_ids()
                         )
@@ -692,7 +684,14 @@ class FederationSender(AbstractFederationSender):
                             if (
                                 auth_event.type == EventTypes.Member
                                 and auth_event.state_key == event.state_key
-                                and auth_event.membership == Membership.INVITE
+                                and (
+                                    auth_event.membership == Membership.JOIN
+                                    or (
+                                        auth_event.membership == Membership.INVITE
+                                        and event.membership == Membership.LEAVE
+                                        and event.sender != event.state_key
+                                    )
+                                )
                             ):
                                 destinations = set(destinations)
                                 destinations.add(get_domain_from_id(event.state_key))

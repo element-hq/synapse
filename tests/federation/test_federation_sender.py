@@ -20,26 +20,119 @@
 from typing import Callable
 from unittest.mock import AsyncMock, Mock
 
+from parameterized import parameterized
 from signedjson import key, sign
 from signedjson.types import BaseKey, SigningKey
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EduTypes, RoomEncryptionAlgorithms
+from synapse.api.constants import EduTypes, Membership, RoomEncryptionAlgorithms
 from synapse.api.presence import UserPresenceState
 from synapse.federation.sender.per_destination_queue import MAX_PRESENCE_STATES_PER_EDU
 from synapse.federation.units import Transaction
 from synapse.handlers.device import DeviceListUpdater, DeviceWriterHandler
 from synapse.rest import admin
-from synapse.rest.client import login
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventMetadata
 from synapse.types import JsonDict, ReadReceipt
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
+from tests.test_utils.event_builders import make_test_pdu_event
+from tests.test_utils.event_injection import inject_member_event
 from tests.unittest import HomeserverTestCase
+
+
+class FederationSenderMembershipTestCases(HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["federation_sender_instances"] = ["master"]
+        return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.federation_transport_client = Mock(spec=["send_transaction"])
+        self.federation_transport_client.send_transaction = AsyncMock(return_value={})
+        return self.setup_test_homeserver(
+            federation_transport_client=self.federation_transport_client,
+        )
+
+    @parameterized.expand(
+        [
+            ("kick", Membership.JOIN, Membership.LEAVE, True),
+            ("ban", Membership.JOIN, Membership.BAN, True),
+            ("rescind_invite", Membership.INVITE, Membership.LEAVE, True),
+            ("unban", Membership.BAN, Membership.LEAVE, False),
+            ("ban_non_member", None, Membership.BAN, False),
+            ("ban_invited_user", Membership.INVITE, Membership.BAN, False),
+        ]
+    )
+    def test_membership_destinations(
+        self,
+        _description: str,
+        previous_membership: str | None,
+        membership: str,
+        should_send: bool,
+    ) -> None:
+        """Removing the last joined user must not lose their server's destination.
+
+        Non-joined targets must not gain a destination, except for invite rescissions.
+        """
+        user = self.register_user("user", "pass")
+        token = self.login("user", "pass")
+        room_id = self.helper.create_room_as(user, tok=token)
+        target = "@remote:other_server"
+        store = self.hs.get_datastores().main
+        room_version = self.get_success(store.get_room_version(room_id))
+
+        if previous_membership is not None:
+            self.get_success(
+                inject_member_event(
+                    self.hs,
+                    room_id,
+                    sender=target if previous_membership == Membership.JOIN else user,
+                    membership=previous_membership,
+                    target=target,
+                )
+            )
+
+        result = self.helper.change_membership(
+            room_id, src=user, targ=target, membership=membership, tok=token
+        )
+        event_id = result["event_id"]
+        self.pump()
+
+        # The target server has no joined users after any of these transitions.
+        self.assertNotIn(
+            "other_server",
+            self.get_success(
+                self.hs.get_state_handler().get_hosts_in_room_at_events(
+                    room_id, [event_id]
+                )
+            ),
+        )
+
+        # Ensure a negative assertion below cannot pass just because the sender
+        # hasn't processed the event yet.
+        event_pos = self.get_success(store.get_position_for_event(event_id))
+        self.assertGreaterEqual(
+            self.get_success(store.get_federation_out_pos("events")), event_pos.stream
+        )
+
+        destinations = {
+            call.args[0].destination
+            for call in self.federation_transport_client.send_transaction.call_args_list
+            for pdu in call.args[1]().get("pdus", [])
+            if make_test_pdu_event(pdu, room_version).event_id == event_id
+        }
+        self.assertEqual(destinations, {"other_server"} if should_send else set())
 
 
 class FederationSenderReceiptsTestCases(HomeserverTestCase):
