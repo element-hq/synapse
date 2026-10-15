@@ -250,6 +250,16 @@ class NewEventChainLinks:
     links: list[tuple[int, int]] = attr.Factory(list)
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _RedactionInfo:
+    """Information about a redaction. For internal use (`_apply_existing_redaction_txn`)."""
+
+    event_id: str
+    redacts_event_id: str
+    event_sender: str
+    event_needs_v3_recheck: bool
+
+
 class PersistEventsStore:
     """Contains all the functions for writing events to the database.
 
@@ -307,6 +317,7 @@ class PersistEventsStore:
         use_negative_stream_ordering: bool = False,
         inhibit_local_membership_updates: bool = False,
         new_state_dag_forward_extremities: set[str] | None = None,
+        newly_joined_servers: Set[str] = frozenset(),
     ) -> None:
         """Persist a set of events alongside updates to the current state and
                 forward extremities tables.
@@ -329,6 +340,8 @@ class PersistEventsStore:
                 not affect the current local state.
             new_state_dag_forward_extremities: A set of event IDs that are the new forward
                 extremities for the state DAG for this room. MSC4242 only.
+            newly_joined_servers: set of server names that have newly joined this room
+                as a result of these events. Only calculated with MSC4354 enabled.
 
         Returns:
             Resolves when the events have been persisted
@@ -414,6 +427,7 @@ class PersistEventsStore:
                 sliding_sync_table_changes=sliding_sync_table_changes,
                 new_state_dag_forward_extremities=new_state_dag_forward_extremities,
                 sticky_events_to_un_soft_fail=sticky_events_to_un_soft_fail,
+                newly_joined_servers=newly_joined_servers,
             )
             persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
                 len(events_and_contexts)
@@ -1080,6 +1094,7 @@ class PersistEventsStore:
         sliding_sync_table_changes: SlidingSyncTableChanges | None,
         new_state_dag_forward_extremities: set[str] | None = None,
         sticky_events_to_un_soft_fail: Set[str] = frozenset(),
+        newly_joined_servers: Set[str] = frozenset(),
     ) -> None:
         """Insert some number of room events into the necessary database tables.
 
@@ -1110,6 +1125,8 @@ class PersistEventsStore:
                 `_calculate_sliding_sync_table_changes(...)`)
             sticky_events_to_un_soft_fail:
                 Sticky events which will be un-soft-failed when persisting the events.
+            newly_joined_servers: set of server names that have newly joined this room
+                as a result of these events. Only calculated with MSC4354 enabled.
 
         Raises:
             PartialStateConflictError: if attempting to persist a partial state event in
@@ -1262,6 +1279,13 @@ class PersistEventsStore:
             if sticky_events_to_un_soft_fail:
                 self.store.un_soft_fail_sticky_events_txn(
                     txn, sticky_events_to_un_soft_fail
+                )
+
+            # If any servers joined the room, then we should write down the fact that we
+            # need to send them all historical sticky events
+            if newly_joined_servers:
+                self.store.mark_backlogged_sticky_events_for_newly_joined_servers_txn(
+                    txn, room_id=room_id, destinations=newly_joined_servers
                 )
 
         # We only update the sliding sync tables for non-backfilled events.
@@ -2924,6 +2948,10 @@ class PersistEventsStore:
         If we have any redactions for the events we're about to persist,
         pre-applies those if they are appropriate.
 
+        The redactions may either have been persisted previously
+        (e.g. we received the redaction over federation before the event it redacts)
+        or be part of this same batch of events.
+
         Redaction events themselves won't be redacted immediately, to avoid
         breaking circular redactions (which are tested in `test_circular_redaction`).
 
@@ -2938,51 +2966,89 @@ class PersistEventsStore:
         Returns a copy of the `events_and_contexts` lists with redactions applied.
         """
 
+        assert all(ev.room_id == room_id for ev, _ in events_and_contexts)
+
         # Get all the event IDs, whilst also filtering out redaction events
         # which we don't want to redact immediately anyway
-        event_ids = [
+        event_ids = {
             ev.event_id
             for ev, _ in events_and_contexts
             if ev.type != EventTypes.Redaction
-        ]
+        }
 
         if not event_ids:
             # nothing to do here
             return events_and_contexts
 
+        def get_persisted_redactions() -> list[_RedactionInfo]:
+            """
+            Fetches the already-persisted redactions affecting the events in this batch.
+            """
+            event_id_in_list_clause, event_id_in_list_args = make_in_list_sql_clause(
+                txn.database_engine,
+                "redactions.redacts",
+                event_ids,
+            )
+            txn.execute(
+                f"""
+                SELECT redactions.event_id, redactions.redacts, redaction_events.sender, redactions.recheck
+                FROM redactions
+                INNER JOIN events AS redaction_events
+                    ON redactions.event_id = redaction_events.event_id
+                    AND redaction_events.room_id = ?
+                WHERE {event_id_in_list_clause}
+                """,
+                (room_id, *event_id_in_list_args),
+            )
+            return [
+                _RedactionInfo(
+                    event_id=redaction_event_id,
+                    redacts_event_id=redaction_redacts_event_id,
+                    event_sender=redaction_event_sender,
+                    event_needs_v3_recheck=bool(redaction_event_needs_v3_recheck),
+                )
+                for (
+                    redaction_event_id,
+                    redaction_redacts_event_id,
+                    redaction_event_sender,
+                    redaction_event_needs_v3_recheck,
+                ) in txn
+            ]
+
+        def get_redactions_in_batch() -> list[_RedactionInfo]:
+            """
+            Picks out redactions _within this batch_ that affect events also in this batch.
+            """
+            return [
+                _RedactionInfo(
+                    event_id=ev.event_id,
+                    redacts_event_id=ev.redacts,
+                    event_sender=ev.sender,
+                    event_needs_v3_recheck=ev.internal_metadata.need_to_check_redaction(),
+                )
+                for ev, ctx in events_and_contexts
+                if ev.type == EventTypes.Redaction
+                and ev.redacts is not None
+                and ev.redacts in event_ids
+                and not ctx.rejected
+            ]
+
         events_by_id = {ev.event_id: ev for ev, _ in events_and_contexts}
-        event_id_in_list_clause, event_id_in_list_args = make_in_list_sql_clause(
-            txn.database_engine,
-            "redactions.redacts",
-            event_ids,
-        )
-        txn.execute(
-            f"""
-            SELECT redactions.event_id, redactions.redacts, redaction_events.sender, redactions.recheck
-            FROM redactions
-            INNER JOIN events AS redaction_events
-                ON redactions.event_id = redaction_events.event_id
-                AND redaction_events.room_id = ?
-            WHERE {event_id_in_list_clause}
-            """,
-            (room_id, *event_id_in_list_args),
-        )
 
         # map from redacted event ID to the event ID that redacts it
         redacted_event_id_map = {}
-        for (
-            redaction_event_id,
-            redaction_redacts_event_id,
-            redaction_event_sender,
-            redaction_event_needs_v3_recheck,
-        ) in txn:
-            if redaction_redacts_event_id in redacted_event_id_map:
+
+        for redaction in itertools.chain(
+            get_persisted_redactions(),
+            get_redactions_in_batch(),
+        ):
+            if redaction.redacts_event_id in redacted_event_id_map:
                 # Already redacted
                 continue
 
-            event = events_by_id[redaction_redacts_event_id]
+            event = events_by_id[redaction.redacts_event_id]
             if (
-                redaction_event_needs_v3_recheck
+                redaction.event_needs_v3_recheck
                 # Normally v1/v2 don't ever need rechecks because the checks are part of auth rules.
                 # However the `recheck` column was only recently introduced as a retrofit,
                 # with a database-level default of `true`.
@@ -2991,27 +3057,27 @@ class PersistEventsStore:
                 and room_version.event_format != EventFormatVersions.ROOM_V1_V2
             ):
                 # Apply the same logic as `_maybe_redact_event_row`
-                if get_domain_from_id(redaction_event_sender) != get_domain_from_id(
+                if get_domain_from_id(redaction.event_sender) != get_domain_from_id(
                     event.sender
                 ):
                     # Sender servers don't match, so the event isn't actually redacted
                     logger.debug(
                         "redaction of %s by %s skipped as it required a v3 recheck and sender servers differ: %r != %r",
-                        redaction_redacts_event_id,
-                        redaction_event_id,
-                        redaction_event_sender,
+                        redaction.redacts_event_id,
+                        redaction.event_id,
+                        redaction.event_sender,
                         event.sender,
                     )
                     continue
 
                 # Unlike `_maybe_redact_event_row`, we _don't_ mutate the cached instance of the redaction event to set
-                # `recheck_redaction` to False here, as we don't actually load the redaction out of the database.
+                # `recheck_redaction` to False here, as we don't necessarily have the redaction event to hand.
 
-            redacted_event_id_map[redaction_redacts_event_id] = redaction_event_id
+            redacted_event_id_map[redaction.redacts_event_id] = redaction.event_id
             logger.debug(
                 "%r redacted at persistence time by %r",
-                redaction_redacts_event_id,
-                redaction_event_id,
+                redaction.redacts_event_id,
+                redaction.event_id,
             )
 
         out: list[EventPersistencePair] = []

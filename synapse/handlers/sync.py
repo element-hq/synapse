@@ -81,6 +81,7 @@ from synapse.types import (
     StreamKeyType,
     StreamToken,
     UserID,
+    is_compliant_user_id,
 )
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
@@ -2787,6 +2788,11 @@ class SyncHandler:
             users = await self.store.get_users_in_room(room_id)
             extra_users_ids.update(users)
         extra_users_ids.discard(user.to_string())
+        extra_users_ids = {
+            extra_user_id
+            for extra_user_id in extra_users_ids
+            if self._is_mine_id(extra_user_id) or is_compliant_user_id(extra_user_id)
+        }
 
         if extra_users_ids:
             states = await self.presence_handler.get_states(extra_users_ids)
@@ -3553,10 +3559,6 @@ class SyncHandler:
                             self._storage_controllers,
                             sync_result_builder.sync_config.user.to_string(),
                             await self.store.get_events_as_list(sticky_event_ids),
-                            # As per MSC4354:
-                            # > History visibility checks MUST NOT be applied to sticky events.
-                            # > Any joined user is authorised to see sticky events for the duration they remain sticky.
-                            always_include_ids=frozenset(sticky_event_ids),
                         )
                 room_sync = JoinedSyncResult(
                     room_id=room_id,

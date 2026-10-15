@@ -23,7 +23,9 @@ from copy import deepcopy
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EduTypes, ReceiptTypes
+from synapse.api.constants import EduTypes, Membership, ReceiptTypes
+from synapse.rest import admin
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -340,3 +342,71 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
             events, "@me:server.org"
         )
         self.assertEqual(filtered_events, expected_output)
+
+
+class FederationReceiptsTestCase(unittest.FederatingHomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        hs.get_receipts_handler()
+
+    def test_non_compliant_user_id_receipt_dropped(self) -> None:
+        """A remote server sends read receipts for a compliant and a
+        non-compliant (grandfathered historical) user ID, both joined to a room
+        we share. Only the compliant one is stored.
+        """
+        local_user_id = self.register_user("alice", "pass")
+        local_user_token = self.login("alice", "pass")
+        room_id = self.helper.create_room_as(local_user_id, tok=local_user_token)
+        event_id = self.helper.send(room_id, tok=local_user_token)["event_id"]
+
+        compliant_user_id = f"@john:{self.OTHER_SERVER_NAME}"
+        non_compliant_user_id = f"@héllo:{self.OTHER_SERVER_NAME}"
+        for user_id in (compliant_user_id, non_compliant_user_id):
+            self.inject_room_member(room_id, user_id, Membership.JOIN)
+
+        channel = self.make_signed_federation_request(
+            "PUT",
+            "/_matrix/federation/v1/send/txn",
+            {
+                "edus": [
+                    {
+                        "edu_type": EduTypes.RECEIPT,
+                        "content": {
+                            room_id: {
+                                ReceiptTypes.READ: {
+                                    user_id: {
+                                        "event_ids": [event_id],
+                                        "data": {"ts": 1436451550453},
+                                    }
+                                    for user_id in (
+                                        compliant_user_id,
+                                        non_compliant_user_id,
+                                    )
+                                }
+                            }
+                        },
+                    }
+                ]
+            },
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        store = self.hs.get_datastores().main
+        self.assertEqual(
+            self.get_success(
+                store.get_receipts_for_user(compliant_user_id, [ReceiptTypes.READ])
+            ),
+            {room_id: event_id},
+        )
+        self.assertEqual(
+            self.get_success(
+                store.get_receipts_for_user(non_compliant_user_id, [ReceiptTypes.READ])
+            ),
+            {},
+        )

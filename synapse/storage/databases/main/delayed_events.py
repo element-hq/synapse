@@ -113,32 +113,6 @@ class DelayedEventsStore(SQLBaseStore):
             unique=True,
         )
 
-    async def get_delayed_events_stream_pos(self) -> int:
-        """
-        Gets the stream position of the background process to watch for state events
-        that target the same piece of state as any pending delayed events.
-        """
-        return await self.db_pool.simple_select_one_onecol(
-            table="delayed_events_stream_pos",
-            keyvalues={},
-            retcol="stream_id",
-            desc="get_delayed_events_stream_pos",
-        )
-
-    async def update_delayed_events_stream_pos(self, stream_id: int | None) -> None:
-        """
-        Updates the stream position of the background process to watch for state events
-        that target the same piece of state as any pending delayed events.
-
-        Must only be used by the worker running the background process.
-        """
-        await self.db_pool.simple_update_one(
-            table="delayed_events_stream_pos",
-            keyvalues={},
-            updatevalues={"stream_id": stream_id},
-            desc="update_delayed_events_stream_pos",
-        )
-
     async def add_delayed_event(
         self,
         *,
@@ -259,14 +233,16 @@ class DelayedEventsStore(SQLBaseStore):
     async def restart_delayed_event(
         self,
         delay_id: str,
+        user_localpart: str,
         current_ts: Timestamp,
     ) -> Timestamp:
         """
-        Restarts the send time of the matching delayed event,
+        Restarts the send time of the matching delayed event owned by the given user,
         as long as it hasn't already been marked for processing.
 
         Args:
             delay_id: The ID of the delayed event to restart.
+            user_localpart: The localpart of the user who owns the delayed event.
             current_ts: The current time, which will be used to calculate the new send time.
 
         Returns: The send time of the next delayed event to be sent,
@@ -284,11 +260,12 @@ class DelayedEventsStore(SQLBaseStore):
                 """
                 UPDATE delayed_events
                 SET send_ts = ? + delay
-                WHERE delay_id = ? AND NOT is_processed
+                WHERE delay_id = ? AND user_localpart = ? AND NOT is_processed
                 """,
                 (
                     current_ts,
                     delay_id,
+                    user_localpart,
                 ),
             )
             if txn.rowcount == 0:
@@ -300,21 +277,6 @@ class DelayedEventsStore(SQLBaseStore):
 
         return await self.db_pool.runInteraction(
             "restart_delayed_event", restart_delayed_event_txn
-        )
-
-    async def get_count_of_delayed_events(self) -> int:
-        """Returns the number of pending delayed events in the DB."""
-
-        def _get_count_of_delayed_events(txn: LoggingTransaction) -> int:
-            sql = "SELECT count(*) FROM delayed_events"
-
-            txn.execute(sql)
-            resp = txn.fetchone()
-            return resp[0] if resp is not None else 0
-
-        return await self.db_pool.runInteraction(
-            "get_count_of_delayed_events",
-            _get_count_of_delayed_events,
         )
 
     async def get_delayed_event_for_user(
@@ -483,13 +445,18 @@ class DelayedEventsStore(SQLBaseStore):
     async def process_target_delayed_event(
         self,
         delay_id: str,
+        user_localpart: str,
     ) -> tuple[
         DelayedEventDetails,
         Timestamp | None,
     ]:
         """
-        Marks for processing the matching delayed event, regardless of its timeout time,
-        as long as it has not already been marked as such.
+        Marks for processing the matching delayed event owned by the given user,
+        regardless of its timeout time, as long as it has not already been marked as such.
+
+        Args:
+            delay_id: The ID of the delayed event to process.
+            user_localpart: The localpart of the user who owns the delayed event.
 
         Returns: The details of the matching delayed event,
             and the send time of the next delayed event to be sent, if any.
@@ -508,7 +475,7 @@ class DelayedEventsStore(SQLBaseStore):
                 """
                 UPDATE delayed_events
                 SET is_processed = TRUE
-                WHERE delay_id = ? AND NOT is_processed
+                WHERE delay_id = ? AND user_localpart = ? AND NOT is_processed
                 RETURNING
                     room_id,
                     event_type,
@@ -519,7 +486,7 @@ class DelayedEventsStore(SQLBaseStore):
                     sticky_duration_ms,
                     user_localpart
                 """,
-                (delay_id,),
+                (delay_id, user_localpart),
             )
             row = txn.fetchone()
             if row is None:
@@ -543,9 +510,18 @@ class DelayedEventsStore(SQLBaseStore):
             "process_target_delayed_event", process_target_delayed_event_txn
         )
 
-    async def cancel_delayed_event(self, delay_id: str) -> Timestamp | None:
+    async def cancel_delayed_event(
+        self,
+        delay_id: str,
+        user_localpart: str,
+    ) -> Timestamp | None:
         """
-        Cancels the matching delayed event, i.e. remove it as long as it hasn't been processed.
+        Cancels the matching delayed event owned by the given user,
+        i.e. remove it as long as it hasn't been processed.
+
+        Args:
+            delay_id: The ID of the delayed event to cancel.
+            user_localpart: The localpart of the user who owns the delayed event.
 
         Returns: The send time of the next delayed event to be sent, if any.
 
@@ -562,6 +538,7 @@ class DelayedEventsStore(SQLBaseStore):
                     table="delayed_events",
                     keyvalues={
                         "delay_id": delay_id,
+                        "user_localpart": user_localpart,
                         "is_processed": False,
                     },
                 )
@@ -575,50 +552,6 @@ class DelayedEventsStore(SQLBaseStore):
 
         return await self.db_pool.runInteraction(
             "cancel_delayed_event", cancel_delayed_event_txn
-        )
-
-    async def cancel_delayed_state_events(
-        self,
-        *,
-        room_id: str,
-        event_type: str,
-        state_key: str,
-        not_from_localpart: str,
-    ) -> Timestamp | None:
-        """
-        Cancels all matching delayed state events, i.e. remove them as long as they haven't been processed.
-
-        Args:
-            room_id: The room ID to match against.
-            event_type: The event type to match against.
-            state_key: The state key to match against.
-            not_from_localpart: The localpart of a user whose delayed events to not cancel.
-                If set to the empty string, any users' delayed events may be cancelled.
-
-        Returns: The send time of the next delayed event to be sent, if any.
-        """
-
-        def cancel_delayed_state_events_txn(
-            txn: LoggingTransaction,
-        ) -> Timestamp | None:
-            txn.execute(
-                """
-                DELETE FROM delayed_events
-                WHERE room_id = ? AND event_type = ? AND state_key = ?
-                    AND user_localpart <> ?
-                    AND NOT is_processed
-                """,
-                (
-                    room_id,
-                    event_type,
-                    state_key,
-                    not_from_localpart,
-                ),
-            )
-            return self._get_next_delayed_event_send_ts_txn(txn)
-
-        return await self.db_pool.runInteraction(
-            "cancel_delayed_state_events", cancel_delayed_state_events_txn
         )
 
     async def cancel_delayed_events_for_user(
