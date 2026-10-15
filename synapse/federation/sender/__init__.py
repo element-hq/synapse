@@ -154,7 +154,11 @@ from synapse.federation.sender.per_destination_queue import (
     CATCHUP_RETRY_INTERVAL,
     PerDestinationQueue,
 )
-from synapse.federation.sender.rust_queue import RustPerDestinationQueue
+from synapse.federation.sender.rust_queue import (
+    RustPerDestinationQueue,
+    flush_rust_queue_metrics,
+    use_native_store,
+)
 from synapse.federation.sender.transaction_manager import TransactionManager
 from synapse.federation.units import Edu
 from synapse.logging.context import make_deferred_yieldable, run_in_background
@@ -164,6 +168,7 @@ from synapse.metrics import (
     event_processing_loop_counter,
     event_processing_loop_room_count,
     events_processed_counter,
+    pre_collect_hooks,
 )
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
@@ -433,9 +438,17 @@ class FederationSender(AbstractFederationSender):
             hs.config.experimental.rust_federation_sending_at_least("queues")
             and rust_transactions is not None
         ):
-            self._rust_queues = RustDestinationQueues(
-                rust_transactions, hs.config.experimental.msc4354_enabled
+            rust_queues = RustDestinationQueues(
+                rust_transactions,
+                hs.config.experimental.msc4354_enabled,
+                set(hs.config.federation.federation_metrics_domains),
             )
+            use_native_store(hs, rust_queues)
+            pre_collect_hooks.register_hook(
+                homeserver_instance_id=hs.get_instance_id(),
+                hook=self._flush_rust_queue_metrics,
+            )
+            self._rust_queues = rust_queues
 
         transaction_queue_pending_destinations_gauge.register_hook(
             homeserver_instance_id=hs.get_instance_id(),
@@ -496,6 +509,11 @@ class FederationSender(AbstractFederationSender):
         self._is_shutdown = True
         for queue in self._per_destination_queues.values():
             queue.shutdown()
+
+    def _flush_rust_queue_metrics(self) -> None:
+        """Add what the Rust loops counted to the metrics."""
+        if self._rust_queues is not None:
+            flush_rust_queue_metrics(self._rust_queues, self.server_name)
 
     def _get_per_destination_queue(
         self, destination: str

@@ -1,0 +1,1 @@
+Do the database work of the Rust federation transmission loops through the native Postgres driver, when the main database uses it (`rust_federation_sending: queues`).

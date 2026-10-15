@@ -147,6 +147,7 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, ArgLocation | None] = 
     "synapse.metrics._gc.PyPyGCStats": None,
     "synapse.metrics._reactor_metrics.ReactorLastSeenMetric": None,
     "synapse.metrics.CPUMetrics": None,
+    "synapse.metrics._PreCollectHooks": None,
     "synapse.metrics.jemalloc.JemallocCollector": None,
     "synapse.util.metrics.DynamicCollectorRegistry": None,
     "synapse.metrics.background_process_metrics._Collector": None,

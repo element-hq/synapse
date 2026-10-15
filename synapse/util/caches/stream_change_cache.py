@@ -21,7 +21,7 @@
 
 import logging
 import math
-from typing import Collection, Mapping
+from typing import Callable, Collection, Mapping
 
 import attr
 from sortedcontainers import SortedDict
@@ -105,6 +105,9 @@ class StreamChangeCache:
         # stream_pos for which we know _cache is valid.
         #
         self._earliest_known_stream_pos = current_stream_pos
+
+        # Called with every change: see `add_listener`.
+        self._listeners: list[Callable[[EntityType | None, int], None]] = []
 
         self.name = name
         self.metrics = caches.register_cache(
@@ -307,6 +310,11 @@ class StreamChangeCache:
         """
         assert isinstance(stream_pos, int)
 
+        # A listener may know of positions we have evicted, so it hears of
+        # this change even if we do nothing with it.
+        for listener in self._listeners:
+            listener(entity, stream_pos)
+
         # For a change before _cache is valid (e.g. at or before the earliest known
         # stream position) there's nothing to do.
         if stream_pos <= self._earliest_known_stream_pos:
@@ -338,6 +346,20 @@ class StreamChangeCache:
         self._cache.clear()
         self._entity_to_key.clear()
         self._earliest_known_stream_pos = stream_pos
+        for listener in self._listeners:
+            listener(None, stream_pos)
+
+    def add_listener(self, listener: Callable[[EntityType | None, int], None]) -> int:
+        """Call `listener(entity, stream_pos)` with every later change, and
+        `listener(None, stream_pos)` when all entities change.
+
+        Returns:
+            The position after which the listener hears of every change. Changes
+            at or before it are unknown to the listener.
+        """
+        self._listeners.append(listener)
+        latest = self._cache.peekitem(-1)[0] if self._cache else 0
+        return max(self._earliest_known_stream_pos, latest)
 
     def _evict(self) -> None:
         """

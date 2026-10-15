@@ -207,13 +207,50 @@ class RustDestinationQueues:
     `rust_federation_sending: queues`."""
 
     def __init__(
-        self, transactions: RustTransactionManager, msc4354_enabled: bool
-    ) -> None: ...
+        self,
+        transactions: RustTransactionManager,
+        msc4354_enabled: bool,
+        metrics_domains: set[str],
+    ) -> None:
+        """`metrics_domains` is `federation_metrics_domains`."""
+
+    def use_native_store(
+        self,
+        db_pool: Any,
+        stream_tokens: Callable[[], tuple[int, int]],
+        allow_device_name_lookup_over_federation: bool,
+        to_device_since: int,
+        device_lists_since: int,
+    ) -> None:
+        """Do the loops' database work through the native driver. `db_pool`
+        is the `RustConnectionPool`, and `stream_tokens()` returns the current
+        to-device and device list stream positions. The change trackers know
+        about the changes after the two positions given, and must be told of
+        every later one."""
+
+    def to_device_changed(self, destination: str | None, stream_pos: int) -> None:
+        """A `StreamChangeCache` listener for to-device messages."""
+
+    def device_list_changed(self, destination: str | None, stream_pos: int) -> None:
+        """A `StreamChangeCache` listener for device list updates."""
+
+    def take_metrics(
+        self,
+    ) -> tuple[int, dict[str, int], int, dict[int, int], dict[str, int]]:
+        """The counts since the last call: `(sent_transactions,
+        sent_edus_by_type, put_requests, put_responses_by_code,
+        last_sent_pdu_ts_by_destination)`."""
+
     def queue(
-        self, destination: str, facade: Any, should_send_on_this_instance: bool
+        self,
+        destination: str,
+        facade: Any,
+        should_send_on_this_instance: bool,
+        notify_delivered: bool,
     ) -> "RustDestinationQueue":
         """The queue for `destination`. `facade` provides the `_rust_*`
-        hooks, and is held weakly."""
+        hooks, and is held weakly. `notify_delivered` is whether a module
+        wants to hear about delivered events."""
 
     def idle(self) -> bool:
         """Whether every transmission loop has finished or is waiting on the

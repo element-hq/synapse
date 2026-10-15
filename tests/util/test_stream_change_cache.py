@@ -302,3 +302,25 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         self.assertFalse(cache.has_entity_changed("user@foo.com", 5))
         self.assertFalse(cache.has_entity_changed("bar@baz.net", 5))
         self.assertFalse(cache.has_entity_changed("user@elsewhere.org", 5))
+
+    def test_listener(self) -> None:
+        """A listener hears of every change after the position it is given,
+        including the ones the cache has no room for."""
+        cache = StreamChangeCache(
+            name="#test",
+            server_name=self.hs.hostname,
+            current_stream_pos=1,
+            max_size=1,
+            prefilled_cache={"a": 3},
+        )
+        heard: list[tuple[str | None, int]] = []
+        self.assertEqual(cache.add_listener(lambda e, pos: heard.append((e, pos))), 3)
+
+        cache.entity_has_changed("b", 4)
+        # The cache only holds one position, so this evicts "b".
+        cache.entity_has_changed("c", 5)
+        # Before the cache's earliest position, which it ignores.
+        cache.entity_has_changed("b", 4)
+        cache.all_entities_changed(6)
+
+        self.assertEqual(heard, [("b", 4), ("c", 5), ("b", 4), (None, 6)])

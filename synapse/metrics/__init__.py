@@ -615,6 +615,52 @@ class CPUMetrics(Collector):
 REGISTRY.register(CPUMetrics())  # type: ignore[missing-server-name-label]
 
 
+class _PreCollectHooks(Collector):
+    """Runs hooks when the metrics are collected, before collecting the
+    metrics registered after it.
+
+    For counts kept outside Python, such as in Rust, which a hook adds to the
+    Python metrics only when they are read. It is registered here, so it runs
+    before every metric defined after this module.
+    """
+
+    def __init__(self) -> None:
+        self._instance_id_to_hook_map: dict[str, Callable[[], None]] = {}
+
+    def describe(self) -> Iterable[Metric]:
+        return []
+
+    def collect(self) -> Iterable[Metric]:
+        for homeserver_instance_id, hook in list(self._instance_id_to_hook_map.items()):
+            try:
+                hook()
+            except Exception:
+                logger.exception(
+                    "Exception running a pre-collect hook for homeserver_instance_id=%s",
+                    homeserver_instance_id,
+                )
+        return []
+
+    def register_hook(
+        self, *, homeserver_instance_id: str, hook: Callable[[], None]
+    ) -> None:
+        """Run `hook` at each collection, until the homeserver shuts down."""
+        assert homeserver_instance_id not in self._instance_id_to_hook_map, (
+            f"A pre-collect hook is already registered for homeserver_instance_id={homeserver_instance_id}"
+        )
+        self._instance_id_to_hook_map[homeserver_instance_id] = hook
+
+    def unregister_hooks_for_homeserver_instance_id(
+        self, homeserver_instance_id: str
+    ) -> None:
+        self._instance_id_to_hook_map.pop(homeserver_instance_id, None)
+
+
+# It adds to metrics with the server name label, and has none of its own.
+pre_collect_hooks = _PreCollectHooks()  # type: ignore[missing-server-name-label]
+REGISTRY.register(pre_collect_hooks)
+
+
 #
 # Federation Metrics
 #

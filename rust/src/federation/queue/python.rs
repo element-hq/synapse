@@ -18,10 +18,12 @@
 //! [`RustDestinationQueues`] makes a [`RustDestinationQueue`] for each
 //! destination. The Python `RustPerDestinationQueue` wraps one and provides
 //! the [`QueueHooks`] as coroutines: `_rust_catch_up`, `_rust_device_edus`,
-//! `_rust_sticky_backlog` and `_rust_complete`.
+//! `_rust_sticky_backlog` and `_rust_complete`. With the native database
+//! driver, [`NativeHooks`] does the database work of the last two instead.
 
 use std::{
-    sync::{Arc, Mutex},
+    collections::HashSet,
+    sync::{Arc, Mutex, OnceLock},
     time::Instant,
 };
 
@@ -34,6 +36,9 @@ use pyo3::{
 use serde_json::Value;
 
 use super::{
+    changes::StreamChanges,
+    metrics::QueueMetrics,
+    native::{Native, NativeHooks, NativePool},
     Activity, Completion, DestinationQueue, DeviceEdus, DeviceEdusRequest, Edu, LoopError,
     Observer, PduBody, PresenceState, QueueConfig, QueueHooks, QueuedPdu, Receipt, SendOutcome,
     StickyBatch, StickyStreamPosition, TransactionSink,
@@ -51,6 +56,7 @@ use crate::{
         },
     },
     runtime::RustRuntime,
+    storage::federation_store::{FederationStore, FederationStoreConfig},
 };
 
 /// Makes the queues, and tells tests when their loops are idle.
@@ -59,45 +65,140 @@ pub struct RustDestinationQueues {
     sink: Arc<ClientSink>,
     runtime: RustRuntime,
     activity: Arc<Activity>,
+    metrics: Arc<QueueMetrics>,
     msc4354_enabled: bool,
+    /// Set when the main database uses the native driver.
+    native: OnceLock<Arc<Native>>,
 }
 
 #[pymethods]
 impl RustDestinationQueues {
+    /// `metrics_domains` is `federation_metrics_domains`.
     #[new]
-    fn py_new(transactions: &Bound<'_, RustTransactionManager>, msc4354_enabled: bool) -> Self {
+    fn py_new(
+        transactions: &Bound<'_, RustTransactionManager>,
+        msc4354_enabled: bool,
+        metrics_domains: HashSet<String>,
+    ) -> Self {
         let transactions = transactions.get();
+        let metrics = Arc::new(QueueMetrics::new(metrics_domains));
         RustDestinationQueues {
             sink: Arc::new(ClientSink {
                 sender: Arc::clone(&transactions.sender),
                 runtime: transactions.runtime.clone(),
-                record_metrics: Arc::clone(&transactions.record_metrics),
+                metrics: Arc::clone(&metrics),
                 send_for_test: Mutex::new(None),
             }),
             runtime: transactions.runtime.clone(),
             activity: Arc::default(),
+            metrics,
             msc4354_enabled,
+            native: OnceLock::new(),
         }
+    }
+
+    /// Do the loops' database work through the native driver. `db_pool` is
+    /// the `RustConnectionPool`. `stream_tokens()` returns the current
+    /// to-device and device list stream positions. The change trackers know
+    /// about the changes after `to_device_since` and `device_lists_since`,
+    /// and Python must feed them every later change through
+    /// `to_device_changed` and `device_list_changed`.
+    ///
+    /// Only the queues made after this use the native driver.
+    fn use_native_store(
+        &self,
+        db_pool: Py<PyAny>,
+        stream_tokens: Py<PyAny>,
+        allow_device_name_lookup_over_federation: bool,
+        to_device_since: i64,
+        device_lists_since: i64,
+    ) -> PyResult<()> {
+        let native = Arc::new(Native {
+            store: FederationStore::new(FederationStoreConfig {
+                allow_device_name_lookup_over_federation,
+            }),
+            pool: NativePool::new(db_pool),
+            stream_tokens,
+            to_device: StreamChanges::new(to_device_since),
+            device_lists: StreamChanges::new(device_lists_since),
+        });
+        self.native.set(native).map_err(|_| {
+            pyo3::exceptions::PyRuntimeError::new_err("the native store is already in use")
+        })
+    }
+
+    /// A destination has new to-device messages at `stream_pos`, or with no
+    /// destination, any may have. A `StreamChangeCache` listener.
+    #[pyo3(signature = (destination, stream_pos))]
+    fn to_device_changed(&self, destination: Option<&str>, stream_pos: i64) {
+        if let Some(native) = self.native.get() {
+            stream_changed(&native.to_device, destination, stream_pos);
+        }
+    }
+
+    /// As `to_device_changed`, for device list updates.
+    #[pyo3(signature = (destination, stream_pos))]
+    fn device_list_changed(&self, destination: Option<&str>, stream_pos: i64) {
+        if let Some(native) = self.native.get() {
+            stream_changed(&native.device_lists, destination, stream_pos);
+        }
+    }
+
+    /// The counts since the last call, for Python's metrics:
+    /// `(sent_transactions, sent_edus_by_type, put_requests,
+    /// put_responses_by_code, last_sent_pdu_ts_by_destination)`.
+    #[allow(clippy::type_complexity)]
+    fn take_metrics(
+        &self,
+    ) -> (
+        u64,
+        std::collections::HashMap<String, u64>,
+        u64,
+        std::collections::HashMap<u16, u64>,
+        std::collections::HashMap<String, i64>,
+    ) {
+        let counts = self.metrics.take();
+        (
+            counts.sent_transactions,
+            counts.sent_edus_by_type,
+            counts.requests,
+            counts.responses,
+            counts.last_sent_pdu_ts,
+        )
     }
 
     /// The queue for `destination`. `facade` is the Python queue, which
     /// provides the hooks. The Rust queue holds it weakly.
+    /// `notify_delivered` is whether a module wants to hear about delivered
+    /// events.
     fn queue(
         &self,
         py: Python<'_>,
         destination: String,
         facade: &Bound<'_, PyAny>,
         should_send_on_this_instance: bool,
+        notify_delivered: bool,
     ) -> PyResult<RustDestinationQueue> {
         let facade = py
             .import("weakref")?
             .getattr("ref")?
             .call1((facade,))?
             .unbind();
-        let hooks = PyHooks {
+        let python = PyHooks {
             runtime: self.runtime.clone(),
             facade: Arc::new(facade),
             destination: destination.clone(),
+            metrics: Arc::clone(&self.metrics),
+        };
+        let hooks: Arc<dyn QueueHooks> = match self.native.get() {
+            Some(native) => Arc::new(NativeHooks {
+                native: Arc::clone(native),
+                python,
+                metrics: Arc::clone(&self.metrics),
+                destination: destination.clone(),
+                notify_delivered,
+            }),
+            None => Arc::new(python),
         };
         let sink: Arc<dyn TransactionSink> = self.sink.clone();
         Ok(RustDestinationQueue {
@@ -107,7 +208,7 @@ impl RustDestinationQueues {
                     should_send_on_this_instance,
                     msc4354_enabled: self.msc4354_enabled,
                 },
-                Arc::new(hooks),
+                hooks,
                 sink,
                 Arc::clone(&self.activity),
                 self.runtime.tokio_handle()?,
@@ -307,12 +408,20 @@ fn edu_from_py(edu: &Bound<'_, PyAny>) -> PyResult<Edu> {
     })
 }
 
+fn stream_changed(changes: &StreamChanges, destination: Option<&str>, stream_pos: i64) {
+    match destination {
+        Some(destination) => changes.entity_has_changed(destination, stream_pos),
+        None => changes.all_entities_changed(stream_pos),
+    }
+}
+
 /// The hooks, as coroutine methods of the Python queue.
-struct PyHooks {
+pub(super) struct PyHooks {
     runtime: RustRuntime,
     /// A weak reference to the Python queue.
     facade: Arc<Py<PyAny>>,
     destination: String,
+    metrics: Arc<QueueMetrics>,
 }
 
 impl PyHooks {
@@ -448,6 +557,20 @@ impl QueueHooks for PyHooks {
     }
 
     async fn complete(&self, observer: &Observer, completion: Completion) -> Result<(), LoopError> {
+        if let Some(sent) = &completion.sent {
+            self.metrics.record_sent(&self.destination, sent);
+        }
+        self.call_complete(observer, completion).await
+    }
+}
+
+impl PyHooks {
+    /// `_rust_complete`, without counting the transaction.
+    pub(super) async fn call_complete(
+        &self,
+        observer: &Observer,
+        completion: Completion,
+    ) -> Result<(), LoopError> {
         let completion = Arc::new(completion);
         self.call(
             observer,
@@ -482,15 +605,7 @@ fn completion_args<'py>(py: Python<'py>, completion: &Completion) -> PyResult<Bo
                     PduBody::Json(_) => {}
                 }
             }
-            (
-                pdus,
-                &sent.edu_types,
-                &sent.acknowledged,
-                sent.stats.attempts,
-                &sent.stats.responses,
-            )
-                .into_pyobject(py)?
-                .into_any()
+            (pdus, &sent.acknowledged).into_pyobject(py)?.into_any()
         }
         None => py.None().into_bound(py),
     };
@@ -564,23 +679,13 @@ fn format_exception(py: Python<'_>, err: &PyErr) -> String {
 struct ClientSink {
     sender: Arc<TransactionSender>,
     runtime: RustRuntime,
-    record_metrics: Arc<Py<PyAny>>,
+    /// Counts the requests of a failed transaction. A sent one's are counted
+    /// with its completion.
+    metrics: Arc<QueueMetrics>,
     send_for_test: Mutex<Option<Arc<Py<PyAny>>>>,
 }
 
 impl ClientSink {
-    /// Record the request counters, which are Python's. A sent transaction's
-    /// go with its completion. A failed one needs this.
-    fn record_metrics(&self, py: Python<'_>, stats: &RequestStats) {
-        let recorded =
-            self.record_metrics
-                .bind(py)
-                .call1(("PUT", stats.attempts, stats.responses.clone()));
-        if let Err(err) = recorded {
-            log::warn!("Failed to record federation request metrics: {err}");
-        }
-    }
-
     /// Send through the Python stand-in.
     async fn send_for_test(
         &self,
@@ -661,8 +766,8 @@ impl TransactionSink for ClientSink {
             }),
             Ok(TransactionResponse::Unparsed(body)) => with_gil("queue_response_fallback", |py| {
                 python_acknowledged(py, &destination, &transaction_id, &body).map_err(|err| {
-                    // No later trip to Python will carry the counters.
-                    self.record_metrics(py, &stats);
+                    // There will be no completion to count the requests.
+                    self.metrics.record_requests(&stats);
                     classify_python_error(py, &err)
                         .unwrap_or_else(|_| LoopError::Other(format_exception(py, &err)))
                 })
@@ -672,8 +777,8 @@ impl TransactionSink for ClientSink {
                 stats,
             }),
             Err(err) => {
-                // As above, there is no later trip to Python.
-                with_gil("queue_send_failed", |py| self.record_metrics(py, &stats));
+                // As above, there will be no completion.
+                self.metrics.record_requests(&stats);
                 Err(LoopError::from_client(err, &destination))
             }
         }

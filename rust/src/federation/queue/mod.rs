@@ -23,11 +23,14 @@
 //!
 //! The loop needs the database for to-device messages, device list updates
 //! and the stream positions, and runs catch-up and the sticky event backlog.
-//! Those stay in Python for now, behind [`QueueHooks`]. A transaction takes
-//! two trips to the reactor: one for its device EDUs and one to record that
-//! it was sent. A loop that runs out of things to send has asked for device
-//! EDUs once more to find that out, as Python's does. Everything else,
-//! building and sending the transaction included, runs on tokio.
+//! It reaches those through [`QueueHooks`]. Catch-up and the sticky event
+//! backlog are Python. The rest is Python too, unless the main database uses
+//! the native driver: then [`native::NativeHooks`] does it on tokio, and a
+//! transaction needs no trip to the reactor. Otherwise a transaction takes
+//! two: one for its device EDUs and one to record that it was sent, and a
+//! loop that runs out of things to send has asked for device EDUs once more
+//! to find that out, as Python's does. Everything else, building and sending
+//! the transaction included, runs on tokio.
 
 use std::{
     any::Any,
@@ -48,6 +51,9 @@ use super::{
 };
 use crate::{deferred::AwaitableObserver, events::Event};
 
+pub mod changes;
+pub mod metrics;
+pub mod native;
 mod ordered;
 pub mod python;
 

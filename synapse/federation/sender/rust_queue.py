@@ -17,7 +17,13 @@ The queue and its transmission loop are Rust's. `RustPerDestinationQueue` has
 the methods of `PerDestinationQueue` that `FederationSender` calls, and
 forwards them. The loop calls back into it for the parts still in Python:
 catch-up, the sticky event backlog, and the database work around each
-transaction. Those are the `_rust_*` coroutines.
+transaction. Those are the `_rust_*` coroutines. When the main database uses
+the native Rust driver, Rust does that database work itself, and calls
+`_rust_complete` only to finish a sticky event batch or to tell modules about
+delivered events.
+
+The loops count what they send in Rust. `flush_rust_queue_metrics` adds the
+counts to the Python metrics when those are collected.
 """
 
 import logging
@@ -34,11 +40,16 @@ from synapse.federation.sender.per_destination_queue import (
 )
 from synapse.federation.sender.transaction_manager import last_pdu_ts_metric
 from synapse.federation.units import Edu
+from synapse.http.matrixfederationclient import (
+    incoming_responses_counter,
+    outgoing_requests_counter,
+)
 from synapse.logging import issue9533_logger
 from synapse.logging.opentracing import whitelisted_homeserver
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
 from synapse.metrics.background_process_metrics import BackgroundProcessLoggingContext
 from synapse.module_api.callbacks.federation import FederatedEventDeliveryMethod
+from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.federation import (
     RustDestinationQueue,
     RustDestinationQueues,
@@ -50,6 +61,68 @@ if TYPE_CHECKING:
     from synapse.federation.sender import TransactionManager
 
 logger = logging.getLogger(__name__)
+
+
+def use_native_store(
+    hs: "synapse.server.HomeServer", rust_queues: RustDestinationQueues
+) -> bool:
+    """Have the Rust loops do their database work through the native driver,
+    if the main database uses it. Returns whether they do."""
+    store = hs.get_datastores().main
+    db_pool = store.db_pool._db_pool
+    device_lists_cache = store._device_list_federation_stream_cache
+    if not isinstance(db_pool, RustConnectionPool) or device_lists_cache is None:
+        return False
+
+    # Rust skips the device queries for destinations with nothing new, as
+    # these caches let Python do. So it hears of every change they do.
+    to_device_since = store._device_federation_outbox_stream_cache.add_listener(
+        rust_queues.to_device_changed
+    )
+    device_lists_since = device_lists_cache.add_listener(
+        rust_queues.device_list_changed
+    )
+    rust_queues.use_native_store(
+        db_pool,
+        lambda: (
+            store.get_to_device_stream_token(),
+            store.get_device_stream_token().stream,
+        ),
+        hs.config.federation.allow_device_name_lookup_over_federation,
+        to_device_since,
+        device_lists_since,
+    )
+    return True
+
+
+def flush_rust_queue_metrics(
+    rust_queues: RustDestinationQueues, server_name: str
+) -> None:
+    """Add what the Rust loops counted since the last call to the metrics."""
+    (
+        sent_transactions,
+        sent_edus_by_type_counts,
+        put_requests,
+        put_responses,
+        last_sent_pdu_ts,
+    ) = rust_queues.take_metrics()
+    labels = {SERVER_NAME_LABEL: server_name}
+
+    if sent_transactions:
+        sent_transactions_counter.labels(**labels).inc(sent_transactions)
+    sent_edus = sum(sent_edus_by_type_counts.values())
+    if sent_edus:
+        sent_edus_counter.labels(**labels).inc(sent_edus)
+    for edu_type, count in sent_edus_by_type_counts.items():
+        sent_edus_by_type.labels(type=edu_type, **labels).inc(count)
+    if put_requests:
+        outgoing_requests_counter.labels(method="PUT", **labels).inc(put_requests)
+    for code, count in put_responses.items():
+        incoming_responses_counter.labels(method="PUT", code=code, **labels).inc(count)
+    for destination, ts in last_sent_pdu_ts.items():
+        last_pdu_ts_metric.labels(destination_server_name=destination, **labels).set(
+            ts / 1000
+        )
 
 
 class _RustStickyBacklog:
@@ -91,12 +164,6 @@ class RustPerDestinationQueue(_CatchUpLoop):
         self._transaction_manager = transaction_manager
         self._destination = destination
         self._federation_callbacks = hs.get_module_api_callbacks().federation
-        self._federation_metrics_domains = (
-            hs.config.federation.federation_metrics_domains
-        )
-        self._record_request_metrics = (
-            hs.get_federation_http_client()._record_request_metrics
-        )
         # Its database half. The Rust queue holds its flag.
         self._sticky_backlog_store = StickyEventBacklogTracker(
             destination, hs, hs.config.experimental.msc4354_enabled
@@ -107,7 +174,12 @@ class RustPerDestinationQueue(_CatchUpLoop):
                 hs.get_instance_name(), destination
             )
         )
-        self._rust = rust_queues.queue(destination, self, should_send_on_this_instance)
+        self._rust = rust_queues.queue(
+            destination,
+            self,
+            should_send_on_this_instance,
+            self._federation_callbacks.interested_in_events_delivered_over_federation(),
+        )
         self._sticky_event_backlog_tracker = _RustStickyBacklog(self._rust)
 
     def __str__(self) -> str:
@@ -260,13 +332,16 @@ class RustPerDestinationQueue(_CatchUpLoop):
         device_list_stream_id: int | None,
         last_stream_ordering: int | None,
         sticky: tuple[str, _StickyEventsTransactionInfo] | None,
-        sent: tuple[list[EventBase], list[str], list[str], int, list[int]] | None,
+        sent: tuple[list[EventBase], list[str]] | None,
     ) -> None:
         """Record a finished transaction: what `send_new_transaction` does
-        after the response, the counters, and `_complete_transaction`."""
+        after the response, less the counters, and `_complete_transaction`.
+
+        `sent` is the PDUs sent and the IDs of those the destination accepted.
+        """
         with self._logcontext("federation_queue_complete"):
             if sent is not None:
-                await self._record_sent(*sent)
+                await self._notify_delivered(*sent)
 
             if to_device_stream_id:
                 await self._store.delete_device_msgs_for_remote(
@@ -283,16 +358,9 @@ class RustPerDestinationQueue(_CatchUpLoop):
             if sticky is not None:
                 await self._sticky_backlog_store.complete_transaction(sticky[1])
 
-    async def _record_sent(
-        self,
-        pdus: list[EventBase],
-        edu_types: list[str],
-        acknowledged: list[str],
-        attempts: int,
-        responses: list[int],
+    async def _notify_delivered(
+        self, pdus: list[EventBase], acknowledged: list[str]
     ) -> None:
-        self._record_request_metrics("PUT", attempts, responses)
-
         if self._federation_callbacks.interested_in_events_delivered_over_federation():
             acknowledged_ids = set(acknowledged)
             await self._federation_callbacks.notify_on_event_delivered_over_federation(
@@ -300,18 +368,3 @@ class RustPerDestinationQueue(_CatchUpLoop):
                 [p for p in pdus if p.event_id in acknowledged_ids],
                 FederatedEventDeliveryMethod.SEND,
             )
-
-        if pdus and self._destination in self._federation_metrics_domains:
-            last_pdu_ts_metric.labels(
-                destination_server_name=self._destination,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).set(pdus[-1].origin_server_ts / 1000)
-
-        sent_transactions_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
-        sent_edus_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
-            len(edu_types)
-        )
-        for edu_type in edu_types:
-            sent_edus_by_type.labels(
-                type=edu_type, **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()

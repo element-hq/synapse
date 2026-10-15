@@ -21,6 +21,7 @@ network, as `tests.http.test_rust_federation_client` does.
 
 import json
 from typing import Any
+from unittest import SkipTest
 from unittest.mock import AsyncMock
 
 from twisted.internet.testing import MemoryReactor
@@ -28,7 +29,11 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.presence import UserPresenceState
 from synapse.federation.sender import FederationSender
 from synapse.federation.sender.per_destination_queue import PerDestinationQueue
-from synapse.federation.sender.rust_queue import RustPerDestinationQueue
+from synapse.federation.sender.rust_queue import (
+    RustPerDestinationQueue,
+    use_native_store,
+)
+from synapse.federation.sender.transaction_manager import last_pdu_ts_metric
 from synapse.federation.units import Edu
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
 from synapse.module_api.callbacks.federation import (
@@ -38,6 +43,7 @@ from synapse.module_api.callbacks.federation import (
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.federation import (
     RustDestinationQueues,
     RustFederationClient,
@@ -83,10 +89,17 @@ class RustQueuesTestCase(unittest.HomeserverTestCase):
             self.transport,
         )
 
+        # Modules register their callbacks before the queues are made, which
+        # read whether there are any.
+        self.delivered = AsyncMock(return_value=None)
+        hs.get_module_api_callbacks().federation.register_callbacks(
+            on_event_delivered_over_federation=self.delivered
+        )
+
         sender = hs.get_federation_sender()
         assert isinstance(sender, FederationSender)
         self.sender = sender
-        self.queues = RustDestinationQueues(RustTransactionManager(rust_client), False)
+        self.queues = self._make_queues(RustTransactionManager(rust_client))
         sender._rust_queues = self.queues
 
         user = self.register_user("user", "pass")
@@ -102,20 +115,32 @@ class RustQueuesTestCase(unittest.HomeserverTestCase):
         assert isinstance(queue, RustPerDestinationQueue)
         self.queue = queue
 
+    def _make_queues(
+        self, transactions: RustTransactionManager
+    ) -> RustDestinationQueues:
+        return RustDestinationQueues(transactions, False, {DEST})
+
     def _settle(self) -> None:
         wait_for_rust_queues(self.reactor, self.queues)
 
+    def _queue_calls(self, before: dict[str, tuple[int, float]]) -> dict[str, int]:
+        """The GIL crossings of the queues since `before`."""
+        after = federation_gil_stats()
+        return {
+            site: after[site][0] - before.get(site, (0, 0.0))[0]
+            for site in after
+            if site.startswith("queue_")
+            and after[site][0] != before.get(site, (0, 0.0))[0]
+        }
+
     def _sent_transactions(self) -> float:
+        self.sender._flush_rust_queue_metrics()
         return sent_transactions_counter.labels(
             **{SERVER_NAME_LABEL: self.hs.hostname}
         )._value.get()
 
     def test_send_pdu(self) -> None:
         """The queue sends the PDU through the Rust client and records it."""
-        callback = AsyncMock(return_value=None)
-        self.hs.get_module_api_callbacks().federation.register_callbacks(
-            on_event_delivered_over_federation=callback
-        )
         self.transport.responses.append(
             json_response(200, {"pdus": {self.event.event_id: {}}})
         )
@@ -139,7 +164,7 @@ class RustQueuesTestCase(unittest.HomeserverTestCase):
             ),
             self.event.internal_metadata.stream_ordering,
         )
-        callback.assert_awaited_once_with(
+        self.delivered.assert_awaited_once_with(
             FederationEventDeliveryEvent(
                 server_name=DEST,
                 events=[self.event],
@@ -220,17 +245,10 @@ class RustQueuesTestCase(unittest.HomeserverTestCase):
         before = federation_gil_stats()
         self.queue.send_pdu(self.event)
         self._settle()
-        after = federation_gil_stats()
 
-        calls = {
-            site: after[site][0] - before.get(site, (0, 0.0))[0]
-            for site in after
-            if after[site][0] != before.get(site, (0, 0.0))[0]
-        }
-        queue_calls = {
-            site: count for site, count in calls.items() if site.startswith("queue_")
-        }
-        self.assertEqual(queue_calls, {"queue_device_edus": 2, "queue_complete": 1})
+        self.assertEqual(
+            self._queue_calls(before), {"queue_device_edus": 2, "queue_complete": 1}
+        )
 
     def test_shutdown(self) -> None:
         self.sender.shutdown()
@@ -239,6 +257,142 @@ class RustQueuesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(self.transport.requests, [])
         self.assertFalse(self.queue.transmission_loop_running)
+
+
+class RustQueuesNativeTestCase(RustQueuesTestCase):
+    """The same, with the database work done through the native driver."""
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        hs = self.setup_test_homeserver()
+        if not isinstance(
+            hs.get_datastores().main.db_pool._db_pool, RustConnectionPool
+        ):
+            raise SkipTest("needs the native Rust Postgres driver")
+        return hs
+
+    def _make_queues(
+        self, transactions: RustTransactionManager
+    ) -> RustDestinationQueues:
+        queues = super()._make_queues(transactions)
+        self.assertTrue(use_native_store(self.hs, queues))
+        return queues
+
+    def _catch_up(self) -> None:
+        """Send a first transaction, which leaves catch-up and reads the
+        device streams for the first time."""
+        self.transport.responses.append(json_response(200, {}))
+        self.queue.send_pdu(self.event)
+        self._settle()
+        self.transport.requests.clear()
+
+    def test_gil_crossings(self) -> None:
+        """Once caught up, a transaction with no device updates takes the GIL
+        only to tell the module about the delivered event."""
+        self._catch_up()
+        self.transport.responses.append(
+            json_response(200, {"pdus": {self.event.event_id: {}}})
+        )
+
+        before = federation_gil_stats()
+        self.queue.send_pdu(self.event)
+        self._settle()
+
+        self.assertEqual(len(self.transport.requests), 1)
+        self.assertEqual(self._queue_calls(before), {"queue_complete": 1})
+
+    def test_gil_crossings_without_modules(self) -> None:
+        """With no module to tell, it takes the GIL nowhere in the loop."""
+        self.hs.get_module_api_callbacks().federation._on_event_delivered_over_federation_callbacks.clear()
+        queue = self.sender._get_per_destination_queue("other.example.com")
+        assert isinstance(queue, RustPerDestinationQueue)
+        self.transport.responses.extend([json_response(200, {})] * 2)
+        queue.send_pdu(self.event)
+        self._settle()
+        self.transport.requests.clear()
+
+        before = federation_gil_stats()
+        queue.send_pdu(self.event)
+        self._settle()
+
+        self.assertEqual(len(self.transport.requests), 1)
+        self.assertEqual(self._queue_calls(before), {})
+
+    def test_to_device(self) -> None:
+        """A to-device message is sent, and deleted once sent. Reading the
+        stream position is the one GIL crossing."""
+        self._catch_up()
+        self.transport.responses.append(json_response(200, {}))
+        message = {
+            "sender": "@user:test",
+            "type": "m.test",
+            "message_id": "m1",
+            "messages": {"@u:remote": {"D": {"body": "hi"}}},
+        }
+
+        before = federation_gil_stats()
+        self.get_success(
+            self.store.add_remote_messages_from_client_to_device_inbox({DEST: message})
+        )
+        self.queue.attempt_new_transaction()
+        self._settle()
+
+        [request] = self.transport.requests
+        body = json.loads(request.body)
+        self.assertEqual(
+            body["edus"], [{"edu_type": "m.direct_to_device", "content": message}]
+        )
+        self.assertEqual(self._queue_calls(before), {"queue_stream_tokens": 1})
+        current = self.store.get_to_device_stream_token()
+        self.assertEqual(
+            self.get_success(
+                self.store.get_new_device_msgs_for_remote(DEST, 0, current, 10)
+            ),
+            ([], current),
+        )
+
+    def test_device_list_update(self) -> None:
+        """A device list update is sent, and marked as sent."""
+        self._catch_up()
+        self.transport.responses.append(json_response(200, {}))
+        user = "@user:test"
+        self.get_success(self.store.store_device(user, "NEW", None))
+        self.get_success(self.store.add_device_change_to_streams(user, ["NEW"], []))
+        self.get_success(
+            self.store.add_device_list_outbound_pokes(
+                user_id=user, device_id="NEW", room_id="!r", hosts=[DEST], context={}
+            )
+        )
+
+        self.queue.attempt_new_transaction()
+        self._settle()
+
+        [request] = self.transport.requests
+        [edu] = json.loads(request.body)["edus"]
+        self.assertEqual(edu["edu_type"], "m.device_list_update")
+        self.assertEqual(edu["content"]["device_id"], "NEW")
+        pokes = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "device_lists_outbound_pokes", {"destination": DEST}, ["stream_id"]
+            )
+        )
+        self.assertEqual(pokes, [])
+
+    def test_metrics(self) -> None:
+        """The loops' counts reach the Python metrics when collected."""
+        self._catch_up()
+        self.transport.responses.append(json_response(200, {}))
+        sent_before = self._sent_transactions()
+
+        self.queue.send_pdu(self.event)
+        self._settle()
+
+        self.assertEqual(self._sent_transactions(), sent_before + 1)
+        self.assertEqual(
+            last_pdu_ts_metric.labels(
+                destination_server_name=DEST, **{SERVER_NAME_LABEL: self.hs.hostname}
+            )._value.get(),
+            self.event.origin_server_ts / 1000,
+        )
 
 
 class RustQueuesLevelTestCase(unittest.HomeserverTestCase):
