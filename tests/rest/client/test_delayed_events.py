@@ -538,6 +538,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             self.user2_user_id, tok=self.user2_access_token
         )
 
+        # Check that a non-state event is rejected
         channel = self._make_delayed_event_request(
             room_id=room_id,
             delay=Duration(milliseconds=900),
