@@ -25,7 +25,11 @@
 //! Errors become the exceptions `MatrixFederationHttpClient` raises, built in
 //! the same GIL hop as a result would be.
 
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
@@ -398,12 +402,16 @@ async fn read_and_parse(
     let headers = response.headers;
     let max_size = parser.max_size();
 
+    // As Python, call a custom parser's `finish` however the read ends, so it
+    // can free its resources. That includes the request being cancelled.
+    let unfinished = Unfinished(Mutex::new(match &parser {
+        Parser::Custom { parser, .. } => Some(parser),
+        _ => None,
+    }));
+
     let failed = |py: Python<'_>, err: ClientError| -> PyErr {
         record(py);
-        if let Parser::Custom { parser, .. } = &parser {
-            // Let the parser free its resources. It has already failed.
-            let _ = parser.bind(py).call_method0(intern!(py, "finish"));
-        }
+        unfinished.finish(py);
         client_error_to_py(py, err, destination)
     };
 
@@ -439,10 +447,7 @@ async fn read_and_parse(
             if let Some(py_err) = python_error {
                 return Err(with_gil("response_error", |py| {
                     record(py);
-                    if let Parser::Custom { parser, .. } = &parser {
-                        // As Python, let the parser free its resources.
-                        let _ = parser.bind(py).call_method0(intern!(py, "finish"));
-                    }
+                    unfinished.finish(py);
                     parser_error(py, py_err)
                 }));
             }
@@ -478,10 +483,14 @@ async fn read_and_parse(
             (Parser::Custom { parser, .. }, _) => {
                 let parser = parser.bind(py);
                 if !collected.is_empty() {
-                    parser
-                        .call_method1(intern!(py, "write"), (PyBytes::new(py, &collected),))
-                        .map_err(|err| parser_error(py, err))?;
+                    if let Err(err) =
+                        parser.call_method1(intern!(py, "write"), (PyBytes::new(py, &collected),))
+                    {
+                        unfinished.finish(py);
+                        return Err(parser_error(py, err));
+                    }
                 }
+                unfinished.disarm();
                 parser
                     .call_method0(intern!(py, "finish"))
                     .map_err(|err| parser_error(py, err))?
@@ -517,6 +526,33 @@ async fn read_and_parse(
         );
     }
     result
+}
+
+/// A custom parser that has not been told to `finish` yet.
+struct Unfinished<'a>(Mutex<Option<&'a Py<PyAny>>>);
+
+impl Unfinished<'_> {
+    /// Call `finish`, ignoring its error, as the read has already failed.
+    fn finish(&self, py: Python<'_>) {
+        let parser = self.0.lock().expect("poisoned").take();
+        if let Some(parser) = parser {
+            let _ = parser.bind(py).call_method0(intern!(py, "finish"));
+        }
+    }
+
+    /// The caller calls `finish` itself.
+    fn disarm(&self) {
+        self.0.lock().expect("poisoned").take();
+    }
+}
+
+impl Drop for Unfinished<'_> {
+    fn drop(&mut self) {
+        if self.0.get_mut().expect("poisoned").is_some() {
+            // Not `with_gil`: this can run as the interpreter shuts down.
+            Python::try_attach(|py| account("parser_finish", py, |py| self.finish(py)));
+        }
+    }
 }
 
 /// Hand a chunk of the body to a Python parser.
@@ -760,12 +796,11 @@ fn failure_cause_to_py(py: Python<'_>, cause: FailureCause) -> PyResult<Bound<'_
     };
     match cause {
         FailureCause::Transport(err) => match err {
-            TransportError::Dns(_) | TransportError::ServiceUnavailable(_) => {
-                twisted_error("DNSLookupError", err.to_string())
-            }
-            TransportError::Connect(_) | TransportError::Tls(_) => {
-                twisted_error("ConnectError", err.to_string())
-            }
+            TransportError::Dns(_) => twisted_error("DNSLookupError", err.to_string()),
+            // Python's SRV resolver raises a `ConnectError` for a `.` target.
+            TransportError::ServiceUnavailable(_)
+            | TransportError::Connect(_)
+            | TransportError::Tls(_) => twisted_error("ConnectError", err.to_string()),
             TransportError::Timeout => build_exception(
                 py,
                 "twisted.internet.defer",

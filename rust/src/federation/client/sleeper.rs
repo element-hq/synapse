@@ -30,7 +30,14 @@ use crate::clock::Sleeper;
 pub struct AwakenableSleeper {
     sleeper: Arc<dyn Sleeper>,
     /// One entry per destination with a sleep in progress.
-    waiting: Mutex<HashMap<String, Arc<Notify>>>,
+    waiting: Mutex<HashMap<String, Waiting>>,
+}
+
+/// The sleeps in progress for one destination.
+#[derive(Default)]
+struct Waiting {
+    notify: Arc<Notify>,
+    sleeps: usize,
 }
 
 impl AwakenableSleeper {
@@ -43,42 +50,60 @@ impl AwakenableSleeper {
 
     /// End every sleep for `destination` now.
     pub fn wake(&self, destination: &str) {
-        let notify = self.waiting.lock().expect("poisoned").remove(destination);
-        if let Some(notify) = notify {
-            notify.notify_waiters();
+        let waiting = self.waiting.lock().expect("poisoned").remove(destination);
+        if let Some(waiting) = waiting {
+            waiting.notify.notify_waiters();
         }
     }
 
     /// Sleep for `duration`, or until `destination` is woken.
     pub async fn sleep(&self, destination: &str, duration: Duration) {
-        let notify = Arc::clone(
-            self.waiting
-                .lock()
-                .expect("poisoned")
-                .entry(destination.to_owned())
-                .or_default(),
-        );
+        // Create the `Notified` while holding the lock. `notify_waiters` wakes
+        // every `Notified` created before it is called, polled or not, so a
+        // wake between here and the select is not lost.
+        let (notify, notified) = {
+            let mut waiting = self.waiting.lock().expect("poisoned");
+            let entry = waiting.entry(destination.to_owned()).or_default();
+            entry.sleeps += 1;
+            let notify = Arc::clone(&entry.notify);
+            let notified = Arc::clone(&notify).notified_owned();
+            (notify, notified)
+        };
+        // Runs when the sleep ends or is cancelled.
+        let _forget = Forget {
+            waiting: &self.waiting,
+            destination,
+            notify,
+        };
 
-        {
-            // Register before sleeping, so a wake between here and the
-            // select is not lost.
-            let notified = notify.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-
-            tokio::select! {
-                () = notified => {}
-                () = self.sleeper.sleep(duration) => {}
-            }
+        tokio::select! {
+            () = notified => {}
+            () = self.sleeper.sleep(duration) => {}
         }
+    }
+}
 
-        // Forget the destination if no one else is sleeping on it. The
-        // map's reference and ours make two.
+/// Forgets a destination when the last sleep on it ends.
+struct Forget<'a> {
+    waiting: &'a Mutex<HashMap<String, Waiting>>,
+    destination: &'a str,
+    notify: Arc<Notify>,
+}
+
+impl Drop for Forget<'_> {
+    fn drop(&mut self) {
         let mut waiting = self.waiting.lock().expect("poisoned");
-        if let Some(current) = waiting.get(destination) {
-            if Arc::ptr_eq(current, &notify) && Arc::strong_count(&notify) == 2 {
-                waiting.remove(destination);
-            }
+        // A wake removes the entry, and a later sleep may have added a new
+        // one. Only count down our own.
+        let Some(entry) = waiting.get_mut(self.destination) else {
+            return;
+        };
+        if !Arc::ptr_eq(&entry.notify, &self.notify) {
+            return;
+        }
+        entry.sleeps -= 1;
+        if entry.sleeps == 0 {
+            waiting.remove(self.destination);
         }
     }
 }
@@ -119,6 +144,37 @@ mod tests {
 
         b.await.unwrap();
         assert_eq!(start.elapsed(), Duration::from_secs(60));
+        assert!(sleeper.waiting.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_sleep_forgets_the_destination() {
+        let sleeper = AwakenableSleeper::new(Arc::new(TokioSleeper));
+        let sleep = sleeper.sleep("a", Duration::from_secs(60));
+        let timed_out = tokio::time::timeout(Duration::from_secs(1), sleep).await;
+        assert!(timed_out.is_err());
+        assert!(sleeper.waiting.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn entry_outlives_the_first_of_two_sleeps() {
+        let sleeper = Arc::new(AwakenableSleeper::new(Arc::new(TokioSleeper)));
+        let start = tokio::time::Instant::now();
+
+        let short = tokio::spawn({
+            let sleeper = Arc::clone(&sleeper);
+            async move { sleeper.sleep("a", Duration::from_secs(1)).await }
+        });
+        let long = tokio::spawn({
+            let sleeper = Arc::clone(&sleeper);
+            async move { sleeper.sleep("a", Duration::from_secs(60)).await }
+        });
+
+        short.await.unwrap();
+        // The second sleep can still be woken.
+        sleeper.wake("a");
+        long.await.unwrap();
+        assert_eq!(start.elapsed(), Duration::from_secs(1));
         assert!(sleeper.waiting.lock().unwrap().is_empty());
     }
 }

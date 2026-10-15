@@ -297,6 +297,8 @@ class TransportLayerClient:
             path=path,
             data=json_data,
             json_data_callback=json_data_callback,
+            # The transaction manager's callback only rewrites `age_ts`.
+            rewrite_age_ts=json_data_callback is not None,
             long_retries=True,
             try_trailing_slash_on_400=True,
             # Sending a transaction should always succeed, if it doesn't

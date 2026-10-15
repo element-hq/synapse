@@ -355,13 +355,6 @@ impl FederationClient {
             }
         }
 
-        // Python encodes these as ASCII before sending, and so fails here.
-        if !request.path.is_ascii() || !request.query.is_ascii() {
-            return Err(ClientError::InvalidRequest(
-                "the path and query must be ASCII".to_owned(),
-            ));
-        }
-
         let limiter = RetryLimiter::check(
             &*self.retry_timings,
             destination,
@@ -375,6 +368,14 @@ impl FederationClient {
         .await
         .map_err(ClientError::Store)?
         .map_err(ClientError::NotRetrying)?;
+
+        // Python encodes these as ASCII after the backoff check and before
+        // entering the limiter, so this failure records nothing.
+        if !request.path.is_ascii() || !request.query.is_ascii() {
+            return Err(ClientError::InvalidRequest(
+                "the path and query must be ASCII".to_owned(),
+            ));
+        }
 
         let result = self.send_with_retries(request, options, stats).await;
 

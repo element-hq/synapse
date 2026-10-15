@@ -1108,6 +1108,7 @@ class MatrixFederationHttpClient:
         try_trailing_slash_on_400: bool = False,
         parser: Literal[None] = None,
         backoff_on_all_error_codes: bool = False,
+        rewrite_age_ts: bool = False,
     ) -> JsonDict: ...
 
     @overload
@@ -1125,6 +1126,7 @@ class MatrixFederationHttpClient:
         try_trailing_slash_on_400: bool = False,
         parser: ByteParser[T] | None = None,
         backoff_on_all_error_codes: bool = False,
+        rewrite_age_ts: bool = False,
     ) -> T: ...
 
     async def put_json(
@@ -1141,6 +1143,7 @@ class MatrixFederationHttpClient:
         try_trailing_slash_on_400: bool = False,
         parser: ByteParser[T] | None = None,
         backoff_on_all_error_codes: bool = False,
+        rewrite_age_ts: bool = False,
     ) -> JsonDict | T:
         """Sends the specified json data using PUT
 
@@ -1152,6 +1155,12 @@ class MatrixFederationHttpClient:
                 the request body. This will be encoded as JSON.
             json_data_callback: A callable returning the dict to
                 use as the request body.
+
+            rewrite_age_ts: set when `json_data_callback` only replaces
+                each PDU's `age_ts` in `data` with an `age`, as the
+                transaction manager's does. The Rust client then does the
+                rewrite itself. Otherwise a `json_data_callback` sends the
+                request through the Python client.
 
             long_retries: whether to use the long retry algorithm. See
                 docs on _send_request for details.
@@ -1192,17 +1201,9 @@ class MatrixFederationHttpClient:
             RequestSendFailed: If there were problems connecting to the
                 remote, due to e.g. DNS failures, connection timeouts etc.
         """
-        if self._rust_client is not None:
-            # The only `json_data_callback` is the transaction manager's,
-            # which rewrites each PDU's `age_ts` to an `age` on every attempt,
-            # and is given `data` as well. The Rust client does that rewrite
-            # itself, so the callback is not called once per attempt.
-            rewrite_age_ts = False
-            if json_data_callback is not None:
-                if data is None:
-                    data = json_data_callback()
-                else:
-                    rewrite_age_ts = True
+        if self._rust_client is not None and (
+            json_data_callback is None or (rewrite_age_ts and data is not None)
+        ):
             body, _ = await self._send_rust_request(
                 self._rust_client,
                 "PUT",
@@ -1211,7 +1212,7 @@ class MatrixFederationHttpClient:
                 args=args,
                 data=data,
                 parser=parser,
-                rewrite_age_ts=rewrite_age_ts,
+                rewrite_age_ts=json_data_callback is not None,
                 long_retries=long_retries,
                 timeout=timeout,
                 ignore_backoff=ignore_backoff,

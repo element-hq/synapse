@@ -316,6 +316,7 @@ class RemoteJoinHelper:
             try_trailing_slash_on_400: bool = False,
             parser: ByteParser[T] | None = None,
             backoff_on_all_error_codes: bool = False,
+            rewrite_age_ts: bool = False,
         ) -> JsonDict | T | SendJoinResponse:
             if (
                 path.startswith(

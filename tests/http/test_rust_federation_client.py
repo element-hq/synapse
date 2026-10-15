@@ -24,6 +24,7 @@ import re
 import time
 from collections import deque
 from typing import Any
+from unittest.mock import AsyncMock, Mock, patch
 
 import attr
 from signedjson.key import get_verify_key
@@ -37,7 +38,12 @@ from synapse.api.errors import (
     HttpResponseException,
     RequestSendFailed,
 )
-from synapse.http.matrixfederationclient import ByteParser, LegacyJsonSendParser
+from synapse.http.matrixfederationclient import (
+    ByteParser,
+    LegacyJsonSendParser,
+    incoming_responses_counter,
+    outgoing_requests_counter,
+)
 from synapse.server import HomeServer
 from synapse.synapse_rust.federation import (
     RustFederationClient,
@@ -243,8 +249,14 @@ class RustFederationClientTestCase(unittest.HomeserverTestCase):
         failure = self.failureResultOf(d, HttpResponseException)
         self.assertEqual(failure.value.code, 503)
 
-    def test_transport_error_with_a_timeout_is_not_retried(self) -> None:
+    def _send_failing(self, timeout: int | None) -> int:
+        """Send a request that fails to connect on every attempt, and return
+        the number of attempts."""
+        attempts = 0
+
         def fail(*args: Any) -> Response:
+            nonlocal attempts
+            attempts += 1
             raise ConnectionError("boom")
 
         self.cl._rust_client = RustFederationClient(
@@ -255,12 +267,20 @@ class RustFederationClientTestCase(unittest.HomeserverTestCase):
             self.cl._record_request_metrics,
             fail,
         )
-        d = ensureDeferred(self.cl.get_json(DEST, "/x", timeout=10_000))
+        d = ensureDeferred(self.cl.get_json(DEST, "/x", timeout=timeout))
         self._wait(d)
         failure = self.failureResultOf(d, RequestSendFailed)
         assert isinstance(failure.value, RequestSendFailed)
         self.assertIsInstance(failure.value.inner_exception, ConnectionError)
         self.assertTrue(failure.value.can_retry)
+        return attempts
+
+    def test_transport_error_with_a_timeout_is_not_retried(self) -> None:
+        self.assertEqual(self._send_failing(timeout=10_000), 1)
+
+    def test_transport_error_without_a_timeout_is_retried(self) -> None:
+        retries = self.hs.config.federation.max_short_retries
+        self.assertEqual(self._send_failing(timeout=None), retries + 1)
 
     @unittest.override_config({"federation_domain_whitelist": ["other.example"]})
     def test_whitelist(self) -> None:
@@ -333,6 +353,25 @@ class RustFederationClientTestCase(unittest.HomeserverTestCase):
         result = self.get_success(self.cl.get_json(DEST, "/x", parser=Collect()))
         self.assertEqual(result, body)
 
+    def test_custom_parser_is_finished_when_write_fails(self) -> None:
+        class Broken(ByteParser[None]):
+            CONTENT_TYPE = "application/json"
+            finished = False
+
+            def write(self, data: bytes) -> int:
+                raise ValueError("bad body")
+
+            def finish(self) -> None:
+                self.finished = True
+
+        self.transport.responses.append(json_response(200, {}))
+        parser = Broken()
+        failure = self.get_failure(
+            self.cl.get_json(DEST, "/x", parser=parser), RequestSendFailed
+        )
+        self.assertIsInstance(failure.value.inner_exception, ValueError)
+        self.assertTrue(parser.finished)
+
     def test_get_json_with_headers(self) -> None:
         self.transport.responses.append(
             (
@@ -356,13 +395,112 @@ class RustFederationClientTestCase(unittest.HomeserverTestCase):
             raise AssertionError("the callback is not called")
 
         self.get_success(
-            self.cl.put_json(DEST, "/send/1", data=data, json_data_callback=callback)
+            self.cl.put_json(
+                DEST,
+                "/send/1",
+                data=data,
+                json_data_callback=callback,
+                rewrite_age_ts=True,
+            )
         )
         (request,) = self.transport.requests
         self.assertEqual(
             json.loads(request.body)["pdus"],
             [{"event_id": "$a", "unsigned": {"age": 1000}}],
         )
+
+    def test_other_json_data_callback_uses_python(self) -> None:
+        """Only the age rewrite is done in Rust. Any other callback sends the
+        request through the Python client."""
+        send = AsyncMock(return_value=Mock())
+        self.cl._send_request_with_optional_trailing_slash = send  # type: ignore[method-assign]
+
+        with patch(
+            "synapse.http.matrixfederationclient._handle_response",
+            AsyncMock(return_value={}),
+        ):
+            self.get_success(
+                self.cl.put_json(DEST, "/x", data={"a": 1}, json_data_callback=dict)
+            )
+            self.get_success(self.cl.put_json(DEST, "/x", json_data_callback=dict))
+
+        self.assertEqual(send.call_count, 2)
+        self.assertEqual(self.transport.requests, [])
+
+    def test_request_metrics(self) -> None:
+        self.transport.responses.extend(
+            [json_response(500, {}), json_response(200, {})]
+        )
+        name = self.hs.hostname
+        requests = outgoing_requests_counter.labels(method="GET", server_name=name)
+        ok = incoming_responses_counter.labels(method="GET", code=200, server_name=name)
+        errors = incoming_responses_counter.labels(
+            method="GET", code=500, server_name=name
+        )
+        before = (requests._value.get(), ok._value.get(), errors._value.get())
+
+        d = ensureDeferred(self.cl.get_json(DEST, "/x"))
+        self._wait(d)
+        self.successResultOf(d)
+
+        after = (requests._value.get(), ok._value.get(), errors._value.get())
+        self.assertEqual(
+            [b - a for a, b in zip(before, after, strict=True)], [2.0, 1.0, 1.0]
+        )
+
+    def test_server_up_wakes_the_retry_sleep(self) -> None:
+        """A destination coming back, here through another request clearing
+        its backoff, ends the sleep before a retry in the Rust client."""
+        store = self.hs.get_datastores().main
+        # A zero `failure_ts` does not count as failing.
+        self.reactor.advance(10)
+        self.get_success(
+            store.set_destination_retry_timings(
+                DEST, self.clock.time_msec(), self.clock.time_msec(), 1000
+            )
+        )
+        # The first request fails, and sleeps for a long retry. The second
+        # ignores the backoff and succeeds, which clears it and calls
+        # `notify_remote_server_up`.
+        self.transport.responses.extend(
+            [json_response(500, {}), json_response(200, {}), json_response(200, {})]
+        )
+        first = ensureDeferred(
+            self.cl.put_json(DEST, "/first", ignore_backoff=True, long_retries=True)
+        )
+        self._wait_for_requests(1)
+        # Let the first request reach its sleep.
+        time.sleep(0.05)
+        self.get_success(self.cl.get_json(DEST, "/second", ignore_backoff=True))
+
+        # Without the wake, the first long retry sleeps for at least 3.2
+        # seconds.
+        start = self.clock.time()
+        self._wait(first, step=0.1)
+        self.assertLess(self.clock.time() - start, 3)
+        self.assertEqual(
+            [r.path for r in self.transport.requests], ["/first", "/second", "/first"]
+        )
+
+    def test_shutdown_stops_retries(self) -> None:
+        self.transport.responses.extend([json_response(500, {})] * 4)
+        d = ensureDeferred(self.cl.get_json(DEST, "/x"))
+        self._wait_for_requests(1)
+
+        self.cl.shutdown()
+        self._wait(d)
+
+        self.failureResultOf(d)
+        self.assertEqual(len(self.transport.requests), 1)
+
+    def _wait_for_requests(self, count: int) -> None:
+        for _ in range(4000):
+            if len(self.transport.requests) >= count:
+                return
+            # The transport runs on the reactor.
+            self.reactor.advance(0)
+            time.sleep(0.001)
+        raise AssertionError("the request was not sent")
 
     def test_gil_crossings(self) -> None:
         """A successful request takes the GIL once below the facade, to hand
@@ -379,3 +517,22 @@ class RustFederationClientTestCase(unittest.HomeserverTestCase):
             if after[site][0] != before.get(site, (0, 0.0))[0]
         }
         self.assertEqual(calls, {"response": 1})
+
+
+class ProxyWorkerTestCase(unittest.HomeserverTestCase):
+    """An instance that sends through a proxy worker stays on the Python
+    client."""
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config["experimental_features"] = {"rust_federation_sending": "client"}
+        config["instance_map"] = {
+            "main": {"host": "testserv", "port": 8765},
+            "federation_sender": {"host": "testserv", "port": 1001},
+        }
+        config["outbound_federation_restricted_to"] = ["federation_sender"]
+        config["worker_replication_secret"] = "secret"
+        return config
+
+    def test_no_rust_client(self) -> None:
+        self.assertIsNone(self.hs.get_federation_http_client()._rust_client)

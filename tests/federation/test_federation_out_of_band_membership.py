@@ -356,6 +356,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             try_trailing_slash_on_400: bool = False,
             parser: ByteParser[T] | None = None,
             backoff_on_all_error_codes: bool = False,
+            rewrite_age_ts: bool = False,
         ) -> JsonDict | T | SendJoinResponse:
             if (
                 path.startswith(
@@ -509,6 +510,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             try_trailing_slash_on_400: bool = False,
             parser: ByteParser[T] | None = None,
             backoff_on_all_error_codes: bool = False,
+            rewrite_age_ts: bool = False,
         ) -> JsonDict | T:
             if path.startswith("/_matrix/federation/v1/send/") and data is not None:
                 for pdu in data.get("pdus", []):
