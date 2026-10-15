@@ -24,13 +24,25 @@
 //! moves when a test says so. The test reactor keeps this clock in step via
 //! [`set_virtual_time_msec`]. See `ThreadedMemoryReactorClock` in
 //! `tests/server.py`.
+//!
+//! Tokio's timers know nothing of that virtual clock, so a Rust task that
+//! sleeps with [`tokio::time::sleep`] under trial would wait out real time
+//! while the test thinks no time passes. [`Clock::sleep`] sleeps on the
+//! virtual clock while it is pinned. Code that sleeps takes a [`Sleeper`] so
+//! that its Rust unit tests can sleep on tokio's (pausable) clock instead.
 
 use std::{
-    sync::atomic::{AtomicU64, Ordering},
+    future::Future,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use pyo3::pyfunction;
+use tokio::sync::oneshot;
 
 /// A sentinel value stored in [`VIRTUAL_MILLIS`] while the clock is
 /// reading the real time. This value indicates that the clock should read the
@@ -47,6 +59,16 @@ const REAL_TIME_SENTINEL: u64 = u64::MAX;
 /// and do not require locking.
 static VIRTUAL_MILLIS: AtomicU64 = AtomicU64::new(REAL_TIME_SENTINEL);
 
+/// Tasks sleeping on the virtual clock: the virtual time each wakes at, and
+/// the channel that wakes it. [`set_virtual_time_msec`] wakes the ones that
+/// are due.
+///
+/// [`Clock::sleep`] reads the virtual time while holding this lock, and
+/// [`set_virtual_time_msec`] takes the lock after storing the new time. So a
+/// sleeper either sees the new time, or is in the list when the setter scans
+/// it, and no wake-up is lost.
+static VIRTUAL_SLEEPERS: Mutex<Vec<(u64, oneshot::Sender<()>)>> = Mutex::new(Vec::new());
+
 /// Pin the clock to the given time, in milliseconds since the Unix epoch.
 ///
 /// Only tests call this. Nothing unpins the clock, since a test reactor
@@ -58,6 +80,20 @@ pub fn set_virtual_time_msec(millis: u64) {
     }
 
     VIRTUAL_MILLIS.store(millis, Ordering::Relaxed);
+
+    let due = {
+        let mut sleepers = VIRTUAL_SLEEPERS.lock().expect("poisoned");
+        let (due, pending) = sleepers
+            .drain(..)
+            .partition::<Vec<_>, _>(|(wake_at, _)| *wake_at <= millis);
+        *sleepers = pending;
+        due
+    };
+
+    for (_, waker) in due {
+        // The sleeper may have been dropped, which is fine.
+        let _ = waker.send(());
+    }
 }
 
 /// The current time as the Rust side of a homeserver sees it.
@@ -111,6 +147,67 @@ impl Clock {
             .expect("system clock was set before the Unix epoch, 1970")
             .as_millis() as u64
     }
+
+    /// Sleep for `duration`.
+    ///
+    /// While a test has pinned the clock this waits for the virtual time to
+    /// reach the deadline, which happens when the test reactor is advanced
+    /// past it. Otherwise it is [`tokio::time::sleep`], and must be awaited
+    /// on a tokio runtime.
+    pub fn sleep(&self, duration: Duration) -> impl Future<Output = ()> + Send + 'static {
+        let virtual_wake = {
+            let mut sleepers = VIRTUAL_SLEEPERS.lock().expect("poisoned");
+            match VIRTUAL_MILLIS.load(Ordering::Relaxed) {
+                REAL_TIME_SENTINEL => None,
+                now => {
+                    let wake_at = now.saturating_add(duration.as_millis() as u64);
+                    let (tx, rx) = oneshot::channel();
+                    if wake_at <= now {
+                        let _ = tx.send(());
+                    } else {
+                        sleepers.push((wake_at, tx));
+                    }
+                    Some(rx)
+                }
+            }
+        };
+
+        async move {
+            match virtual_wake {
+                Some(rx) => {
+                    // An error means the sender was dropped, which only
+                    // happens if the process is going away.
+                    let _ = rx.await;
+                }
+                None => tokio::time::sleep(duration).await,
+            }
+        }
+    }
+}
+
+/// Something that can sleep. Code that waits between attempts takes one of
+/// these rather than calling a timer directly, so that its tests choose the
+/// clock. See the module docs.
+pub trait Sleeper: Send + Sync + 'static {
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+}
+
+/// Sleeps on a homeserver's [`Clock`], which follows the virtual clock under
+/// trial.
+impl Sleeper for Clock {
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(Clock::sleep(self, duration))
+    }
+}
+
+/// Sleeps on tokio's clock, for Rust unit tests (which can pause and advance
+/// it with `tokio::time::pause`).
+pub struct TokioSleeper;
+
+impl Sleeper for TokioSleeper {
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(tokio::time::sleep(duration))
+    }
 }
 
 #[cfg(test)]
@@ -132,5 +229,22 @@ mod tests {
         // Zero is a legitimate virtual time. The memory reactor starts there.
         set_virtual_time_msec(0);
         assert_eq!(clock.now_millis(), 0);
+
+        // Sleeping on the pinned clock wakes when the virtual time reaches
+        // the deadline, and not before. This lives in the same test because
+        // the virtual time is process-global.
+        let mut sleep = std::pin::pin!(clock.sleep(Duration::from_millis(500)));
+        // `Waker::noop` needs a newer rustc than our MSRV.
+        let waker = futures::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        assert!(sleep.as_mut().poll(&mut cx).is_pending());
+        set_virtual_time_msec(499);
+        assert!(sleep.as_mut().poll(&mut cx).is_pending());
+        set_virtual_time_msec(500);
+        assert!(sleep.as_mut().poll(&mut cx).is_ready());
+
+        // A zero-length sleep is ready at once.
+        let mut sleep = std::pin::pin!(clock.sleep(Duration::ZERO));
+        assert!(sleep.as_mut().poll(&mut cx).is_ready());
     }
 }
