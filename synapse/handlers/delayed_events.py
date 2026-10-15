@@ -406,7 +406,9 @@ class DelayedEventsHandler:
         # MSC4140: don't store delayed events that could not be sent now. A
         # change to their own membership (e.g. a delayed join) is left to the auth
         # rules, which are applied in full when the event is sent.
-        if not (event_type == EventTypes.Member and state_key == requester.user.to_string()):
+        if not (
+            event_type == EventTypes.Member and state_key == requester.user.to_string()
+        ):
             event_dict: JsonDict = {
                 "type": event_type,
                 "content": content,

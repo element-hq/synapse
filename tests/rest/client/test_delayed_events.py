@@ -246,9 +246,7 @@ class DelayedEventsTestCaseBase(DelayedEventsHelperMixin):
         request was made.
         """
         self.assertGreaterEqual(event["delayed_since_ts"], requested_ts, event)
-        self.assertLessEqual(
-            event["delayed_since_ts"], self.clock.time_msec(), event
-        )
+        self.assertLessEqual(event["delayed_since_ts"], self.clock.time_msec(), event)
 
     def _get_delayed_event_content(self, event: JsonDict) -> JsonDict:
         content = event["content"]
@@ -531,7 +529,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
     def test_delayed_events_rejected_if_sender_not_in_room(self) -> None:
         """Test that sending delayed events in rooms the user is not in are rejected.
-        
+
         We test that this applies to both state and non-state events.
         """
         room_id = self.helper.create_room_as(
