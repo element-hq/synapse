@@ -703,6 +703,31 @@ class EventsPersistenceStorageController:
             async with self._state_deletion_store.persisting_state_group_references(
                 events_and_contexts
             ):
+                newly_joined_servers: set[str] = set()
+                if self.hs.config.experimental.msc4354_enabled and state_delta_for_room:
+                    # We specifically only consider events in `chunk` to reduce the risk of state rollbacks
+                    # causing servers to appear to repeatedly rejoin rooms. This works because we only
+                    # persist events once, whereas the state delta may unreliably flap between joined members
+                    # on unrelated events. This means we may miss cases where the /first/ join event for a server
+                    # is as a result of a state rollback and not as a result of a new join event. That is fine
+                    # because the chance of that happening is vanishingly rare because the join event would need to be
+                    # persisted without it affecting the current state (e.g there's a concurrent ban for that user)
+                    # which is then revoked concurrently by a later event (e.g the user is unbanned).
+                    # If state resolution were more reliable (in terms of state resets) then we could feasibly only
+                    # consider the events in the state_delta_for_room, but we aren't there yet.
+                    new_event_ids_in_current_state = set(
+                        state_delta_for_room.to_insert.values()
+                    )
+                    newly_joined_servers = (
+                        await self._newly_joined_servers_after_state_change(
+                            room_id,
+                            [
+                                ev
+                                for (ev, _) in chunk
+                                if ev.event_id in new_event_ids_in_current_state
+                            ],
+                        )
+                    )
                 await self.persist_events_store._persist_events_and_state_updates(
                     room_id,
                     chunk,
@@ -712,9 +737,66 @@ class EventsPersistenceStorageController:
                     inhibit_local_membership_updates=backfilled,
                     new_event_links=new_event_links,
                     new_state_dag_forward_extremities=new_state_dag_extrems,
+                    newly_joined_servers=newly_joined_servers,
                 )
 
+                if newly_joined_servers:
+                    # Notify federation senders after the server has joined,
+                    # so we can start to send historical sticky events.
+                    #
+                    # As per MSC4354:
+                    # > When a new server joins the room, existing servers MUST attempt to **push** all of their own sticky events[^newjoiner].
+                    # >
+                    # > — https://github.com/matrix-org/matrix-spec-proposals/blob/4ad14b0cd3b09205dcba59e45cbf1cab1e75edf7/proposals/4354-sticky-events.md#L91
+                    for server_name in newly_joined_servers:
+                        self.hs.get_notifier().notify_new_server_joined(
+                            server=server_name, room_id=room_id
+                        )
+
+                        if self.hs.config.redis.redis_enabled:
+                            self.hs.get_replication_command_handler().send_new_server_joined(
+                                server=server_name, room_id=room_id
+                            )
+
         return replaced_events
+
+    async def _newly_joined_servers_after_state_change(
+        self, room_id: str, new_events_in_current_state: list[EventBase]
+    ) -> set[str]:
+        """
+        Returns the set of servers that, after persisting `new_events_in_current_state` into the current state,
+        will be considered to have newly-joined the given room.
+
+        This function must be called BEFORE the current_state_events table is updated.
+
+        Args:
+            room_id: The room in question
+            new_events_in_current_state: A list of events that will become part of the current state,
+                but have not yet been persisted.
+        """
+        # filter to only join events from other servers. We're obviously joined if we are getting full events
+        # so needn't consider ourselves.
+        join_events = [
+            ev
+            for ev in new_events_in_current_state
+            if ev.type == EventTypes.Member
+            and ev.is_state()
+            and not self.is_mine_id(ev.state_key)
+            and ev.membership == Membership.JOIN
+        ]
+        if not join_events:
+            return set()
+
+        joining_domains = {get_domain_from_id(ev.state_key) for ev in join_events}
+
+        # We know the cache is up to date here because we are the event persister for the room,
+        # the only writer of current state for the room and so we'd have received our own
+        # cache invalidations immediately with no replication delay.
+        joined_domains = await self.main_store.get_current_hosts_in_room(room_id)
+
+        newly_joined_domains = joining_domains.difference(joined_domains)
+
+        return newly_joined_domains
 
     async def _calculate_new_forward_extremities_and_state_delta(
         self, room_id: str, ev_ctx_rm: list[EventPersistencePair]
