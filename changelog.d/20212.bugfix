@@ -1,0 +1,1 @@
+Fix state events being omitted from the `required_state` of a simplified sliding sync response when the client's `pos` token falls inside an event persistence batch, as could happen on worker deployments.
