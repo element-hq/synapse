@@ -98,6 +98,7 @@ from synapse.storage.databases.main.relations import RelationsWorkerStore
 from synapse.storage.databases.main.room import RoomWorkerStore
 from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
 from synapse.storage.databases.main.search import SearchStore
+from synapse.storage.databases.main.server_announcements import ServerAnnouncementsStore
 from synapse.storage.databases.main.session import SessionStore
 from synapse.storage.databases.main.signatures import SignatureWorkerStore
 from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
@@ -164,6 +165,7 @@ class GenericWorkerStore(
     RegistrationWorkerStore,
     StatsStore,
     SearchStore,
+    ServerAnnouncementsStore,
     TransactionWorkerStore,
     LockStore,
     SessionStore,

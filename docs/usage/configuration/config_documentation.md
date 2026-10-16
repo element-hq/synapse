@@ -4198,6 +4198,77 @@ server_notices:
   auto_join: true
 ```
 ---
+### `server_announcements`
+
+*(array)* A list of server announcement rooms managed by the homeserver. These rooms are not federated, and only local users can be allowed to send announcements.
+
+On startup, the main process creates missing rooms and reconciles existing rooms with this configuration.
+
+In a worker deployment, include the same configuration on all workers.
+
+Rooms are invite-only, unencrypted, and have `world_readable` history: **their announcements are public, not confidential**, even though readers cannot join. Only configured senders are automatically invited and joined. Other users are removed, and outstanding invitations to them are revoked. Room state (including name, topic, avatar, power levels, join rules, and history visibility) is managed by Synapse; attempts to change or redact it through the client APIs are rejected. Senders can leave, but are rejoined on the next reconciliation.
+
+Defaults to `[]`.
+
+Options for each entry include:
+
+* `id` (string, required): A unique, nonempty configuration identifier. This is not a Matrix room ID. It should not be changed after the associated room has been created. It maps the configuration entry to its existing room, so changing the name, topic, avatar, or allowed users does not create a new room. Changing `id` creates a new mapping rather than renaming the existing one. Purging the room deletes its mapping, allowing the same `id` to be used to create a replacement.
+
+* `room_name` (string, required): A nonempty name for the room.
+
+* `room_topic` (string|null): An optional topic for the room. Defaults to `null`.
+
+* `room_avatar_url` (string|null): A valid `mxc://` URI for the room avatar, which may refer to media on another homeserver. Mutually exclusive with `room_avatar_path`. Defaults to `null`.
+
+* `room_avatar_path` (string|null): A path to a local file to upload as the room avatar. Mutually exclusive with `room_avatar_url`. The file must be a supported image and must reside on, and be readable by, the process selected to upload it. Relative paths are resolved against that process's working directory.
+
+  Uploads run on the main process by default. To use a media worker, set [`media_instance_running_background_jobs`](#media_instance_running_background_jobs) to its `worker_name` in the shared configuration and add its HTTP replication listener to [`instance_map`](#instance_map). [`enable_media_repo`](#enable_media_repo) must be `true` on the selected uploader (legacy `synapse.app.media_repository` workers enable the media repository automatically). The main process and other workers do not need access to the file or an enabled media repository when a separate media worker is selected.
+
+  The file's path, content hash, and uploaded MXC URI are stored, so unchanged images are not uploaded again on each restart. Replacing the file at the same path updates the avatar on the next restart.
+
+  Defaults to `null`.
+
+* `allowed_user_ids` (array): Full Matrix user IDs allowed to send announcements. Each must be a valid, local user; remote users are not supported because these rooms are not federated. An empty list means no users are allowed to send announcements. Defaults to `[]`.
+
+Example configuration:
+```yaml
+server_announcements:
+- id: general
+  room_name: Server announcements
+  room_topic: News and updates from the server administrators
+  room_avatar_url: mxc://example.com/oumMVlgDnLYFaPVkExemNVVZ
+  allowed_user_ids:
+  - '@alice:example.com'
+- id: maintenance
+  room_name: Maintenance announcements
+  room_avatar_path: /etc/synapse/maintenance-avatar.png
+  allowed_user_ids:
+  - '@engineer_charlie:example.com'
+  - '@part_time_phil:example.com'
+```
+
+The internal room creator is configured with [`server_announcements_mxid`](#server_announcements_mxid). It is an unregistered management identity, not a user-visible announcement sender, and must not be included in `allowed_user_ids`. Create separate local accounts for senders; these accounts must exist and must not be deactivated.
+
+Removing both avatar options (or setting both to `null`) clears an existing room avatar. Removing `room_topic` clears the existing topic. Removing an entire entry does **not** delete its room or stored ID mapping: the room is retained and is no longer reconciled with this configuration. The same applies when the list is emptied or the setting is removed. Removing the entry does not remove previously granted room permissions. Re-adding the same `id` resumes management of the retained room.
+
+Purging an announcement room using the admin room-deletion API deletes its announcement mapping and cached avatar metadata. If the configuration entry is kept, the next startup creates a replacement room with the same logical `id`. To delete a room permanently, first remove its configuration entry and restart Synapse and its workers, then purge the room.
+
+---
+### `server_announcements_mxid`
+
+*(string)* The full Matrix user ID used to create and manage [`server_announcements`](#server_announcements) rooms. It must be a valid local user ID belonging to the configured [`server_name`](#server_name). In the default value, `<server_name>` is replaced with your server's name.
+
+This is an unregistered management identity, separate from the user-visible accounts that send announcements. It stays joined solely to manage the rooms, including when `allowed_user_ids` is empty, and cannot send announcements. It must not be included in `allowed_user_ids`. Choose an ID that is not already registered: Synapse refuses to start with announcement rooms configured if an account with this ID already exists.
+
+This ID cannot be changed after an announcement room has been created. To use a different creator, purge the existing announcement rooms and recreate them with the new value. Purging deletes their mappings, so the same room configuration `id` values can be reused.
+
+Defaults to `"@_server_announcements:<server_name>"`.
+
+Example configuration:
+```yaml
+server_announcements_mxid: '@announcement_manager:example.com'
+```
+---
 ### `enable_room_list_search`
 
 *(boolean)* Set to false to disable searching the public room list. When disabled blocks searching local and remote room lists for local and remote users by always returning an empty list for all queries. Defaults to `true`.
@@ -4686,6 +4757,8 @@ notify_appservices_from_worker: worker1
 ### `media_instance_running_background_jobs`
 
 *(string|null)* The [worker](../../workers.md#synapseappmedia_repository) that is used to run background tasks for media repository. If running multiple media repositories you must configure a single instance to run the background tasks. If not provided this defaults to the main process or your single `media_repository` worker.
+
+This also selects the uploader for `room_avatar_path` in [`server_announcements`](#server_announcements). For announcement avatar uploads, an unset or null value selects the main process; to use a media worker, explicitly set its `worker_name` here and include it in [`instance_map`](#instance_map).
 
 _Added in Synapse 1.16.0._
 

@@ -68,6 +68,7 @@ from synapse.events.utils import (
 )
 from synapse.events.validator import EventValidator
 from synapse.handlers.directory import DirectoryHandler
+from synapse.handlers.server_announcement_rules import ServerAnnouncementRules
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
@@ -508,6 +509,7 @@ class EventCreationHandler:
         self._notifier = hs.get_notifier()
         self._worker_lock_handler = hs.get_worker_locks_handler()
         self._policy_handler = hs.get_room_policy_handler()
+        self._server_announcement_rules = ServerAnnouncementRules(hs)
 
         self.send_events = ReplicationSendEventsRestServlet.make_client(hs)
 
@@ -1563,6 +1565,12 @@ class EventCreationHandler:
         """
         extra_users = extra_users or []
 
+        # Ensure the state of an announcement room isn't being modified.
+        # That is only meant to be modified through homeserver config.
+        await self._server_announcement_rules.check_events(
+            requester, events_and_context
+        )
+
         for event, context in events_and_context:
             # we don't apply shadow-banning to membership events here. Invites are blocked
             # higher up the stack, and we allow shadow-banned users to send join and leave
@@ -1979,6 +1987,12 @@ class EventCreationHandler:
                 a room that has been un-partial stated.
         """
         extra_users = extra_users or []
+
+        # Ensure the state of an announcement room isn't being modified.
+        # That is only meant to be modified through homeserver config.
+        await self._server_announcement_rules.check_events(
+            requester, events_and_context
+        )
 
         for event, context in events_and_context:
             assert self._events_shard_config.should_handle(

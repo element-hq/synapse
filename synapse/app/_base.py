@@ -731,6 +731,11 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
     # If we've configured an expiry time for caches, start the background job now.
     setup_expire_lru_cache_entries(hs)
 
+    # Reject a management identity that belongs to a real account before serving
+    # traffic or announcing readiness. This check does not depend on event writers.
+    if not hs.config.worker.worker_app and hs.config.serverannouncements.rooms:
+        await hs.get_server_announcements_handler().validate_configuration()
+
     # It is now safe to start your Synapse.
     hs.start_listening()
     hs.get_datastores().main.db_pool.start_profiling()
@@ -749,6 +754,11 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
 
     setup_sentry(hs)
     setup_sdnotify(hs)
+
+    # Workers may wait for the main process's readiness notification before
+    # starting, so do not await reconciliation (which may need an event writer).
+    if not hs.config.worker.worker_app and hs.config.serverannouncements.rooms:
+        hs.get_server_announcements_handler().start()
 
     # Register background tasks required by this server. This must be done
     # somewhat manually due to the background tasks not being registered
