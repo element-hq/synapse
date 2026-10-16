@@ -29,6 +29,7 @@ from synapse.api.constants import (
     EventTypes,
     EventUnsignedContentFields,
     GuestAccess,
+    Membership,
     StickyEvent,
 )
 from synapse.api.errors import Codes, NotFoundError
@@ -239,6 +240,16 @@ class DelayedEventsTestCaseBase(DelayedEventsHelperMixin):
 
         return events
 
+    def _assert_delayed_since_ts(self, event: JsonDict, requested_ts: int) -> None:
+        """Assert that a delayed event was scheduled between `requested_ts` and now.
+
+        `FakeChannel.await_result` advances the test clock while the request waits
+        on the database, so the stored timestamp may be later than the time the
+        request was made.
+        """
+        self.assertGreaterEqual(event["delayed_since_ts"], requested_ts, event)
+        self.assertLessEqual(event["delayed_since_ts"], self.clock.time_msec(), event)
+
     def _get_delayed_event_content(self, event: JsonDict) -> JsonDict:
         content = event["content"]
         self.assertIsInstance(content, dict)
@@ -337,6 +348,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         # Assert the stored properties of the delayed event
         event = channel.json_body
+        self._assert_delayed_since_ts(event, delayed_since_ts)
         self.assertDictEqual(
             event,
             {
@@ -344,7 +356,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
                 "room_id": self.room_id,
                 "type": _EVENT_TYPE,
                 "delay_ms": delay.as_millis(),
-                "delayed_since_ts": delayed_since_ts,
+                "delayed_since_ts": event["delayed_since_ts"],
                 "content": content,
             },
         )
@@ -397,6 +409,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         # Assert the stored properties of the delayed event
         state_event = channel.json_body
+        self._assert_delayed_since_ts(state_event, delayed_since_ts)
         self.assertDictEqual(
             state_event,
             {
@@ -405,7 +418,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
                 "type": state_event_type,
                 "state_key": state_key,
                 "delay_ms": delay.as_millis(),
-                "delayed_since_ts": delayed_since_ts,
+                "delayed_since_ts": state_event["delayed_since_ts"],
                 "content": content,
             },
         )
@@ -550,6 +563,175 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, True)
         self._check_for_delayed_event_in_sync(self.user2_access_token, delay_id, False)
+
+    def test_delayed_events_rejected_if_sender_not_in_room(self) -> None:
+        """Test that sending delayed events in rooms the user is not in are rejected.
+
+        We test that this applies to both state and non-state events.
+        """
+        room_id = self.helper.create_room_as(
+            self.user2_user_id, tok=self.user2_access_token
+        )
+
+        # Check that a non-state event is rejected
+        channel = self._make_delayed_event_request(
+            room_id=room_id,
+            delay=Duration(milliseconds=900),
+            event_type=_EVENT_TYPE,
+            content={},
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
+        )
+
+        # Check that a state event is rejected
+        channel = self._make_delayed_event_request(
+            room_id=room_id,
+            delay=Duration(milliseconds=900),
+            event_type=_EVENT_TYPE,
+            state_key="",
+            content={},
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
+        )
+
+        self.assertListEqual([], self._get_delayed_events())
+
+    def test_delayed_member_event_for_other_user_rejected_if_sender_not_in_room(
+        self,
+    ) -> None:
+        """A delayed change to another user's membership is rejected when the
+        sender is not in the room: only changes to their own membership are exempt.
+        """
+        room_id = self.helper.create_room_as(
+            self.user2_user_id, tok=self.user2_access_token
+        )
+
+        channel = self._make_delayed_event_request(
+            room_id=room_id,
+            delay=Duration(milliseconds=900),
+            event_type=EventTypes.Member,
+            state_key=self.user2_user_id,
+            content={EventContentFields.MEMBERSHIP: Membership.LEAVE},
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
+        )
+
+        self.assertListEqual([], self._get_delayed_events())
+
+    def test_delayed_state_event_rejected_if_sender_lacks_power_level(self) -> None:
+        """A delayed state event is rejected when the sender is in the room but
+        their power level is too low to send it."""
+        room_id = self.helper.create_room_as(
+            self.user2_user_id,
+            tok=self.user2_access_token,
+            extra_content={"preset": "public_chat"},
+        )
+        self.helper.join(room_id, self.user1_user_id, tok=self.user1_access_token)
+
+        channel = self._make_delayed_event_request(
+            room_id=room_id,
+            delay=Duration(milliseconds=900),
+            event_type=EventTypes.Name,
+            state_key="",
+            content={EventContentFields.ROOM_NAME: "New name"},
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN, channel.json_body["errcode"], channel.json_body
+        )
+
+        self.assertListEqual([], self._get_delayed_events())
+
+    def test_delayed_event_fails_on_timeout_if_sender_left_room(self) -> None:
+        """A delayed event is not sent if its sender has left the room by the
+        time it comes to be sent."""
+        state_key = "sender_left_room"
+        channel = self._make_delayed_event_request(
+            room_id=self.room_id,
+            delay=Duration(milliseconds=900),
+            event_type=_EVENT_TYPE,
+            state_key=state_key,
+            content={},
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        self.helper.leave(self.room_id, self.user1_user_id, tok=self.user1_access_token)
+
+        self.reactor.advance(1)
+        self.helper.get_state(
+            self.room_id,
+            _EVENT_TYPE,
+            self.user2_access_token,
+            state_key=state_key,
+            expect_code=HTTPStatus.NOT_FOUND,
+        )
+
+    def test_delayed_self_join_accepted_if_sender_not_in_room(self) -> None:
+        """A delayed join is accepted from outside a public room, and the sender is
+        joined when it comes to be sent."""
+        room_id = self.helper.create_room_as(
+            self.user2_user_id,
+            tok=self.user2_access_token,
+            extra_content={"preset": "public_chat"},
+        )
+
+        channel = self._make_delayed_event_request(
+            room_id=room_id,
+            delay=Duration(milliseconds=900),
+            event_type=EventTypes.Member,
+            state_key=self.user1_user_id,
+            content={EventContentFields.MEMBERSHIP: Membership.JOIN},
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        self.reactor.advance(1)
+        content = self.helper.get_state(
+            room_id,
+            EventTypes.Member,
+            self.user2_access_token,
+            state_key=self.user1_user_id,
+        )
+        self.assertEqual(
+            Membership.JOIN, content.get(EventContentFields.MEMBERSHIP), content
+        )
+
+    def test_delayed_self_join_fails_on_timeout_if_join_not_allowed(self) -> None:
+        """A delayed join is accepted from outside an invite-only room, and fails
+        when it comes to be sent because the sender was never invited."""
+        room_id = self.helper.create_room_as(
+            self.user2_user_id, is_public=False, tok=self.user2_access_token
+        )
+
+        channel = self._make_delayed_event_request(
+            room_id=room_id,
+            delay=Duration(milliseconds=900),
+            event_type=EventTypes.Member,
+            state_key=self.user1_user_id,
+            content={EventContentFields.MEMBERSHIP: Membership.JOIN},
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        self.reactor.advance(1)
+        self.helper.get_state(
+            room_id,
+            EventTypes.Member,
+            self.user2_access_token,
+            state_key=self.user1_user_id,
+            expect_code=HTTPStatus.NOT_FOUND,
+        )
 
     def test_get_delayed_events_auth(self) -> None:
         channel = self.make_request("GET", _MANAGEMENT_PATH_PREFIX)
