@@ -66,6 +66,7 @@ from synapse.types import (
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.handlers.sliding_sync import (
+    HaveSentRoom,
     HaveSentRoomFlag,
     MutablePerConnectionState,
     PerConnectionState,
@@ -815,35 +816,13 @@ class SlidingSyncHandler:
         # or `limited` mean for clients that interpret them correctly. In future this
         # behavior is almost certainly going to change.
         #
-        from_bound = None
-        initial = True
-        ignore_timeline_bound = False
-        if from_token and not newly_joined and not state_reset_out_of_room:
-            room_status = previous_connection_state.rooms.have_sent_room(room_id)
-            if room_status.status == HaveSentRoomFlag.LIVE:
-                from_bound = from_token.stream_token.room_key
-                initial = False
-            elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
-                assert room_status.last_token is not None
-                from_bound = room_status.last_token
-                initial = False
-            elif room_status.status == HaveSentRoomFlag.NEVER:
-                from_bound = None
-                initial = True
-            else:
-                assert_never(room_status.status)
-
-            log_kv({"sliding_sync.room_status": room_status})
-
-            if prev_room_sync_config is not None:
-                # Check if the timeline limit has increased, if so ignore the
-                # timeline bound and record the change (see "XXX: Odd behavior"
-                # above).
-                if (
-                    prev_room_sync_config.timeline_limit
-                    < room_sync_config.timeline_limit
-                ):
-                    ignore_timeline_bound = True
+        from_bound, initial, ignore_timeline_bound = _timeline_bounds(
+            previous_connection_state.rooms.have_sent_room(room_id),
+            from_token=from_token,
+            skip_previous_bounds=newly_joined or state_reset_out_of_room,
+            prev_room_sync_config=prev_room_sync_config,
+            room_sync_config=room_sync_config,
+        )
 
         log_kv(
             {
@@ -1010,24 +989,7 @@ class SlidingSyncHandler:
             invite_or_knock_event = await self.store.get_event(
                 room_membership_for_user_at_to_token.event_id
             )
-
-            stripped_state = []
-            if invite_or_knock_event.membership == Membership.INVITE:
-                invite_state = invite_or_knock_event.unsigned.get(
-                    "invite_room_state", []
-                )
-                if not isinstance(invite_state, list):
-                    invite_state = []
-
-                stripped_state.extend(invite_state)
-            elif invite_or_knock_event.membership == Membership.KNOCK:
-                knock_state = invite_or_knock_event.unsigned.get("knock_room_state", [])
-                if not isinstance(knock_state, list):
-                    knock_state = []
-
-                stripped_state.extend(knock_state)
-
-            stripped_state.append(strip_event(invite_or_knock_event))
+            stripped_state = _stripped_state(invite_or_knock_event)
 
         # Get the changes to current state in the token range from the
         # `current_state_delta_stream` table.
@@ -1431,66 +1393,22 @@ class SlidingSyncHandler:
             # sensible order again.
             bump_stamp = 0
 
-        room_sync_required_state_map_to_persist: Mapping[str, AbstractSet[str]] = (
-            room_sync_config.required_state_map
-        )
-        if changed_required_state_map:
-            room_sync_required_state_map_to_persist = changed_required_state_map
-
         # Record the `room_sync_config` if we're `ignore_timeline_bound` (which means
-        # that the `timeline_limit` has increased)
-        unstable_expanded_timeline = False
-        if ignore_timeline_bound:
-            # FIXME: We signal the fact that we're sending down more events to
-            # the client by setting `unstable_expanded_timeline` to true (see
-            # "XXX: Odd behavior" above).
-            unstable_expanded_timeline = True
-
-            new_connection_state.room_configs[room_id] = RoomSyncConfig(
-                timeline_limit=room_sync_config.timeline_limit,
-                required_state_map=room_sync_required_state_map_to_persist,
-            )
-        elif prev_room_sync_config is not None:
-            # If the result is `limited` then we need to record that the
-            # `timeline_limit` has been reduced, as when/if the client later requests
-            # more timeline then we have more data to send.
-            #
-            # Otherwise (when not `limited`) we don't need to record that the
-            # `timeline_limit` has been reduced, as the *effective* `timeline_limit`
-            # (i.e. the amount of timeline we have previously sent to the client) is at
-            # least the previous `timeline_limit`.
-            #
-            # This is to handle the case where the `timeline_limit` e.g. goes from 10 to
-            # 5 to 10 again (without any timeline gaps), where there's no point sending
-            # down the initial historical chunk events when the `timeline_limit` is
-            # increased as the client already has the 10 previous events. However, if
-            # client has a gap in the timeline (i.e. `limited` is True), then we *do*
-            # need to record the reduced timeline.
-            #
-            # TODO: Handle timeline gaps (`get_timeline_gaps()`) - This is separate from
-            # the gaps we might see on the client because a response was `limited` we're
-            # talking about above.
-            if (
-                limited
-                and prev_room_sync_config.timeline_limit
-                > room_sync_config.timeline_limit
-            ):
-                new_connection_state.room_configs[room_id] = RoomSyncConfig(
-                    timeline_limit=room_sync_config.timeline_limit,
-                    required_state_map=room_sync_required_state_map_to_persist,
-                )
-
-            elif changed_required_state_map is not None:
-                new_connection_state.room_configs[room_id] = RoomSyncConfig(
-                    timeline_limit=room_sync_config.timeline_limit,
-                    required_state_map=room_sync_required_state_map_to_persist,
-                )
-
-        else:
-            new_connection_state.room_configs[room_id] = RoomSyncConfig(
-                timeline_limit=room_sync_config.timeline_limit,
-                required_state_map=room_sync_required_state_map_to_persist,
-            )
+        # that the `timeline_limit` has increased).
+        #
+        # FIXME: We signal the fact that we're sending down more events to the
+        # client by setting `unstable_expanded_timeline` to true (see "XXX: Odd
+        # behavior" above).
+        unstable_expanded_timeline = ignore_timeline_bound
+        room_config_to_persist = _room_config_to_persist(
+            room_sync_config,
+            prev_room_sync_config=prev_room_sync_config,
+            changed_required_state_map=changed_required_state_map,
+            ignore_timeline_bound=ignore_timeline_bound,
+            limited=limited,
+        )
+        if room_config_to_persist is not None:
+            new_connection_state.room_configs[room_id] = room_config_to_persist
 
         set_tag(SynapseTags.RESULT_PREFIX + "initial", initial)
 
@@ -1620,6 +1538,139 @@ class SlidingSyncHandler:
                     return new_bump_event_pos.stream
 
             return None
+
+
+def _timeline_bounds(
+    room_status: HaveSentRoom[RoomStreamToken],
+    *,
+    from_token: SlidingSyncStreamToken | None,
+    skip_previous_bounds: bool,
+    prev_room_sync_config: RoomSyncConfig | None,
+    room_sync_config: RoomSyncConfig,
+) -> tuple[RoomStreamToken | None, bool, bool]:
+    """Where a room's updates start, from what the connection sent before.
+
+    Args:
+        room_status: Whether the connection sent the room before.
+        from_token: The request's `pos`.
+        skip_previous_bounds: Whether to send the room as if never sent: when
+            newly joined or state reset out of the room.
+        prev_room_sync_config: The room's config the connection stored.
+        room_sync_config: The room's config in this request.
+
+    Returns:
+        `(from_bound, initial, ignore_timeline_bound)`: the lower bound of
+        the room's updates (`None` for the whole room), whether the room is
+        sent in full, and whether the timeline ignores the bound because the
+        timeline limit grew.
+    """
+    from_bound = None
+    initial = True
+    ignore_timeline_bound = False
+    if from_token and not skip_previous_bounds:
+        if room_status.status == HaveSentRoomFlag.LIVE:
+            from_bound = from_token.stream_token.room_key
+            initial = False
+        elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
+            assert room_status.last_token is not None
+            from_bound = room_status.last_token
+            initial = False
+        elif room_status.status == HaveSentRoomFlag.NEVER:
+            from_bound = None
+            initial = True
+        else:
+            assert_never(room_status.status)
+
+        log_kv({"sliding_sync.room_status": room_status})
+
+        if prev_room_sync_config is not None:
+            # Check if the timeline limit has increased, if so ignore the
+            # timeline bound and record the change (see "XXX: Odd behavior"
+            # in `get_room_sync_data`).
+            if prev_room_sync_config.timeline_limit < room_sync_config.timeline_limit:
+                ignore_timeline_bound = True
+
+    return from_bound, initial, ignore_timeline_bound
+
+
+def _stripped_state(invite_or_knock_event: EventBase) -> list[JsonDict]:
+    """The stripped state of an invite or knock: what the event's `unsigned`
+    carries, then the event itself, stripped."""
+    stripped_state: list[JsonDict] = []
+    if invite_or_knock_event.membership == Membership.INVITE:
+        invite_state = invite_or_knock_event.unsigned.get("invite_room_state", [])
+        if not isinstance(invite_state, list):
+            invite_state = []
+
+        stripped_state.extend(invite_state)
+    elif invite_or_knock_event.membership == Membership.KNOCK:
+        knock_state = invite_or_knock_event.unsigned.get("knock_room_state", [])
+        if not isinstance(knock_state, list):
+            knock_state = []
+
+        stripped_state.extend(knock_state)
+
+    stripped_state.append(strip_event(invite_or_knock_event))
+    return stripped_state
+
+
+def _room_config_to_persist(
+    room_sync_config: RoomSyncConfig,
+    *,
+    prev_room_sync_config: RoomSyncConfig | None,
+    changed_required_state_map: Mapping[str, AbstractSet[str]] | None,
+    ignore_timeline_bound: bool,
+    limited: bool | None,
+) -> RoomSyncConfig | None:
+    """The room config to record in the connection state after sending the
+    room, or None to keep the stored one.
+
+    Note: an empty `changed_required_state_map` stores the request's map,
+    but still counts as a change.
+    """
+    room_sync_required_state_map_to_persist: Mapping[str, AbstractSet[str]] = (
+        room_sync_config.required_state_map
+    )
+    if changed_required_state_map:
+        room_sync_required_state_map_to_persist = changed_required_state_map
+
+    config_to_persist = RoomSyncConfig(
+        timeline_limit=room_sync_config.timeline_limit,
+        required_state_map=room_sync_required_state_map_to_persist,
+    )
+
+    if ignore_timeline_bound:
+        return config_to_persist
+    elif prev_room_sync_config is not None:
+        # If the result is `limited` then we need to record that the
+        # `timeline_limit` has been reduced, as when/if the client later requests
+        # more timeline then we have more data to send.
+        #
+        # Otherwise (when not `limited`) we don't need to record that the
+        # `timeline_limit` has been reduced, as the *effective* `timeline_limit`
+        # (i.e. the amount of timeline we have previously sent to the client) is at
+        # least the previous `timeline_limit`.
+        #
+        # This is to handle the case where the `timeline_limit` e.g. goes from 10 to
+        # 5 to 10 again (without any timeline gaps), where there's no point sending
+        # down the initial historical chunk events when the `timeline_limit` is
+        # increased as the client already has the 10 previous events. However, if
+        # client has a gap in the timeline (i.e. `limited` is True), then we *do*
+        # need to record the reduced timeline.
+        #
+        # TODO: Handle timeline gaps (`get_timeline_gaps()`) - This is separate from
+        # the gaps we might see on the client because a response was `limited` we're
+        # talking about above.
+        if (
+            limited
+            and prev_room_sync_config.timeline_limit > room_sync_config.timeline_limit
+        ):
+            return config_to_persist
+        elif changed_required_state_map is not None:
+            return config_to_persist
+        return None
+    else:
+        return config_to_persist
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)

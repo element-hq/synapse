@@ -212,3 +212,31 @@ def rooms_to_send_for_test(
     now_ms: int,
 ) -> list[str]:
     """Raises `ValueError` where Python raises `SlidingSyncUnknownPosition`."""
+
+def timeline_bounds_for_test(
+    room_status: tuple[str, int | None],
+    from_stream: int | None,
+    skip_previous_bounds: bool,
+    prev_room_sync_config: tuple[int, dict[str, list[str]]] | None,
+    room_sync_config: tuple[int, dict[str, list[str]]],
+) -> tuple[int | None, bool, bool]:
+    """`(from_bound, initial, ignore_timeline_bound)`, tokens as streams."""
+
+def stripped_state_for_test(event: str) -> str:
+    """The event and the stripped state as JSON."""
+
+def get_bump_stamp_for_test(
+    timeline: list[tuple[str, int]],
+    check_outside_timeline: bool,
+    latest_room_bump_stamp: int | None,
+    have_finished_bg_jobs: bool,
+    to_stream: int,
+    last_event_stream: int | None,
+) -> int | None: ...
+def room_config_to_persist_for_test(
+    room_sync_config: tuple[int, dict[str, list[str]]],
+    prev_room_sync_config: tuple[int, dict[str, list[str]]] | None,
+    changed_required_state_map: dict[str, list[str]] | None,
+    ignore_timeline_bound: bool,
+    limited: bool | None,
+) -> tuple[int, dict[str, list[str]]] | None: ...

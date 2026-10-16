@@ -24,11 +24,16 @@ from typing import AbstractSet, Any, Coroutine, Mapping, TypeVar, cast
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.handlers.sliding_sync import (
     MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER,
+    SlidingSyncHandler,
     _required_state_changes,
     _required_state_request,
+    _room_config_to_persist,
     _state_filter_with_meta,
+    _stripped_state,
+    _timeline_bounds,
 )
 from synapse.handlers.sliding_sync.room_lists import (
     SlidingSyncRoomLists,
@@ -40,9 +45,11 @@ from synapse.synapse_rust import sliding_sync as rust
 from synapse.types import (
     PersistedEventPosition,
     RoomStreamToken,
+    SlidingSyncStreamToken,
     StrCollection,
     StreamToken,
 )
+from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoom,
     HaveSentRoomFlag,
@@ -992,3 +999,214 @@ class RoomListSortTestCase(unittest.TestCase):
                 result = None
             self.assertEqual(result, python)
         self.assertGreater(reset, 0)
+
+
+class _FakeBumpStore:
+    def __init__(
+        self,
+        latest_room_bump_stamp: int | None,
+        have_finished_bg_jobs: bool,
+        last_event_stream: int | None,
+    ) -> None:
+        self.latest_room_bump_stamp = latest_room_bump_stamp
+        self.have_finished_bg_jobs = have_finished_bg_jobs
+        self.last_event_stream = last_event_stream
+
+    async def get_latest_bump_stamp_for_room(self, room_id: str) -> int | None:
+        return self.latest_room_bump_stamp
+
+    async def have_finished_sliding_sync_background_jobs(self) -> bool:
+        return self.have_finished_bg_jobs
+
+    async def get_last_event_pos_in_room_before_stream_ordering(
+        self, room_id: str, end_token: RoomStreamToken, event_types: StrCollection
+    ) -> tuple[str, PersistedEventPosition] | None:
+        assert set(event_types) == SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
+        if self.last_event_stream is None:
+            return None
+        return ("$event", PersistedEventPosition("master", self.last_event_stream))
+
+
+class RoomHelpersTestCase(unittest.TestCase):
+    """`rust/src/sliding_sync/room.rs`"""
+
+    def test_timeline_bounds(self) -> None:
+        rng = random.Random(14)
+        for _ in range(2000):
+            status = _random_statuses(rng).get("!r0:test", ("never", None))
+            from_stream = rng.choice([None, rng.randint(1, 50)])
+            skip = rng.random() < 0.2
+            prev = rng.choice(
+                [None, _python_config(rng.randint(0, 10), _random_required_state(rng))]
+            )
+            config = _python_config(rng.randint(0, 10), _random_required_state(rng))
+
+            flag, token = status
+            from_bound, initial, ignore = _timeline_bounds(
+                HaveSentRoom(
+                    HaveSentRoomFlag(flag),
+                    RoomStreamToken(stream=token) if token else None,
+                ),
+                from_token=cast(
+                    SlidingSyncStreamToken,
+                    SimpleNamespace(
+                        stream_token=SimpleNamespace(
+                            room_key=RoomStreamToken(stream=from_stream)
+                        )
+                    ),
+                )
+                if from_stream is not None
+                else None,
+                skip_previous_bounds=skip,
+                prev_room_sync_config=prev,
+                room_sync_config=config,
+            )
+            self.assertEqual(
+                rust.timeline_bounds_for_test(
+                    status,
+                    from_stream,
+                    skip,
+                    _to_rust(prev) if prev else None,
+                    _to_rust(config),
+                ),
+                (from_bound.stream if from_bound else None, initial, ignore),
+                (status, from_stream, skip, prev, config),
+            )
+
+    def test_stripped_state(self) -> None:
+        rng = random.Random(15)
+        for _ in range(500):
+            membership = rng.choice(
+                [Membership.INVITE, Membership.KNOCK, Membership.JOIN]
+            )
+            unsigned: dict[str, Any] = {}
+            for key in ("invite_room_state", "knock_room_state"):
+                choice = rng.random()
+                if choice < 0.5:
+                    unsigned[key] = [
+                        {"type": "m.room.name", "state_key": "", "content": {}},
+                        "not an event",
+                    ][: rng.randint(0, 2)]
+                elif choice < 0.7:
+                    unsigned[key] = {"not": "a list"}
+            event = {
+                "type": EventTypes.Member,
+                "state_key": _USER_ID,
+                "sender": "@bob:test",
+                "content": {"membership": membership, "displayname": "Alice"},
+                "unsigned": unsigned,
+            }
+            python = _stripped_state(
+                cast(
+                    EventBase,
+                    SimpleNamespace(
+                        membership=membership,
+                        unsigned=unsigned,
+                        type=event["type"],
+                        state_key=event["state_key"],
+                        sender=event["sender"],
+                        content=event["content"],
+                    ),
+                )
+            )
+            self.assertEqual(
+                json.loads(rust.stripped_state_for_test(json.dumps(event))), python
+            )
+
+    def test_get_bump_stamp(self) -> None:
+        rng = random.Random(16)
+        types = [*sorted(SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES), EventTypes.Member]
+        for _ in range(2000):
+            timeline = [
+                (rng.choice(types), rng.choice([-3, 0, rng.randint(1, 60)]))
+                for _ in range(rng.randint(0, 4))
+            ]
+            check_outside = rng.random() < 0.7
+            latest = rng.choice([None, -1, 0, rng.randint(1, 60)])
+            have_finished = rng.random() < 0.7
+            to_stream = rng.randint(1, 60)
+            last_event = rng.choice([None, -2, rng.randint(1, 60)])
+
+            fake_handler = cast(
+                SlidingSyncHandler,
+                SimpleNamespace(
+                    store=_FakeBumpStore(latest, have_finished, last_event)
+                ),
+            )
+            python = _run(
+                SlidingSyncHandler._get_bump_stamp(
+                    fake_handler,
+                    "!r:test",
+                    cast(
+                        StreamToken,
+                        SimpleNamespace(room_key=RoomStreamToken(stream=to_stream)),
+                    ),
+                    [
+                        cast(
+                            FilteredEvent,
+                            SimpleNamespace(
+                                event=SimpleNamespace(
+                                    type=event_type,
+                                    internal_metadata=SimpleNamespace(
+                                        stream_ordering=stream
+                                    ),
+                                )
+                            ),
+                        )
+                        for event_type, stream in timeline
+                    ],
+                    check_outside_timeline=check_outside,
+                )
+            )
+            self.assertEqual(
+                rust.get_bump_stamp_for_test(
+                    timeline,
+                    check_outside,
+                    latest,
+                    have_finished,
+                    to_stream,
+                    last_event,
+                ),
+                python,
+                (timeline, check_outside, latest, have_finished, to_stream, last_event),
+            )
+
+    def test_room_config_to_persist(self) -> None:
+        rng = random.Random(17)
+        for _ in range(2000):
+            config = _python_config(rng.randint(0, 10), _random_required_state(rng))
+            prev = rng.choice(
+                [None, _python_config(rng.randint(0, 10), _random_required_state(rng))]
+            )
+            changed: dict[str, set[str]] | None = rng.choice(
+                [None, {}, _random_map(rng)]
+            )
+            ignore = rng.random() < 0.3
+            limited = rng.choice([None, True, False])
+
+            python = _room_config_to_persist(
+                config,
+                prev_room_sync_config=prev,
+                changed_required_state_map=changed,
+                ignore_timeline_bound=ignore,
+                limited=limited,
+            )
+            result = rust.room_config_to_persist_for_test(
+                _to_rust(config),
+                _to_rust(prev) if prev else None,
+                {t: sorted(keys) for t, keys in changed.items()}
+                if changed is not None
+                else None,
+                ignore,
+                limited,
+            )
+            context = (config, prev, changed, ignore, limited)
+            if python is None:
+                self.assertIsNone(result, context)
+                continue
+            assert result is not None
+            self.assertEqual(
+                (result[0], _as_sets(result[1])),
+                (python.timeline_limit, _as_sets(python.required_state_map)),
+                context,
+            )
