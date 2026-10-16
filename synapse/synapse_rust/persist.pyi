@@ -143,6 +143,32 @@ class PersistReaderForTest:
         """`(origin_chain_id, origin_sequence_number, target_chain_id,
         target_sequence_number)` rows."""
     def max_sequence_numbers(self, chain_ids: list[int]) -> dict[int, int]: ...
+    # The extremity calculations (`rust/src/persist/extremities.rs`), each
+    # returning its result and what it counted, in the shape
+    # `Persister.take_metrics` returns.
+    def calculate_new_extremities(
+        self,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        latest_event_ids: list[str],
+    ) -> tuple[set[str], dict[str, Any]]: ...
+    def calculate_new_state_dag_extremities(
+        self,
+        room_id: str,
+        existing: list[str],
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+    ) -> tuple[set[str], dict[str, Any]]:
+        """Raises a 500 `SynapseError` for missing prev state events, as
+        Python does."""
+    def prune_extremities(
+        self,
+        room_id: str,
+        server_name: str,
+        new_latest_event_ids: list[str],
+        resolved_state_group: int,
+        event_id_to_state_group: dict[str, int],
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        now_ms: int,
+    ) -> tuple[set[str], dict[str, Any]]: ...
 
 def persist_gil_stats() -> dict[str, tuple[int, float]]:
     """`{site: (calls, seconds held)}` for every time event persistence took

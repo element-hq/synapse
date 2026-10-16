@@ -727,6 +727,15 @@ impl Event {
         self.parsed_event.common_fields.state_key.as_deref_opt()
     }
 
+    /// The event's MSC4242 `prev_state_events`, or `None` if its format
+    /// has none.
+    pub fn prev_state_event_ids(&self) -> Option<&[String]> {
+        match &*self.parsed_event.specific_fields {
+            EventFormatEnum::VMSC4242(format) => Some(&format.prev_state_events),
+            _ => None,
+        }
+    }
+
     /// The event's `content`.
     pub fn content(&self) -> &JsonObject {
         &self.parsed_event.common_fields.content

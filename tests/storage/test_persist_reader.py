@@ -26,7 +26,10 @@ from unittest import SkipTest
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import NotFoundError
+from synapse.api.errors import NotFoundError, SynapseError
+from synapse.api.room_versions import RoomVersions
+from synapse.events import EventBase
+from synapse.events.snapshot import EventContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -38,6 +41,7 @@ from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 from tests.test_utils.event_injection import inject_event
 from tests.utils import RUST_PERSIST_FOR_TESTS
 
@@ -110,6 +114,51 @@ class PersistReaderTestBase(unittest.HomeserverTestCase):
             )
         ]
 
+    def _dag_with_bad_events(self) -> list[str]:
+        """A chain of events in the room, of which the third is rejected,
+        the fourth soft failed, the fifth an outlier and the seventh both
+        rejected and an outlier."""
+        chain = [self._send(f"m{i}") for i in range(3)]
+        chain.append(
+            self.get_success(
+                inject_event(
+                    self.hs,
+                    prev_event_ids=[chain[-1]],
+                    internal_metadata={"soft_failed": True},
+                    room_id=self.room_id,
+                    sender=self.alice,
+                    type=EventTypes.Message,
+                    content={"msgtype": "m.text", "body": "soft failed"},
+                )
+            ).event_id
+        )
+        chain.extend(
+            self.get_success(
+                inject_event(
+                    self.hs,
+                    prev_event_ids=[chain[-1]],
+                    room_id=self.room_id,
+                    sender=self.alice,
+                    type=EventTypes.Message,
+                    content={"msgtype": "m.text", "body": body},
+                )
+            ).event_id
+            for body in ("outlier", "last", "rejected outlier")
+        )
+        for event_id in (chain[2], chain[6]):
+            self._reject(event_id)
+        for event_id in (chain[4], chain[6]):
+            self._write("UPDATE events SET outlier = TRUE WHERE event_id = ?", event_id)
+        return chain
+
+    def _reject(self, event_id: str) -> None:
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "rejections",
+                {"event_id": event_id, "reason": "test", "last_check": "now"},
+            )
+        )
+
 
 class PersistReaderTestCase(PersistReaderTestBase):
     """Each test runs a Rust read and the Python store method against the
@@ -156,51 +205,6 @@ class PersistReaderTestCase(PersistReaderTestBase):
                 set(self.get_success(self.store.get_state_dag_extremities(room_id))),
             )
         self.assertEqual(len(self.rust.state_dag_extremities(self.room_id)), 2)
-
-    def _dag_with_bad_events(self) -> list[str]:
-        """A chain of events in the room, of which the third is rejected,
-        the fourth soft failed, the fifth an outlier and the seventh both
-        rejected and an outlier."""
-        chain = [self._send(f"m{i}") for i in range(3)]
-        chain.append(
-            self.get_success(
-                inject_event(
-                    self.hs,
-                    prev_event_ids=[chain[-1]],
-                    internal_metadata={"soft_failed": True},
-                    room_id=self.room_id,
-                    sender=self.alice,
-                    type=EventTypes.Message,
-                    content={"msgtype": "m.text", "body": "soft failed"},
-                )
-            ).event_id
-        )
-        chain.extend(
-            self.get_success(
-                inject_event(
-                    self.hs,
-                    prev_event_ids=[chain[-1]],
-                    room_id=self.room_id,
-                    sender=self.alice,
-                    type=EventTypes.Message,
-                    content={"msgtype": "m.text", "body": body},
-                )
-            ).event_id
-            for body in ("outlier", "last", "rejected outlier")
-        )
-        for event_id in (chain[2], chain[6]):
-            self._reject(event_id)
-        for event_id in (chain[4], chain[6]):
-            self._write("UPDATE events SET outlier = TRUE WHERE event_id = ?", event_id)
-        return chain
-
-    def _reject(self, event_id: str) -> None:
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                "rejections",
-                {"event_id": event_id, "reason": "test", "last_check": "now"},
-            )
-        )
 
     def test_events_which_are_prevs(self) -> None:
         chain = self._dag_with_bad_events()
@@ -668,3 +672,286 @@ class ChainCoverReadsTestCase(PersistReaderTestBase):
             self.assertEqual(
                 self.rust.max_sequence_numbers(chain_ids), dict(rows), chain_ids
             )
+
+
+class ExtremitiesTestCase(PersistReaderTestBase):
+    """The extremity calculations in `rust/src/persist/extremities.rs`
+    against the controller's Python methods, over the same database and
+    the same new events."""
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        persistence = hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.persistence = persistence
+        self.room_version = self.get_success(self.store.get_room_version(self.room_id))
+        self._counter = 0
+
+    def _new(
+        self,
+        prev_event_ids: list[str],
+        *,
+        sender: str | None = None,
+        depth: int = 10,
+        prev_state_events: list[str] | None = None,
+        rejected: bool = False,
+        soft_failed: bool = False,
+        outlier: bool = False,
+    ) -> tuple[EventBase, EventContext]:
+        """A new event for the chunk, not persisted. With
+        `prev_state_events` it is an MSC4242 state event."""
+        self._counter += 1
+        fields: dict[str, Any] = {
+            "room_id": self.room_id,
+            "sender": sender or self.alice,
+            "type": EventTypes.Message,
+            "content": {"msgtype": "m.text", "body": f"new {self._counter}"},
+            "prev_events": prev_event_ids,
+            "depth": depth,
+        }
+        room_version = self.room_version
+        if prev_state_events is not None:
+            room_version = RoomVersions.MSC4242v12
+            fields["type"] = "m.test.state"
+            fields["state_key"] = str(self._counter)
+            fields["prev_state_events"] = prev_state_events
+        event = make_test_event(fields, room_version)
+        event.internal_metadata.outlier = outlier
+        if soft_failed:
+            event.internal_metadata.soft_failed = True
+        context = EventContext.for_outlier(self.hs.get_storage_controllers())
+        if rejected:
+            context.rejected = "test"
+        return event, context
+
+    def _new_extremities(
+        self,
+        events: list[tuple[EventBase, EventContext]],
+        latest: set[str],
+    ) -> tuple[set[str], dict[str, Any]]:
+        expected = self.get_success(
+            self.persistence._calculate_new_extremities(self.room_id, events, latest)
+        )
+        result, counts = self.rust.calculate_new_extremities(events, list(latest))
+        self.assertEqual(result, expected)
+        return result, counts
+
+    def test_calculate_new_extremities(self) -> None:
+        chain = self._dag_with_bad_events()
+        # The fixture flags its events after persisting them, so the stored
+        # extremities are out of date. Use the one they would be.
+        latest = {chain[5]}
+
+        # A message on top, with new events that cannot be extremities.
+        new = self._new([chain[5]])
+        result, counts = self._new_extremities(
+            [
+                new,
+                self._new([new[0].event_id], rejected=True),
+                self._new([new[0].event_id], soft_failed=True),
+                self._new([new[0].event_id], outlier=True),
+            ],
+            latest,
+        )
+        self.assertEqual(result, {new[0].event_id})
+        self.assertEqual(counts["forward_extremities"], {1: 1})
+        self.assertEqual(counts["stale_forward_extremities"], {0: 1})
+
+        # Nothing changes, so nothing is counted.
+        result, counts = self._new_extremities(
+            [self._new([chain[5]], outlier=True)], latest
+        )
+        self.assertEqual(result, latest)
+        self.assertEqual(counts["forward_extremities"], {})
+
+        # Stale extremities with persisted children go. The new event's prev
+        # is soft failed, and behind it a rejected event: everything up to
+        # chain[1] goes, while chain[0], whose child chain[1] is persisted,
+        # goes anyway.
+        on_soft_failed = self._new([chain[3]])
+        result, counts = self._new_extremities(
+            [on_soft_failed], {chain[0], chain[1], chain[5]}
+        )
+        self.assertEqual(result, {chain[5], on_soft_failed[0].event_id})
+        self.assertEqual(counts["forward_extremities"], {2: 1})
+        self.assertEqual(counts["stale_forward_extremities"], {1: 1})
+
+    def _new_extremities_state_dag(
+        self,
+        existing: set[str],
+        events: list[tuple[EventBase, EventContext]],
+    ) -> set[str]:
+        expected = self.get_success(
+            self.persistence._calculate_new_state_dag_extremities(
+                self.room_id,
+                frozenset(existing),
+                events,  # type: ignore[arg-type]
+            )
+        )
+        result, _ = self.rust.calculate_new_state_dag_extremities(
+            self.room_id, list(existing), events
+        )
+        self.assertEqual(result, expected)
+        return result
+
+    def test_calculate_new_state_dag_extremities(self) -> None:
+        # The function reads the room DAG tables, so the room's messages
+        # stand in for persisted state events.
+        chain = self._dag_with_bad_events()
+
+        # No state events: unchanged.
+        self.assertEqual(
+            self._new_extremities_state_dag({chain[5]}, [self._new([chain[5]])]),
+            {chain[5]},
+        )
+
+        # A rejected new event is known to the next one, and a soft failed
+        # one can be an extremity.
+        rejected = self._new([], prev_state_events=[chain[5]], rejected=True)
+        soft_failed = self._new(
+            [], prev_state_events=[rejected[0].event_id], soft_failed=True
+        )
+        fork = self._new([], prev_state_events=[chain[1]])
+        # A rejected event nothing points at is never an extremity.
+        rejected_leaf = self._new([], prev_state_events=[chain[5]], rejected=True)
+        self.assertEqual(
+            self._new_extremities_state_dag(
+                {chain[5], chain[1]}, [rejected, soft_failed, fork, rejected_leaf]
+            ),
+            {chain[5], soft_failed[0].event_id, fork[0].event_id},
+        )
+
+        # A prev state event that is rejected takes its ancestors with it:
+        # chain[2] is rejected, so chain[1] goes.
+        on_rejected = self._new([], prev_state_events=[chain[2]])
+        self.assertEqual(
+            self._new_extremities_state_dag({chain[1], chain[5]}, [on_rejected]),
+            {chain[5], on_rejected[0].event_id},
+        )
+
+        # Soft failed events do not count on the state DAG: chain[3] is soft
+        # failed, so the walk stops there and chain[1] stays.
+        on_soft_failed = self._new([], prev_state_events=[chain[3]])
+        self.assertEqual(
+            self._new_extremities_state_dag({chain[1], chain[5]}, [on_soft_failed]),
+            {chain[1], chain[5], on_soft_failed[0].event_id},
+        )
+
+    def test_missing_prev_state_events(self) -> None:
+        message = self._send("known")
+        events = [
+            self._new([], prev_state_events=[message, "$gone1"]),
+            self._new([], prev_state_events=["$gone2"]),
+        ]
+        failure = self.get_failure(
+            self.persistence._calculate_new_state_dag_extremities(
+                self.room_id,
+                frozenset({message}),
+                events,  # type: ignore[arg-type]
+            ),
+            SynapseError,
+        )
+        with self.assertRaises(SynapseError) as cm:
+            self.rust.calculate_new_state_dag_extremities(
+                self.room_id, [message], events
+            )
+        self.assertEqual(cm.exception.code, 500)
+        self.assertEqual(cm.exception.msg, failure.value.msg)
+        self.assertEqual(cm.exception.errcode, failure.value.errcode)
+
+    def _inject(
+        self, sender: str, prev: str, event_type: str = EventTypes.Message
+    ) -> str:
+        content: dict[str, Any] = (
+            {} if event_type == EventTypes.Dummy else {"msgtype": "m.text", "body": "x"}
+        )
+        self._counter += 1
+        content["n"] = self._counter
+        return self.get_success(
+            inject_event(
+                self.hs,
+                prev_event_ids=[prev],
+                room_id=self.room_id,
+                sender=sender,
+                type=event_type,
+                content=content,
+            )
+        ).event_id
+
+    def _prune(
+        self,
+        dropped: str,
+        events: list[tuple[EventBase, EventContext]],
+        keep: str,
+    ) -> set[str]:
+        """Prune with `keep` in the resolved state group and `dropped` in
+        another."""
+        latest = {keep, dropped}
+        groups = {keep: 1, dropped: 2}
+        expected = self.get_success(
+            self.persistence._prune_extremities(
+                self.room_id, set(latest), 1, groups, events
+            )
+        )
+        result, counts = self.rust.prune_extremities(
+            self.room_id,
+            self.hs.hostname,
+            list(latest),
+            1,
+            groups,
+            events,
+            self.clock.time_msec(),
+        )
+        self.assertEqual(result, expected)
+        self.assertEqual(counts["potential_times_prune_extremities"], 1)
+        self.assertEqual(
+            counts["times_pruned_extremities"], 1 if result == {keep} else 0
+        )
+        return result
+
+    def test_prune_extremities(self) -> None:
+        keep = self._send("keep")
+        old_remote = self._inject("@x:remote", keep)
+        old_local = self._inject(self.alice, keep)
+        old_dummy_to_remote = self._inject(self.alice, old_remote, EventTypes.Dummy)
+        old_dummy_to_local = self._inject(
+            self.alice,
+            self._inject(self.alice, old_local, EventTypes.Dummy),
+            EventTypes.Dummy,
+        )
+        # Make the events above more than a day old.
+        self.reactor.advance(2 * 24 * 60 * 60)
+        new_remote = self._inject("@x:other", keep)
+        depth = self.get_success(self.store.get_event(new_remote)).depth
+
+        def chunk(
+            depth_ahead: int, sender: str = "@y:elsewhere"
+        ) -> list[tuple[EventBase, EventContext]]:
+            return [self._new([keep], sender=sender, depth=depth + depth_ahead)]
+
+        # Old and more than 100 deep: goes.
+        self.assertEqual(self._prune(old_remote, chunk(101), keep), {keep})
+        self.assertEqual(self._prune(old_remote, chunk(100), keep), {keep, old_remote})
+        # Local events stay, unless dummy events that lead only to remote
+        # events.
+        self.assertEqual(self._prune(old_local, chunk(500), keep), {keep, old_local})
+        self.assertEqual(self._prune(old_dummy_to_remote, chunk(500), keep), {keep})
+        self.assertEqual(
+            self._prune(old_dummy_to_local, chunk(500), keep),
+            {keep, old_dummy_to_local},
+        )
+        # Recent: goes only if its server sent an event in the chunk, more
+        # than 20 deep.
+        self.assertEqual(self._prune(new_remote, chunk(500), keep), {keep, new_remote})
+        self.assertEqual(self._prune(new_remote, chunk(21, "@z:other"), keep), {keep})
+        self.assertEqual(
+            self._prune(new_remote, chunk(20, "@z:other"), keep), {keep, new_remote}
+        )
+        # Never an extremity being persisted.
+        being_persisted = self._new([keep], depth=depth + 500)
+        self.assertEqual(
+            self._prune(
+                being_persisted[0].event_id, chunk(500) + [being_persisted], keep
+            ),
+            {keep, being_persisted[0].event_id},
+        )

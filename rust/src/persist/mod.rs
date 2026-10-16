@@ -21,6 +21,7 @@
 //! - [`context`]: what persisting needs from an `EventContext`.
 //! - [`effects`]: the Python cache updates a Rust transaction asks for once
 //!   it commits.
+//! - [`extremities`]: the room's forward extremities after a chunk.
 //! - [`metrics`]: counts for the Python metrics, flushed when scraped.
 //! - [`python`]: the [`python::Persister`] and test helpers.
 //! - [`reader`]: what persisting reads before its write transaction.
@@ -32,6 +33,7 @@ use pyo3::prelude::*;
 
 pub mod context;
 pub mod effects;
+pub mod extremities;
 pub mod metrics;
 pub mod python;
 pub mod reader;

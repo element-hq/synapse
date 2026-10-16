@@ -18,10 +18,14 @@
 
 use std::sync::Arc;
 
+use http::StatusCode;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyDict};
 
-use super::{context::PersistContext, metrics::PersistMetrics};
+use super::{
+    context::PersistContext, extremities::MissingPrevStateEvents, metrics::PersistMetrics,
+};
 use crate::{
+    errors::SynapseError,
     events::Event,
     homeserver::HomeServer,
     runtime::RustRuntime,
@@ -120,6 +124,28 @@ impl Persister {
     fn take_metrics<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         self.inner.metrics.take().to_py(py)
     }
+}
+
+/// Convert an error from persisting to the Python exception the Python
+/// path would raise: a Python exception as it was raised, a 500
+/// `SynapseError` for missing prev state events, as
+/// `_calculate_new_state_dag_extremities` raises, and a `RuntimeError`
+/// otherwise.
+pub fn persist_error_to_py(e: anyhow::Error) -> PyErr {
+    let e = match e.downcast::<PyErr>() {
+        Ok(err) => return err,
+        Err(e) => e,
+    };
+    if let Some(missing) = e.downcast_ref::<MissingPrevStateEvents>() {
+        return SynapseError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            missing.to_string(),
+            "M_UNKNOWN",
+            None,
+            None,
+        );
+    }
+    PyRuntimeError::new_err(format!("{e:#}"))
 }
 
 /// `(internal_metadata, json)`: the two `event_json` columns as Rust would

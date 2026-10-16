@@ -39,13 +39,20 @@ use std::{
 
 use anyhow::Context;
 use futures::{future::BoxFuture, FutureExt};
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyDict};
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Handle;
 use tokio_postgres::Row;
 
+use super::{
+    context::PersistContext,
+    extremities::{self, NewEvent},
+    metrics::PersistCounts,
+    python::persist_error_to_py,
+};
 use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
+use crate::events::Event;
 use crate::storage::events::Querier;
 use crate::storage::sync_store::{
     PersistedEventPosition, SyncReader, SyncStore, SELECT_MANY_BATCH_SIZE,
@@ -669,10 +676,6 @@ fn is_truthy(value: &Value) -> bool {
 // Test-only entry points, so trial can compare the reads against the Python
 // store on a real schema.
 
-fn anyhow_to_py(e: anyhow::Error) -> PyErr {
-    pyo3::exceptions::PyRuntimeError::new_err(format!("{e:#}"))
-}
-
 fn arcs(ids: Vec<String>) -> Vec<Arc<str>> {
     ids.into_iter().map(Arc::from).collect()
 }
@@ -702,7 +705,7 @@ impl PyPersistReaderForTest {
             self.handle
                 .block_on(f(PersistReader::new(self.store.reader(self.pool.clone()))))
         })
-        .map_err(anyhow_to_py)
+        .map_err(persist_error_to_py)
     }
 }
 
@@ -982,6 +985,109 @@ impl PyPersistReaderForTest {
             async move { max_sequence_numbers(&reader.borrow().await?, &chain_ids).await }.boxed()
         })
     }
+
+    // The extremity calculations over the reader, each returning its result
+    // and what it counted.
+
+    fn calculate_new_extremities<'py>(
+        &self,
+        py: Python<'py>,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        latest_event_ids: Vec<String>,
+    ) -> PyResult<(HashSet<String>, Bound<'py, PyDict>)> {
+        let events = new_events(py, &events_and_contexts)?;
+        let latest: HashSet<Arc<str>> = arcs(latest_event_ids).into_iter().collect();
+        let (result, counts) = self.run(py, |reader| {
+            async move {
+                let mut counts = PersistCounts::default();
+                let result =
+                    extremities::calculate_new_extremities(&reader, &events, &latest, &mut counts)
+                        .await?;
+                Ok((result, counts))
+            }
+            .boxed()
+        })?;
+        Ok((strings(result), counts.to_py(py)?))
+    }
+
+    fn calculate_new_state_dag_extremities<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        existing: Vec<String>,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+    ) -> PyResult<(HashSet<String>, Bound<'py, PyDict>)> {
+        let events = new_events(py, &events_and_contexts)?;
+        let existing: HashSet<Arc<str>> = arcs(existing).into_iter().collect();
+        let (result, counts) = self.run(py, |reader| {
+            async move {
+                let mut counts = PersistCounts::default();
+                let result = extremities::calculate_new_state_dag_extremities(
+                    &reader,
+                    &room_id,
+                    &existing,
+                    &events,
+                    &mut counts,
+                )
+                .await?;
+                Ok((result, counts))
+            }
+            .boxed()
+        })?;
+        Ok((strings(result), counts.to_py(py)?))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prune_extremities<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        server_name: String,
+        new_latest_event_ids: Vec<String>,
+        resolved_state_group: i64,
+        event_id_to_state_group: HashMap<String, i64>,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        now_ms: i64,
+    ) -> PyResult<(HashSet<String>, Bound<'py, PyDict>)> {
+        let events = new_events(py, &events_and_contexts)?;
+        let latest: HashSet<Arc<str>> = arcs(new_latest_event_ids).into_iter().collect();
+        let groups: HashMap<Arc<str>, i64> = event_id_to_state_group
+            .into_iter()
+            .map(|(id, group)| (Arc::from(id), group))
+            .collect();
+        let (result, counts) = self.run(py, |reader| {
+            async move {
+                let mut counts = PersistCounts::default();
+                let result = extremities::prune_extremities(
+                    &reader,
+                    &room_id,
+                    &server_name,
+                    latest,
+                    resolved_state_group,
+                    &groups,
+                    &events,
+                    now_ms,
+                    &mut counts,
+                )
+                .await?;
+                Ok((result, counts))
+            }
+            .boxed()
+        })?;
+        Ok((strings(result), counts.to_py(py)?))
+    }
+}
+
+fn new_events(
+    py: Python<'_>,
+    events_and_contexts: &[(Py<Event>, PersistContext)],
+) -> PyResult<Vec<NewEvent>> {
+    events_and_contexts
+        .iter()
+        .map(|(event, context)| {
+            NewEvent::new(event.bind(py).get(), context).map_err(persist_error_to_py)
+        })
+        .collect()
 }
 
 #[cfg(test)]

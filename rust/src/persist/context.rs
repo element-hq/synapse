@@ -86,6 +86,16 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PersistContext {
     }
 }
 
+impl PersistContext {
+    /// Whether the event was rejected, as Python's `if context.rejected`
+    /// reads it: an empty reason does not count.
+    pub fn is_rejected(&self) -> bool {
+        self.rejected
+            .as_deref()
+            .is_some_and(|reason| !reason.is_empty())
+    }
+}
+
 /// Convert a dict of `(type, state_key)` to event ID.
 fn state_map_from_py(dict: &Bound<'_, PyDict>) -> PyResult<StateMap> {
     let mut map = StateMap::with_capacity(dict.len());
