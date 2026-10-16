@@ -37,6 +37,7 @@ use crate::runtime::RustRuntime;
 use crate::storage::sync_store::{SyncDbStats, SyncStore};
 
 pub mod config;
+pub mod connection;
 pub mod request;
 pub mod required_state;
 
@@ -164,6 +165,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<SlidingSyncStats>()?;
     child_module.add_class::<request::SlidingSyncRequest>()?;
     config::register_test_functions(&child_module)?;
+    connection::register_test_functions(&child_module)?;
     required_state::register_test_functions(&child_module)?;
 
     m.add_submodule(&child_module)?;

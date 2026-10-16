@@ -139,3 +139,30 @@ def required_state_request_for_test(
 def state_filter_with_meta_for_test(
     required_state_filter: StateFilter, hero_user_ids: list[str], include_avatar: bool
 ) -> tuple[dict[str, list[str] | None], bool]: ...
+def room_status_map_ops_for_test(
+    statuses: dict[str, tuple[str, int | None]],
+    ops: list[tuple[str, list[str], int | None]],
+) -> tuple[dict[str, tuple[str, int | None]], dict[str, tuple[str, int | None]], int]:
+    """`(updates, flattened, len)` of a `MutableRoomStatusMap[int]` after
+    `ops` of `("sent", room_ids, None)` or `("unsent", room_ids, token)`."""
+
+def lazy_membership_changes_for_test(
+    returned_user_id_to_last_seen_ts_map: dict[str, int | None],
+    invalidated_user_ids: set[str],
+    now_ms: int,
+) -> tuple[list[str], bool]:
+    """`(get_returned_user_ids_to_update, has_updates)`."""
+
+def per_connection_state_for_test(
+    rooms: dict[str, tuple[str, int | None]],
+    rooms_sent: list[str],
+    receipts: dict[str, tuple[str, int | None]],
+    receipts_sent: list[str],
+    account_data: dict[str, tuple[str, int | None]],
+    account_data_sent: list[str],
+    room_configs: dict[str, tuple[int, dict[str, list[str]]]],
+    room_config_updates: dict[str, tuple[int, dict[str, list[str]]]],
+    lazy: dict[str, tuple[dict[str, int | None], set[str]]],
+    now_ms: int,
+) -> tuple[bool, int, int]:
+    """`(has_updates, len(state), len(mutable state))`."""

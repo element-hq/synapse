@@ -18,7 +18,7 @@ inputs."""
 
 import random
 from types import SimpleNamespace
-from typing import AbstractSet, Mapping, cast
+from typing import AbstractSet, Any, Mapping, cast
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
@@ -29,12 +29,19 @@ from synapse.handlers.sliding_sync import (
     _state_filter_with_meta,
 )
 from synapse.synapse_rust import sliding_sync as rust
+from synapse.types import RoomStreamToken
 from synapse.types.handlers.sliding_sync import (
+    HaveSentRoom,
+    HaveSentRoomFlag,
+    PerConnectionState,
+    RoomLazyMembershipChanges,
+    RoomStatusMap,
     RoomSyncConfig,
     SlidingSyncConfig,
     StateValues,
 )
 from synapse.types.state import StateFilter
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -387,4 +394,202 @@ class RequiredStateRequestTestCase(unittest.TestCase):
                     )
                 ),
                 context,
+            )
+
+
+_ROOMS = [f"!r{i}:test" for i in range(8)]
+_HOUR_MS = 60 * 60 * 1000
+
+PyStatus = tuple[str, int | None]
+
+
+def _random_statuses(rng: random.Random) -> dict[str, PyStatus]:
+    statuses: dict[str, PyStatus] = {}
+    for room_id in _ROOMS:
+        choice = rng.random()
+        if choice < 0.3:
+            continue
+        elif choice < 0.4:
+            statuses[room_id] = ("never", None)
+        elif choice < 0.7:
+            statuses[room_id] = ("live", None)
+        else:
+            statuses[room_id] = ("previously", rng.randint(1, 50))
+    return statuses
+
+
+def _to_status(status: PyStatus) -> HaveSentRoom[int]:
+    flag, token = status
+    if flag == "never":
+        return HaveSentRoom.never()
+    if flag == "live":
+        return HaveSentRoom.live()
+    assert token is not None
+    return HaveSentRoom.previously(token)
+
+
+def _from_status(status: HaveSentRoom[int]) -> PyStatus:
+    return (status.status.value, status.last_token)
+
+
+class _FakeClock:
+    def __init__(self, now_ms: int) -> None:
+        self.now_ms = now_ms
+
+    def time_msec(self) -> int:
+        return self.now_ms
+
+
+class ConnectionStateTestCase(unittest.TestCase):
+    """`rust/src/sliding_sync/connection.rs`"""
+
+    def test_room_status_map(self) -> None:
+        rng = random.Random(6)
+        for _ in range(2000):
+            statuses = _random_statuses(rng)
+            ops: list[tuple[str, list[str], int | None]] = []
+            for _ in range(rng.randint(0, 4)):
+                room_ids = rng.sample(_ROOMS, rng.randint(0, 4))
+                if rng.random() < 0.5:
+                    ops.append(("sent", room_ids, None))
+                else:
+                    ops.append(("unsent", room_ids, rng.randint(1, 50)))
+
+            python = RoomStatusMap(
+                statuses={k: _to_status(v) for k, v in statuses.items()}
+            ).get_mutable()
+            for op, room_ids, token in ops:
+                if op == "sent":
+                    python.record_sent_rooms(room_ids)
+                else:
+                    assert token is not None
+                    python.record_unsent_rooms(room_ids, token)
+
+            updates, flattened, length = rust.room_status_map_ops_for_test(
+                statuses, ops
+            )
+            context = (statuses, ops)
+            self.assertEqual(
+                updates,
+                {k: _from_status(v) for k, v in python.get_updates().items()},
+                context,
+            )
+            copied = python.copy()
+            self.assertEqual(
+                flattened,
+                {
+                    room_id: _from_status(copied.have_sent_room(room_id))
+                    for room_id in _ROOMS
+                    if room_id in statuses or room_id in python.get_updates()
+                },
+                context,
+            )
+            self.assertEqual(length, len(python), context)
+
+    def test_lazy_membership_changes(self) -> None:
+        rng = random.Random(7)
+        for _ in range(2000):
+            now_ms = 10 * _HOUR_MS
+            returned = {
+                user_id: rng.choice(
+                    [None, now_ms, now_ms - _HOUR_MS, now_ms - _HOUR_MS + 1, 0]
+                )
+                for user_id in rng.sample(_USERS, rng.randint(0, 4))
+            }
+            invalidated = set(rng.sample(_USERS, rng.choice([0, 0, 1])))
+            python = RoomLazyMembershipChanges(
+                returned_user_id_to_last_seen_ts_map=returned,
+                invalidated_user_ids=invalidated,
+            )
+            clock = cast(Clock, _FakeClock(now_ms))
+            to_update, has_updates = rust.lazy_membership_changes_for_test(
+                returned, invalidated, now_ms
+            )
+            self.assertEqual(
+                to_update, sorted(python.get_returned_user_ids_to_update(clock))
+            )
+            self.assertEqual(has_updates, python.has_updates(clock))
+
+    def test_per_connection_state(self) -> None:
+        rng = random.Random(8)
+        now_ms = 10 * _HOUR_MS
+        for _ in range(1000):
+            rooms = _random_statuses(rng)
+            receipts = _random_statuses(rng)
+            account_data = _random_statuses(rng)
+            sent = [rng.sample(_ROOMS, rng.choice([0, 0, 1, 2])) for _ in range(3)]
+            room_configs = {
+                room_id: _to_rust(_python_config(1, _random_required_state(rng)))
+                for room_id in rng.sample(_ROOMS, rng.randint(0, 3))
+            }
+            room_config_updates = {
+                room_id: _to_rust(_python_config(2, _random_required_state(rng)))
+                for room_id in rng.sample(_ROOMS, rng.choice([0, 0, 1]))
+            }
+            lazy = {
+                room_id: (
+                    {
+                        user_id: rng.choice([None, now_ms])
+                        for user_id in rng.sample(_USERS, rng.choice([0, 1]))
+                    },
+                    set(rng.sample(_USERS, rng.choice([0, 0, 0, 1]))),
+                )
+                for room_id in rng.sample(_ROOMS, rng.choice([0, 1]))
+            }
+
+            def config(rust_config: RustConfig) -> RoomSyncConfig:
+                limit, required_state_map = rust_config
+                return RoomSyncConfig(
+                    limit, {t: set(keys) for t, keys in required_state_map.items()}
+                )
+
+            state = PerConnectionState(
+                rooms=RoomStatusMap(
+                    statuses={
+                        k: HaveSentRoom(
+                            HaveSentRoomFlag(flag),
+                            RoomStreamToken(stream=token) if token else None,
+                        )
+                        for k, (flag, token) in rooms.items()
+                    }
+                ),
+                # The receipts stream's tokens are ints here.
+                receipts=RoomStatusMap(
+                    statuses=cast(Any, {k: _to_status(v) for k, v in receipts.items()})
+                ),
+                account_data=RoomStatusMap(
+                    statuses={k: _to_status(v) for k, v in account_data.items()}
+                ),
+                room_configs={k: config(v) for k, v in room_configs.items()},
+            )
+            python = state.get_mutable()
+            python.rooms.record_sent_rooms(sent[0])
+            python.receipts.record_sent_rooms(sent[1])
+            python.account_data.record_sent_rooms(sent[2])
+            for room_id, rust_config in room_config_updates.items():
+                python.room_configs[room_id] = config(rust_config)
+            for room_id, (returned, invalidated) in lazy.items():
+                python.room_lazy_membership[room_id] = RoomLazyMembershipChanges(
+                    returned_user_id_to_last_seen_ts_map=returned,
+                    invalidated_user_ids=invalidated,
+                )
+
+            self.assertEqual(
+                rust.per_connection_state_for_test(
+                    rooms,
+                    sent[0],
+                    receipts,
+                    sent[1],
+                    account_data,
+                    sent[2],
+                    room_configs,
+                    room_config_updates,
+                    lazy,
+                    now_ms,
+                ),
+                (
+                    python.has_updates(cast(Clock, _FakeClock(now_ms))),
+                    len(state),
+                    len(python),
+                ),
             )
