@@ -73,6 +73,9 @@ class SlidingSyncConfig(SlidingSyncBody):
 
     user: UserID
     requester: Requester
+    # The request body as the client sent it, which the Rust implementation
+    # parses itself. `None` when the config was not built from a request.
+    body_bytes: bytes | None = None
     model_config = ConfigDict(
         extra="ignore",
         frozen=True,

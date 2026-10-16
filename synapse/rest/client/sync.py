@@ -990,6 +990,11 @@ class SlidingSyncRestServlet(RestServlet):
         # by filter ID. For now, we will just prototype with always passing everything
         # in.
         body = parse_and_validate_json_object_from_request(request, SlidingSyncBody)
+        # The Rust implementation parses the body itself, from the same bytes.
+        body_bytes = None
+        if self.sliding_sync_handler.parses_request_body:
+            request.content.seek(0)  # type: ignore[union-attr]
+            body_bytes = request.content.read()  # type: ignore[union-attr]
 
         # Tag and log useful data to differentiate requests.
         set_tag(
@@ -1028,6 +1033,7 @@ class SlidingSyncRestServlet(RestServlet):
             lists=body.lists,
             room_subscriptions=body.room_subscriptions,
             extensions=body.extensions,
+            body_bytes=body_bytes,
         )
 
         (

@@ -36,6 +36,8 @@ use crate::deferred::{create_deferred_with, OnCancel};
 use crate::runtime::RustRuntime;
 use crate::storage::sync_store::{SyncDbStats, SyncStore};
 
+pub mod request;
+
 /// Computes sliding sync responses with the Rust implementation, reading
 /// the database through the native Postgres driver.
 #[pyclass(frozen)]
@@ -158,6 +160,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     let child_module = PyModule::new(py, "sliding_sync")?;
     child_module.add_class::<SlidingSyncHandler>()?;
     child_module.add_class::<SlidingSyncStats>()?;
+    child_module.add_class::<request::SlidingSyncRequest>()?;
 
     m.add_submodule(&child_module)?;
 

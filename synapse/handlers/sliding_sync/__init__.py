@@ -48,6 +48,7 @@ from synapse.storage.roommember import (
 )
 from synapse.synapse_rust.sliding_sync import (
     SlidingSyncHandler as RustSlidingSyncHandler,
+    SlidingSyncRequest as RustSlidingSyncRequest,
     SlidingSyncStats as RustSlidingSyncStats,
 )
 from synapse.types import (
@@ -188,6 +189,7 @@ class SlidingSyncHandler:
         self.relations_handler = hs.get_relations_handler()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
+        self._hs_config = hs.config
 
         self.connection_store = SlidingSyncConnectionStore(self.clock, self.store)
         self.extensions = SlidingSyncExtensionHandler(hs)
@@ -209,6 +211,58 @@ class SlidingSyncHandler:
         # Whether a Rust error raises rather than falling back to Python. Tests
         # set it.
         self._rust_sliding_sync_strict = False
+
+    @property
+    def parses_request_body(self) -> bool:
+        """Whether the servlet should keep the request body's bytes in the
+        `SlidingSyncConfig`, for the Rust implementation to parse."""
+        return self._rust_sliding_sync is not None
+
+    async def _build_rust_request(
+        self,
+        sync_config: SlidingSyncConfig,
+        from_token: SlidingSyncStreamToken | None,
+        to_token: StreamToken,
+    ) -> RustSlidingSyncRequest:
+        """What the Rust implementation reads about the request: the body, and
+        what Python knows about the user, the tokens and the server.
+
+        Raises:
+            ValueError if Rust cannot parse the body. Python validated it, so
+            this is a body Rust does not cover (see `rust/src/sliding_sync/
+            request.rs`), and Python computes the request.
+        """
+        user_id = sync_config.user.to_string()
+        body = sync_config.body_bytes
+        if body is None:
+            # Not from a request. Only unset fields can hold `Absent`.
+            body = sync_config.model_dump_json(
+                by_alias=True,
+                exclude_unset=True,
+                include={"conn_id", "lists", "room_subscriptions", "extensions"},
+            ).encode()
+        is_server_admin = await self.store.is_server_admin(user_id)
+        client_config = await self.store.get_admin_client_config_for_user(user_id)
+        # A room key never holds the separator.
+        to_suffix = (await to_token.to_string(self.store)).split("_", 1)[1]
+        config = self._hs_config
+        return RustSlidingSyncRequest(
+            body,
+            user_id=user_id,
+            device_id=sync_config.requester.device_id,
+            from_room_key=from_token.stream_token.room_key if from_token else None,
+            connection_position=from_token.connection_position if from_token else None,
+            to_room_key=to_token.room_key,
+            to_suffix=to_suffix,
+            is_server_admin=is_server_admin,
+            return_soft_failed_events=client_config.return_soft_failed_events,
+            return_policy_server_spammy_events=client_config.return_policy_server_spammy_events,
+            have_finished_bg_jobs=await self.store.have_finished_sliding_sync_background_jobs(),
+            rooms_to_exclude=set(self.rooms_to_exclude_globally),
+            msc4306_enabled=config.experimental.msc4306_enabled,
+            msc4354_enabled=config.experimental.msc4354_enabled,
+            profiles_enabled=config.server.include_profile_updates_in_sync,
+        )
 
     async def wait_for_sync_for_user(
         self,

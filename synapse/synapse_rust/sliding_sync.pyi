@@ -12,6 +12,8 @@
 
 """Simplified sliding sync (MSC4186) in Rust. See `rust/src/sliding_sync/`."""
 
+from synapse.types import JsonDict, RoomStreamToken
+
 class SlidingSyncHandler:
     """Computes sliding sync responses in Rust, reading the database through
     the native Postgres driver. Built by `RustHandlers`."""
@@ -43,3 +45,49 @@ class SlidingSyncStats:
     def rooms_computed(self) -> int: ...
     @property
     def lazy_member_lookups(self) -> int: ...
+
+class SlidingSyncRequest:
+    """One sliding sync request as the Rust implementation sees it: the body,
+    parsed from the bytes pydantic validated, plus what Python adds."""
+
+    def __init__(
+        self,
+        body: bytes,
+        *,
+        user_id: str,
+        device_id: str | None,
+        from_room_key: RoomStreamToken | None,
+        connection_position: int | None,
+        to_room_key: RoomStreamToken,
+        to_suffix: str,
+        is_server_admin: bool,
+        return_soft_failed_events: bool,
+        return_policy_server_spammy_events: bool,
+        have_finished_bg_jobs: bool,
+        rooms_to_exclude: set[str],
+        msc4306_enabled: bool,
+        msc4354_enabled: bool,
+        profiles_enabled: bool,
+    ) -> None:
+        """Raises `ValueError` if the body does not parse."""
+    def body_for_test(self) -> JsonDict:
+        """The parsed body with every default filled in, and the lists and
+        room subscriptions as lists of `[name, value]` pairs."""
+    @property
+    def user_id(self) -> str: ...
+    @property
+    def device_id(self) -> str | None: ...
+    @property
+    def from_room_key(self) -> RoomStreamToken | None: ...
+    @property
+    def connection_position(self) -> int | None: ...
+    @property
+    def to_room_key(self) -> RoomStreamToken: ...
+    @property
+    def to_suffix(self) -> str: ...
+    @property
+    def is_server_admin(self) -> bool: ...
+    @property
+    def have_finished_bg_jobs(self) -> bool: ...
+    @property
+    def rooms_to_exclude(self) -> set[str]: ...
