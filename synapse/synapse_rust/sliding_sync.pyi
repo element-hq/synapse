@@ -13,6 +13,7 @@
 """Simplified sliding sync (MSC4186) in Rust. See `rust/src/sliding_sync/`."""
 
 from synapse.types import JsonDict, RoomStreamToken
+from synapse.types.state import StateFilter
 
 class SlidingSyncHandler:
     """Computes sliding sync responses in Rust, reading the database through
@@ -105,3 +106,36 @@ def must_await_full_state_for_test(
     config: tuple[int, dict[str, list[str]]], server_name: str
 ) -> bool:
     """Raises `ValueError` where Python raises `IndexError`."""
+
+def required_state_changes_for_test(
+    user_id: str,
+    prev_required_state_map: dict[str, list[str]],
+    request_required_state_map: dict[str, list[str]],
+    previously_returned_lazy_user_ids: set[str],
+    request_lazy_load_user_ids: set[str],
+    state_deltas: list[tuple[str, str]],
+) -> tuple[
+    dict[str, list[str]] | None,
+    tuple[dict[str, list[str] | None], bool],
+    list[str],
+    list[str],
+]:
+    """`(changed_required_state_map, added_state_filter,
+    extra_users_to_add_to_lazy_cache, lazy_members_invalidated)`, with a
+    state filter as `({type: state keys or None}, include_others)`."""
+
+def required_state_request_for_test(
+    user_id: str,
+    membership: str,
+    required_state_map: dict[str, list[str]],
+    timeline: list[tuple[str, str, str | None]],
+    limited: bool | None,
+    initial: bool,
+    state_delta_keys: list[tuple[str, str]],
+) -> tuple[tuple[dict[str, list[str] | None], bool], bool, list[str], list[str]]:
+    """`(required_state_filter, lazy_load_room_members, lazy_load_user_ids,
+    explicit_user_state)`, the timeline as `(sender, type, state_key)`."""
+
+def state_filter_with_meta_for_test(
+    required_state_filter: StateFilter, hero_user_ids: list[str], include_avatar: bool
+) -> tuple[dict[str, list[str] | None], bool]: ...

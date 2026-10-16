@@ -15,7 +15,7 @@
 import itertools
 import logging
 from itertools import chain
-from typing import TYPE_CHECKING, AbstractSet, Mapping
+from typing import TYPE_CHECKING, AbstractSet, Iterable, Mapping, Sequence
 
 import attr
 from prometheus_client import Counter, Histogram
@@ -1182,186 +1182,30 @@ class SlidingSyncHandler:
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
         #
         # Calculate the `StateFilter` based on the `required_state` for the room
-        required_state_filter = StateFilter.none()
-
-        # Keep track of which users' state we may need to fetch. We split this
-        # into explicit users and lazy loaded users.
-        explicit_user_state = set()
-        lazy_load_user_ids = set()
-
-        # Whether lazy-loading of room members is enabled.
-        lazy_load_room_members = False
-
-        if room_membership_for_user_at_to_token.membership not in (
-            Membership.INVITE,
-            Membership.KNOCK,
-        ):
-            # If we have a double wildcard ("*", "*") in the `required_state`, we need
-            # to fetch all state for the room
-            #
-            # Note: MSC3575 describes different behavior to how we're handling things
-            # here but since it's not wrong to return more state than requested
-            # (`required_state` is just the minimum requested), it doesn't matter if we
-            # include more than client wanted. This complexity is also under scrutiny,
-            # see
-            # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1185109050
-            #
-            # > One unique exception is when you request all state events via ["*", "*"]. When used,
-            # > all state events are returned by default, and additional entries FILTER OUT the returned set
-            # > of state events. These additional entries cannot use '*' themselves.
-            # > For example, ["*", "*"], ["m.room.member", "@alice:example.com"] will _exclude_ every m.room.member
-            # > event _except_ for @alice:example.com, and include every other state event.
-            # > In addition, ["*", "*"], ["m.space.child", "*"] is an error, the m.space.child filter is not
-            # > required as it would have been returned anyway.
-            # >
-            # > -- MSC3575 (https://github.com/matrix-org/matrix-spec-proposals/pull/3575)
-            if StateValues.WILDCARD in room_sync_config.required_state_map.get(
-                StateValues.WILDCARD, set()
-            ):
-                set_tag(
-                    SynapseTags.FUNC_ARG_PREFIX + "required_state_wildcard",
-                    True,
-                )
-                required_state_filter = StateFilter.all()
-            # TODO: `StateFilter` currently doesn't support wildcard event types. We're
-            # currently working around this by returning all state to the client but it
-            # would be nice to fetch less from the database and return just what the
-            # client wanted.
-            elif (
-                room_sync_config.required_state_map.get(StateValues.WILDCARD)
-                is not None
-            ):
-                set_tag(
-                    SynapseTags.FUNC_ARG_PREFIX + "required_state_wildcard_event_type",
-                    True,
-                )
-                required_state_filter = StateFilter.all()
-            else:
-                required_state_types: list[tuple[str, str | None]] = []
-                num_wild_state_keys = 0
-                num_others = 0
-                for (
-                    state_type,
-                    state_key_set,
-                ) in room_sync_config.required_state_map.items():
-                    for state_key in state_key_set:
-                        if state_key == StateValues.WILDCARD:
-                            num_wild_state_keys += 1
-                            # `None` is a wildcard in the `StateFilter`
-                            required_state_types.append((state_type, None))
-                        # We need to fetch all relevant people when we're lazy-loading membership
-                        elif (
-                            state_type == EventTypes.Member
-                            and state_key == StateValues.LAZY
-                        ):
-                            lazy_load_room_members = True
-
-                            # Everyone in the timeline is relevant
-                            timeline_membership: set[str] = set()
-                            if timeline_events is not None:
-                                for timeline_event in timeline_events:
-                                    # Anyone who sent a message is relevant
-                                    timeline_membership.add(timeline_event.event.sender)
-
-                                    # We also care about invite, ban, kick, targets,
-                                    # etc.
-                                    if timeline_event.event.type == EventTypes.Member:
-                                        timeline_membership.add(
-                                            timeline_event.event.state_key
-                                        )
-
-                            # The client needs to know the membership of everyone in
-                            # the timeline we're returning.
-                            lazy_load_user_ids.update(timeline_membership)
-
-                            # Update the required state filter so we pick up the new
-                            # membership
-                            if limited or initial:
-                                # If the timeline is limited, we only need to
-                                # return the membership changes for people in
-                                # the timeline.
-                                for user_id in timeline_membership:
-                                    required_state_types.append(
-                                        (EventTypes.Member, user_id)
-                                    )
-                            else:
-                                # For non-limited timelines we always return all
-                                # membership changes. This is so that clients
-                                # who have fetched the full membership list
-                                # already can continue to maintain it for
-                                # non-limited syncs.
-                                #
-                                # This assumes that for non-limited syncs there
-                                # won't be many membership changes that wouldn't
-                                # have been included already (this can only
-                                # happen if membership state was rolled back due
-                                # to state resolution anyway).
-                                #
-                                # `None` is a wildcard in the `StateFilter`
-                                required_state_types.append((EventTypes.Member, None))
-
-                                # Record the extra members we're returning.
-                                lazy_load_user_ids.update(
-                                    state_key
-                                    for event_type, state_key in room_state_delta_id_map
-                                    if event_type == EventTypes.Member
-                                )
-                        else:
-                            num_others += 1
-
-                            # Replace `$ME` with the user's ID so we can deduplicate
-                            # when someone requests the same state with `$ME` or with
-                            # their user ID.
-                            normalized_state_key = state_key
-                            if state_key == StateValues.ME:
-                                normalized_state_key = user.to_string()
-
-                            if state_type == EventTypes.Member:
-                                # Also track explicitly requested member state for
-                                # lazy membership tracking.
-                                explicit_user_state.add(normalized_state_key)
-
-                            required_state_types.append(
-                                (state_type, normalized_state_key)
-                            )
-
-                set_tag(
-                    SynapseTags.FUNC_ARG_PREFIX
-                    + "required_state_wildcard_state_key_count",
-                    num_wild_state_keys,
-                )
-                set_tag(
-                    SynapseTags.FUNC_ARG_PREFIX + "required_state_lazy",
-                    lazy_load_room_members,
-                )
-                set_tag(
-                    SynapseTags.FUNC_ARG_PREFIX + "required_state_other_count",
-                    num_others,
-                )
-
-                required_state_filter = StateFilter.from_types(required_state_types)
-
-        # Remove any explicitly requested user state from the lazy-loaded set,
-        # as we track them separately.
-        lazy_load_user_ids -= explicit_user_state
+        required_state_request = _required_state_request(
+            user.to_string(),
+            membership=room_membership_for_user_at_to_token.membership,
+            required_state_map=room_sync_config.required_state_map,
+            timeline=[timeline_event.event for timeline_event in timeline_events],
+            limited=limited,
+            initial=initial,
+            state_delta_keys=room_state_delta_id_map.keys(),
+        )
+        required_state_filter = required_state_request.required_state_filter
+        explicit_user_state = required_state_request.explicit_user_state
+        lazy_load_user_ids = required_state_request.lazy_load_user_ids
+        lazy_load_room_members = required_state_request.lazy_load_room_members
 
         # We need this base set of info for the response so let's just fetch it along
         # with the `required_state` for the room
         hero_room_state = [
             (EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids
         ]
-        meta_room_state = list(hero_room_state)
-        if initial or avatar_changed:
-            meta_room_state.append((EventTypes.RoomAvatar, ""))
-
-        state_filter = StateFilter.all()
-        if required_state_filter != StateFilter.all():
-            state_filter = StateFilter(
-                types=StateFilter.from_types(
-                    chain(meta_room_state, required_state_filter.to_types())
-                ).types,
-                include_others=required_state_filter.include_others,
-            )
+        state_filter = _state_filter_with_meta(
+            required_state_filter,
+            hero_user_ids,
+            include_avatar=initial or avatar_changed,
+        )
 
         # The required state map to store in the room sync config, if it has
         # changed.
@@ -1776,6 +1620,232 @@ class SlidingSyncHandler:
                     return new_bump_event_pos.stream
 
             return None
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _RequiredStateRequest:
+    """What a room's `required_state` asks for, given its timeline. Returned
+    by `_required_state_request`."""
+
+    required_state_filter: StateFilter
+    """The state the request asks for."""
+
+    lazy_load_room_members: bool
+    """Whether lazy-loading of room members is enabled."""
+
+    lazy_load_user_ids: set[str]
+    """The lazy-loaded members, less the explicitly requested ones."""
+
+    explicit_user_state: set[str]
+    """The members requested explicitly, by user ID or `$ME`."""
+
+
+def _required_state_request(
+    user_id: str,
+    *,
+    membership: str,
+    required_state_map: Mapping[str, AbstractSet[str]],
+    timeline: Sequence[EventBase],
+    limited: bool | None,
+    initial: bool,
+    state_delta_keys: Iterable[tuple[str, str]],
+) -> _RequiredStateRequest:
+    """Derive the state filter and member sets of a room's `required_state`.
+
+    Args:
+        user_id: The user making the request.
+        membership: The user's membership in the room at the `to_token`.
+        required_state_map: The room's `RoomSyncConfig.required_state_map`.
+        timeline: The timeline events being returned.
+        limited: Whether the timeline is limited, or None with no timeline.
+        initial: Whether the room is sent down in full.
+        state_delta_keys: The keys of the room's state deltas in the token
+            range.
+    """
+    required_state_filter = StateFilter.none()
+
+    # Keep track of which users' state we may need to fetch. We split this
+    # into explicit users and lazy loaded users.
+    explicit_user_state = set()
+    lazy_load_user_ids = set()
+
+    # Whether lazy-loading of room members is enabled.
+    lazy_load_room_members = False
+
+    if membership not in (
+        Membership.INVITE,
+        Membership.KNOCK,
+    ):
+        # If we have a double wildcard ("*", "*") in the `required_state`, we need
+        # to fetch all state for the room
+        #
+        # Note: MSC3575 describes different behavior to how we're handling things
+        # here but since it's not wrong to return more state than requested
+        # (`required_state` is just the minimum requested), it doesn't matter if we
+        # include more than client wanted. This complexity is also under scrutiny,
+        # see
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1185109050
+        #
+        # > One unique exception is when you request all state events via ["*", "*"]. When used,
+        # > all state events are returned by default, and additional entries FILTER OUT the returned set
+        # > of state events. These additional entries cannot use '*' themselves.
+        # > For example, ["*", "*"], ["m.room.member", "@alice:example.com"] will _exclude_ every m.room.member
+        # > event _except_ for @alice:example.com, and include every other state event.
+        # > In addition, ["*", "*"], ["m.space.child", "*"] is an error, the m.space.child filter is not
+        # > required as it would have been returned anyway.
+        # >
+        # > -- MSC3575 (https://github.com/matrix-org/matrix-spec-proposals/pull/3575)
+        if StateValues.WILDCARD in required_state_map.get(StateValues.WILDCARD, set()):
+            set_tag(
+                SynapseTags.FUNC_ARG_PREFIX + "required_state_wildcard",
+                True,
+            )
+            required_state_filter = StateFilter.all()
+        # TODO: `StateFilter` currently doesn't support wildcard event types. We're
+        # currently working around this by returning all state to the client but it
+        # would be nice to fetch less from the database and return just what the
+        # client wanted.
+        elif required_state_map.get(StateValues.WILDCARD) is not None:
+            set_tag(
+                SynapseTags.FUNC_ARG_PREFIX + "required_state_wildcard_event_type",
+                True,
+            )
+            required_state_filter = StateFilter.all()
+        else:
+            required_state_types: list[tuple[str, str | None]] = []
+            num_wild_state_keys = 0
+            num_others = 0
+            for (
+                state_type,
+                state_key_set,
+            ) in required_state_map.items():
+                for state_key in state_key_set:
+                    if state_key == StateValues.WILDCARD:
+                        num_wild_state_keys += 1
+                        # `None` is a wildcard in the `StateFilter`
+                        required_state_types.append((state_type, None))
+                    # We need to fetch all relevant people when we're lazy-loading membership
+                    elif (
+                        state_type == EventTypes.Member
+                        and state_key == StateValues.LAZY
+                    ):
+                        lazy_load_room_members = True
+
+                        # Everyone in the timeline is relevant
+                        timeline_membership: set[str] = set()
+                        if timeline is not None:
+                            for timeline_event in timeline:
+                                # Anyone who sent a message is relevant
+                                timeline_membership.add(timeline_event.sender)
+
+                                # We also care about invite, ban, kick, targets,
+                                # etc.
+                                if timeline_event.type == EventTypes.Member:
+                                    timeline_membership.add(timeline_event.state_key)
+
+                        # The client needs to know the membership of everyone in
+                        # the timeline we're returning.
+                        lazy_load_user_ids.update(timeline_membership)
+
+                        # Update the required state filter so we pick up the new
+                        # membership
+                        if limited or initial:
+                            # If the timeline is limited, we only need to
+                            # return the membership changes for people in
+                            # the timeline.
+                            for member_user_id in timeline_membership:
+                                required_state_types.append(
+                                    (EventTypes.Member, member_user_id)
+                                )
+                        else:
+                            # For non-limited timelines we always return all
+                            # membership changes. This is so that clients
+                            # who have fetched the full membership list
+                            # already can continue to maintain it for
+                            # non-limited syncs.
+                            #
+                            # This assumes that for non-limited syncs there
+                            # won't be many membership changes that wouldn't
+                            # have been included already (this can only
+                            # happen if membership state was rolled back due
+                            # to state resolution anyway).
+                            #
+                            # `None` is a wildcard in the `StateFilter`
+                            required_state_types.append((EventTypes.Member, None))
+
+                            # Record the extra members we're returning.
+                            lazy_load_user_ids.update(
+                                state_key
+                                for event_type, state_key in state_delta_keys
+                                if event_type == EventTypes.Member
+                            )
+                    else:
+                        num_others += 1
+
+                        # Replace `$ME` with the user's ID so we can deduplicate
+                        # when someone requests the same state with `$ME` or with
+                        # their user ID.
+                        normalized_state_key = state_key
+                        if state_key == StateValues.ME:
+                            normalized_state_key = user_id
+
+                        if state_type == EventTypes.Member:
+                            # Also track explicitly requested member state for
+                            # lazy membership tracking.
+                            explicit_user_state.add(normalized_state_key)
+
+                        required_state_types.append((state_type, normalized_state_key))
+
+            set_tag(
+                SynapseTags.FUNC_ARG_PREFIX + "required_state_wildcard_state_key_count",
+                num_wild_state_keys,
+            )
+            set_tag(
+                SynapseTags.FUNC_ARG_PREFIX + "required_state_lazy",
+                lazy_load_room_members,
+            )
+            set_tag(
+                SynapseTags.FUNC_ARG_PREFIX + "required_state_other_count",
+                num_others,
+            )
+
+            required_state_filter = StateFilter.from_types(required_state_types)
+
+    # Remove any explicitly requested user state from the lazy-loaded set,
+    # as we track them separately.
+    lazy_load_user_ids -= explicit_user_state
+
+    return _RequiredStateRequest(
+        required_state_filter=required_state_filter,
+        lazy_load_room_members=lazy_load_room_members,
+        lazy_load_user_ids=lazy_load_user_ids,
+        explicit_user_state=explicit_user_state,
+    )
+
+
+def _state_filter_with_meta(
+    required_state_filter: StateFilter,
+    hero_user_ids: Iterable[str],
+    *,
+    include_avatar: bool,
+) -> StateFilter:
+    """The state to fetch for a room: `required_state_filter`, plus the
+    heroes' memberships and, if `include_avatar`, the room avatar."""
+    meta_room_state = [
+        (EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids
+    ]
+    if include_avatar:
+        meta_room_state.append((EventTypes.RoomAvatar, ""))
+
+    state_filter = StateFilter.all()
+    if required_state_filter != StateFilter.all():
+        state_filter = StateFilter(
+            types=StateFilter.from_types(
+                chain(meta_room_state, required_state_filter.to_types())
+            ).types,
+            include_others=required_state_filter.include_others,
+        )
+    return state_filter
 
 
 @attr.s(auto_attribs=True)

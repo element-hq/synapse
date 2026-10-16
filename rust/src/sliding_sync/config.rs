@@ -144,7 +144,9 @@ impl RoomSyncConfig {
     /// `server_name` is ours, for `is_mine_id`.
     ///
     /// Fails where Python raises: an empty state key under the wildcard
-    /// type, which Python indexes into.
+    /// type, which Python indexes into. Python only gets there if no
+    /// remote user ID comes before it in the set's order. Rust checks the
+    /// user IDs first, which is one of Python's orders.
     pub fn must_await_full_state(&self, server_name: &str) -> anyhow::Result<bool> {
         let is_mine_id = |user_id: &str| {
             user_id
@@ -158,9 +160,6 @@ impl RoomSyncConfig {
                 return Ok(true);
             }
             for possible_user_id in state_keys {
-                if possible_user_id.is_empty() {
-                    bail!("an empty state key under the wildcard type");
-                }
                 if !possible_user_id.starts_with('@') {
                     continue;
                 }
@@ -170,6 +169,9 @@ impl RoomSyncConfig {
                 if !is_mine_id(possible_user_id) {
                     return Ok(true);
                 }
+            }
+            if state_keys.contains("") {
+                bail!("an empty state key under the wildcard type");
             }
         }
 
