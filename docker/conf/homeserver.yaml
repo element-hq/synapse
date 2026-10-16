@@ -71,6 +71,10 @@ database:
     user: "{{ POSTGRES_USER or "synapse" }}"
     password: "{{ POSTGRES_PASSWORD }}"
     database: "{{ POSTGRES_DB or "synapse" }}"
+{# Used by Complement. Not documented as a stable option. CAUSES RISK OF DATA LOSS. #}
+{% if __PRIVATE_SYNAPSE_DISABLE_SYNCHRONOUS_COMMIT %}
+    synchronous_commit: false
+{% endif %}
 {% if not SYNAPSE_USE_UNIX_SOCKET %}
 {# Synapse will use a default unix socket for Postgres when host/port is not specified (behavior from `psycopg2`). #}
     host: "{{ POSTGRES_HOST or "db" }}"
