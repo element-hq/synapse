@@ -755,7 +755,9 @@ class SlidingSyncHandler:
                 connection_position, finish_stats = await rust.finish_request(
                     request, state, interested
                 )
-        except CancelledError:
+        except (CancelledError, SlidingSyncUnknownPosition):
+            # A request racing on the same connection cleared our position.
+            # Python would hit the same error, so there is nothing to retry.
             raise
         except Exception:
             # The persist is one transaction, so nothing was stored, and
@@ -797,8 +799,11 @@ class SlidingSyncHandler:
             membership_changed_since_from = (
                 store._membership_stream_cache.has_entity_changed(user_id, from_stream)
             )
-            changed = store._events_stream_cache.get_all_entities_changed(from_stream)
-            if changed.hit:
+            # Python's `get_entities_changed` does not trust an empty cache.
+            # Leaving this as None makes Rust ask the database instead.
+            events_cache = store._events_stream_cache
+            changed = events_cache.get_all_entities_changed(from_stream)
+            if changed.hit and events_cache._cache:
                 events_changed_since_from = set(changed.entities)
         return await rust.compute_interested_rooms(
             request,
@@ -851,6 +856,8 @@ class SlidingSyncHandler:
             for room_input in interested.python_room_inputs(room_ids)
         }
 
+        @trace
+        @tag_args
         async def handle_room(room_id: str) -> None:
             (
                 _,

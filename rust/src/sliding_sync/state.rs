@@ -38,8 +38,8 @@ use pyo3::{
 use crate::caches::lock_ignoring_poison;
 use crate::sliding_sync::config::RoomSyncConfig;
 use crate::sliding_sync::connection::{
-    HaveSentRoom, MutablePerConnectionState, PerConnectionState, RoomLazyMembershipChanges,
-    RoomStatusMap,
+    HaveSentRoom, MutablePerConnectionState, MutableRoomStatusMap, PerConnectionState,
+    RoomLazyMembershipChanges, RoomStatusMap,
 };
 use crate::sliding_sync::result::required_state_map_from_py;
 use crate::sliding_sync::SlidingSyncStats;
@@ -339,21 +339,27 @@ impl ConnectionState {
         HashMap<String, PyRoomConfig>,
         HashMap<String, Bound<'py, PyAny>>,
     )> {
-        let data = lock_ignoring_poison(&self.data);
-        let previous = &data.previous;
-        let mut configs = HashMap::new();
-        let mut statuses = HashMap::new();
-        for room_id in room_ids {
-            if let Some(config) = previous.room_configs.get(&room_id) {
-                configs.insert(room_id.clone(), config_to_py(config));
+        // Copy out under the lock, then build the Python objects without it.
+        let (last_used_ts, configs, sent) = {
+            let data = lock_ignoring_poison(&self.data);
+            let previous = &data.previous;
+            let mut configs = HashMap::new();
+            let mut sent = Vec::new();
+            for room_id in room_ids {
+                if let Some(config) = previous.room_configs.get(&room_id) {
+                    configs.insert(room_id.clone(), config_to_py(config));
+                }
+                let status = previous.rooms.have_sent_room(&room_id);
+                if !status.is_never() {
+                    sent.push((room_id, status));
+                }
             }
-            let status = previous.rooms.have_sent_room(&room_id);
-            if !status.is_never() {
-                let status = have_sent_room_to_py(py, &status, |token| token.into_pyobject(py))?;
-                statuses.insert(room_id, status);
-            }
-        }
-        Ok((previous.last_used_ts, configs, statuses))
+            (previous.last_used_ts, configs, sent)
+        };
+        let statuses = statuses_to_py(py, sent, |token| token.into_pyobject(py))?
+            .into_iter()
+            .collect();
+        Ok((last_used_ts, configs, statuses))
     }
 
     /// Record what Python's `get_room_sync_data` changed for the rooms it
@@ -482,7 +488,8 @@ pub struct RoomStatusMapView {
 
 impl RoomStatusMapView {
     /// The statuses of `room_ids`, or every room's when `None`, as Python
-    /// `HaveSentRoom`s.
+    /// `HaveSentRoom`s. The statuses are copied out first, so the lock is
+    /// not held while calling into Python.
     fn statuses<'py>(
         &self,
         py: Python<'py>,
@@ -490,58 +497,27 @@ impl RoomStatusMapView {
     ) -> PyResult<Vec<(String, Bound<'py, PyAny>)>> {
         let state = self.state.bind(py).get();
         let instances = &state.instances;
-        let data = lock_ignoring_poison(&state.data);
-        // The flattened map, for every room, or one lookup per room.
-        macro_rules! collect {
-            ($previous:expr, $new:expr, $to_py:expr) => {{
-                let to_py = $to_py;
-                match room_ids {
-                    Some(room_ids) => room_ids
-                        .iter()
-                        .map(|room_id| {
-                            let status = if self.mutable {
-                                $new.have_sent_room(room_id)
-                            } else {
-                                $previous.have_sent_room(room_id)
-                            };
-                            Ok((room_id.clone(), have_sent_room_to_py(py, &status, to_py)?))
-                        })
-                        .collect::<PyResult<Vec<_>>>(),
-                    None => {
-                        let flattened;
-                        let map = if self.mutable {
-                            flattened = $new.copy();
-                            &flattened
-                        } else {
-                            &$previous
-                        };
-                        map.iter()
-                            .map(|(room_id, status)| {
-                                Ok((room_id.to_owned(), have_sent_room_to_py(py, status, to_py)?))
-                            })
-                            .collect::<PyResult<Vec<_>>>()
-                    }
-                }
+        macro_rules! copy {
+            ($stream:ident) => {{
+                let data = lock_ignoring_poison(&state.data);
+                copy_statuses(
+                    &data.previous.$stream,
+                    &data.new.$stream,
+                    self.mutable,
+                    room_ids,
+                )
             }};
         }
         match self.stream {
-            Stream::Rooms => collect!(
-                data.previous.rooms,
-                data.new.rooms,
-                |token: &RoomStreamToken| { token.into_pyobject(py) }
-            ),
-            Stream::Receipts => collect!(
-                data.previous.receipts,
-                data.new.receipts,
-                |token: &String| { multi_writer_to_py(py, token, instances) }
-            ),
-            Stream::AccountData => {
-                collect!(
-                    data.previous.account_data,
-                    data.new.account_data,
-                    |token: &i64| { Ok(token.into_pyobject(py)?.into_any()) }
-                )
-            }
+            Stream::Rooms => statuses_to_py(py, copy!(rooms), |token: &RoomStreamToken| {
+                token.into_pyobject(py)
+            }),
+            Stream::Receipts => statuses_to_py(py, copy!(receipts), |token: &String| {
+                multi_writer_to_py(py, token, instances)
+            }),
+            Stream::AccountData => statuses_to_py(py, copy!(account_data), |token: &i64| {
+                Ok(token.into_pyobject(py)?.into_any())
+            }),
         }
     }
 
@@ -554,6 +530,49 @@ impl RoomStatusMapView {
             ))
         }
     }
+}
+
+/// The statuses of `room_ids`, or every room's when `None`, from
+/// `previous`, or from `new` when `mutable`.
+fn copy_statuses<T: Clone>(
+    previous: &RoomStatusMap<T>,
+    new: &MutableRoomStatusMap<T>,
+    mutable: bool,
+    room_ids: Option<&[String]>,
+) -> Vec<(String, HaveSentRoom<T>)> {
+    match room_ids {
+        Some(room_ids) => room_ids
+            .iter()
+            .map(|room_id| {
+                let status = if mutable {
+                    new.have_sent_room(room_id)
+                } else {
+                    previous.have_sent_room(room_id)
+                };
+                (room_id.clone(), status)
+            })
+            .collect(),
+        None if mutable => new
+            .copy()
+            .iter()
+            .map(|(room_id, status)| (room_id.to_owned(), status.clone()))
+            .collect(),
+        None => previous
+            .iter()
+            .map(|(room_id, status)| (room_id.to_owned(), status.clone()))
+            .collect(),
+    }
+}
+
+fn statuses_to_py<'py, T>(
+    py: Python<'py>,
+    statuses: Vec<(String, HaveSentRoom<T>)>,
+    token_to_py: impl Fn(&T) -> PyResult<Bound<'py, PyAny>>,
+) -> PyResult<Vec<(String, Bound<'py, PyAny>)>> {
+    statuses
+        .into_iter()
+        .map(|(room_id, status)| Ok((room_id, have_sent_room_to_py(py, &status, &token_to_py)?)))
+        .collect()
 }
 
 /// Room IDs from any iterable of strings.

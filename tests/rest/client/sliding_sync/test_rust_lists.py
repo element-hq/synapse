@@ -32,8 +32,16 @@ from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import AccountDataTypes, EventTypes, RoomTypes
-from synapse.handlers.sliding_sync import rust_sliding_sync_requests_counter
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventTypes,
+    RelationTypes,
+    RoomTypes,
+)
+from synapse.handlers.sliding_sync import (
+    rust_sliding_sync_requests_counter,
+    rust_sliding_sync_rooms_counter,
+)
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.rest.client import account_data, knock, login, receipts, room, sync, tags
 from synapse.server import HomeServer
@@ -49,6 +57,7 @@ from synapse.types import JsonDict, MultiWriterStreamToken, SlidingSyncStreamTok
 from synapse.types.handlers.sliding_sync import (
     MutablePerConnectionState,
     SlidingSyncConfig,
+    StateValues,
 )
 from synapse.util.clock import Clock
 
@@ -435,6 +444,70 @@ class SlidingSyncRustListsTestCase(SlidingSyncBase):
                 },
             }
         )
+
+    def test_python_rooms(self) -> None:
+        """Python computes the rooms Rust leaves to it on a copy of their
+        state, and its changes reach the Rust state."""
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+        (rust_room,) = self._joined_rooms(1)
+        python_room = self.helper.create_room_as(self.user2_id, tok=self.user2_tok)
+        self.helper.join(python_room, self.user1_id, tok=self.user1_tok)
+        self.helper.join(python_room, user3_id, tok=user3_tok)
+        self._put_account_data(
+            AccountDataTypes.IGNORED_USER_LIST, {"ignored_users": {user3_id: {}}}
+        )
+        # Rust leaves a room to Python when the latest reply in a thread on
+        # its timeline is from an ignored user.
+        root_id = self._send_message(python_room)
+        self.helper.send_event(
+            python_room,
+            EventTypes.Message,
+            {
+                "msgtype": "m.text",
+                "body": "reply",
+                "m.relates_to": {"rel_type": RelationTypes.THREAD, "event_id": root_id},
+            },
+            tok=user3_tok,
+        )
+        self._send_message(rust_room)
+        sync_body: JsonDict = {
+            "lists": {
+                "all": {
+                    "ranges": [[0, 99]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.Member, StateValues.LAZY],
+                    ],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        fallback = rust_sliding_sync_rooms_counter.labels(
+            result="fallback", **{SERVER_NAME_LABEL: self.hs.hostname}
+        )
+        before = fallback._value.get()
+        response = self._sync_both(sync_body)
+        self.assertEqual(fallback._value.get() - before, 1)
+        self.assertEqual(set(response["rooms"]), {rust_room, python_room})
+
+        # The next requests start from the state Python's room wrote.
+        self._send_message(python_room)
+        self._send_message(rust_room)
+        self._sync_both(sync_body)
+        before = fallback._value.get()
+        self._sync_both(
+            {
+                "lists": {
+                    "all": {
+                        **sync_body["lists"]["all"],
+                        "required_state": [[EventTypes.Member, "*"]],
+                        "timeline_limit": 5,
+                    }
+                }
+            }
+        )
+        self.assertEqual(fallback._value.get() - before, 1)
 
     def test_extensions_state(self) -> None:
         """The receipts and account data extensions read and update the Rust
