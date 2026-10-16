@@ -70,8 +70,10 @@ pub const UPDATE_INTERVAL_LAST_USED_TS_MS: i64 = 5 * 60 * 1000;
 /// one that fails with a serialization error or a deadlock.
 const MAX_TRANSACTION_ATTEMPTS: usize = 5;
 
-/// The rooms of a user's membership snapshots, by room ID.
-pub type SnapshotRooms = HashMap<Arc<str>, RoomForUser>;
+/// The rooms of a user's membership snapshots, by room ID, in the order
+/// the query returns them, as Python's dict keeps it: a list that covers
+/// every room is not sorted, so its rooms come in this order.
+pub type SnapshotRooms = IndexMap<Arc<str>, RoomForUser>;
 
 /// A user's tags: room ID to tag to the tag's content.
 pub type UserTags = HashMap<Arc<str>, HashMap<String, serde_json::Value>>;
@@ -961,6 +963,21 @@ impl<'a> SlidingSyncReader<'a> {
             Err(e) if e.inner().is::<NoVersion>() => Ok(None),
             Err(e) => Err(anyhow::Error::new(e)),
         }
+    }
+
+    /// The `instance_map` table: each writer's instance ID and name, as
+    /// stream tokens name writers by ID.
+    pub async fn instance_map(&self) -> anyhow::Result<Vec<(i64, Arc<str>)>> {
+        let rows = self
+            .query_one_shot("SELECT instance_id, instance_name FROM instance_map", &[])
+            .await?;
+        rows.iter()
+            .map(|row| {
+                let id: i32 = row.try_get(0)?;
+                let name: String = row.try_get(1)?;
+                Ok((i64::from(id), Arc::from(name)))
+            })
+            .collect()
     }
 
     /// `get_partial_rooms`: every room the server joined with partial

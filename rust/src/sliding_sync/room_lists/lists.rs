@@ -30,6 +30,7 @@ pub const MINIMUM_NOT_USED_AGE_EXPIRY_MS: i64 = 60 * 60 * 1000;
 
 /// `NUM_ROOMS_THRESHOLD`: more rooms with updates than this, on a
 /// connection unused for [`MINIMUM_NOT_USED_AGE_EXPIRY_MS`], resets it.
+/// Python passes its value per request, which tests patch.
 pub const NUM_ROOMS_THRESHOLD: usize = 100;
 
 /// The rooms a request covers, to their combined configs, in the order
@@ -145,6 +146,7 @@ pub fn rooms_to_send<R: Clone>(
     relevant_room_map: &RelevantRoomMap,
     previous_state: &PerConnectionState<R>,
     rooms_that_have_updates: &HashSet<Arc<str>>,
+    num_rooms_threshold: usize,
     now_ms: i64,
 ) -> Result<Vec<Arc<str>>, UnknownPosition> {
     let mut rooms_should_send: HashSet<&Arc<str>> = HashSet::new();
@@ -167,7 +169,7 @@ pub fn rooms_to_send<R: Clone>(
 
     // A client with lots to catch up on does better starting over with a
     // small range, unless it synced recently and would loop.
-    if rooms_that_have_updates.len() > NUM_ROOMS_THRESHOLD {
+    if rooms_that_have_updates.len() > num_rooms_threshold {
         if let Some(last_used_ts) = previous_state.last_used_ts {
             if now_ms - last_used_ts > MINIMUM_NOT_USED_AGE_EXPIRY_MS {
                 return Err(UnknownPosition);

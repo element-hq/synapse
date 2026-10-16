@@ -13,64 +13,214 @@
 """Simplified sliding sync (MSC4186) in Rust. See `rust/src/sliding_sync/`."""
 
 from collections.abc import Mapping
-from typing import AbstractSet
+from typing import AbstractSet, Generic, TypeVar
 
 from twisted.internet.defer import Deferred
 
 from synapse.events import EventBase
 from synapse.synapse_rust.database.postgres import ConnectionPool
 from synapse.synapse_rust.events import SerializeEventConfig
-from synapse.types import JsonDict, JsonMapping, RoomStreamToken
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    MultiWriterStreamToken,
+    RoomStreamToken,
+    StrCollection,
+)
+from synapse.types.handlers.sliding_sync import HaveSentRoom
 from synapse.types.state import StateFilter
+from synapse.util.caches.stream_change_cache import StreamChangeCache
+
+T = TypeVar("T", str, RoomStreamToken, MultiWriterStreamToken, int)
 
 class SlidingSyncHandler:
     """Computes sliding sync responses in Rust, reading the database through
     the native Postgres driver. Built by `RustHandlers`."""
 
+    def load_connection_state(
+        self, request: SlidingSyncRequest, *, instance_ids: Mapping[str, int]
+    ) -> Deferred[ConnectionState]:
+        """`get_and_clear_connection_positions`. `instance_ids` are
+        `get_id_for_instance` for the writers of the request's tokens.
+
+        Raises:
+            SlidingSyncUnknownPosition for a position the store does not know.
+        """
+    def load_connection_state_blocking(
+        self, request: SlidingSyncRequest, *, instance_ids: Mapping[str, int]
+    ) -> ConnectionState: ...
+    def compute_interested_rooms(
+        self,
+        request: SlidingSyncRequest,
+        state: ConnectionState,
+        *,
+        server_name: str,
+        msc4155_enabled: bool,
+        num_rooms_threshold: int,
+        membership_changed_since_from: bool,
+        membership_changed_since_to: bool,
+        events_changed_since_from: AbstractSet[str] | None,
+        room_max_token: RoomStreamToken,
+        events_stream_cache: StreamChangeCache,
+    ) -> Deferred[InterestedRooms]:
+        """`compute_interested_rooms` on the sliding sync tables.
+        `membership_changed_since_*` are `_membership_stream_cache`'s
+        `has_entity_changed` at the from and to tokens' streams (true without a
+        from token), `events_changed_since_from` is `_events_stream_cache`'s
+        `get_all_entities_changed` at the from token's stream, and
+        `events_stream_cache` is read for the rooms a sort needs.
+
+        Raises:
+            RustSlidingSyncFallback for a filter Python does not implement.
+            SlidingSyncUnknownPosition for a connection to reset.
+        """
+    def compute_interested_rooms_blocking(
+        self,
+        request: SlidingSyncRequest,
+        state: ConnectionState,
+        *,
+        server_name: str,
+        msc4155_enabled: bool,
+        num_rooms_threshold: int,
+        membership_changed_since_from: bool,
+        membership_changed_since_to: bool,
+        events_changed_since_from: AbstractSet[str] | None,
+        room_max_token: RoomStreamToken,
+        events_stream_cache: StreamChangeCache,
+    ) -> InterestedRooms: ...
     def generate_room_entries(
         self,
         request: SlidingSyncRequest,
-        rooms: list[RoomInput],
-        *,
-        instance_ids: Mapping[str, int],
+        state: ConnectionState,
+        interested: InterestedRooms,
     ) -> Deferred[RoomsResult]:
-        """`get_room_sync_data` for each of `rooms`, twenty at a time.
-        `instance_ids` are `get_id_for_instance` for the writers the rooms'
-        tokens may name."""
+        """`get_room_sync_data` for each of the rooms to send, twenty at a
+        time. The rooms' changes to the connection state go into `state`."""
     def generate_room_entries_blocking(
         self,
         request: SlidingSyncRequest,
-        rooms: list[RoomInput],
-        *,
-        instance_ids: Mapping[str, int],
+        state: ConnectionState,
+        interested: InterestedRooms,
     ) -> RoomsResult: ...
-
-class RoomInput:
-    """The input of one room's `get_room_sync_data`."""
-
-    def __init__(
+    def finish_request(
         self,
-        *,
-        room_id: str,
-        sender: str | None,
-        membership: str,
-        event_id: str | None,
-        instance_name: str,
-        stream: int,
-        room_version_id: str | None,
-        timeline_limit: int,
-        required_state_map: Mapping[str, AbstractSet[str]],
-        prev_room_sync_config: tuple[int, Mapping[str, AbstractSet[str]]] | None,
-        room_status: str,
-        room_status_token: RoomStreamToken | None,
-        newly_joined: bool,
-        newly_left: bool,
-        is_dm: bool,
-    ) -> None:
-        """`room_status` is a `HaveSentRoomFlag` value, with its token for
-        "previously"."""
+        request: SlidingSyncRequest,
+        state: ConnectionState,
+        interested: InterestedRooms,
+    ) -> Deferred[tuple[int, SlidingSyncStats]]:
+        """The rest of `current_sync_for_user` after the extensions: record
+        the sent and unsent rooms, and persist the state if it changed.
+        Resolves to the connection position for `pos`."""
+    def finish_request_blocking(
+        self,
+        request: SlidingSyncRequest,
+        state: ConnectionState,
+        interested: InterestedRooms,
+    ) -> tuple[int, SlidingSyncStats]: ...
+
+class RustSlidingSyncFallback(Exception):
+    """The request is one Rust leaves to Python."""
+
+class ConnectionState:
+    """A request's connection state, owned by Rust from load to persist."""
+
     @property
-    def room_id(self) -> str: ...
+    def stats(self) -> SlidingSyncStats:
+        """What loading the state cost."""
+    @property
+    def previous(self) -> ConnectionStateView:
+        """The state as loaded: `PerConnectionState`."""
+    @property
+    def new(self) -> ConnectionStateView:
+        """The state with the request's updates: `MutablePerConnectionState`."""
+    def python_state_for_rooms(
+        self, room_ids: list[str]
+    ) -> tuple[
+        int | None,
+        dict[str, tuple[int, dict[str, set[str]]]],
+        dict[str, HaveSentRoom[RoomStreamToken]],
+    ]:
+        """`(last_used_ts, room_configs, room_statuses)` of the previous state
+        for `room_ids`, for the rooms Python computes."""
+    def apply_python_rooms(
+        self,
+        room_configs: list[tuple[str, int, Mapping[str, AbstractSet[str]]]],
+        lazy_memberships: list[tuple[str, Mapping[str, int | None], AbstractSet[str]]],
+    ) -> None:
+        """Record the changes of the rooms Python computed."""
+    def updates_for_test(
+        self,
+    ) -> tuple[
+        dict[str, tuple[int, dict[str, set[str]]]],
+        dict[str, tuple[dict[str, int | None], set[str]]],
+    ]: ...
+
+class ConnectionStateView:
+    """`PerConnectionState` or `MutablePerConnectionState` over a
+    `ConnectionState`, as the extensions read them."""
+
+    @property
+    def rooms(self) -> RoomStatusMapView[RoomStreamToken]: ...
+    @property
+    def receipts(self) -> RoomStatusMapView[MultiWriterStreamToken]: ...
+    @property
+    def account_data(self) -> RoomStatusMapView[int]: ...
+    @property
+    def last_used_ts(self) -> int | None: ...
+
+class RoomStatusMapView(Generic[T]):
+    """One stream's `RoomStatusMap` of a `ConnectionStateView`. The record
+    methods raise on the previous state's."""
+
+    def have_sent_room(self, room_id: str) -> HaveSentRoom[T]: ...
+    @property
+    def _statuses(self) -> dict[str, HaveSentRoom[T]]: ...
+    def record_sent_rooms(self, room_ids: StrCollection) -> None: ...
+    def record_unsent_rooms(self, room_ids: StrCollection, from_token: T) -> None: ...
+    def get_updates(self) -> dict[str, HaveSentRoom[T]]: ...
+
+class InterestedRooms:
+    """`SlidingSyncInterestedRooms`, as Python reads it."""
+
+    @property
+    def lists(
+        self,
+    ) -> list[tuple[str, int, list[tuple[tuple[int, int], list[str]]]]]:
+        """`(name, count, [((start, end), room_ids)])` for each list."""
+    @property
+    def relevant_room_ids(self) -> list[str]: ...
+    @property
+    def rooms_to_send(self) -> list[str]: ...
+    @property
+    def all_rooms(self) -> set[str]: ...
+    @property
+    def stats(self) -> SlidingSyncStats: ...
+    def python_room_inputs(
+        self, room_ids: list[str]
+    ) -> list[
+        tuple[
+            str,
+            tuple[int, dict[str, set[str]]],
+            tuple[
+                str | None,
+                str,
+                str | None,
+                str,
+                int,
+                str | None,
+                bool,
+                str | None,
+                bool,
+            ],
+            bool,
+            bool,
+            bool,
+        ]
+    ]:
+        """`(room_id, (timeline_limit, required_state_map), (sender,
+        membership, event_id, instance_name, stream, room_version_id,
+        has_known_state, room_type, is_encrypted), newly_joined, newly_left,
+        is_dm)` for each room, for the rooms Python computes."""
 
 class RoomResult:
     """One room's entry, computed in Rust: what `current_sync_for_user` and the
@@ -102,16 +252,6 @@ class RoomsResult:
     @property
     def empty(self) -> list[str]:
         """The rooms computed with nothing to send."""
-    @property
-    def room_config_updates(self) -> list[tuple[str, int, dict[str, set[str]]]]:
-        """`(room_id, timeline_limit, required_state_map)` for each room whose
-        config the connection records."""
-    @property
-    def lazy_memberships(
-        self,
-    ) -> list[tuple[str, dict[str, int | None], set[str]]]:
-        """`(room_id, returned_user_id_to_last_seen_ts_map,
-        invalidated_user_ids)` for each room computed."""
     @property
     def fallbacks(self) -> list[tuple[str, str]]: ...
     @property
@@ -472,3 +612,9 @@ class SlidingSyncStoreForTest:
         room_lazy_membership: dict[str, tuple[dict[str, int | None], set[str]]],
         now_ms: int,
     ) -> int: ...
+
+def multi_writer_token_round_trip_for_test(
+    token: MultiWriterStreamToken, instances: list[tuple[int, str]]
+) -> tuple[str, MultiWriterStreamToken]:
+    """A receipts token's database form, as Rust writes it, and the token Rust
+    parses back from it."""

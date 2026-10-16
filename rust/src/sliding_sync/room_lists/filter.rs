@@ -52,7 +52,7 @@ pub fn filter_membership_for_sync(user_id: &str, room: &RoomForUser, newly_left:
 /// previous connection state). `room_tags` maps a room to the user's tags
 /// on it, and is only read for the tag filters.
 pub fn filter_rooms_using_tables<'a>(
-    rooms: &'a [RoomForUser],
+    rooms: &[&'a RoomForUser],
     filters: &Filters,
     dm_room_ids: &HashSet<String>,
     room_tags: &HashMap<String, HashSet<String>>,
@@ -117,6 +117,7 @@ pub fn filter_rooms_using_tables<'a>(
 
     Ok(rooms
         .iter()
+        .copied()
         .filter(|room| {
             passes(room)
                 // State reset out of a room the client knows: it must hear
@@ -150,6 +151,7 @@ fn filter_rooms_for_test(
     let filters: Filters =
         serde_json::from_str(filters).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let rooms: Vec<RoomForUser> = rooms.into_iter().map(room_from_py).collect();
+    let rooms: Vec<&RoomForUser> = rooms.iter().collect();
     let filtered = filter_rooms_using_tables(&rooms, &filters, &dm_room_ids, &room_tags, |r| {
         sent_before.contains(r)
     })

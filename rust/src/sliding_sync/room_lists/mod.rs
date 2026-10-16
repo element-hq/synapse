@@ -31,6 +31,7 @@ use crate::storage::sync_store::PersistedEventPosition;
 use crate::types::stream_token::RoomStreamToken;
 
 pub mod filter;
+pub mod interested;
 pub mod lists;
 pub mod sort;
 
@@ -210,9 +211,15 @@ fn rooms_to_send_for_test(
         ..Default::default()
     };
     let updates: HashSet<Arc<str>> = rooms_that_have_updates.into_iter().map(Arc::from).collect();
-    lists::rooms_to_send(&relevant, &state, &updates, now_ms)
-        .map(|rooms| rooms.iter().map(|r| r.to_string()).collect())
-        .map_err(|_| PyValueError::new_err("unknown position"))
+    lists::rooms_to_send(
+        &relevant,
+        &state,
+        &updates,
+        lists::NUM_ROOMS_THRESHOLD,
+        now_ms,
+    )
+    .map(|rooms| rooms.iter().map(|r| r.to_string()).collect())
+    .map_err(|_| PyValueError::new_err("unknown position"))
 }
 
 pub fn register_test_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {

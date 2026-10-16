@@ -24,13 +24,14 @@ from typing_extensions import assert_never
 from twisted.internet.defer import CancelledError
 
 from synapse.api.constants import Direction, EventTypes, Membership
+from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.events import EventBase
 from synapse.events.utils import FilteredEvent, strip_event
 from synapse.handlers.relations import BundledAggregations
+from synapse.handlers.sliding_sync import room_lists
 from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.handlers.sliding_sync.room_lists import (
     RoomsForUserType,
-    SlidingSyncInterestedRooms,
     SlidingSyncRoomLists,
 )
 from synapse.handlers.sliding_sync.store import SlidingSyncConnectionStore
@@ -48,9 +49,12 @@ from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.roommember import (
     MemberSummary,
+    RoomsForUserSlidingSync,
 )
 from synapse.synapse_rust.sliding_sync import (
-    RoomInput as RustRoomInput,
+    ConnectionState as RustConnectionState,
+    InterestedRooms as RustInterestedRooms,
+    RustSlidingSyncFallback,
     SlidingSyncHandler as RustSlidingSyncHandler,
     SlidingSyncRequest as RustSlidingSyncRequest,
     SlidingSyncStats as RustSlidingSyncStats,
@@ -74,8 +78,10 @@ from synapse.types.handlers.sliding_sync import (
     HaveSentRoom,
     HaveSentRoomFlag,
     MutablePerConnectionState,
+    OperationType,
     PerConnectionState,
     RoomLazyMembershipChanges,
+    RoomStatusMap,
     RoomSyncConfig,
     SlidingSyncConfig,
     SlidingSyncResult,
@@ -108,14 +114,15 @@ rust_sliding_sync_rooms_counter = Counter(
 )
 
 # Requests served in `rust_sliding_sync: on` mode. `result` is "rust" for a
-# request Rust took part in, "fallback" for one Python computed in full because
-# Rust does not cover it (the sliding sync background updates have not finished,
-# or a list uses a filter Python does not implement either), or "error" for one
+# request Rust served (with the extensions, and any rooms Rust left to Python,
+# computed in Python), "fallback" for one Python computed in full because Rust
+# does not cover it (the sliding sync background updates have not finished, or a
+# list uses a filter Python does not implement either), or "error" for one
 # Python computed in full after the Rust handler failed on it.
 rust_sliding_sync_requests_counter = Counter(
     "synapse_sliding_sync_rust_requests_total",
     "Sliding sync requests in `rust_sliding_sync: on` mode, by whether Rust "
-    "took part or Python computed the whole response",
+    "served them or Python computed the whole response",
     labelnames=["result", SERVER_NAME_LABEL],
 )
 
@@ -170,6 +177,19 @@ def observe_rust_sliding_sync_stats(
     rust_sliding_sync_rooms_computed.labels(**labels).observe(stats.rooms_computed)
     rust_sliding_sync_lazy_member_lookups.labels(**labels).observe(
         stats.lazy_member_lookups
+    )
+
+
+def _sum_stats(stats: Iterable[RustSlidingSyncStats]) -> RustSlidingSyncStats:
+    """One request's stats, from those of its Rust calls."""
+    stats = list(stats)
+    return RustSlidingSyncStats(
+        db_time=sum(s.db_time for s in stats),
+        checkout_time=sum(s.checkout_time for s in stats),
+        transactions=sum(s.transactions for s in stats),
+        queries=sum(s.queries for s in stats),
+        rooms_computed=sum(s.rooms_computed for s in stats),
+        lazy_member_lookups=sum(s.lazy_member_lookups for s in stats),
     )
 
 
@@ -412,6 +432,22 @@ class SlidingSyncHandler:
             # See https://github.com/matrix-org/matrix-doc/issues/1144
             raise NotImplementedError()
 
+        if self._rust_sliding_sync is not None:
+            rust_result = await self._current_sync_for_user_in_rust(
+                self._rust_sliding_sync,
+                sync_config,
+                to_token=to_token,
+                from_token=from_token,
+            )
+            if rust_result is not None:
+                set_tag(SynapseTags.RESULT_PREFIX + "result", bool(rust_result))
+                set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
+                sync_processing_time.labels(
+                    initial=from_token is not None,
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).observe(self.clock.time() - start_time_s)
+                return rust_result
+
         # Get the per-connection state (if any).
         #
         # Raises an exception if there is a `connection_position` that we don't
@@ -478,20 +514,9 @@ class SlidingSyncHandler:
 
         if relevant_rooms_to_send_map:
             with start_active_span("sliding_sync.generate_room_entries"):
-                python_room_ids: StrCollection = list(relevant_rooms_to_send_map)
-                if self._rust_sliding_sync is not None:
-                    python_room_ids = await self._generate_room_entries_in_rust(
-                        self._rust_sliding_sync,
-                        sync_config=sync_config,
-                        previous_connection_state=previous_connection_state,
-                        new_connection_state=new_connection_state,
-                        interested_rooms=interested_rooms,
-                        from_token=from_token,
-                        to_token=to_token,
-                        rooms=rooms,
-                    )
-                if python_room_ids:
-                    await concurrently_execute(handle_room, python_room_ids, 20)
+                await concurrently_execute(
+                    handle_room, list(relevant_rooms_to_send_map), 20
+                )
 
         extensions = await self.extensions.get_extensions_response(
             sync_config=sync_config,
@@ -585,109 +610,83 @@ class SlidingSyncHandler:
 
         return sliding_sync_result
 
-    async def _generate_room_entries_in_rust(
+    async def _current_sync_for_user_in_rust(
         self,
         rust: RustSlidingSyncHandler,
-        *,
         sync_config: SlidingSyncConfig,
-        previous_connection_state: PerConnectionState,
-        new_connection_state: MutablePerConnectionState,
-        interested_rooms: SlidingSyncInterestedRooms,
-        from_token: SlidingSyncStreamToken | None,
         to_token: StreamToken,
-        rooms: dict[str, AnySlidingSyncRoomResult],
-    ) -> list[str]:
-        """`get_room_sync_data` in Rust for every room of
-        `relevant_rooms_to_send_map`. Adds the entries to `rooms` and the
-        rooms' changes to `new_connection_state`.
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult | None:
+        """`current_sync_for_user` with the room lists, the rooms and the
+        connection state in Rust, and the extensions in Python.
 
         Returns:
-            The rooms Python must compute: those Rust leaves to Python, and
-            those it failed on (outside strict mode). All of them if the Rust
-            call as a whole failed.
+            None for a request Python must compute: one Rust does not cover,
+            or one Rust failed on before persisting the connection state
+            (outside strict mode).
+
+        Raises:
+            SlidingSyncUnknownPosition if the connection position is unknown, or
+                the connection has too much to catch up on.
         """
-        rooms_to_send = interested_rooms.relevant_rooms_to_send_map
         labels = {SERVER_NAME_LABEL: self.server_name}
+        store = self.store
+        user_id = sync_config.user.to_string()
+
+        # Rust only reads the sliding sync tables.
+        if not await store.have_finished_sliding_sync_background_jobs():
+            rust_sliding_sync_requests_counter.labels(result="fallback", **labels).inc()
+            return None
         try:
             request = await self._build_rust_request(sync_config, from_token, to_token)
         except ValueError as e:
             rust_sliding_sync_requests_counter.labels(result="fallback", **labels).inc()
-            logger.debug("Computing the sliding sync rooms in Python: %s", e)
-            return list(rooms_to_send)
+            logger.debug("Computing the sliding sync request in Python: %s", e)
+            return None
 
-        # The writers that the rooms' `prev_batch` tokens may name: those of
-        # the tokens the timelines are bounded by.
-        instance_names = set(to_token.room_key.instance_map)
+        # The writers the tokens Rust formats and parses may name.
+        tokens = [to_token.room_key, to_token.receipt_key]
         if from_token is not None:
-            instance_names.update(from_token.stream_token.room_key.instance_map)
-
-        room_inputs = []
-        for room_id, room_sync_config in rooms_to_send.items():
-            membership = interested_rooms.room_membership_for_user_map[room_id]
-            prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
-            room_status = previous_connection_state.rooms.have_sent_room(room_id)
-            if room_status.last_token is not None:
-                instance_names.update(room_status.last_token.instance_map)
-            room_inputs.append(
-                RustRoomInput(
-                    room_id=room_id,
-                    sender=membership.sender,
-                    membership=membership.membership,
-                    event_id=membership.event_id,
-                    instance_name=membership.event_pos.instance_name,
-                    stream=membership.event_pos.stream,
-                    room_version_id=membership.room_version_id,
-                    timeline_limit=room_sync_config.timeline_limit,
-                    required_state_map=room_sync_config.required_state_map,
-                    prev_room_sync_config=(
-                        (
-                            prev_room_sync_config.timeline_limit,
-                            prev_room_sync_config.required_state_map,
-                        )
-                        if prev_room_sync_config is not None
-                        else None
-                    ),
-                    room_status=room_status.status.value,
-                    room_status_token=room_status.last_token,
-                    newly_joined=room_id in interested_rooms.newly_joined_rooms,
-                    newly_left=room_id in interested_rooms.newly_left_rooms,
-                    is_dm=room_id in interested_rooms.dm_room_ids,
-                )
-            )
+            tokens += [
+                from_token.stream_token.room_key,
+                from_token.stream_token.receipt_key,
+            ]
         instance_ids = {
-            name: await self.store.get_id_for_instance(name) for name in instance_names
+            name: await store.get_id_for_instance(name)
+            for token in tokens
+            for name in token.instance_map
         }
 
+        stats: list[RustSlidingSyncStats] = []
         try:
-            result = await rust.generate_room_entries(
-                request, room_inputs, instance_ids=instance_ids
-            )
-        except CancelledError:
+            with start_active_span("sliding_sync.rust.load_connection_state"):
+                state = await rust.load_connection_state(
+                    request, instance_ids=instance_ids
+                )
+            stats.append(state.stats)
+            with start_active_span("sliding_sync.rust.compute_interested_rooms"):
+                interested = await self._compute_interested_rooms_in_rust(
+                    rust, request, state, user_id, to_token, from_token
+                )
+            stats.append(interested.stats)
+            rooms: dict[str, AnySlidingSyncRoomResult] = {}
+            with start_active_span("sliding_sync.rust.generate_room_entries"):
+                result = await rust.generate_room_entries(request, state, interested)
+            stats.append(result.stats)
+        except (CancelledError, SlidingSyncUnknownPosition):
             raise
+        except RustSlidingSyncFallback as e:
+            rust_sliding_sync_requests_counter.labels(result="fallback", **labels).inc()
+            logger.debug("Computing the sliding sync request in Python: %s", e)
+            return None
         except Exception:
             rust_sliding_sync_requests_counter.labels(result="error", **labels).inc()
             if self._rust_sliding_sync_strict:
                 raise
             logger.exception(
-                "Rust sliding sync failed for %s. Computing the rooms in Python",
-                sync_config.user.to_string(),
+                "Rust sliding sync failed for %s. Computing it in Python", user_id
             )
-            return list(rooms_to_send)
-
-        rust_sliding_sync_requests_counter.labels(result="rust", **labels).inc()
-        observe_rust_sliding_sync_stats(result.stats, self.server_name)
-
-        for room_id, timeline_limit, required_state_map in result.room_config_updates:
-            new_connection_state.room_configs[room_id] = RoomSyncConfig(
-                timeline_limit=timeline_limit, required_state_map=required_state_map
-            )
-        for room_id, returned, invalidated in result.lazy_memberships:
-            new_connection_state.room_lazy_membership[room_id] = (
-                RoomLazyMembershipChanges(
-                    returned_user_id_to_last_seen_ts_map=returned,
-                    invalidated_user_ids=invalidated,
-                )
-            )
+            return None
 
         entries = result.take_entries()
         for entry in entries:
@@ -714,7 +713,210 @@ class SlidingSyncHandler:
                 error,
             )
             python_room_ids.append(room_id)
-        return python_room_ids
+        if python_room_ids:
+            await self._generate_room_entries_in_python(
+                sync_config,
+                state,
+                interested,
+                python_room_ids,
+                from_token=from_token,
+                to_token=to_token,
+                rooms=rooms,
+            )
+
+        lists = {
+            name: SlidingSyncResult.SlidingWindowList(
+                count=count,
+                ops=[
+                    SlidingSyncResult.SlidingWindowList.Operation(
+                        op=OperationType.SYNC, range=range, room_ids=room_ids
+                    )
+                    for range, room_ids in ops
+                ],
+            )
+            for name, count, ops in interested.lists
+        }
+        extensions = await self.extensions.get_extensions_response(
+            sync_config=sync_config,
+            actual_lists=lists,
+            previous_connection_state=state.previous,
+            new_connection_state=state.new,
+            all_interested_room_ids=interested.all_rooms,
+            # All the rooms we could send, with event updates or not: see the
+            # Python path.
+            actual_room_ids=set(interested.relevant_room_ids),
+            actual_room_response_map=rooms,
+            from_token=from_token,
+            to_token=to_token,
+        )
+
+        try:
+            with start_active_span("sliding_sync.rust.finish_request"):
+                connection_position, finish_stats = await rust.finish_request(
+                    request, state, interested
+                )
+        except CancelledError:
+            raise
+        except Exception:
+            # The persist is one transaction, so nothing was stored, and
+            # Python can compute the request from the start.
+            rust_sliding_sync_requests_counter.labels(result="error", **labels).inc()
+            if self._rust_sliding_sync_strict:
+                raise
+            logger.exception(
+                "Rust sliding sync failed for %s. Computing it in Python", user_id
+            )
+            return None
+        stats.append(finish_stats)
+
+        rust_sliding_sync_requests_counter.labels(result="rust", **labels).inc()
+        observe_rust_sliding_sync_stats(_sum_stats(stats), self.server_name)
+        return SlidingSyncResult(
+            next_pos=SlidingSyncStreamToken(to_token, connection_position),
+            lists=lists,
+            rooms=rooms,
+            extensions=extensions,
+        )
+
+    async def _compute_interested_rooms_in_rust(
+        self,
+        rust: RustSlidingSyncHandler,
+        request: RustSlidingSyncRequest,
+        state: RustConnectionState,
+        user_id: str,
+        to_token: StreamToken,
+        from_token: SlidingSyncStreamToken | None,
+    ) -> RustInterestedRooms:
+        """`compute_interested_rooms` in Rust, with the stream change caches'
+        answers for the request."""
+        store = self.store
+        membership_changed_since_from = True
+        events_changed_since_from: set[str] | None = None
+        if from_token is not None:
+            from_stream = from_token.stream_token.room_key.stream
+            membership_changed_since_from = (
+                store._membership_stream_cache.has_entity_changed(user_id, from_stream)
+            )
+            changed = store._events_stream_cache.get_all_entities_changed(from_stream)
+            if changed.hit:
+                events_changed_since_from = set(changed.entities)
+        return await rust.compute_interested_rooms(
+            request,
+            state,
+            server_name=self.server_name,
+            msc4155_enabled=self._hs_config.experimental.msc4155_enabled,
+            # Read per request, as tests patch it.
+            num_rooms_threshold=room_lists.NUM_ROOMS_THRESHOLD,
+            membership_changed_since_from=membership_changed_since_from,
+            membership_changed_since_to=store._membership_stream_cache.has_entity_changed(
+                user_id, to_token.room_key.stream
+            ),
+            events_changed_since_from=events_changed_since_from,
+            room_max_token=store.get_room_max_token(),
+            events_stream_cache=store._events_stream_cache,
+        )
+
+    async def _generate_room_entries_in_python(
+        self,
+        sync_config: SlidingSyncConfig,
+        state: RustConnectionState,
+        interested: RustInterestedRooms,
+        room_ids: list[str],
+        *,
+        from_token: SlidingSyncStreamToken | None,
+        to_token: StreamToken,
+        rooms: dict[str, AnySlidingSyncRoomResult],
+    ) -> None:
+        """`get_room_sync_data` in Python for the rooms Rust left to it, over
+        a Python copy of their slice of the connection state. Their changes go
+        back into `state`."""
+        last_used_ts, room_configs, statuses = state.python_state_for_rooms(room_ids)
+        previous_connection_state = PerConnectionState(
+            last_used_ts=last_used_ts,
+            rooms=RoomStatusMap(statuses),
+            room_configs={
+                room_id: RoomSyncConfig(
+                    timeline_limit=timeline_limit, required_state_map=required_state_map
+                )
+                for room_id, (
+                    timeline_limit,
+                    required_state_map,
+                ) in room_configs.items()
+            },
+        )
+        new_connection_state = previous_connection_state.get_mutable()
+
+        inputs = {
+            room_input[0]: room_input
+            for room_input in interested.python_room_inputs(room_ids)
+        }
+
+        async def handle_room(room_id: str) -> None:
+            (
+                _,
+                (timeline_limit, required_state_map),
+                membership,
+                newly_joined,
+                newly_left,
+                is_dm,
+            ) = inputs[room_id]
+            (
+                sender,
+                membership_value,
+                event_id,
+                instance_name,
+                stream,
+                room_version_id,
+                has_known_state,
+                room_type,
+                is_encrypted,
+            ) = membership
+            # The tables only hold rooms of known versions.
+            assert room_version_id is not None, f"{room_id} has no room version"
+            room_sync_result = await self.get_room_sync_data(
+                sync_config=sync_config,
+                previous_connection_state=previous_connection_state,
+                new_connection_state=new_connection_state,
+                room_id=room_id,
+                room_sync_config=RoomSyncConfig(
+                    timeline_limit=timeline_limit, required_state_map=required_state_map
+                ),
+                room_membership_for_user_at_to_token=RoomsForUserSlidingSync(
+                    room_id=room_id,
+                    sender=sender,
+                    membership=membership_value,
+                    event_id=event_id,
+                    event_pos=PersistedEventPosition(instance_name, stream),
+                    room_version_id=room_version_id,
+                    has_known_state=has_known_state,
+                    room_type=room_type,
+                    is_encrypted=is_encrypted,
+                ),
+                from_token=from_token,
+                to_token=to_token,
+                newly_joined=newly_joined,
+                newly_left=newly_left,
+                is_dm=is_dm,
+            )
+            if room_sync_result or not from_token:
+                rooms[room_id] = room_sync_result
+
+        await concurrently_execute(handle_room, room_ids, 20)
+
+        state.apply_python_rooms(
+            [
+                (room_id, config.timeline_limit, config.required_state_map)
+                for room_id, config in new_connection_state.room_configs.maps[0].items()
+            ],
+            [
+                (
+                    room_id,
+                    changes.returned_user_id_to_last_seen_ts_map,
+                    changes.invalidated_user_ids,
+                )
+                for room_id, changes in new_connection_state.room_lazy_membership.items()
+            ],
+        )
 
     @trace
     async def get_current_state_ids_at(

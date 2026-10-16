@@ -37,6 +37,7 @@ from synapse.events.utils import FilteredEvent
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
+from synapse.synapse_rust.sliding_sync import ConnectionStateView
 from synapse.types import (
     Absent,
     AbsentType,
@@ -78,6 +79,14 @@ _ThreadUnsubscription: TypeAlias = (
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
+# The connection state of a request: Python's, or the Rust-owned one in
+# `rust_sliding_sync: on` mode, which has the same surface as far as the
+# extensions read and update it.
+AnyPerConnectionState: TypeAlias = PerConnectionState | ConnectionStateView
+AnyMutablePerConnectionState: TypeAlias = (
+    MutablePerConnectionState | ConnectionStateView
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,8 +108,8 @@ class SlidingSyncExtensionHandler:
     async def get_extensions_response(
         self,
         sync_config: SlidingSyncConfig,
-        previous_connection_state: "PerConnectionState",
-        new_connection_state: "MutablePerConnectionState",
+        previous_connection_state: AnyPerConnectionState,
+        new_connection_state: AnyMutablePerConnectionState,
         all_interested_room_ids: set[str],
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
@@ -455,8 +464,8 @@ class SlidingSyncExtensionHandler:
     async def get_account_data_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        previous_connection_state: "PerConnectionState",
-        new_connection_state: "MutablePerConnectionState",
+        previous_connection_state: AnyPerConnectionState,
+        new_connection_state: AnyMutablePerConnectionState,
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
         account_data_request: SlidingSyncConfig.Extensions.AccountDataExtension,
@@ -687,8 +696,8 @@ class SlidingSyncExtensionHandler:
     async def get_receipts_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        previous_connection_state: "PerConnectionState",
-        new_connection_state: "MutablePerConnectionState",
+        previous_connection_state: AnyPerConnectionState,
+        new_connection_state: AnyMutablePerConnectionState,
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, AnySlidingSyncRoomResult],

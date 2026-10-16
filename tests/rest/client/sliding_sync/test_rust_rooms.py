@@ -20,11 +20,12 @@ and one by Rust. The `rooms` of the two responses must be equal, and so must
 the changes each side makes to its connection's state.
 """
 
-from typing import Any
+from typing import AbstractSet, Any, Mapping
 from unittest import SkipTest
 
 from parameterized import parameterized_class
 
+from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
@@ -34,6 +35,13 @@ from synapse.handlers.sliding_sync import rust_sliding_sync_rooms_counter
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.rest.client import knock, login, room, sync
 from synapse.server import HomeServer
+from synapse.synapse_rust.sliding_sync import (
+    ConnectionState as RustConnectionState,
+    InterestedRooms as RustInterestedRooms,
+    SlidingSyncHandler as RustSlidingSyncHandler,
+    SlidingSyncRequest as RustSlidingSyncRequest,
+    SlidingSyncStats as RustSlidingSyncStats,
+)
 from synapse.types import JsonDict, SlidingSyncStreamToken
 from synapse.types.handlers.sliding_sync import (
     MutablePerConnectionState,
@@ -70,35 +78,100 @@ def _normalized(rooms: JsonDict) -> JsonDict:
     return rooms
 
 
-def _connection_changes(state: MutablePerConnectionState) -> JsonDict:
+def _unordered_lists(response: JsonDict) -> JsonDict:
+    """The response's lists with each operation's rooms sorted. The lists of
+    these tests cover every room, so neither side sorts them, and Python adds
+    rooms left in the token range back in set order. `test_rust_lists`
+    compares the order of sorted lists."""
+    return {
+        name: {
+            **list_result,
+            "ops": [
+                {**op, "room_ids": sorted(op["room_ids"])}
+                for op in list_result.get("ops", [])
+            ],
+        }
+        for name, list_result in response.get("lists", {}).items()
+    }
+
+
+# What Rust's `ConnectionState.updates_for_test` returns.
+RustUpdates = tuple[
+    Mapping[str, tuple[int, Mapping[str, AbstractSet[str]]]],
+    Mapping[str, tuple[Mapping[str, int | None], AbstractSet[str]]],
+]
+
+
+def _connection_changes(state: MutablePerConnectionState | RustUpdates) -> JsonDict:
     """What a request changed in its connection's state that the room
-    computation writes: the room configs and the lazy-loaded members.
+    computation writes: the room configs and the lazy-loaded members. `state`
+    is Python's state, or what Rust's `updates_for_test` returns.
 
     A lazy member's timestamp is only whether there is one: it is when its
     own connection last sent the member, which the two connections did a
     moment apart."""
+    configs: Mapping[str, tuple[int, Mapping[str, AbstractSet[str]]]]
+    lazy: Mapping[str, tuple[Mapping[str, int | None], AbstractSet[str]]]
+    if isinstance(state, MutablePerConnectionState):
+        configs = {
+            room_id: (config.timeline_limit, config.required_state_map)
+            for room_id, config in state.get_room_config_updates().items()
+        }
+        lazy = {
+            room_id: (
+                changes.returned_user_id_to_last_seen_ts_map,
+                changes.invalidated_user_ids,
+            )
+            for room_id, changes in state.room_lazy_membership.items()
+        }
+    else:
+        configs, lazy = state
     return {
         "room_configs": {
             room_id: (
-                config.timeline_limit,
+                timeline_limit,
                 {
                     state_type: set(state_keys)
-                    for state_type, state_keys in config.required_state_map.items()
+                    for state_type, state_keys in required_state_map.items()
                 },
             )
-            for room_id, config in state.get_room_config_updates().items()
+            for room_id, (timeline_limit, required_state_map) in configs.items()
         },
         "lazy_membership": {
             room_id: (
                 {
                     user_id: last_seen_ts is not None
-                    for user_id, last_seen_ts in changes.returned_user_id_to_last_seen_ts_map.items()
+                    for user_id, last_seen_ts in returned.items()
                 },
-                set(changes.invalidated_user_ids),
+                set(invalidated),
             )
-            for room_id, changes in state.room_lazy_membership.items()
+            for room_id, (returned, invalidated) in lazy.items()
         },
     }
+
+
+class _RecordingRustCalls(_BlockingRustCalls):
+    """Blocking Rust calls that record the connection state's updates of each
+    request before it is persisted, by `conn_id`."""
+
+    def __init__(
+        self,
+        handler: RustSlidingSyncHandler,
+        recorded: dict[str, MutablePerConnectionState | RustUpdates],
+    ) -> None:
+        super().__init__(handler)
+        self._recorded = recorded
+
+    def finish_request(
+        self,
+        request: RustSlidingSyncRequest,
+        state: RustConnectionState,
+        interested: RustInterestedRooms,
+    ) -> "Deferred[tuple[int, RustSlidingSyncStats]]":
+        conn_id = request.body_for_test().get("conn_id")
+        assert isinstance(conn_id, str)
+        self._recorded[conn_id] = state.updates_for_test()
+        return super().__getattr__("finish_request")(request, state, interested)
 
 
 @parameterized_class(
@@ -127,13 +200,13 @@ class SlidingSyncRustRoomsTestCase(SlidingSyncBase):
         rust = hs.get_rust_handlers().sliding_sync
         if rust is None:
             raise SkipTest("needs the native Rust Postgres driver")
-        self.rust = _BlockingRustCalls(rust)
+        # The connection state each side records, by `conn_id`.
+        self.recorded: dict[str, MutablePerConnectionState | RustUpdates] = {}
+        self.rust = _RecordingRustCalls(rust, self.recorded)
         self.handler = hs.get_sliding_sync_handler()
         self.handler._rust_sliding_sync_strict = True
         self.pos: dict[str, str | None] = {"python": None, "rust": None}
 
-        # The connection state each side records, by `conn_id`.
-        self.recorded: dict[str, MutablePerConnectionState] = {}
         connection_store = self.handler.connection_store
         record_new_state = connection_store.record_new_state
 
@@ -177,9 +250,11 @@ class SlidingSyncRustRoomsTestCase(SlidingSyncBase):
                 tok=self.user1_tok,
             )
             computed = self._rust_rooms_computed() - before
-            if side == "rust":
+            if side == "rust" and self.use_new_tables:
                 self.assertGreaterEqual(computed, len(response["rooms"]))
             else:
+                # Rust leaves a request to Python until the sliding sync
+                # tables are filled.
                 self.assertEqual(computed, 0)
             responses[side] = response
         python_rooms = _normalized(responses["python"]["rooms"])
@@ -188,7 +263,8 @@ class SlidingSyncRustRoomsTestCase(SlidingSyncBase):
         for room_id, python_room in python_rooms.items():
             self.assertEqual(python_room, rust_rooms[room_id], room_id)
         self.assertEqual(
-            responses["python"].get("lists"), responses["rust"].get("lists")
+            _unordered_lists(responses["python"]),
+            _unordered_lists(responses["rust"]),
         )
         self.assertEqual(
             _connection_changes(self.recorded["python"]),
