@@ -124,9 +124,17 @@ pub fn add_room_subscription(
 }
 
 /// `SlidingSyncUnknownPosition`: the connection is reset, as it has too
-/// many rooms to update.
+/// many rooms to update or its position is not one the store knows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownPosition;
+
+impl std::fmt::Display for UnknownPosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("unknown sliding sync connection position")
+    }
+}
+
+impl std::error::Error for UnknownPosition {}
 
 /// The rooms of an incremental sync that may have updates, the decision
 /// half of `_filter_relevant_rooms_to_send`: rooms whose config expanded,

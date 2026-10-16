@@ -17,6 +17,11 @@ against the Python store methods it ports, on the same database. These need
 the native Rust Postgres driver:
 
     SYNAPSE_TEST_RUST_DRIVER=1 POSTGRES=1 run-trial.sh tests.storage.test_sliding_sync_store
+
+The two connection-state transactions are compared by running the same
+operations through each on two connections of one device, and diffing the
+`sliding_sync_connection_*` rows of the two with their IDs replaced by what
+they stand for.
 """
 
 import random
@@ -30,6 +35,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, RoomTypes
+from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -38,15 +44,25 @@ from synapse.storage.roommember import RoomsForUserSlidingSync
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.sliding_sync import SlidingSyncStoreForTest
 from synapse.types import (
+    MultiWriterStreamToken,
     PersistedEventPosition,
     RoomStreamToken,
     StreamKeyType,
     StreamToken,
 )
+from synapse.types.handlers.sliding_sync import (
+    HaveSentRoom,
+    MutablePerConnectionState,
+    PerConnectionState,
+    RoomLazyMembershipChanges,
+    RoomSyncConfig,
+)
 from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.sync.fixtures import SEEDS, WRITERS
+
+DEVICE = "DEVICE"
 
 
 def _snapshot(room: RoomsForUserSlidingSync) -> tuple[Any, ...]:
@@ -700,3 +716,382 @@ class SlidingSyncStoreTestCase(unittest.HomeserverTestCase):
                 ),
                 stream,
             )
+
+    # Connection state.
+
+    def _random_state(
+        self, rng: random.Random, rooms: list[str], users: list[str]
+    ) -> MutablePerConnectionState:
+        """A request's random updates to a connection's state."""
+        state = PerConnectionState().get_mutable()
+        for room_id in rng.sample(rooms, rng.randint(0, len(rooms))):
+            if rng.random() < 0.5:
+                state.rooms._statuses[room_id] = HaveSentRoom.live()
+            else:
+                state.rooms._statuses[room_id] = HaveSentRoom.previously(
+                    RoomStreamToken(
+                        stream=rng.randint(1, 50),
+                        instance_map=immutabledict(
+                            {"master": rng.randint(51, 60)}
+                            if rng.random() < 0.3
+                            else {}
+                        ),
+                    )
+                )
+        for room_id in rng.sample(rooms, rng.randint(0, 2)):
+            state.receipts._statuses[room_id] = (
+                HaveSentRoom.live()
+                if rng.random() < 0.5
+                else HaveSentRoom.previously(
+                    MultiWriterStreamToken(stream=rng.randint(1, 50))
+                )
+            )
+        for room_id in rng.sample(rooms, rng.randint(0, 2)):
+            state.account_data._statuses[room_id] = (
+                HaveSentRoom.live()
+                if rng.random() < 0.5
+                else HaveSentRoom.previously(rng.randint(1, 50))
+            )
+        for room_id in rng.sample(rooms, rng.randint(0, len(rooms))):
+            required_state: dict[str, set[str]] = {}
+            for event_type in rng.sample(
+                [EventTypes.Member, EventTypes.Name, "*", "org.é"], rng.randint(0, 3)
+            ):
+                required_state[event_type] = set(
+                    rng.sample(["", "$ME", "$LAZY", "*", self.bob], rng.randint(1, 2))
+                )
+            state.room_configs[room_id] = RoomSyncConfig(
+                timeline_limit=rng.randint(0, 3),
+                required_state_map=required_state,
+            )
+        for room_id in rng.sample(rooms, rng.randint(0, 2)):
+            state.room_lazy_membership[room_id] = RoomLazyMembershipChanges(
+                returned_user_id_to_last_seen_ts_map={
+                    user_id: rng.choice(
+                        [
+                            None,
+                            self.clock.time_msec(),
+                            self.clock.time_msec() - 4_000_000,
+                        ]
+                    )
+                    for user_id in rng.sample(users, rng.randint(0, len(users)))
+                },
+                invalidated_user_ids=set(rng.sample(users, rng.randint(0, 1))),
+            )
+        return state
+
+    def _rust_updates(self, state: MutablePerConnectionState) -> dict[str, Any]:
+        """The state's updates as the Rust test entry point takes them."""
+
+        def statuses(updates: Any, to_string: Any) -> dict[str, tuple[str, Any]]:
+            return {
+                room_id: (
+                    status.status.value,
+                    None
+                    if status.last_token is None
+                    else self.get_success(to_string(status.last_token)),
+                )
+                for room_id, status in updates.items()
+            }
+
+        async def to_string(token: Any) -> str:
+            if isinstance(token, int):
+                return str(token)
+            return await token.to_string(self.store)
+
+        return {
+            "rooms": statuses(state.rooms.get_updates(), to_string),
+            "receipts": statuses(state.receipts.get_updates(), to_string),
+            "account_data": statuses(state.account_data.get_updates(), to_string),
+            "room_configs": {
+                room_id: (
+                    config.timeline_limit,
+                    {
+                        event_type: sorted(state_keys)
+                        for event_type, state_keys in config.required_state_map.items()
+                    },
+                )
+                for room_id, config in state.room_configs.maps[0].items()
+            },
+            "room_lazy_membership": {
+                room_id: (
+                    dict(changes.returned_user_id_to_last_seen_ts_map),
+                    set(changes.invalidated_user_ids),
+                )
+                for room_id, changes in state.room_lazy_membership.items()
+            },
+            "now_ms": self.clock.time_msec(),
+        }
+
+    def _python_loaded(self, state: PerConnectionState) -> tuple[Any, ...]:
+        """A Python loaded state in the Rust test form."""
+
+        def statuses(status_map: Any) -> dict[str, tuple[str, Any]]:
+            return {
+                room_id: (
+                    status.status.value,
+                    None
+                    if status.last_token is None
+                    else self.get_success(_to_string(self.store, status.last_token)),
+                )
+                for room_id, status in status_map._statuses.items()
+            }
+
+        return (
+            state.last_used_ts,
+            statuses(state.rooms),
+            statuses(state.receipts),
+            statuses(state.account_data),
+            {
+                room_id: (
+                    config.timeline_limit,
+                    {
+                        event_type: sorted(state_keys)
+                        for event_type, state_keys in config.required_state_map.items()
+                    },
+                )
+                for room_id, config in state.room_configs.items()
+            },
+        )
+
+    def _connection_rows(self, conn_id: str) -> dict[str, Any]:
+        """Every row of the connection, with IDs replaced: positions by their
+        order, required state IDs by their JSON."""
+        db = self.store.db_pool
+
+        def select(sql: str, *args: Any) -> list[tuple[Any, ...]]:
+            return self.get_success(db.execute("rows", sql, *args))
+
+        connections = select(
+            "SELECT connection_key, created_ts, last_used_ts FROM sliding_sync_connections"
+            " WHERE user_id = ? AND effective_device_id = ? AND conn_id = ?",
+            self.bob,
+            DEVICE,
+            conn_id,
+        )
+        if not connections:
+            return {}
+        [(key, created_ts, last_used_ts)] = connections
+        positions = [
+            row[0]
+            for row in select(
+                "SELECT connection_position FROM sliding_sync_connection_positions"
+                " WHERE connection_key = ? ORDER BY connection_position",
+                key,
+            )
+        ]
+        index = {position: i for i, position in enumerate(positions)}
+        required_state = dict(
+            select(
+                "SELECT required_state_id, required_state"
+                " FROM sliding_sync_connection_required_state WHERE connection_key = ?",
+                key,
+            )
+        )
+        configs = {
+            (index[position], room_id): (limit, required_state[state_id])
+            for position, room_id, limit, state_id in select(
+                "SELECT connection_position, room_id, timeline_limit, required_state_id"
+                " FROM sliding_sync_connection_room_configs"
+                " WHERE connection_position = ANY(?)",
+                positions,
+            )
+        }
+        streams = {
+            (index[position], stream, room_id): (status, token)
+            for position, stream, room_id, status, token in select(
+                "SELECT connection_position, stream, room_id, room_status, last_token"
+                " FROM sliding_sync_connection_streams WHERE connection_position = ANY(?)",
+                positions,
+            )
+        }
+        lazy = {
+            (room_id, user_id): (None if position is None else index[position], ts)
+            for position, room_id, user_id, ts in select(
+                "SELECT connection_position, room_id, user_id, last_seen_ts"
+                " FROM sliding_sync_connection_lazy_members WHERE connection_key = ?",
+                key,
+            )
+        }
+        return {
+            "created_ts": created_ts,
+            "last_used_ts": last_used_ts,
+            "positions": len(positions),
+            "required_state": sorted(required_state.values()),
+            "configs": configs,
+            "streams": streams,
+            "lazy": lazy,
+        }
+
+    @parameterized.expand(SEEDS)
+    def test_connection_state(self, seed: int) -> None:
+        """The same operations through Python's transactions on one
+        connection and Rust's on another leave the same rows and load the
+        same states."""
+        rng = random.Random(seed)
+        rooms = ["!a:test", "!b:test", "!c:test", "!d:test"]
+        users = [self.alice, self.bob, "@carol:test"]
+        # Each side's positions, in the order the operations made them.
+        positions: dict[str, list[int]] = {"py": [], "rs": []}
+
+        for step in range(12):
+            context = f"step {step}"
+            self.reactor.advance(rng.choice([0, 1, 200, 400, 4000]))
+            op = rng.random()
+            # A position to build on or load: usually the latest, sometimes
+            # an older one (a fork), sometimes none or a stranger's.
+            choice = rng.random()
+            index: int | None
+            if not positions["py"] or choice < 0.1:
+                index = None
+            elif choice < 0.75:
+                index = len(positions["py"]) - 1
+            else:
+                index = rng.randrange(len(positions["py"]))
+
+            if op < 0.6:
+                state = self._random_state(rng, rooms, users)
+                updates = self._rust_updates(state)
+                outcomes = {}
+                py_prev = None if index is None else positions["py"][index]
+                rs_prev = None if index is None else positions["rs"][index]
+                try:
+                    py_pos = self.get_success_or_raise(
+                        self.store.persist_per_connection_state(
+                            self.bob, DEVICE, "py", py_prev, state
+                        )
+                    )
+                    outcomes["py"] = "ok"
+                except SlidingSyncUnknownPosition:
+                    outcomes["py"] = "unknown"
+                try:
+                    rs_pos = self.rust.persist_connection_state(
+                        self.bob, DEVICE, "rs", rs_prev, **updates
+                    )
+                    outcomes["rs"] = "ok"
+                except SlidingSyncUnknownPosition:
+                    outcomes["rs"] = "unknown"
+                self.assertEqual(outcomes["py"], outcomes["rs"], context)
+                if outcomes["py"] == "ok":
+                    positions["py"].append(py_pos)
+                    positions["rs"].append(rs_pos)
+            elif index is not None:
+                now = self.clock.time_msec()
+                try:
+                    py_loaded = self._python_loaded(
+                        self.get_success_or_raise(
+                            self.store.get_and_clear_connection_positions(
+                                self.bob, DEVICE, "py", positions["py"][index]
+                            )
+                        )
+                    )
+                except SlidingSyncUnknownPosition:
+                    py_loaded = None
+                try:
+                    rs_loaded = self.rust.load_connection_state(
+                        self.bob, DEVICE, "rs", positions["rs"][index], now
+                    )
+                except SlidingSyncUnknownPosition:
+                    rs_loaded = None
+                self.assertEqual(rs_loaded, py_loaded, context)
+
+            py_rows = self._connection_rows("py")
+            rs_rows = self._connection_rows("rs")
+            self.assertEqual(rs_rows, py_rows, context)
+
+        # Someone else's position is unknown to both.
+        if positions["py"]:
+            with self.assertRaises(SlidingSyncUnknownPosition):
+                self.rust.load_connection_state(
+                    self.alice, DEVICE, "rs", positions["rs"][-1], 0
+                )
+            with self.assertRaises(SlidingSyncUnknownPosition):
+                self.rust.persist_connection_state(
+                    self.bob, DEVICE, "py", positions["rs"][-1], **updates
+                )
+
+    def test_connection_lazy_members(self) -> None:
+        state = PerConnectionState().get_mutable()
+        state.room_lazy_membership[self.room_id] = RoomLazyMembershipChanges(
+            returned_user_id_to_last_seen_ts_map={self.alice: None, self.bob: None}
+        )
+        first = self.get_success(
+            self.store.persist_per_connection_state(
+                self.bob, DEVICE, "conn", None, state
+            )
+        )
+        # Two forks off the first position, each sending another member.
+        forks = []
+        for user_id in ("@carol:test", "@dave:test"):
+            state = PerConnectionState().get_mutable()
+            state.room_lazy_membership[self.room_id] = RoomLazyMembershipChanges(
+                returned_user_id_to_last_seen_ts_map={user_id: None}
+            )
+            forks.append(
+                self.get_success(
+                    self.store.persist_per_connection_state(
+                        self.bob, DEVICE, "conn", first, state
+                    )
+                )
+            )
+
+        users = [self.alice, self.bob, "@carol:test", "@dave:test", "@eve:test"]
+
+        def compare() -> None:
+            for position in [first, *forks, 12345]:
+                for room_id in (self.room_id, "!other:test"):
+                    self.assertEqual(
+                        self.rust.connection_lazy_members(position, room_id, users),
+                        dict(
+                            self.get_success(
+                                self.store.get_sliding_sync_connection_lazy_members(
+                                    position, room_id, set(users)
+                                )
+                            )
+                        ),
+                        (position, room_id),
+                    )
+            self.assertEqual(
+                self.rust.connection_lazy_members(first, self.room_id, []), {}
+            )
+
+        compare()
+        # Loading a fork commits to it, which drops the other.
+        self.get_success(
+            self.store.get_and_clear_connection_positions(
+                self.bob, DEVICE, "conn", forks[0]
+            )
+        )
+        compare()
+
+    def test_load_memo(self) -> None:
+        """A position loads once: the second load is answered from the memo,
+        without the transaction's side effects."""
+        state = PerConnectionState().get_mutable()
+        state.rooms._statuses[self.room_id] = HaveSentRoom.live()
+        first = self.rust.persist_connection_state(
+            self.bob, DEVICE, "conn", None, **self._rust_updates(state)
+        )
+        second = self.rust.persist_connection_state(
+            self.bob, DEVICE, "conn", first, **self._rust_updates(state)
+        )
+        loaded = self.rust.load_connection_state(self.bob, DEVICE, "conn", first, 0)
+        self.assertEqual(loaded[1], {self.room_id: ("live", None)})
+        # The load deleted the other position.
+        self.assertEqual(self._connection_rows("conn")["positions"], 1)
+        with self.assertRaises(SlidingSyncUnknownPosition):
+            self.rust.load_connection_state(self.bob, DEVICE, "conn", second, 0)
+        # Again from the memo, though the row's last use is now different.
+        self.assertEqual(
+            self.rust.load_connection_state(self.bob, DEVICE, "conn", first, 10**12),
+            loaded,
+        )
+        self.assertEqual(
+            self._connection_rows("conn")["last_used_ts"], self.clock.time_msec()
+        )
+
+
+async def _to_string(store: Any, token: Any) -> str:
+    if isinstance(token, int):
+        return str(token)
+    return await token.to_string(store)

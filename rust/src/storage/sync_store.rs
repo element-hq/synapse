@@ -279,6 +279,24 @@ impl<'a> SyncReader<'a> {
         Ok(borrowed)
     }
 
+    /// Borrow a connection and open a `REPEATABLE READ` transaction on it
+    /// that may write, as a Python `runInteraction` does. Unlike
+    /// [`SyncReader::begin`]'s, such a transaction can fail with a
+    /// serialization error or a deadlock, which the caller retries. Finish
+    /// with [`Borrowed::commit`].
+    pub(crate) async fn begin_write(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
+        let mut borrowed = self.borrow().await?;
+        // Set before awaiting: if we are dropped after BEGIN is sent but
+        // before it returns, the transaction is open and must be rolled back.
+        // A ROLLBACK outside one only warns.
+        borrowed.in_transaction = true;
+        borrowed
+            .execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
+            .await?;
+        self.update_stats(|stats| stats.transactions += 1);
+        Ok(borrowed)
+    }
+
     /// Run one statement on a connection borrowed for it.
     pub(crate) async fn query_one_shot(
         &self,

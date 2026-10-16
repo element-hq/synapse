@@ -256,11 +256,16 @@ def find_relevant_room_ids_for_test(
 _PySnapshot = tuple[
     str, str | None, str, str | None, str | None, str, int, bool, str | None, bool
 ]
+# A room status as `(flag, token)`, and a room config as `(timeline_limit,
+# {type: state keys})`.
+_PyStatus = tuple[str, str | None]
+_PyConfig = tuple[int, dict[str, list[str]]]
 
 class SlidingSyncStoreForTest:
     """The sliding sync store's queries (`rust/src/storage/sliding_sync_store.rs`),
     each run to completion on the tokio runtime, over the native driver's pool
-    and the Rust store's caches. For `tests/storage/test_sliding_sync_store.py`."""
+    and the Rust store's caches. For `tests/storage/test_sliding_sync_store.py`.
+    Raises `SlidingSyncUnknownPosition` as the Python does."""
 
     def __init__(self, pool: ConnectionPool, handler: SlidingSyncHandler) -> None: ...
     def rooms_from_snapshots(self, user_id: str) -> dict[str, _PySnapshot]: ...
@@ -325,3 +330,35 @@ class SlidingSyncStoreForTest:
     def is_encrypted_at(
         self, room_id: str, to_token: RoomStreamToken, now_token: RoomStreamToken
     ) -> bool: ...
+    def connection_lazy_members(
+        self, connection_position: int, room_id: str, user_ids: list[str]
+    ) -> dict[str, int]: ...
+    def load_connection_state(
+        self,
+        user_id: str,
+        device_id: str,
+        conn_id: str,
+        connection_position: int,
+        now_ms: int,
+    ) -> tuple[
+        int | None,
+        dict[str, _PyStatus],
+        dict[str, _PyStatus],
+        dict[str, _PyStatus],
+        dict[str, _PyConfig],
+    ]:
+        """`(last_used_ts, rooms, receipts, account_data, room_configs)`."""
+    def persist_connection_state(
+        self,
+        user_id: str,
+        device_id: str,
+        conn_id: str,
+        previous_position: int | None,
+        *,
+        rooms: dict[str, _PyStatus],
+        receipts: dict[str, _PyStatus],
+        account_data: dict[str, _PyStatus],
+        room_configs: dict[str, _PyConfig],
+        room_lazy_membership: dict[str, tuple[dict[str, int | None], set[str]]],
+        now_ms: int,
+    ) -> int: ...

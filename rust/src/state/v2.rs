@@ -686,7 +686,7 @@ fn push_py_json_list(out: &mut String, items: &[&str]) {
 }
 
 /// Encode a string as Python's `json.dumps` does with `ensure_ascii=True`.
-fn push_py_json_str(out: &mut String, s: &str) {
+pub(crate) fn push_py_json_str(out: &mut String, s: &str) {
     use std::fmt::Write;
 
     out.push('"');

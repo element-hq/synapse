@@ -12,7 +12,8 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-//! What the sliding sync handler reads from the database.
+//! What the sliding sync handler reads from the database, and the two
+//! transactions that load and store a connection's state.
 //!
 //! [`SlidingSyncReader`] is a [`SyncReader`] with the sliding sync queries
 //! on top, so one reader serves a request's v2 reads (timelines, state,
@@ -32,7 +33,7 @@
 //! [`StoreCaches`](super::caches::StoreCaches).
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     ops::Deref,
     sync::Arc,
 };
@@ -40,21 +41,34 @@ use std::{
 use anyhow::Context;
 use futures::{future::BoxFuture, FutureExt};
 use indexmap::IndexMap;
-use pyo3::prelude::*;
+use log::warn;
+use pyo3::{prelude::*, types::PyTuple};
 use tokio::runtime::Handle;
-use tokio_postgres::Row;
+use tokio_postgres::{error::SqlState, Row};
 
+use crate::caches::python::PyCacheKey;
 use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
 use crate::room_versions::is_known_room_version;
-use crate::sliding_sync::room_lists::RoomForUser;
+use crate::sliding_sync::config::{RequiredStateMap, RoomSyncConfig};
+use crate::sliding_sync::connection::{HaveSentRoom, RoomLazyMembershipChanges};
+use crate::sliding_sync::room_lists::{lists::UnknownPosition, RoomForUser};
 use crate::sliding_sync::SlidingSyncHandler;
 use crate::state::StateKey;
 use crate::storage::events::RedactBehaviour;
 use crate::storage::sync_store::{
-    anyhow_to_py, Interner, PersistedEventPosition, SyncReader, SyncStore, SELECT_MANY_BATCH_SIZE,
+    anyhow_to_py, Borrowed, Interner, PersistedEventPosition, SyncReader, SyncStore,
+    SELECT_MANY_BATCH_SIZE,
 };
 use crate::types::state_filter::StateFilter;
 use crate::types::stream_token::{filter_results_by_stream, RoomStreamToken};
+
+/// How often a connection's `last_used_ts` is rewritten when it is used,
+/// in milliseconds: `UPDATE_INTERVAL_LAST_USED_TS`.
+pub const UPDATE_INTERVAL_LAST_USED_TS_MS: i64 = 5 * 60 * 1000;
+
+/// How many times a write transaction is tried, as `runInteraction` tries
+/// one that fails with a serialization error or a deadlock.
+const MAX_TRANSACTION_ATTEMPTS: usize = 5;
 
 /// The rooms of a user's membership snapshots, by room ID.
 pub type SnapshotRooms = HashMap<Arc<str>, RoomForUser>;
@@ -102,6 +116,68 @@ pub struct DeltaMembershipChange {
     pub prev_event_pos: Option<PersistedEventPosition>,
     pub prev_membership: Option<Arc<str>>,
     pub prev_sender: Option<Arc<str>>,
+}
+
+/// `PerConnectionStateDB`: a connection's state as stored, with each
+/// stream's tokens as their strings. Loading it gives the whole state at a
+/// position. Storing one stores the request's updates.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StoredConnectionState {
+    /// When the connection was last used, before this load.
+    pub last_used_ts: Option<i64>,
+    pub rooms: HashMap<String, HaveSentRoom<String>>,
+    pub receipts: HashMap<String, HaveSentRoom<String>>,
+    pub account_data: HashMap<String, HaveSentRoom<String>>,
+    pub room_configs: HashMap<String, RoomSyncConfig>,
+}
+
+impl StoredConnectionState {
+    /// `len()` of the `PerConnectionState` it becomes: what the memo of
+    /// loaded states weighs it as.
+    pub fn len(&self) -> usize {
+        self.rooms.len() + self.receipts.len() + self.account_data.len() + self.room_configs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// The updates of one request to a connection's state, for
+/// [`SlidingSyncReader::persist_connection_state`]: each stream's status
+/// updates with their tokens as strings, the room configs set, and the
+/// rooms' lazy-loaded memberships.
+#[derive(Debug, Clone, Default)]
+pub struct ConnectionStateUpdates {
+    pub rooms: HashMap<String, HaveSentRoom<String>>,
+    pub receipts: HashMap<String, HaveSentRoom<String>>,
+    pub account_data: HashMap<String, HaveSentRoom<String>>,
+    pub room_configs: HashMap<String, RoomSyncConfig>,
+    pub room_lazy_membership: HashMap<String, RoomLazyMembershipChanges>,
+}
+
+/// The key of a loaded connection state: `(user_id, device_id, conn_id,
+/// connection_position)`, the arguments of
+/// `get_and_clear_connection_positions`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ConnectionPositionKey {
+    pub user_id: Arc<str>,
+    pub device_id: Arc<str>,
+    pub conn_id: Arc<str>,
+    pub connection_position: i64,
+}
+
+impl PyCacheKey for ConnectionPositionKey {
+    fn from_py_key(key: &Bound<'_, PyTuple>) -> Option<Self> {
+        let (user_id, device_id, conn_id, connection_position): (String, String, String, i64) =
+            key.extract().ok()?;
+        Some(ConnectionPositionKey {
+            user_id: Arc::from(user_id),
+            device_id: Arc::from(device_id),
+            conn_id: Arc::from(conn_id),
+            connection_position,
+        })
+    }
 }
 
 impl SyncStore {
@@ -187,6 +263,81 @@ fn position(
 fn assert_live(token: &RoomStreamToken) -> anyhow::Result<()> {
     anyhow::ensure!(!token.is_historic(), "expected a live token, got {token:?}");
     Ok(())
+}
+
+/// Whether `e` is a serialization failure or a deadlock, which
+/// `runInteraction` retries.
+fn is_retryable(e: &anyhow::Error) -> bool {
+    e.chain().any(|cause| {
+        cause
+            .downcast_ref::<tokio_postgres::Error>()
+            .and_then(|e| e.code())
+            .is_some_and(|code| {
+                *code == SqlState::T_R_SERIALIZATION_FAILURE
+                    || *code == SqlState::T_R_DEADLOCK_DETECTED
+            })
+    })
+}
+
+/// A room status as `sliding_sync_connection_streams` stores it:
+/// `HaveSentRoomFlag`'s value and the token.
+fn status_to_row(status: &HaveSentRoom<String>) -> (&'static str, Option<&str>) {
+    match status {
+        HaveSentRoom::Never => ("never", None),
+        HaveSentRoom::Live => ("live", None),
+        HaveSentRoom::Previously(token) => ("previously", Some(token)),
+    }
+}
+
+/// A room status from its row. A `previously` without a token is an error,
+/// where Python would carry the `None` on until something read it.
+fn status_from_row(
+    status: &str,
+    last_token: Option<String>,
+) -> anyhow::Result<HaveSentRoom<String>> {
+    match (status, last_token) {
+        ("never", _) => Ok(HaveSentRoom::Never),
+        ("live", _) => Ok(HaveSentRoom::Live),
+        ("previously", Some(token)) => Ok(HaveSentRoom::Previously(token)),
+        (status, token) => anyhow::bail!("invalid room status {status:?} with token {token:?}"),
+    }
+}
+
+/// A room's required state as `sliding_sync_connection_required_state`
+/// stores it: the sorted `[type, state_key]` pairs, encoded as Python's
+/// `json_encoder` does, so the same state from either side dedups to one
+/// row.
+pub fn encode_required_state(map: &RequiredStateMap) -> String {
+    let mut out = String::from("[");
+    let mut first = true;
+    // The map and its sets are sorted, so this is the order of Python's
+    // `sorted` over the pairs.
+    for (event_type, state_keys) in map {
+        for state_key in state_keys {
+            if !first {
+                out.push(',');
+            }
+            first = false;
+            out.push('[');
+            crate::state::v2::push_py_json_str(&mut out, event_type);
+            out.push(',');
+            crate::state::v2::push_py_json_str(&mut out, state_key);
+            out.push(']');
+        }
+    }
+    out.push(']');
+    out
+}
+
+/// The reverse of [`encode_required_state`].
+fn decode_required_state(json: &str) -> anyhow::Result<RequiredStateMap> {
+    let pairs: Vec<(String, String)> =
+        serde_json::from_str(json).with_context(|| format!("required state {json}"))?;
+    let mut map: RequiredStateMap = BTreeMap::new();
+    for (event_type, state_key) in pairs {
+        map.entry(event_type).or_default().insert(state_key);
+    }
+    Ok(map)
 }
 
 impl<'a> SlidingSyncReader<'a> {
@@ -896,6 +1047,568 @@ impl<'a> SlidingSyncReader<'a> {
             .get_field("algorithm")
             .is_some_and(|algorithm| !algorithm.is_null()))
     }
+
+    // Connection state.
+
+    /// `get_sliding_sync_connection_lazy_members`: which of the users the
+    /// connection sent lazy-loaded memberships for in the room, as of
+    /// `connection_position`, to when each was last needed.
+    pub async fn connection_lazy_members(
+        &self,
+        connection_position: i64,
+        room_id: &str,
+        user_ids: &[Arc<str>],
+    ) -> anyhow::Result<HashMap<Arc<str>, i64>> {
+        let mut members = HashMap::new();
+        if user_ids.is_empty() {
+            return Ok(members);
+        }
+        let ids: Vec<&str> = user_ids.iter().map(|id| &**id).collect();
+        // The position's connection is found through its row, as the caller
+        // doesn't have the connection key. Of the two `connection_position`
+        // columns, the members' is the one filtered on.
+        let rows = self
+            .query_one_shot(
+                "SELECT user_id, members.connection_position, last_seen_ts
+                FROM sliding_sync_connection_lazy_members AS members
+                INNER JOIN sliding_sync_connection_positions AS pos USING (connection_key)
+                WHERE pos.connection_position = $1 AND room_id = $2 AND user_id = ANY($3)",
+                &[&connection_position, &room_id, &ids],
+            )
+            .await?;
+        for row in rows {
+            let user_id: String = row.try_get(0)?;
+            let member_position: Option<i64> = row.try_get(1)?;
+            let last_seen_ts: i64 = row.try_get(2)?;
+            // An entry with a position applies to that fork of the
+            // connection only. One without applies to every position.
+            if member_position.is_none_or(|position| position == connection_position) {
+                members.insert(Arc::from(user_id), last_seen_ts);
+            }
+        }
+        Ok(members)
+    }
+
+    /// `get_and_clear_connection_positions`: the connection's state at
+    /// `connection_position`, or [`UnknownPosition`] if the position is not
+    /// one of this user's device's connection. Loading a position commits
+    /// the client to it: the connection's other positions are deleted.
+    ///
+    /// Memoized by its arguments, as Python's `@cached` is, so a long-poll's
+    /// second call and a client's retry don't run the transaction again.
+    /// `now_ms` is the time to record as the connection's last use.
+    pub async fn load_connection_state(
+        &self,
+        user_id: &str,
+        device_id: &str,
+        conn_id: &str,
+        connection_position: i64,
+        now_ms: i64,
+    ) -> anyhow::Result<Arc<StoredConnectionState>> {
+        let key = ConnectionPositionKey {
+            user_id: Arc::from(user_id),
+            device_id: Arc::from(device_id),
+            conn_id: Arc::from(conn_id),
+            connection_position,
+        };
+        self.store()
+            .caches()
+            .connection_states
+            .get_or_load(key, || async {
+                self.retry_transaction(|| {
+                    self.load_connection_state_txn(
+                        user_id,
+                        device_id,
+                        conn_id,
+                        connection_position,
+                        now_ms,
+                    )
+                    .boxed()
+                })
+                .await
+                .map(Arc::new)
+            })
+            .await
+            .map_err(|e| match e.inner().downcast_ref::<UnknownPosition>() {
+                Some(unknown) => anyhow::Error::new(unknown.clone()),
+                None => anyhow::Error::new(e),
+            })
+    }
+
+    /// Run `txn` until it succeeds, fails with an error other than a
+    /// serialization failure or a deadlock, or has been tried
+    /// [`MAX_TRANSACTION_ATTEMPTS`] times.
+    async fn retry_transaction<'s, T>(
+        &'s self,
+        txn: impl Fn() -> BoxFuture<'s, anyhow::Result<T>>,
+    ) -> anyhow::Result<T> {
+        let mut attempt = 1;
+        loop {
+            match txn().await {
+                Err(e) if attempt < MAX_TRANSACTION_ATTEMPTS && is_retryable(&e) => {
+                    warn!("Retrying a sliding sync transaction, attempt {attempt}: {e:#}");
+                    attempt += 1;
+                }
+                result => return result,
+            }
+        }
+    }
+
+    async fn load_connection_state_txn(
+        &self,
+        user_id: &str,
+        device_id: &str,
+        conn_id: &str,
+        connection_position: i64,
+        now_ms: i64,
+    ) -> anyhow::Result<StoredConnectionState> {
+        let txn = self.begin_write().await?;
+
+        // The position is the client's to name, so check it is theirs.
+        let rows = txn
+            .query(
+                "SELECT connection_key, last_used_ts
+                FROM sliding_sync_connection_positions
+                INNER JOIN sliding_sync_connections USING (connection_key)
+                WHERE
+                    connection_position = $1
+                    AND user_id = $2 AND effective_device_id = $3 AND conn_id = $4",
+                &[&connection_position, &user_id, &device_id, &conn_id],
+            )
+            .await?;
+        let Some(row) = rows.first() else {
+            return Err(UnknownPosition.into());
+        };
+        let connection_key: i64 = row.try_get(0)?;
+        let last_used_ts: Option<i64> = row.try_get(1)?;
+
+        // Not on every use, to spare the writes.
+        if last_used_ts.is_none_or(|ts| now_ms - ts > UPDATE_INTERVAL_LAST_USED_TS_MS) {
+            txn.query(
+                "UPDATE sliding_sync_connections SET last_used_ts = $1 WHERE connection_key = $2",
+                &[&now_ms, &connection_key],
+            )
+            .await?;
+        }
+
+        // The client has the position, so the others can go. What follows
+        // relies on it being the only one left.
+        txn.query(
+            "DELETE FROM sliding_sync_connection_positions
+            WHERE connection_key = $1 AND connection_position != $2",
+            &[&connection_key, &connection_position],
+        )
+        .await?;
+
+        // With the forks gone, the position's lazy members hold for every
+        // position after it.
+        txn.query(
+            "UPDATE sliding_sync_connection_lazy_members SET connection_position = NULL
+            WHERE connection_key = $1 AND connection_position = $2",
+            &[&connection_key, &connection_position],
+        )
+        .await?;
+
+        let rows = txn
+            .query(
+                "SELECT required_state_id, required_state
+                FROM sliding_sync_connection_required_state
+                WHERE connection_key = $1",
+                &[&connection_key],
+            )
+            .await?;
+        let mut required_states: HashMap<i64, RequiredStateMap> =
+            HashMap::with_capacity(rows.len());
+        for row in &rows {
+            let required_state_id: i64 = row.try_get(0)?;
+            let required_state: String = row.try_get(1)?;
+            required_states.insert(required_state_id, decode_required_state(&required_state)?);
+        }
+
+        let rows = txn
+            .query(
+                "SELECT room_id, timeline_limit, required_state_id
+                FROM sliding_sync_connection_room_configs
+                WHERE connection_position = $1",
+                &[&connection_position],
+            )
+            .await?;
+        let mut room_configs = HashMap::with_capacity(rows.len());
+        let mut used_required_state_ids = HashSet::new();
+        for row in &rows {
+            let room_id: String = row.try_get(0)?;
+            let timeline_limit: i64 = row.try_get(1)?;
+            let required_state_id: i64 = row.try_get(2)?;
+            let required_state_map = required_states
+                .get(&required_state_id)
+                .with_context(|| format!("required state {required_state_id} of {room_id}"))?
+                .clone();
+            used_required_state_ids.insert(required_state_id);
+            room_configs.insert(
+                room_id,
+                RoomSyncConfig {
+                    timeline_limit,
+                    required_state_map,
+                },
+            );
+        }
+
+        // The required states no room of the one remaining position uses.
+        let unused: Vec<i64> = required_states
+            .keys()
+            .filter(|id| !used_required_state_ids.contains(*id))
+            .copied()
+            .collect();
+        if !unused.is_empty() {
+            txn.query(
+                "DELETE FROM sliding_sync_connection_required_state
+                WHERE connection_key = $1 AND required_state_id = ANY($2)",
+                &[&connection_key, &unused],
+            )
+            .await?;
+        }
+
+        let rows = txn
+            .query(
+                "SELECT stream, room_id, room_status, last_token
+                FROM sliding_sync_connection_streams
+                WHERE connection_position = $1",
+                &[&connection_position],
+            )
+            .await?;
+        let mut state = StoredConnectionState {
+            last_used_ts,
+            room_configs,
+            ..Default::default()
+        };
+        for row in &rows {
+            let stream: String = row.try_get(0)?;
+            let room_id: String = row.try_get(1)?;
+            let room_status: String = row.try_get(2)?;
+            let last_token: Option<String> = row.try_get(3)?;
+            let statuses = match stream.as_str() {
+                "rooms" => &mut state.rooms,
+                "receipts" => &mut state.receipts,
+                "account_data" => &mut state.account_data,
+                // Later versions may add streams.
+                _ => {
+                    warn!("Unrecognized sliding sync stream in DB {stream:?}");
+                    continue;
+                }
+            };
+            statuses.insert(
+                room_id,
+                status_from_row(&room_status, last_token)
+                    .with_context(|| format!("stream {stream} of connection {connection_key}"))?,
+            );
+        }
+
+        txn.commit().await?;
+        Ok(state)
+    }
+
+    /// `persist_per_connection_state`: store the request's `updates` to
+    /// the connection's state at `previous_position` as a new position,
+    /// and return it. Without a previous position the connection starts
+    /// over, dropping what was stored for it. [`UnknownPosition`] if the
+    /// previous position is not this user's device's connection's.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn persist_connection_state(
+        &self,
+        user_id: &str,
+        device_id: &str,
+        conn_id: &str,
+        previous_position: Option<i64>,
+        updates: &ConnectionStateUpdates,
+        now_ms: i64,
+    ) -> anyhow::Result<i64> {
+        self.retry_transaction(|| {
+            self.persist_connection_state_txn(
+                user_id,
+                device_id,
+                conn_id,
+                previous_position,
+                updates,
+                now_ms,
+            )
+            .boxed()
+        })
+        .await
+    }
+
+    async fn persist_connection_state_txn(
+        &self,
+        user_id: &str,
+        device_id: &str,
+        conn_id: &str,
+        previous_position: Option<i64>,
+        updates: &ConnectionStateUpdates,
+        now_ms: i64,
+    ) -> anyhow::Result<i64> {
+        let txn = self.begin_write().await?;
+
+        let connection_key: i64 = match previous_position {
+            Some(previous_position) => {
+                // Lock the connection up front. Concurrent upserts of its lazy
+                // members deadlocked otherwise. The position is the client's
+                // to name, so check it is theirs.
+                let rows = txn
+                    .query(
+                        "SELECT connection_key
+                        FROM sliding_sync_connection_positions
+                        INNER JOIN sliding_sync_connections USING (connection_key)
+                        WHERE
+                            connection_position = $1
+                            AND user_id = $2 AND effective_device_id = $3 AND conn_id = $4
+                        FOR NO KEY UPDATE OF sliding_sync_connections",
+                        &[&previous_position, &user_id, &device_id, &conn_id],
+                    )
+                    .await?;
+                let Some(row) = rows.first() else {
+                    return Err(UnknownPosition.into());
+                };
+                row.try_get(0)?
+            }
+            None => {
+                // Starting over: drop the connection's old state, which
+                // cascades to its positions and their rows, so one-shot
+                // requests don't pile up.
+                txn.query(
+                    "DELETE FROM sliding_sync_connections
+                    WHERE user_id = $1 AND effective_device_id = $2 AND conn_id = $3",
+                    &[&user_id, &device_id, &conn_id],
+                )
+                .await?;
+                let rows = txn
+                    .query(
+                        "INSERT INTO sliding_sync_connections
+                        (user_id, effective_device_id, conn_id, created_ts, last_used_ts)
+                        VALUES ($1, $2, $3, $4, $4)
+                        RETURNING connection_key",
+                        &[&user_id, &device_id, &conn_id, &now_ms],
+                    )
+                    .await?;
+                rows.first()
+                    .context("no connection key returned")?
+                    .try_get(0)?
+            }
+        };
+
+        let rows = txn
+            .query(
+                "INSERT INTO sliding_sync_connection_positions (connection_key, created_ts)
+                VALUES ($1, $2)
+                RETURNING connection_position",
+                &[&connection_key, &now_ms],
+            )
+            .await?;
+        let connection_position: i64 = rows
+            .first()
+            .context("no connection position returned")?
+            .try_get(0)?;
+
+        // Rooms share required state rows by their JSON, within the
+        // connection.
+        let mut required_state_to_id: HashMap<String, i64> = HashMap::new();
+        if previous_position.is_some() {
+            let rows = txn
+                .query(
+                    "SELECT required_state_id, required_state
+                    FROM sliding_sync_connection_required_state
+                    WHERE connection_key = $1",
+                    &[&connection_key],
+                )
+                .await?;
+            for row in &rows {
+                required_state_to_id.insert(row.try_get(1)?, row.try_get(0)?);
+            }
+        }
+        let mut room_to_state_id: HashMap<&str, i64> = HashMap::new();
+        let mut unique_required_state: IndexMap<String, Vec<&str>> = IndexMap::new();
+        for (room_id, config) in &updates.room_configs {
+            let serialized = encode_required_state(&config.required_state_map);
+            match required_state_to_id.get(&serialized) {
+                Some(id) => {
+                    room_to_state_id.insert(room_id, *id);
+                }
+                None => unique_required_state
+                    .entry(serialized)
+                    .or_default()
+                    .push(room_id),
+            }
+        }
+        for (serialized, room_ids) in &unique_required_state {
+            let rows = txn
+                .query(
+                    "INSERT INTO sliding_sync_connection_required_state
+                    (connection_key, required_state)
+                    VALUES ($1, $2)
+                    RETURNING required_state_id",
+                    &[&connection_key, serialized],
+                )
+                .await?;
+            let required_state_id: i64 = rows
+                .first()
+                .context("no required state ID returned")?
+                .try_get(0)?;
+            for room_id in room_ids {
+                room_to_state_id.insert(room_id, required_state_id);
+            }
+        }
+
+        // Start from the previous position's rows. The updates overwrite
+        // them.
+        if let Some(previous_position) = previous_position {
+            txn.query(
+                "INSERT INTO sliding_sync_connection_streams
+                (connection_position, stream, room_id, room_status, last_token)
+                SELECT $1, stream, room_id, room_status, last_token
+                FROM sliding_sync_connection_streams
+                WHERE connection_position = $2",
+                &[&connection_position, &previous_position],
+            )
+            .await?;
+            txn.query(
+                "INSERT INTO sliding_sync_connection_room_configs
+                (connection_position, room_id, timeline_limit, required_state_id)
+                SELECT $1, room_id, timeline_limit, required_state_id
+                FROM sliding_sync_connection_room_configs
+                WHERE connection_position = $2",
+                &[&connection_position, &previous_position],
+            )
+            .await?;
+        }
+
+        let mut streams: Vec<&str> = Vec::new();
+        let mut stream_rooms: Vec<&str> = Vec::new();
+        let mut statuses: Vec<&str> = Vec::new();
+        let mut tokens: Vec<Option<&str>> = Vec::new();
+        for (stream, updates) in [
+            ("rooms", &updates.rooms),
+            ("receipts", &updates.receipts),
+            ("account_data", &updates.account_data),
+        ] {
+            for (room_id, status) in updates {
+                let (status, token) = status_to_row(status);
+                streams.push(stream);
+                stream_rooms.push(room_id);
+                statuses.push(status);
+                tokens.push(token);
+            }
+        }
+        if !streams.is_empty() {
+            txn.query(
+                "INSERT INTO sliding_sync_connection_streams
+                (connection_position, stream, room_id, room_status, last_token)
+                SELECT $1, * FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[])
+                ON CONFLICT (connection_position, stream, room_id)
+                DO UPDATE SET room_status = EXCLUDED.room_status, last_token = EXCLUDED.last_token",
+                &[
+                    &connection_position,
+                    &streams,
+                    &stream_rooms,
+                    &statuses,
+                    &tokens,
+                ],
+            )
+            .await?;
+        }
+
+        let mut config_rooms: Vec<&str> = Vec::with_capacity(updates.room_configs.len());
+        let mut timeline_limits: Vec<i64> = Vec::with_capacity(updates.room_configs.len());
+        let mut required_state_ids: Vec<i64> = Vec::with_capacity(updates.room_configs.len());
+        for (room_id, config) in &updates.room_configs {
+            config_rooms.push(room_id);
+            timeline_limits.push(config.timeline_limit);
+            required_state_ids.push(room_to_state_id[room_id.as_str()]);
+        }
+        if !config_rooms.is_empty() {
+            txn.query(
+                "INSERT INTO sliding_sync_connection_room_configs
+                (connection_position, room_id, timeline_limit, required_state_id)
+                SELECT $1, * FROM UNNEST($2::text[], $3::bigint[], $4::bigint[])
+                ON CONFLICT (connection_position, room_id)
+                DO UPDATE SET
+                    timeline_limit = EXCLUDED.timeline_limit,
+                    required_state_id = EXCLUDED.required_state_id",
+                &[
+                    &connection_position,
+                    &config_rooms,
+                    &timeline_limits,
+                    &required_state_ids,
+                ],
+            )
+            .await?;
+        }
+
+        persist_lazy_members(
+            &txn,
+            connection_key,
+            connection_position,
+            &updates.room_lazy_membership,
+            now_ms,
+        )
+        .await?;
+
+        txn.commit().await?;
+        Ok(connection_position)
+    }
+}
+
+/// `_persist_sliding_sync_connection_lazy_members_txn`: record the lazy
+/// members sent, and forget those whose membership changed unsent.
+async fn persist_lazy_members(
+    txn: &Borrowed<'_, '_>,
+    connection_key: i64,
+    connection_position: i64,
+    all_changes: &HashMap<String, RoomLazyMembershipChanges>,
+    now_ms: i64,
+) -> anyhow::Result<()> {
+    // New entries, and those whose timestamp is old enough to rewrite.
+    let mut rooms: Vec<&str> = Vec::new();
+    let mut users: Vec<&str> = Vec::new();
+    for (room_id, changes) in all_changes {
+        for user_id in changes.get_returned_user_ids_to_update(now_ms) {
+            rooms.push(room_id);
+            users.push(user_id);
+        }
+    }
+    if !rooms.is_empty() {
+        // An entry of another fork of the connection is left alone. This is
+        // a cache, so missing a row costs a few extra members down sync.
+        txn.query(
+            "INSERT INTO sliding_sync_connection_lazy_members
+            (connection_key, connection_position, room_id, user_id, last_seen_ts)
+            SELECT $1, $2, room_id, user_id, $3
+            FROM UNNEST($4::text[], $5::text[]) AS u(room_id, user_id)
+            ON CONFLICT (connection_key, room_id, user_id)
+            DO UPDATE SET last_seen_ts = EXCLUDED.last_seen_ts
+            WHERE sliding_sync_connection_lazy_members.connection_position IS NULL
+                OR sliding_sync_connection_lazy_members.connection_position = EXCLUDED.connection_position",
+            &[&connection_key, &connection_position, &now_ms, &rooms, &users],
+        )
+        .await?;
+    }
+
+    // Removed from every fork: expiring an entry of a cache is always safe.
+    let mut rooms: Vec<&str> = Vec::new();
+    let mut users: Vec<&str> = Vec::new();
+    for (room_id, changes) in all_changes {
+        for user_id in &changes.invalidated_user_ids {
+            rooms.push(room_id);
+            users.push(user_id);
+        }
+    }
+    if !rooms.is_empty() {
+        txn.query(
+            "DELETE FROM sliding_sync_connection_lazy_members
+            WHERE connection_key = $1
+                AND (room_id, user_id) IN (SELECT * FROM UNNEST($2::text[], $3::text[]))",
+            &[&connection_key, &rooms, &users],
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 // Test-only entry points, so trial can compare the Rust store against the
@@ -947,6 +1660,89 @@ fn position_to_py(position: &PersistedEventPosition) -> (String, i64) {
     (position.instance_name.to_string(), position.stream)
 }
 
+/// A status as tests write it: `(flag, token)`.
+type PyStatus = (String, Option<String>);
+
+fn status_to_py(status: &HaveSentRoom<String>) -> PyStatus {
+    let (flag, token) = status_to_row(status);
+    (flag.to_owned(), token.map(str::to_owned))
+}
+
+fn status_from_py((flag, token): PyStatus) -> PyResult<HaveSentRoom<String>> {
+    status_from_row(&flag, token).map_err(anyhow_to_py)
+}
+
+fn statuses_from_py(
+    statuses: HashMap<String, PyStatus>,
+) -> PyResult<HashMap<String, HaveSentRoom<String>>> {
+    statuses
+        .into_iter()
+        .map(|(room_id, status)| Ok((room_id, status_from_py(status)?)))
+        .collect()
+}
+
+fn statuses_to_py(statuses: &HashMap<String, HaveSentRoom<String>>) -> HashMap<String, PyStatus> {
+    statuses
+        .iter()
+        .map(|(room_id, status)| (room_id.clone(), status_to_py(status)))
+        .collect()
+}
+
+/// A room config as tests write it: `(timeline_limit, {type: [state_key]})`.
+type PyRoomConfig = (i64, BTreeMap<String, Vec<String>>);
+
+fn config_to_py(config: &RoomSyncConfig) -> PyRoomConfig {
+    (
+        config.timeline_limit,
+        config
+            .required_state_map
+            .iter()
+            .map(|(event_type, state_keys)| {
+                (event_type.clone(), state_keys.iter().cloned().collect())
+            })
+            .collect(),
+    )
+}
+
+fn config_from_py((timeline_limit, map): PyRoomConfig) -> RoomSyncConfig {
+    RoomSyncConfig {
+        timeline_limit,
+        required_state_map: map
+            .into_iter()
+            .map(|(event_type, state_keys)| (event_type, state_keys.into_iter().collect()))
+            .collect(),
+    }
+}
+
+/// A stored connection state as tests read it: `(last_used_ts, rooms,
+/// receipts, account_data, room_configs)`.
+type PyStoredState = (
+    Option<i64>,
+    HashMap<String, PyStatus>,
+    HashMap<String, PyStatus>,
+    HashMap<String, PyStatus>,
+    HashMap<String, PyRoomConfig>,
+);
+
+/// A room's lazy membership changes as tests write them:
+/// `({user_id: last_seen_ts}, invalidated_user_ids)`.
+type PyLazyChanges = (HashMap<String, Option<i64>>, HashSet<String>);
+
+/// Raise [`UnknownPosition`] as Python's `SlidingSyncUnknownPosition`.
+fn store_error_to_py(py: Python<'_>, e: anyhow::Error) -> PyErr {
+    if e.downcast_ref::<UnknownPosition>().is_some() {
+        return match py
+            .import("synapse.api.errors")
+            .and_then(|errors| errors.getattr("SlidingSyncUnknownPosition"))
+            .and_then(|class| class.call0())
+        {
+            Ok(exception) => PyErr::from_value(exception),
+            Err(e) => e,
+        };
+    }
+    anyhow_to_py(e)
+}
+
 fn arcs(ids: Vec<String>) -> Vec<Arc<str>> {
     ids.into_iter().map(Arc::from).collect()
 }
@@ -972,7 +1768,7 @@ impl PySlidingSyncStoreForTest {
             self.handle
                 .block_on(f(self.store.sliding_sync_reader(self.pool.clone())))
         });
-        result.map_err(anyhow_to_py)
+        result.map_err(|e| store_error_to_py(py, e))
     }
 }
 
@@ -1280,5 +2076,158 @@ impl PySlidingSyncStoreForTest {
             }
             .boxed()
         })
+    }
+
+    fn connection_lazy_members(
+        &self,
+        py: Python<'_>,
+        connection_position: i64,
+        room_id: String,
+        user_ids: Vec<String>,
+    ) -> PyResult<HashMap<String, i64>> {
+        let user_ids = arcs(user_ids);
+        let members = self.run(py, |reader| {
+            async move {
+                reader
+                    .connection_lazy_members(connection_position, &room_id, &user_ids)
+                    .await
+            }
+            .boxed()
+        })?;
+        Ok(members
+            .into_iter()
+            .map(|(user_id, ts)| (user_id.to_string(), ts))
+            .collect())
+    }
+
+    fn load_connection_state(
+        &self,
+        py: Python<'_>,
+        user_id: String,
+        device_id: String,
+        conn_id: String,
+        connection_position: i64,
+        now_ms: i64,
+    ) -> PyResult<PyStoredState> {
+        let state = self.run(py, |reader| {
+            async move {
+                reader
+                    .load_connection_state(
+                        &user_id,
+                        &device_id,
+                        &conn_id,
+                        connection_position,
+                        now_ms,
+                    )
+                    .await
+            }
+            .boxed()
+        })?;
+        Ok((
+            state.last_used_ts,
+            statuses_to_py(&state.rooms),
+            statuses_to_py(&state.receipts),
+            statuses_to_py(&state.account_data),
+            state
+                .room_configs
+                .iter()
+                .map(|(room_id, config)| (room_id.clone(), config_to_py(config)))
+                .collect(),
+        ))
+    }
+
+    #[pyo3(signature = (user_id, device_id, conn_id, previous_position, *, rooms, receipts, account_data, room_configs, room_lazy_membership, now_ms))]
+    #[allow(clippy::too_many_arguments)]
+    fn persist_connection_state(
+        &self,
+        py: Python<'_>,
+        user_id: String,
+        device_id: String,
+        conn_id: String,
+        previous_position: Option<i64>,
+        rooms: HashMap<String, PyStatus>,
+        receipts: HashMap<String, PyStatus>,
+        account_data: HashMap<String, PyStatus>,
+        room_configs: HashMap<String, PyRoomConfig>,
+        room_lazy_membership: HashMap<String, PyLazyChanges>,
+        now_ms: i64,
+    ) -> PyResult<i64> {
+        let updates = ConnectionStateUpdates {
+            rooms: statuses_from_py(rooms)?,
+            receipts: statuses_from_py(receipts)?,
+            account_data: statuses_from_py(account_data)?,
+            room_configs: room_configs
+                .into_iter()
+                .map(|(room_id, config)| (room_id, config_from_py(config)))
+                .collect(),
+            room_lazy_membership: room_lazy_membership
+                .into_iter()
+                .map(|(room_id, (returned, invalidated))| {
+                    (
+                        room_id,
+                        RoomLazyMembershipChanges {
+                            returned_user_id_to_last_seen_ts_map: returned,
+                            invalidated_user_ids: invalidated,
+                        },
+                    )
+                })
+                .collect(),
+        };
+        self.run(py, |reader| {
+            async move {
+                reader
+                    .persist_connection_state(
+                        &user_id,
+                        &device_id,
+                        &conn_id,
+                        previous_position,
+                        &updates,
+                        now_ms,
+                    )
+                    .await
+            }
+            .boxed()
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn required_state_round_trips_as_python_encodes_it() {
+        let mut map = RequiredStateMap::new();
+        map.entry("m.room.member".to_owned())
+            .or_default()
+            .extend(["$ME".to_owned(), "@é:test".to_owned()]);
+        map.entry("m.room.create".to_owned())
+            .or_default()
+            .insert(String::new());
+        let json = encode_required_state(&map);
+        // `json.dumps(sorted(...), separators=(",", ":"))`, ASCII only.
+        assert_eq!(
+            json,
+            r#"[["m.room.create",""],["m.room.member","$ME"],["m.room.member","@\u00e9:test"]]"#
+        );
+        assert_eq!(decode_required_state(&json).unwrap(), map);
+        assert_eq!(encode_required_state(&RequiredStateMap::new()), "[]");
+    }
+
+    #[test]
+    fn statuses_round_trip() {
+        for status in [
+            HaveSentRoom::Never,
+            HaveSentRoom::Live,
+            HaveSentRoom::Previously("s5".to_owned()),
+        ] {
+            let (flag, token) = status_to_row(&status);
+            assert_eq!(
+                status_from_row(flag, token.map(str::to_owned)).unwrap(),
+                status
+            );
+        }
+        assert!(status_from_row("previously", None).is_err());
+        assert!(status_from_row("sent", None).is_err());
     }
 }

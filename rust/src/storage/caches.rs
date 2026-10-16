@@ -58,7 +58,9 @@ use crate::caches::{python::CacheHandle, registry::CacheRegistry, Cache};
 use crate::federation::client::limiter::RetryTimings;
 use crate::state::StateMap;
 use crate::storage::events::CachedEvent;
-use crate::storage::sliding_sync_store::{RoomType, SnapshotRooms, UserTags};
+use crate::storage::sliding_sync_store::{
+    ConnectionPositionKey, RoomType, SnapshotRooms, StoredConnectionState, UserTags,
+};
 use crate::storage::sync_store::{RetentionRow, RoomNotifCounts, RoomSummary};
 
 pub type EventCache = Cache<Arc<str>, CachedEvent>;
@@ -171,6 +173,12 @@ pub struct StoreCaches {
     /// `_get_max_event_pos`. `None` for a room the batch load did not find,
     /// as Python's `cachedList` stores.
     pub max_event_pos: Arc<Cache<Arc<str>, Option<i64>>>,
+    /// `get_and_clear_connection_positions`: a memo of each connection
+    /// position's state, so the transaction that loads it runs once per
+    /// position. Python never invalidates it, and a position's stored state
+    /// never changes once it is loaded, so this mirrors nothing. Weighed by
+    /// rooms, as Python's `iterable=True` cache is.
+    pub connection_states: Arc<Cache<ConnectionPositionKey, Arc<StoredConnectionState>>>,
 }
 
 /// Room ID to its number of members by membership.
@@ -241,6 +249,11 @@ impl StoreCaches {
                 |rooms| rooms.len(),
             ),
             max_event_pos: registry.new_cache("rust_get_max_event_pos", 1000),
+            connection_states: registry.new_weighted_cache(
+                "rust_get_and_clear_connection_positions",
+                100_000,
+                |state| state.len(),
+            ),
         }
     }
 
