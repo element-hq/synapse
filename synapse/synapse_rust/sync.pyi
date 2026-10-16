@@ -473,6 +473,18 @@ class SyncStoreForTest:
         """`get_last_event_pos_in_room_before_stream_ordering`, as
         `(event_id, instance_name, stream_ordering)`."""
 
+    def last_event_of_types_before(
+        self, room_id: str, end_token: RoomStreamToken, event_types: list[str]
+    ) -> tuple[str, str, int] | None:
+        """`get_last_event_pos_in_room_before_stream_ordering` with
+        `event_types`, as `(event_id, instance_name, stream_ordering)`."""
+
+    def member_counts(self, room_id: str) -> dict[str, int]:
+        """`get_member_counts`."""
+
+    def latest_bump_stamp(self, room_id: str) -> int | None:
+        """`get_latest_bump_stamp_for_room`."""
+
     def unread_counts(
         self, room_id: str, user_id: str
     ) -> tuple[tuple[int, int, int], dict[str, tuple[int, int, int]]]:
@@ -493,6 +505,15 @@ class SyncStoreForTest:
     ) -> list[tuple[int, str, str, str | None, str | None]]:
         """`get_current_state_deltas_for_room_by_event_position`, with each
         delta as `(stream_id, type, state_key, event_id, prev_event_id)`."""
+
+    def state_deltas_by_stream_id(
+        self,
+        room_id: str,
+        from_token: RoomStreamToken | None,
+        to_token: RoomStreamToken | None,
+    ) -> list[tuple[int, str, str, str | None, str | None]]:
+        """`get_current_state_deltas_for_room`, with each delta as
+        `(stream_id, type, state_key, event_id, prev_event_id)`."""
 
     def state_group_for_events(self, event_ids: list[str]) -> dict[str, int]:
         """`_get_state_group_for_events`."""

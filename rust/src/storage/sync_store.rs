@@ -1270,40 +1270,62 @@ impl<'a> SyncReader<'a> {
         room_id: &str,
         end_token: &RoomStreamToken,
     ) -> anyhow::Result<Option<(Arc<str>, PersistedEventPosition)>> {
+        self.last_event_of_types_before(room_id, end_token, &[])
+            .await
+    }
+
+    /// `get_last_event_pos_in_room_before_stream_ordering` with
+    /// `event_types`: as [`Self::last_event_before`], counting only events
+    /// of one of `event_types`. No types means any type, as in Python.
+    pub async fn last_event_of_types_before(
+        &self,
+        room_id: &str,
+        end_token: &RoomStreamToken,
+        event_types: &[String],
+    ) -> anyhow::Result<Option<(Arc<str>, PersistedEventPosition)>> {
         // The first subquery is the events within the token's instance map,
         // between its minimum and maximum, to be filtered against the map;
         // the second is the last event before the minimum. The first match
         // in stream order is the answer.
         let min_stream = end_token.stream;
         let max_stream = end_token.get_max_stream_pos();
-        let rows = self
-            .query_one_shot(
-                "SELECT * FROM (
-                    SELECT instance_name, stream_ordering, topological_ordering, event_id
-                    FROM events
-                    LEFT JOIN rejections USING (event_id)
-                    WHERE room_id = $1
-                        AND $2 < stream_ordering AND stream_ordering <= $3
-                        AND NOT outlier
-                        AND rejections.event_id IS NULL
-                    ORDER BY stream_ordering DESC
-                ) AS a
-                UNION ALL
-                SELECT * FROM (
-                    SELECT instance_name, stream_ordering, topological_ordering, event_id
-                    FROM events
-                    LEFT JOIN rejections USING (event_id)
-                    WHERE room_id = $1
-                        AND stream_ordering <= $2
-                        AND NOT outlier
-                        AND rejections.event_id IS NULL
-                    ORDER BY stream_ordering DESC
-                    LIMIT 1
-                ) AS b
-                ORDER BY stream_ordering DESC",
-                &[&room_id, &min_stream, &max_stream],
-            )
-            .await?;
+        let type_clause = if event_types.is_empty() {
+            ""
+        } else {
+            "AND type = ANY($4)"
+        };
+        let sql = format!(
+            "SELECT * FROM (
+                SELECT instance_name, stream_ordering, topological_ordering, event_id
+                FROM events
+                LEFT JOIN rejections USING (event_id)
+                WHERE room_id = $1
+                    {type_clause}
+                    AND $2 < stream_ordering AND stream_ordering <= $3
+                    AND NOT outlier
+                    AND rejections.event_id IS NULL
+                ORDER BY stream_ordering DESC
+            ) AS a
+            UNION ALL
+            SELECT * FROM (
+                SELECT instance_name, stream_ordering, topological_ordering, event_id
+                FROM events
+                LEFT JOIN rejections USING (event_id)
+                WHERE room_id = $1
+                    {type_clause}
+                    AND stream_ordering <= $2
+                    AND NOT outlier
+                    AND rejections.event_id IS NULL
+                ORDER BY stream_ordering DESC
+                LIMIT 1
+            ) AS b
+            ORDER BY stream_ordering DESC"
+        );
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&room_id, &min_stream, &max_stream];
+        if !event_types.is_empty() {
+            params.push(&event_types);
+        }
+        let rows = self.query_one_shot(&sql, &params).await?;
         for row in rows {
             let instance_name: Option<String> = row.try_get(0)?;
             let stream_ordering: i64 = row.try_get(1)?;
@@ -1540,6 +1562,115 @@ impl<'a> SyncReader<'a> {
             }
         }
         Ok(deltas)
+    }
+
+    /// `get_current_state_deltas_for_room`: the changes to the room's
+    /// current state after `from_token` and up to `to_token`, in `stream_id`
+    /// order, bounded on the delta rows' own `stream_id`. Sliding sync reads
+    /// these. A token that falls inside a persist batch misses that batch's
+    /// deltas, as the Python explains: [`Self::state_deltas`] is the variant
+    /// that pairs with a timeline.
+    ///
+    /// Python first asks its delta stream cache whether the room changed
+    /// after `from_token`. Rust always reads the table, which gives the same
+    /// answer.
+    pub async fn state_deltas_by_stream_id(
+        &self,
+        room_id: &str,
+        from_token: Option<&RoomStreamToken>,
+        to_token: Option<&RoomStreamToken>,
+    ) -> anyhow::Result<Vec<StateDelta>> {
+        if let (Some(from), Some(to)) = (from_token, to_token) {
+            if to.is_before_or_eq(from) {
+                return Ok(Vec::new());
+            }
+        }
+        let lower_value = from_token.map(|from| from.stream);
+        let upper_value = to_token.map(|to| to.get_max_stream_pos());
+        let lower_clause = if lower_value.is_some() {
+            "AND $2 < stream_id"
+        } else {
+            ""
+        };
+        let upper_clause = match (lower_value, upper_value) {
+            (_, None) => "",
+            (Some(_), Some(_)) => "AND stream_id <= $3",
+            (None, Some(_)) => "AND stream_id <= $2",
+        };
+        let sql = format!(
+            "SELECT instance_name, stream_id, type, state_key, event_id, prev_event_id
+            FROM current_state_delta_stream
+            WHERE room_id = $1 {lower_clause} {upper_clause}
+            ORDER BY stream_id ASC"
+        );
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&room_id];
+        if let Some(value) = &lower_value {
+            params.push(value);
+        }
+        if let Some(value) = &upper_value {
+            params.push(value);
+        }
+        let rows = self.query_one_shot(&sql, &params).await?;
+
+        let mut interner = Interner::default();
+        let mut deltas = Vec::with_capacity(rows.len());
+        for row in rows {
+            let instance_name: Option<String> = row.try_get(0)?;
+            let stream_id: i64 = row.try_get(1)?;
+            if !filter_results_by_stream(from_token, to_token, instance_name.as_deref(), stream_id)?
+            {
+                continue;
+            }
+            let event_type: String = row.try_get(2)?;
+            let state_key: String = row.try_get(3)?;
+            let event_id: Option<String> = row.try_get(4)?;
+            let prev_event_id: Option<String> = row.try_get(5)?;
+            deltas.push(StateDelta {
+                stream_id,
+                event_type: interner.intern(&event_type),
+                state_key: Arc::from(state_key),
+                event_id: event_id.map(Arc::from),
+                prev_event_id: prev_event_id.map(Arc::from),
+            });
+        }
+        Ok(deltas)
+    }
+
+    /// `get_member_counts`: the number of members of the room by
+    /// membership, from its current state. A rejected membership event has
+    /// no membership and is not counted.
+    pub async fn member_counts(&self, room_id: &str) -> anyhow::Result<HashMap<String, i64>> {
+        let rows = self
+            .query_one_shot(
+                "SELECT count(*), membership FROM current_state_events
+                WHERE type = 'm.room.member' AND room_id = $1
+                    AND membership IS NOT NULL
+                GROUP BY membership",
+                &[&room_id],
+            )
+            .await?;
+        let mut counts = HashMap::with_capacity(rows.len());
+        for row in rows {
+            let count: i64 = row.try_get(0)?;
+            let membership: String = row.try_get(1)?;
+            counts.insert(membership, count);
+        }
+        Ok(counts)
+    }
+
+    /// `get_latest_bump_stamp_for_room`: the room's `bump_stamp` in
+    /// `sliding_sync_joined_rooms`, or `None` if it has none or no row.
+    pub async fn latest_bump_stamp(&self, room_id: &str) -> anyhow::Result<Option<i64>> {
+        let rows = self
+            .query_one_shot(
+                "SELECT bump_stamp FROM sliding_sync_joined_rooms WHERE room_id = $1",
+                &[&room_id],
+            )
+            .await?;
+        match rows.first() {
+            Some(row) => Ok(row.try_get(0)?),
+            None => Ok(None),
+        }
     }
 
     /// `_get_state_group_for_events`: the state group of each event, which
@@ -2537,6 +2668,46 @@ impl PySyncStoreForTest {
         }))
     }
 
+    /// `get_last_event_pos_in_room_before_stream_ordering` with
+    /// `event_types`, as `(event_id, instance_name, stream_ordering)`.
+    fn last_event_of_types_before(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        end_token: RoomStreamToken,
+        event_types: Vec<String>,
+    ) -> PyResult<Option<(String, String, i64)>> {
+        let last = self.run(py, |reader| {
+            async move {
+                reader
+                    .last_event_of_types_before(&room_id, &end_token, &event_types)
+                    .await
+            }
+            .boxed()
+        })?;
+        Ok(last.map(|(event_id, position)| {
+            (
+                event_id.to_string(),
+                position.instance_name.to_string(),
+                position.stream,
+            )
+        }))
+    }
+
+    /// `get_member_counts`.
+    fn member_counts(&self, py: Python<'_>, room_id: String) -> PyResult<HashMap<String, i64>> {
+        self.run(py, |reader| {
+            async move { reader.member_counts(&room_id).await }.boxed()
+        })
+    }
+
+    /// `get_latest_bump_stamp_for_room`.
+    fn latest_bump_stamp(&self, py: Python<'_>, room_id: String) -> PyResult<Option<i64>> {
+        self.run(py, |reader| {
+            async move { reader.latest_bump_stamp(&room_id).await }.boxed()
+        })
+    }
+
     /// `get_unread_event_push_actions_by_room_for_user`, with each timeline's
     /// counts as `(notify_count, unread_count, highlight_count)`: the main
     /// timeline's, and the threads' by thread.
@@ -2589,6 +2760,39 @@ impl PySyncStoreForTest {
             async move {
                 reader
                     .state_deltas(&room_id, from_token.as_ref(), to_token.as_ref())
+                    .await
+            }
+            .boxed()
+        })?;
+        Ok(deltas
+            .into_iter()
+            .map(|delta| {
+                (
+                    delta.stream_id,
+                    delta.event_type.to_string(),
+                    delta.state_key.to_string(),
+                    delta.event_id.map(|id| id.to_string()),
+                    delta.prev_event_id.map(|id| id.to_string()),
+                )
+            })
+            .collect())
+    }
+
+    /// `get_current_state_deltas_for_room`, with each delta as
+    /// `(stream_id, type, state_key, event_id, prev_event_id)`.
+    #[pyo3(signature = (room_id, from_token, to_token))]
+    #[allow(clippy::type_complexity)]
+    fn state_deltas_by_stream_id(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        from_token: Option<RoomStreamToken>,
+        to_token: Option<RoomStreamToken>,
+    ) -> PyResult<Vec<(i64, String, String, Option<String>, Option<String>)>> {
+        let deltas = self.run(py, |reader| {
+            async move {
+                reader
+                    .state_deltas_by_stream_id(&room_id, from_token.as_ref(), to_token.as_ref())
                     .await
             }
             .boxed()
