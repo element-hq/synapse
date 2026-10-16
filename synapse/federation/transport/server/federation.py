@@ -28,7 +28,7 @@ from typing import (
     Sequence,
 )
 
-from synapse.api.constants import Direction, EduTypes, StateDag
+from synapse.api.constants import Direction, EduTypes, MemberKeys, StateDag
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.api.urls import FEDERATION_UNSTABLE_PREFIX, FEDERATION_V2_PREFIX
@@ -48,7 +48,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, MemberKey, UserID, is_member_key
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -291,6 +291,31 @@ class FederationUnstableGetExtremitiesServlet(BaseFederationServerServlet):
         return 200, result
 
 
+def _membership_identity(user_id: str, query: dict[bytes, list[bytes]]) -> str:
+    """The identity a `/make_join`, `/make_knock` or `/make_leave` request names.
+
+    A user ID, as ever, or an MSC4430 member key. A joining server does not know
+    the room version before it asks, and so cannot know which of the two the room
+    wants, so it sends its user ID in the path and its member key in the
+    `org.matrix.msc4430.member_key` query parameter; a server that has never
+    heard of MSC4430 ignores the parameter. A member key in the path is accepted
+    too, for a server that already knows the room version (a leave, say).
+
+    Anything that is neither is a 400 here rather than a server error further in.
+    """
+    member_key = parse_string_from_args(
+        query,
+        MemberKeys.MAKE_MEMBERSHIP_PARAM,
+        required=False,
+        encoding="utf-8",
+    )
+    if member_key is not None:
+        return MemberKey.from_string(member_key).to_string()
+    if is_member_key(user_id):
+        return MemberKey.from_string(user_id).to_string()
+    return UserID.from_string(user_id).to_string()
+
+
 class FederationMakeJoinServlet(BaseFederationServerServlet):
     PATH = "/make_join/(?P<room_id>[^/]*)/(?P<user_id>[^/]*)"
     CATEGORY = "Federation requests"
@@ -321,12 +346,10 @@ class FederationMakeJoinServlet(BaseFederationServerServlet):
         if supported_versions is None:
             supported_versions = ["1"]
 
-        # The path parameter is a user ID; anything else (such as an MSC4430 member
-        # key) is a 400 here rather than a server error further in.
-        UserID.from_string(user_id)
+        identity = _membership_identity(user_id, query)
 
         result = await self.handler.on_make_join_request(
-            origin, room_id, user_id, supported_versions=supported_versions
+            origin, room_id, identity, supported_versions=supported_versions
         )
         return 200, result
 
@@ -343,8 +366,8 @@ class FederationMakeLeaveServlet(BaseFederationServerServlet):
         room_id: str,
         user_id: str,
     ) -> tuple[int, JsonDict]:
-        UserID.from_string(user_id)
-        result = await self.handler.on_make_leave_request(origin, room_id, user_id)
+        identity = _membership_identity(user_id, query)
+        result = await self.handler.on_make_leave_request(origin, room_id, identity)
         return 200, result
 
 

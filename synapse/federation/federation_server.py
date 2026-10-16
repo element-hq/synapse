@@ -55,7 +55,10 @@ from synapse.api.errors import (
     UnsupportedRoomVersionError,
 )
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
-from synapse.crypto.event_signing import compute_event_signature
+from synapse.crypto.event_signing import (
+    compute_event_signature,
+    compute_member_key_room_signature,
+)
 from synapse.events import EventBase
 from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.snapshot import EventPersistencePair
@@ -150,6 +153,7 @@ class FederationServer(FederationBase):
         self.state = hs.get_state_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
         self._room_member_handler = hs.get_room_member_handler()
+        self._member_key_handler = hs.get_member_key_handler()
         self._e2e_keys_handler = hs.get_e2e_keys_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
 
@@ -1220,24 +1224,44 @@ class FederationServer(FederationBase):
             and event.membership == Membership.JOIN
             and EventContentFields.AUTHORISING_USER in event.content
         ):
-            # We can only authorise our own users.
-            authorising_server = get_domain_from_id(
-                event.content[EventContentFields.AUTHORISING_USER]
-            )
-            if not self._is_mine_server_name(authorising_server):
-                raise SynapseError(
-                    400,
-                    f"Cannot authorise membership event for {authorising_server}. We can only authorise requests from our own homeserver",
+            authorising_identity = event.content[EventContentFields.AUTHORISING_USER]
+            if room_version.msc4430_member_keys:
+                # MSC4430: the authorising member is named by key, and signs
+                # under that key rather than their server signing under its name.
+                signing_key = await self._member_key_handler.signing_key_for_identity(
+                    room_id, authorising_identity
                 )
+                if signing_key is None:
+                    raise SynapseError(
+                        400,
+                        f"Cannot authorise membership event for {authorising_identity}."
+                        " We can only authorise members of our own homeserver",
+                    )
+                event.signatures.update(
+                    compute_member_key_room_signature(
+                        room_version,
+                        event.get_pdu_json(),
+                        (authorising_identity, signing_key),
+                        server_name=self.hs.hostname,
+                    )
+                )
+            else:
+                # We can only authorise our own users.
+                authorising_server = get_domain_from_id(authorising_identity)
+                if not self._is_mine_server_name(authorising_server):
+                    raise SynapseError(
+                        400,
+                        f"Cannot authorise membership event for {authorising_server}. We can only authorise requests from our own homeserver",
+                    )
 
-            event.signatures.update(
-                compute_event_signature(
-                    room_version,
-                    event.get_pdu_json(),
-                    self.hs.hostname,
-                    self.hs.signing_key,
+                event.signatures.update(
+                    compute_event_signature(
+                        room_version,
+                        event.get_pdu_json(),
+                        self.hs.hostname,
+                        self.hs.signing_key,
+                    )
                 )
-            )
 
         try:
             event = await self._check_sigs_and_hash(room_version, event)

@@ -375,6 +375,13 @@ class MemberKeys:
     KEY_ID: Final = "ed25519:1"
     """The (constant) key ID of every member key signature."""
 
+    MAKE_MEMBERSHIP_PARAM: Final = "org.matrix.msc4430.member_key"
+    """The query parameter carrying the joining member's key on `/make_join`,
+    `/make_knock` and `/make_leave`. A server joining a room it has never seen
+    does not know the room version until the answer comes back, so it cannot
+    know whether to put a user ID or a member key in the path: it sends both,
+    and a server that has not heard of MSC4430 ignores the parameter."""
+
 
 class MTextFields:
     """Fields found inside m.text content blocks."""

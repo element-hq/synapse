@@ -96,9 +96,11 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
 
 
 class MakeMembershipUserIdTests(unittest.FederatingHomeserverTestCase):
-    """The `{userId}` of `/make_join|leave|knock` must be a user ID. In particular
-    an MSC4430 member key (`@<43 chars>`), which has no domain, is rejected at the
-    edge rather than reaching the domain parse and failing as a server error."""
+    """A room without MSC4430 member keys names its members by user ID, so a
+    member key (`@<43 chars>`, which has no domain) is refused — with a 400
+    rather than the server error that parsing a domain that is not there would
+    give. The same goes for one offered in the query parameter a joining server
+    uses when it does not yet know the room version."""
 
     servlets = [
         admin.register_servlets,
@@ -112,15 +114,32 @@ class MakeMembershipUserIdTests(unittest.FederatingHomeserverTestCase):
             self.register_user("u1", "pass"), tok=self.login("u1", "pass")
         )
 
+    MEMBER_KEY = "@l8Hft5qXKn1vfHrg3p4-W8gELQVo8N13JkluMfmn2sQ"
+
     @parameterized.expand(["make_join", "make_leave", "make_knock"])
-    def test_rejects_member_key(self, endpoint: str) -> None:
-        member_key = "@l8Hft5qXKn1vfHrg3p4-W8gELQVo8N13JkluMfmn2sQ"
+    def test_rejects_member_key_in_path(self, endpoint: str) -> None:
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/{endpoint}/{self.room_id}/{member_key}?ver=10",
+            f"/_matrix/federation/v1/{endpoint}/{self.room_id}/{self.MEMBER_KEY}"
+            f"?ver={self._room_version}",
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
+
+    @parameterized.expand(["make_join", "make_leave"])
+    def test_rejects_member_key_in_query(self, endpoint: str) -> None:
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/{endpoint}/{self.room_id}/@u1:other.example"
+            f"?ver={self._room_version}"
+            f"&org.matrix.msc4430.member_key={self.MEMBER_KEY}",
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
+
+    @property
+    def _room_version(self) -> str:
+        return self.hs.config.server.default_room_version.identifier
 
 
 class GetMissingEventsRoomCheckTests(unittest.FederatingHomeserverTestCase):

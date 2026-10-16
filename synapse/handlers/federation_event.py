@@ -61,7 +61,11 @@ from synapse.event_auth import (
     validate_event_for_room_version,
 )
 from synapse.events import EventBase
-from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
+from synapse.events.py_protocol import (
+    MSC4242Event,
+    supports_msc4242_state_dag,
+    supports_msc4430_member_keys,
+)
 from synapse.events.snapshot import (
     EventContext,
     EventPersistencePair,
@@ -89,6 +93,7 @@ from synapse.types import (
     StrCollection,
     UserID,
     get_domain_from_id,
+    is_member_key,
 )
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer, concurrently_execute
@@ -160,6 +165,8 @@ class FederationEventHandler:
         self._state_handler = hs.get_state_handler()
         self._event_creation_handler = hs.get_event_creation_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
+        self._member_links = hs.get_member_link_handler()
+        self._member_key_handler = hs.get_member_key_handler()
         self._message_handler = hs.get_message_handler()
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
         self._state_resolution_handler = hs.get_state_resolution_handler()
@@ -418,7 +425,18 @@ class FederationEventHandler:
             event.signatures,
         )
 
-        if get_domain_from_id(event.sender) != origin:
+        if supports_msc4430_member_keys(event):
+            # MSC4430: the sender is a member key, which names no server. What it
+            # asserts about the server it belongs to is in the event's linkage
+            # information, signed by the key itself; `origin` is simply who
+            # relayed it, and is kept below as the server to send the result to.
+            if not is_member_key(event.sender):
+                raise SynapseError(
+                    400,
+                    "This room identifies its members by member key",
+                    Codes.BAD_JSON,
+                )
+        elif get_domain_from_id(event.sender) != origin:
             logger.info(
                 "Got send_membership request for user %r from different origin %s",
                 event.sender,
@@ -2844,6 +2862,23 @@ class FederationEventHandler:
             context: The `EventContext` which we are about to persist the event with.
             origin: The host the event originates from.
         """
+        if supports_msc4430_member_keys(event):
+            # MSC4430: a member key whose link we cannot verify is a member whose
+            # server has not (yet) vouched for them. Their state events still
+            # count — membership and power levels are decided by keys, not by who
+            # the keys belong to — but their messages are not shown to clients.
+            if not await self._member_links.is_sender_verified(event):
+                soft_failed_event_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
+                logger.info(
+                    "Soft-failing %s: %s has no verified link",
+                    event.event_id,
+                    event.sender,
+                )
+                event.internal_metadata.soft_failed = True
+                return
+
         if await self._store.is_partial_state_room(event.room_id):
             # We might not know the sender's membership in the current state, so don't
             # soft fail anything. Even if we do have a membership for the sender in the
@@ -3252,6 +3287,12 @@ class FederationEventHandler:
                 event_and_contexts, backfilled=backfilled
             )
 
+            # MSC4430: a membership event may have changed what a member key
+            # stands for, which is a function of the room's current state and so
+            # can only be read once the event is persisted.
+            if not backfilled:
+                await self._member_links.update_links_for_events(events)
+
             # After persistence, we never notify clients (wake up `/sync` streams) about
             # backfilled events but it's important to let all the workers know about any
             # new event (backfilled or not) because TODO
@@ -3290,17 +3331,21 @@ class FederationEventHandler:
 
         extra_users = []
         if event.type == EventTypes.Member:
-            target_user_id = event.state_key
+            # MSC4430: the membership target is a member key, which is a user of
+            # ours only if we hold it; the notification itself is keyed by user.
+            target_user_id = await self._member_key_handler.user_id_for_identity(
+                event.room_id, event.state_key
+            )
 
             # We notify for memberships if its an invite for one of our
             # users
             if event.internal_metadata.is_outlier():
                 if event.membership != Membership.INVITE:
-                    if not self._is_mine_id(target_user_id):
+                    if target_user_id is None or not self._is_mine_id(target_user_id):
                         return
 
-            target_user = UserID.from_string(target_user_id)
-            extra_users.append(target_user)
+            if target_user_id is not None:
+                extra_users.append(UserID.from_string(target_user_id))
         elif event.internal_metadata.is_outlier():
             return
 

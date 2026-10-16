@@ -785,11 +785,16 @@ async def filter_events_for_server(
     partial_state_invisible_event_ids: set[str] = set()
     if filter_out_remote_partial_state_events:
         for e in events:
-            sender_domain = get_domain_from_id(e.sender)
-            if (
-                sender_domain != local_server_name
-                and await storage.main.is_partial_state_room(e.room_id)
-            ):
+            # MSC4430: a member key names no server; whether the event is ours
+            # is whether we hold the key that sent it.
+            if supports_msc4430_member_keys(e):
+                is_local = (
+                    await storage.main.get_local_member_key_by_key(e.room_id, e.sender)
+                    is not None
+                )
+            else:
+                is_local = get_domain_from_id(e.sender) == local_server_name
+            if not is_local and await storage.main.is_partial_state_room(e.room_id):
                 partial_state_invisible_event_ids.add(e.event_id)
 
     # Let's check to see if all the events have a history visibility
@@ -911,11 +916,22 @@ async def _event_to_memberships(
         for key, event_id in key_to_eid.items()
     }
 
+    # MSC4430: a member key names no server, so which of them belong to the
+    # server being served has to be looked up. Only *verified* links count:
+    # this decides what another server may be told about a room, and anybody
+    # can claim anybody's domain.
+    member_keys_for_server: frozenset[str] = frozenset()
+    member_key_room_ids = {e.room_id for e in events if supports_msc4430_member_keys(e)}
+    for room_id in member_key_room_ids:
+        member_keys_for_server |= await storage.main.get_member_keys_for_domain_in_room(
+            room_id, server_name, verified_only=True
+        )
+
     def include(state_key: str) -> bool:
         # we avoid using get_domain_from_id here for efficiency.
         idx = state_key.find(":")
         if idx == -1:
-            return False
+            return state_key in member_keys_for_server
         return state_key[idx + 1 :] == server_name
 
     event_map = await storage.main.get_events(

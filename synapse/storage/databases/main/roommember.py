@@ -1235,6 +1235,31 @@ class RoomMemberWorkerStore(EventsWorkerStore, MemberKeysWorkerStore):
     async def _check_host_room_membership(
         self, room_id: str, host: str, membership: str
     ) -> bool:
+        if await self._is_member_key_room(room_id):
+            # MSC4430: the members are keys, so a host is in the room when one of
+            # the keys with that membership is one we hold (for ourselves) or has
+            # a *verified* link claiming that host. Only verified links count
+            # here: this answer decides what a server is allowed to be told about
+            # the room, and anybody can claim anybody's domain.
+            member_keys = await self.get_member_keys_for_domain_in_room(
+                room_id, host, verified_only=True
+            )
+            if not member_keys:
+                return False
+            memberships = await self.db_pool.simple_select_many_batch(
+                table="current_state_events",
+                column="state_key",
+                iterable=member_keys,
+                keyvalues={
+                    "type": EventTypes.Member,
+                    "room_id": room_id,
+                    "membership": membership,
+                },
+                retcols=("state_key",),
+                desc="is_host_joined_member_keys",
+            )
+            return bool(memberships)
+
         if "%" in host or "_" in host:
             raise Exception("Invalid host name")
 

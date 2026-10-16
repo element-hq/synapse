@@ -512,6 +512,7 @@ class EventCreationHandler:
         self.validator = EventValidator()
         self.event_builder_factory = hs.get_event_builder_factory()
         self._member_key_handler = hs.get_member_key_handler()
+        self._member_links = hs.get_member_link_handler()
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.auth_blocking = hs.get_auth_blocking()
@@ -2281,6 +2282,11 @@ class EventCreationHandler:
         ) = await self._storage_controllers.persistence.persist_events(
             events_and_context,
         )
+
+        # MSC4430: a membership event one of our users sent may have changed
+        # what a member key stands for; the link follows the room's current
+        # state, so it can only be read now the event is persisted.
+        await self._member_links.update_links_for_events(persisted_events)
 
         events_and_pos = []
         for event in persisted_events:

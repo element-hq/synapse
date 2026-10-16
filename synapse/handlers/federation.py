@@ -48,6 +48,7 @@ from synapse.api.constants import (
     MAX_DEPTH,
     EventContentFields,
     EventTypes,
+    MemberKeys,
     Membership,
     StateDag,
 )
@@ -85,7 +86,12 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.module_api import NOT_SPAM
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.invite_rule import InviteRule
-from synapse.types import JsonDict, StrCollection, get_domain_from_id
+from synapse.types import (
+    JsonDict,
+    StrCollection,
+    get_domain_from_id,
+    is_member_key,
+)
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer, concurrently_execute
 from synapse.util.duration import Duration
@@ -167,6 +173,56 @@ class InvalidStrippedStateBehaviour(Enum):
     """
 
 
+def _check_make_membership_identity(
+    room_version: RoomVersion,
+    origin: str,
+    identity: str,
+    membership: str,
+    *,
+    msc4430_enabled: bool,
+) -> None:
+    """Check that the identity a `/make_join` or `/make_leave` names is one the
+    requesting server may build a template for.
+
+    For a user ID that is the usual check: only a user's own server may ask.
+    An MSC4430 member key names no server, so there is nothing to compare it
+    against — and nothing to protect: the template that comes back is unsigned
+    and worthless to anybody who does not hold the key. The claim about which
+    server the member belongs to is made in the completed event, by the key, and
+    is checked there.
+
+    Raises:
+        SynapseError: 403 if the user is not the origin's, 400 if a member key
+            room was asked for a template for a user ID (the asking server must
+            name the member's key) or vice versa.
+    """
+    if room_version.msc4430_member_keys and msc4430_enabled:
+        if not is_member_key(identity):
+            raise SynapseError(
+                400,
+                "This room identifies its members by member key; name one in "
+                f"the path or in {MemberKeys.MAKE_MEMBERSHIP_PARAM}",
+                Codes.INVALID_PARAM,
+            )
+        return
+
+    if is_member_key(identity):
+        raise SynapseError(
+            400,
+            "This room identifies its members by user ID",
+            Codes.INVALID_PARAM,
+        )
+
+    if get_domain_from_id(identity) != origin:
+        logger.info(
+            "Got /make_%s request for user %r from different origin %s, ignoring",
+            membership,
+            identity,
+            origin,
+        )
+        raise SynapseError(403, "User not from origin", Codes.FORBIDDEN)
+
+
 class FederationHandler:
     """Handles general incoming federation requests
 
@@ -198,6 +254,9 @@ class FederationHandler:
         self._device_handler = hs.get_device_handler()
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
         self._notifier = hs.get_notifier()
+        self._member_key_handler = hs.get_member_key_handler()
+        self._member_links = hs.get_member_link_handler()
+        self._msc4430_enabled = hs.config.experimental.msc4430_enabled
         self._worker_locks = hs.get_worker_locks_handler()
 
         self._room_backfill = Linearizer(name="room_backfill", clock=self.clock)
@@ -665,13 +724,26 @@ class FederationHandler:
 
         logger.debug("Joining %s to %s", joinee, room_id)
 
+        params: dict[str, str | Iterable[str]] = {"ver": KNOWN_ROOM_VERSIONS}
+        member_key: str | None = None
+        if self._msc4430_enabled:
+            # MSC4430: we do not know the room version until `/make_join`
+            # answers, so we cannot know whether the room names its members by
+            # key. Offer one; a resident of a room without member keys ignores
+            # it, and the key is only stored if the room turns out to want it.
+            member_key = await self._member_key_handler.member_key_for_remote_join(
+                room_id, joinee
+            )
+            params[MemberKeys.MAKE_MEMBERSHIP_PARAM] = member_key
+
         origin, event, room_version_obj = await self._make_and_verify_event(
             target_hosts,
             room_id,
             joinee,
             "join",
             content,
-            params={"ver": KNOWN_ROOM_VERSIONS},
+            params=params,
+            member_key=member_key,
         )
 
         # This shouldn't happen, because the RoomMemberHandler has a
@@ -840,6 +912,14 @@ class FederationHandler:
                 "events",
                 max_stream_id,
             )
+
+            if room_version_obj.msc4430_member_keys:
+                # MSC4430: we have just been handed the room's whole state, so
+                # learn who every member key in it belongs to. Doing it now means
+                # the room's existing members are routable and their messages are
+                # shown from the first sync rather than from their next
+                # membership event.
+                await self._member_links.learn_links_for_room(room_id)
 
             # Check whether this room is the result of an upgrade of a room we already know
             # about. If so, migrate over user information
@@ -1074,17 +1154,13 @@ class FederationHandler:
             room_id: Room to create join event in
             user_id: The user to create the join for
         """
-        if get_domain_from_id(user_id) != origin:
-            logger.info(
-                "Got /make_join request for user %r from different origin %s, ignoring",
-                user_id,
-                origin,
-            )
-            raise SynapseError(403, "User not from origin", Codes.FORBIDDEN)
-
         # checking the room version will check that we've actually heard of the room
         # (and return a 404 otherwise)
         room_version = await self.store.get_room_version(room_id)
+
+        _check_make_membership_identity(
+            room_version, origin, user_id, "join", msc4430_enabled=self._msc4430_enabled
+        )
 
         if await self.store.is_partial_state_room(room_id):
             # If our server is still only partially joined, we can't give a complete
@@ -1681,22 +1757,36 @@ class FederationHandler:
         membership: str,
         content: JsonDict,
         params: dict[str, str | Iterable[str]] | None = None,
+        member_key: str | None = None,
     ) -> tuple[str, EventBase, RoomVersion]:
         (
             origin,
             event,
             room_version,
         ) = await self.federation_client.make_membership_event(
-            target_hosts, room_id, user_id, membership, content, params=params
+            target_hosts,
+            room_id,
+            user_id,
+            membership,
+            content,
+            params=params,
+            member_key=member_key,
         )
 
         logger.debug("Got response to make_%s: %s", membership, event)
 
+        # In an MSC4430 room the member is their key, not their user ID.
+        expected_identity = (
+            member_key
+            if member_key is not None and room_version.msc4430_member_keys
+            else user_id
+        )
+
         # We should assert some things.
         # FIXME: Do this in a nicer way
         assert event.type == EventTypes.Member
-        assert event.sender == user_id
-        assert event.state_key == user_id
+        assert event.sender == expected_identity
+        assert event.state_key == expected_identity
         assert event.room_id == room_id
         assert event.content.get("membership") == membership
         return origin, event, room_version
@@ -1713,15 +1803,15 @@ class FederationHandler:
             room_id: Room to create leave event in
             user_id: The user to create the leave for
         """
-        if get_domain_from_id(user_id) != origin:
-            logger.info(
-                "Got /make_leave request for user %r from different origin %s, ignoring",
-                user_id,
-                origin,
-            )
-            raise SynapseError(403, "User not from origin", Codes.FORBIDDEN)
-
         room_version_obj = await self.store.get_room_version(room_id)
+
+        _check_make_membership_identity(
+            room_version_obj,
+            origin,
+            user_id,
+            "leave",
+            msc4430_enabled=self._msc4430_enabled,
+        )
         builder = self.event_builder_factory.for_room_version(
             room_version_obj,
             {

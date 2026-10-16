@@ -59,6 +59,7 @@ from synapse.api.room_versions import (
     RoomVersion,
     RoomVersions,
 )
+from synapse.crypto.event_signing import EventSigner
 from synapse.events import EventBase, builder, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.federation.federation_base import (
@@ -147,6 +148,7 @@ class FederationClient(FederationBase):
 
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
+        self._member_key_handler = hs.get_member_key_handler()
 
         # Cache mapping `event_id` to a tuple of the event itself and the `pull_origin`
         # (which server we pulled the event from)
@@ -990,6 +992,7 @@ class FederationClient(FederationBase):
         membership: str,
         content: dict,
         params: Mapping[str, str | Iterable[str]] | None,
+        member_key: str | None = None,
     ) -> tuple[str, EventBase, RoomVersion]:
         """
         Creates an m.room.member event, with context, without participating in the room.
@@ -1059,6 +1062,22 @@ class FederationClient(FederationBase):
 
             pdu_dict["content"].update(content)
 
+            signers: Sequence[EventSigner] | None = None
+            if room_version.msc4430_member_keys:
+                # MSC4430: the template names our member's key and is signed by
+                # it, not by us. Store the key first: a join that succeeds must
+                # never be one we cannot sign for afterwards.
+                if member_key is None:
+                    raise InvalidResponseError(
+                        "Room %s identifies its members by member key" % (room_id,)
+                    )
+                await self._member_key_handler.persist_pending_join_key(
+                    room_id, member_key
+                )
+                signers = await self._member_key_handler.get_signers_for_event_dict(
+                    room_version, pdu_dict
+                )
+
             # The protoevent received over the JSON wire may not have all
             # the required fields. Lets just gloss over that because
             # there's some we never care about
@@ -1068,6 +1087,7 @@ class FederationClient(FederationBase):
                 self.signing_key,
                 room_version=room_version,
                 event_dict=pdu_dict,
+                signers=signers,
             )
 
             return destination, ev, room_version

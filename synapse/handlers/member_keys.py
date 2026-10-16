@@ -140,18 +140,28 @@ class MemberKeyHandler:
         self._server_signing_key = hs.signing_key
         self._msc4430_enabled = hs.config.experimental.msc4430_enabled
 
+        # The key generated for a remote join in progress, so that a retry of the
+        # same join offers the same key rather than a fresh one each time.
+        self._pending_join_keys: ExpiringCache[tuple[str, str], str] = ExpiringCache(
+            cache_name="msc4430_pending_join_keys",
+            server_name=hs.hostname,
+            hs=hs,
+            clock=hs.get_clock(),
+            expiry_ms=PENDING_MEMBER_KEY_LIFETIME_MS,
+        )
+
         # Member keys generated for a create event, whose room does not exist yet
         # (the room ID is derived from the create event, which the key signs).
         # Keyed by member key; the value is the user and the signing key. Moved to
         # storage by `persist_pending_member_keys` once the create event is built.
-        self._pending_member_keys: ExpiringCache[str, tuple[str, SigningKey]] = (
-            ExpiringCache(
-                cache_name="msc4430_pending_member_keys",
-                server_name=hs.hostname,
-                hs=hs,
-                clock=hs.get_clock(),
-                expiry_ms=PENDING_MEMBER_KEY_LIFETIME_MS,
-            )
+        self._pending_member_keys: ExpiringCache[
+            str, tuple[str, SigningKey, str | None]
+        ] = ExpiringCache(
+            cache_name="msc4430_pending_member_keys",
+            server_name=hs.hostname,
+            hs=hs,
+            clock=hs.get_clock(),
+            expiry_ms=PENDING_MEMBER_KEY_LIFETIME_MS,
         )
 
     # ------------------------------------------------------------------
@@ -173,11 +183,14 @@ class MemberKeyHandler:
         if not is_member_key(identity):
             return identity if self._is_mine_id(identity) else None
 
-        if room_id is None:
-            pending = self._pending_member_keys.get(identity)
-            return pending[0] if pending is not None else None
-        local_key = await self._store.get_local_member_key_by_key(room_id, identity)
-        return local_key.user_id if local_key is not None else None
+        if room_id is not None:
+            local_key = await self._store.get_local_member_key_by_key(room_id, identity)
+            if local_key is not None:
+                return local_key.user_id
+        pending = self._pending_member_keys.get(identity)
+        if pending is not None and pending[2] == room_id:
+            return pending[0]
+        return None
 
     async def is_local_identity(self, room_id: str, identity: str) -> bool:
         """Whether the given room member identity belongs to this server."""
@@ -295,9 +308,47 @@ class MemberKeyHandler:
         before the room ID does. The key is held in memory (for a bounded time)
         until `persist_pending_member_keys` is called with the create event."""
         assert self._is_mine_id(user_id), f"{user_id} is not a local user"
+        return self._generate_pending_member_key(user_id, None)
+
+    async def member_key_for_remote_join(self, room_id: str, user_id: str) -> str:
+        """The key one of our users will join a remote room with: the one we
+        already hold for that room, or a fresh one held in memory until the join
+        goes ahead.
+
+        A server joining a room it has never seen does not know whether the room
+        identifies its members by key until `/make_join` answers, so it has to
+        offer one either way. Keeping it in memory until the room turns out to
+        want it means a join to a room without member keys leaves nothing behind.
+        """
+        assert self._is_mine_id(user_id), f"{user_id} is not a local user"
+        existing = await self._store.get_local_member_key(room_id, user_id)
+        if existing is not None:
+            return existing.member_key
+        pending = self._pending_join_keys.get((room_id, user_id))
+        if pending is not None:
+            return pending
+        member_key = self._generate_pending_member_key(user_id, room_id)
+        self._pending_join_keys[(room_id, user_id)] = member_key
+        return member_key
+
+    async def persist_pending_join_key(self, room_id: str, member_key: str) -> None:
+        """Store a key generated for a remote join, now that the room is known to
+        want one. Called before the join event is sent, so that a join which
+        succeeds is never one we cannot sign for afterwards."""
+        pending = self._pending_member_keys.pop(member_key, None)
+        if pending is None:
+            return
+        user_id, signing_key, pending_room_id = pending
+        assert pending_room_id == room_id, (
+            f"{member_key} is pending for {pending_room_id}, not {room_id}"
+        )
+        self._pending_join_keys.pop((room_id, user_id), None)
+        await self._store.create_local_member_key(room_id, user_id, signing_key)
+
+    def _generate_pending_member_key(self, user_id: str, room_id: str | None) -> str:
         signing_key = generate_signing_key(MemberKeys.KEY_VERSION)
         member_key = MemberKey.from_signing_key(signing_key).to_string()
-        self._pending_member_keys[member_key] = (user_id, signing_key)
+        self._pending_member_keys[member_key] = (user_id, signing_key, room_id)
         return member_key
 
     async def persist_pending_member_keys(self, create_event: EventBase) -> None:
@@ -317,7 +368,7 @@ class MemberKeyHandler:
             pending = self._pending_member_keys.pop(member_key, None)
             if pending is None:
                 continue
-            user_id, signing_key = pending
+            user_id, signing_key, _ = pending
             stored = await self._store.create_local_member_key(
                 create_event.room_id, user_id, signing_key
             )
@@ -331,17 +382,34 @@ class MemberKeyHandler:
                     % (user_id, stored.member_key, create_event.room_id, member_key),
                 )
 
+    async def signing_key_for_identity(
+        self, room_id: str, identity: str
+    ) -> SigningKey | None:
+        """The private half of a member key we hold in a room, for signing on
+        behalf of that member: the authorising member of a restricted join.
+        `None` for anything that is not a key of ours there."""
+        if not is_member_key(identity):
+            return None
+        return await self._signing_key_for(room_id, identity)
+
     async def _signing_key_for(
         self, room_id: str | None, member_key: str
     ) -> SigningKey | None:
-        """The private half of a member key we hold: stored for the room, or,
-        for a create event (no room yet), pending for one. `None` otherwise: a
-        pending key is not ours in any existing room."""
-        if room_id is None:
-            pending = self._pending_member_keys.get(member_key)
-            return pending[1] if pending is not None else None
-        local_key = await self._store.get_local_member_key_by_key(room_id, member_key)
-        return local_key.signing_key if local_key is not None else None
+        """The private half of a member key we hold: stored for the room, or
+        pending for it — a create event, whose room does not exist yet, or a
+        remote join, whose room we are not in yet. `None` otherwise: a key
+        pending for one room is not ours in another."""
+        local_key = (
+            await self._store.get_local_member_key_by_key(room_id, member_key)
+            if room_id is not None
+            else None
+        )
+        if local_key is not None:
+            return local_key.signing_key
+        pending = self._pending_member_keys.get(member_key)
+        if pending is not None and pending[2] == room_id:
+            return pending[1]
+        return None
 
     def discard_pending_member_keys(self, event_dict: JsonDict) -> None:
         """Forget the pending keys a create event dict names, because building

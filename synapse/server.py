@@ -99,6 +99,7 @@ from synapse.handlers.identity import IdentityHandler
 from synapse.handlers.initial_sync import InitialSyncHandler
 from synapse.handlers.member_info import MemberInfoHandler
 from synapse.handlers.member_keys import MemberKeyHandler
+from synapse.handlers.member_links import MemberLinkHandler
 from synapse.handlers.message import EventCreationHandler, MessageHandler
 from synapse.handlers.pagination import PaginationHandler
 from synapse.handlers.password_policy import PasswordPolicyHandler
@@ -898,6 +899,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_member_key_handler(self) -> MemberKeyHandler:
         return MemberKeyHandler(self)
+
+    @cache_in_self
+    def get_member_link_handler(self) -> MemberLinkHandler:
+        return MemberLinkHandler(self)
 
     @cache_in_self
     def get_room_list_handler(self) -> RoomListHandler:

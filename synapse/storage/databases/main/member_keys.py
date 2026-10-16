@@ -721,6 +721,44 @@ class MemberKeysWorkerStore(CacheInvalidationWorkerStore):
             for room_id, member_key, localpart, row_verified, event_id in rows
         ]
 
+    async def delete_member_link(self, room_id: str, member_key: str) -> bool:
+        """Forget what we knew about a member key in a room: the member has left,
+        so their current membership event asserts nothing and the key maps to
+        nobody. Returns whether there was a link to forget."""
+
+        def delete_member_link_txn(txn: LoggingTransaction) -> bool:
+            deleted = self.db_pool.simple_delete_txn(
+                txn,
+                table="msc4430_member_links",
+                keyvalues={"room_id": room_id, "member_key": member_key},
+            )
+            if deleted:
+                self._invalidate_cache_and_stream(
+                    txn, self.get_member_link, (room_id, member_key)
+                )
+            return bool(deleted)
+
+        return await self.db_pool.runInteraction(
+            "delete_member_link", delete_member_link_txn
+        )
+
+    async def get_unverified_member_links(
+        self, limit: int
+    ) -> list[tuple[str, str, str | None]]:
+        """Links whose claimed domain has not (yet) been seen to vouch for them,
+        as (room ID, member key, event ID) for re-checking. `event_id` is `None`
+        for a link learned from something other than an event.
+        """
+        return cast(
+            list[tuple[str, str, str | None]],
+            await self.db_pool.execute(
+                "get_unverified_member_links",
+                "SELECT room_id, member_key, event_id FROM msc4430_member_links"
+                " WHERE NOT verified LIMIT ?",
+                limit,
+            ),
+        )
+
     async def mark_links_unverified(
         self, domain: str, key_id: str
     ) -> list[tuple[str, str]]:

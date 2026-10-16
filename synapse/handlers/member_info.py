@@ -66,6 +66,16 @@ class MemberInfoHandler:
         )
         self._notifier.on_new_event(StreamKeyType.MEMBER_INFO, token, rooms=room_ids)
 
+    async def on_links_changed(self, room_id: str, stable_ids: Collection[str]) -> None:
+        """Record that the user behind one or more member keys changed, and wake
+        the room's syncing clients. Used when a link is learned, re-pointed,
+        verified or forgotten at a moment the room has no event to carry the
+        change — a verification that only succeeded on a later attempt, say."""
+        if not self.enabled or not stable_ids:
+            return
+        token = await self._store.add_member_info_changes({room_id: tuple(stable_ids)})
+        self._notifier.on_new_event(StreamKeyType.MEMBER_INFO, token, rooms=[room_id])
+
     async def get_changes_in_rooms(
         self,
         room_ids: Collection[str],
