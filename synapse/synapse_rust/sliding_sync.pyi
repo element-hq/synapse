@@ -91,3 +91,17 @@ class SlidingSyncRequest:
     def have_finished_bg_jobs(self) -> bool: ...
     @property
     def rooms_to_exclude(self) -> set[str]: ...
+
+# Test exports of the pure logic, for `tests/handlers/test_sliding_sync_rust_pure.py`.
+# A `RoomSyncConfig` crosses as `(timeline_limit, {type: state keys})`.
+
+def room_sync_config_from_room_config_for_test(
+    timeline_limit: int, required_state: list[tuple[str, str]]
+) -> tuple[int, dict[str, list[str]]]: ...
+def combine_room_sync_config_for_test(
+    a: tuple[int, dict[str, list[str]]], b: tuple[int, dict[str, list[str]]]
+) -> tuple[int, dict[str, list[str]]]: ...
+def must_await_full_state_for_test(
+    config: tuple[int, dict[str, list[str]]], server_name: str
+) -> bool:
+    """Raises `ValueError` where Python raises `IndexError`."""
