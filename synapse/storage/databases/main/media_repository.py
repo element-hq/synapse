@@ -38,6 +38,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_in_list_sql_clause,
 )
 from synapse.types import JsonDict, UserID
 
@@ -631,6 +632,52 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "download_ts": download_ts,
             },
             desc="store_url_cache",
+        )
+
+    async def get_url_cache_media_by_sha256(
+        self, sha256: str, created_after_ts: int, exclude_media_ids: Collection[str]
+    ) -> str | None:
+        """Find URL preview media with the given hash, to reuse instead of a copy.
+
+        Args:
+            sha256: The hex-encoded SHA-256 hash of the media.
+            created_after_ts: Only consider media created at or after this time.
+            exclude_media_ids: Media IDs to ignore, e.g. the new copy itself.
+
+        Returns:
+            The media ID of the most recent match, or None if there is none.
+        """
+
+        def _get_url_cache_media_by_sha256_txn(
+            txn: LoggingTransaction,
+        ) -> str | None:
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "media_id", exclude_media_ids, negative=True
+            )
+            sql = f"""
+                SELECT media_id FROM local_media_repository
+                WHERE sha256 = ? AND url_cache IS NOT NULL AND created_ts >= ?
+                    AND quarantined_by IS NULL AND {clause}
+                ORDER BY created_ts DESC LIMIT 1
+            """
+            txn.execute(sql, [sha256, created_after_ts, *args])
+            row = txn.fetchone()
+            return row[0] if row else None
+
+        return await self.db_pool.runInteraction(
+            "get_url_cache_media_by_sha256", _get_url_cache_media_by_sha256_txn
+        )
+
+    async def update_url_cache_og(self, url: str, old_og: str, new_og: str) -> None:
+        """Replace the OG data of a cached URL preview, if it is still `old_og`.
+
+        Used to add the MSC4448 site logo to a preview once a client asks for it.
+        """
+        await self.db_pool.simple_update(
+            "local_media_repository_url_cache",
+            keyvalues={"url": url, "og": old_og},
+            updatevalues={"og": new_og},
+            desc="update_url_cache_og",
         )
 
     async def get_local_media_thumbnails(self, media_id: str) -> list[ThumbnailInfo]:
