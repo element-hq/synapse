@@ -17,13 +17,23 @@ These scripts sit on top of `demo/start.sh`, which already makes three
 homeservers that federate over localhost with self-signed certificates.
 
 ```sh
+source "$(poetry env info --path)/bin/activate"
+
+demo/clean.sh
+
 demo/start.sh --no-rate-limit     # once, to generate the configs
 demo/msc4430/01-enable.sh         # add msc4430_enabled, restart
 demo/msc4430/02-setup-room.sh     # three accounts, a member key room, two servers in it
+
+SIGN INTO 3x ELEMENT-WEB FROM https://github.com/element-hq/element-web/pull/35501
+USING CREDENTIALS FROM ABOVE COMMAND
+
 demo/msc4430/inspect.sh           # the "before" picture
 demo/msc4430/03-move-account.sh   # move Alice's member key to her second server
 demo/msc4430/04-rejoin.sh         # join again from there, with the same key
 demo/msc4430/inspect.sh           # the "after" picture
+
+demo/stop.sh
 ```
 
 Pass `--yes` to `03-move-account.sh` to skip its confirmation prompt.
