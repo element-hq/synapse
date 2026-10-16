@@ -1,0 +1,1 @@
+Port the pure logic of simplified sliding sync to Rust, held equal to the Python by differential tests.
