@@ -676,6 +676,244 @@ class ChainCoverReadsTestCase(PersistReaderTestBase):
             )
 
 
+# Event ID to `(chain, sequence_number, links)`, with each chain named as
+# `ChainCoverTestCase._normalise` names it.
+_Chains = dict[str, tuple[str, int, list[tuple[str, int]]]]
+
+
+class ChainCoverTestCase(PersistReaderTestBase):
+    """`rust/src/persist/chain_cover.rs` against
+    `calculate_chain_cover_index_for_events`, over the same database and the
+    same new events. Each side allocates its own chain IDs, and Python
+    hands them to new chains in no fixed order, so a new chain is compared
+    by the lowest event ID on it."""
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.room_version = self.get_success(self.store.get_room_version(self.room_id))
+        state = self.get_success(
+            hs.get_storage_controllers().state.get_current_state_ids(self.room_id)
+        )
+        self.create = state[(EventTypes.Create, "")]
+        self.power_levels = state[(EventTypes.PowerLevels, "")]
+        self.join_rules = state[(EventTypes.JoinRules, "")]
+        self.alice_member = state[(EventTypes.Member, self.alice)]
+        self.bob_member = state[(EventTypes.Member, self.bob)]
+        self._counter = 0
+
+    def _new(
+        self, event_type: str, state_key: str | None, auth_events: list[str]
+    ) -> tuple[EventBase, EventContext]:
+        """A new event for the chunk, not persisted."""
+        self._counter += 1
+        if self.room_version.msc4291_room_ids_as_hashes:
+            # The create event is implied by the room ID.
+            auth_events = [a for a in auth_events if a != self.create]
+        fields: dict[str, Any] = {
+            "room_id": self.room_id,
+            "sender": self.alice,
+            "type": event_type,
+            "content": {"n": self._counter},
+            "prev_events": [],
+            "auth_events": auth_events,
+            # The event ID hashes the redacted event, which keeps the depth
+            # and not the content.
+            "depth": 10 + self._counter,
+        }
+        if state_key is not None:
+            fields["state_key"] = state_key
+        event = make_test_event(fields, self.room_version)
+        return event, EventContext.for_outlier(self.hs.get_storage_controllers())
+
+    def _position(self, event_id: str) -> tuple[str, int]:
+        ((chain_id, sequence_number),) = self._sql(
+            "SELECT chain_id, sequence_number FROM event_auth_chains WHERE event_id = ?",
+            event_id,
+        )
+        return str(chain_id), sequence_number
+
+    def _to_calculate(self) -> list[tuple[Any, ...]]:
+        return sorted(
+            self._sql(
+                "SELECT event_id, room_id, type, state_key FROM event_auth_chain_to_calculate"
+            )
+        )
+
+    def _restore_to_calculate(self, rows: list[tuple[Any, ...]]) -> None:
+        def restore(txn: LoggingTransaction) -> None:
+            txn.execute("DELETE FROM event_auth_chain_to_calculate")
+            for row in rows:
+                txn.execute(
+                    """INSERT INTO event_auth_chain_to_calculate
+                    (event_id, room_id, type, state_key) VALUES (?, ?, ?, ?)""",
+                    row,
+                )
+
+        self.get_success(self.store.db_pool.runInteraction("test", restore))
+
+    def _put_off(self, event_id: str) -> None:
+        """Drop the event's chain, as for an out of band membership."""
+        self._write("DELETE FROM event_auth_chains WHERE event_id = ?", event_id)
+
+    def _normalise(
+        self, chains: dict[str, tuple[int, int, list[tuple[int, int]]]]
+    ) -> _Chains:
+        existing = {
+            chain_id
+            for (chain_id,) in self._sql(
+                "SELECT DISTINCT chain_id FROM event_auth_chains"
+            )
+        }
+        names: dict[int, str] = {}
+        for event_id, (chain_id, _, _) in sorted(chains.items()):
+            if chain_id not in existing:
+                names.setdefault(chain_id, f"new {event_id}")
+
+        def name(chain_id: int) -> str:
+            return names.get(chain_id, str(chain_id))
+
+        return {
+            event_id: (
+                name(chain_id),
+                sequence_number,
+                sorted((name(target), target_seq) for target, target_seq in links),
+            )
+            for event_id, (chain_id, sequence_number, links) in chains.items()
+        }
+
+    def _calculate(self, events: list[tuple[EventBase, EventContext]]) -> _Chains:
+        """Run Rust and then Python on the same database, and check that they
+        agree on the chains and on what they put off."""
+        before = self._to_calculate()
+        actual = self.rust.calculate_chain_cover_index_for_events(
+            self.room_id, [event for event, _ in events]
+        )
+        put_off = self._to_calculate()
+        # Python would otherwise see what Rust put off as left from an
+        # earlier chunk.
+        self._restore_to_calculate(before)
+
+        expected = self.get_success(
+            self.persist_events_store.calculate_chain_cover_index_for_events(
+                self.room_id, [event for event, _ in events]
+            )
+        )
+        self.assertEqual(self._to_calculate(), put_off)
+        result = self._normalise(actual)
+        self.assertEqual(
+            result,
+            self._normalise(
+                {
+                    event_id: (links.chain_id, links.sequence_number, links.links)
+                    for event_id, links in expected.items()
+                }
+            ),
+        )
+        return result
+
+    def test_new_state_events(self) -> None:
+        m1, _ = m1_pair = self._new(
+            EventTypes.Member,
+            self.bob,
+            [self.create, self.power_levels, self.join_rules, self.bob_member],
+        )
+        m2, _ = m2_pair = self._new(
+            EventTypes.Member, self.bob, [self.create, self.power_levels, m1.event_id]
+        )
+        # A fork: m2 and m3 both follow m1.
+        m3, _ = m3_pair = self._new(
+            EventTypes.Member, self.bob, [self.create, self.power_levels, m1.event_id]
+        )
+        name, _ = name_pair = self._new(
+            EventTypes.Name, "", [self.create, self.power_levels, self.alice_member]
+        )
+        message = self._new(
+            EventTypes.Message,
+            None,
+            [self.create, self.power_levels, self.alice_member],
+        )
+        known = (
+            self.get_success(self.store.get_event(self.alice_member)),
+            EventContext.for_outlier(self.hs.get_storage_controllers()),
+        )
+
+        chains = self._calculate(
+            [m3_pair, m2_pair, name_pair, message, m1_pair, name_pair, known]
+        )
+        self.assertEqual(
+            set(chains), {m1.event_id, m2.event_id, m3.event_id, name.event_id}
+        )
+        # m1 extends Bob's join's chain, and one of m2 and m3 extends m1's.
+        bob_chain, bob_seq = self._position(self.bob_member)
+        self.assertEqual(chains[m1.event_id][:2], (bob_chain, bob_seq + 1))
+        self.assertEqual(
+            sorted(chains[e.event_id][0] == bob_chain for e in (m2, m3)), [False, True]
+        )
+        # The power levels reach Alice's join and the create event, so the
+        # name links only to them.
+        self.assertEqual(chains[name.event_id][2], [self._position(self.power_levels)])
+
+    def test_missing_auth_event(self) -> None:
+        carol = "@carol:test"
+        oob, _ = oob_pair = self._new(
+            EventTypes.Member, carol, [self.create, self.power_levels, "$unknown"]
+        )
+        after, _ = after_pair = self._new(
+            EventTypes.Member, carol, [self.create, self.power_levels, oob.event_id]
+        )
+        name, _ = name_pair = self._new(
+            EventTypes.Name, "", [self.create, self.power_levels, self.alice_member]
+        )
+
+        chains = self._calculate([oob_pair, after_pair, name_pair])
+        self.assertEqual(set(chains), {name.event_id})
+        self.assertEqual(
+            {row[0] for row in self._to_calculate()}, {oob.event_id, after.event_id}
+        )
+
+    def test_auth_event_without_a_chain(self) -> None:
+        self._put_off(self.bob_member)
+        member, _ = pair = self._new(
+            EventTypes.Member,
+            self.bob,
+            [self.create, self.power_levels, self.bob_member],
+        )
+
+        chains = self._calculate([pair])
+        self.assertEqual(set(chains), {self.bob_member, member.event_id})
+        self.assertEqual(chains[member.event_id][0], chains[self.bob_member][0])
+
+    def test_put_off_event_is_calculated(self) -> None:
+        self._put_off(self.bob_member)
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "event_auth_chain_to_calculate",
+                {
+                    "event_id": self.bob_member,
+                    "room_id": self.room_id,
+                    "type": EventTypes.Member,
+                    "state_key": self.bob,
+                },
+            )
+        )
+        name, _ = pair = self._new(
+            EventTypes.Name, "", [self.create, self.power_levels, self.alice_member]
+        )
+
+        chains = self._calculate([pair])
+        self.assertEqual(set(chains), {self.bob_member, name.event_id})
+
+    def test_legacy_room(self) -> None:
+        self._write(
+            "UPDATE rooms SET has_auth_chain_index = FALSE WHERE room_id = ?",
+            self.room_id,
+        )
+        pair = self._new(
+            EventTypes.Name, "", [self.create, self.power_levels, self.alice_member]
+        )
+        self.assertEqual(self._calculate([pair]), {})
+
+
 class ExtremitiesTestCase(PersistReaderTestBase):
     """The extremity calculations in `rust/src/persist/extremities.rs`
     against the controller's Python methods, over the same database and

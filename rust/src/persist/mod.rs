@@ -32,6 +32,7 @@
 
 use pyo3::prelude::*;
 
+pub mod chain_cover;
 pub mod context;
 pub mod effects;
 pub mod extremities;

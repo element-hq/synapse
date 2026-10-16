@@ -46,6 +46,7 @@ use tokio::runtime::Handle;
 use tokio_postgres::Row;
 
 use super::{
+    chain_cover,
     context::PersistContext,
     extremities::{self, NewEvent},
     metrics::PersistCounts,
@@ -1048,6 +1049,38 @@ impl PyPersistReaderForTest {
         self.run(py, |reader| {
             async move { max_sequence_numbers(&reader.borrow().await?, &chain_ids).await }.boxed()
         })
+    }
+
+    /// The chain cover step, in a write transaction of its own. Event ID to
+    /// `(chain_id, sequence_number, links)`.
+    #[allow(clippy::type_complexity)]
+    fn calculate_chain_cover_index_for_events(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        events: Vec<Py<Event>>,
+    ) -> PyResult<HashMap<String, (i64, i64, Vec<(i64, i64)>)>> {
+        let events: Vec<chain_cover::ChainCoverEvent> = events
+            .iter()
+            .filter_map(|event| chain_cover::ChainCoverEvent::new(event.bind(py).get()))
+            .collect();
+        let result = py
+            .detach(|| {
+                self.handle
+                    .block_on(chain_cover::calculate_chain_cover_index_for_events(
+                        &self.pool, &room_id, &events,
+                    ))
+            })
+            .map_err(persist_error_to_py)?;
+        Ok(result
+            .into_iter()
+            .map(|(event_id, links)| {
+                (
+                    event_id.to_string(),
+                    (links.chain_id, links.sequence_number, links.links),
+                )
+            })
+            .collect())
     }
 
     // The extremity calculations over the reader, each returning its result

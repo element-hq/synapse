@@ -143,6 +143,12 @@ class PersistReaderForTest:
         """`(origin_chain_id, origin_sequence_number, target_chain_id,
         target_sequence_number)` rows."""
     def max_sequence_numbers(self, chain_ids: list[int]) -> dict[int, int]: ...
+    # The chain cover step (`rust/src/persist/chain_cover.rs`), in a write
+    # transaction of its own. Event ID to `(chain_id, sequence_number,
+    # links)`.
+    def calculate_chain_cover_index_for_events(
+        self, room_id: str, events: list[EventBase]
+    ) -> dict[str, tuple[int, int, list[tuple[int, int]]]]: ...
     # The extremity calculations (`rust/src/persist/extremities.rs`), each
     # returning its result and what it counted, in the shape
     # `Persister.take_metrics` returns.
