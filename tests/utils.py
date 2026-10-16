@@ -64,6 +64,8 @@ RUST_SYNC_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_SYNC")
 # Python one, fails the test, so that the suite is a differential test of the
 # two. Set to 0 to only count and log them, as production does.
 RUST_SYNC_STRICT_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_SYNC_STRICT", "1") != "0"
+# As above, for `experimental_features.rust_event_persistence`.
+RUST_PERSIST_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_PERSIST")
 # At `rust_federation_sending: transactions`, check every transaction body Rust
 # builds against the one Python would build, and fail the test if they differ.
 RUST_FED_STRICT_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_FED_STRICT", "1") != "0"

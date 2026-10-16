@@ -6,7 +6,7 @@ set -e
 
 echo "Complement Synapse launcher"
 echo "  Args: $*"
-echo "  Env: SYNAPSE_COMPLEMENT_DATABASE=$SYNAPSE_COMPLEMENT_DATABASE SYNAPSE_COMPLEMENT_USE_WORKERS=$SYNAPSE_COMPLEMENT_USE_WORKERS SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR=$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR SYNAPSE_USE_RUST_DRIVER=$SYNAPSE_USE_RUST_DRIVER SYNAPSE_RUST_STATE_RES=$SYNAPSE_RUST_STATE_RES SYNAPSE_RUST_SYNC=$SYNAPSE_RUST_SYNC"
+echo "  Env: SYNAPSE_COMPLEMENT_DATABASE=$SYNAPSE_COMPLEMENT_DATABASE SYNAPSE_COMPLEMENT_USE_WORKERS=$SYNAPSE_COMPLEMENT_USE_WORKERS SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR=$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR SYNAPSE_USE_RUST_DRIVER=$SYNAPSE_USE_RUST_DRIVER SYNAPSE_RUST_STATE_RES=$SYNAPSE_RUST_STATE_RES SYNAPSE_RUST_SYNC=$SYNAPSE_RUST_SYNC SYNAPSE_RUST_PERSIST=$SYNAPSE_RUST_PERSIST"
 
 function log {
     d=$(printf '%(%Y-%m-%d %H:%M:%S)T,%.3s\n' ${EPOCHREALTIME/./ })
@@ -139,6 +139,11 @@ fi
 # two event caches a test homeserver can afford.
 if [[ -n "$SYNAPSE_RUST_SYNC" ]]; then
   sed -i "s/^experimental_features:$/experimental_features:\n  rust_sync: \"$SYNAPSE_RUST_SYNC\"/" /conf/shared.yaml.j2
+fi
+
+# Persist events in Rust (`experimental_features.rust_event_persistence`).
+if [[ -n "$SYNAPSE_RUST_PERSIST" ]]; then
+  sed -i "s/^experimental_features:$/experimental_features:\n  rust_event_persistence: \"$SYNAPSE_RUST_PERSIST\"/" /conf/shared.yaml.j2
 fi
 
 # Add a directory for tests to add config overrides if they want

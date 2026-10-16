@@ -292,6 +292,15 @@ impl Unsigned {
 }
 
 impl Unsigned {
+    /// The fields stored in the database, as [`Unsigned::for_persistence`]
+    /// returns them, built without the GIL.
+    pub fn persistence_value(&self) -> PyResult<serde_json::Value> {
+        serde_json::to_value(&self.py_read()?.persisted_fields)
+            .map_err(|e| PyRuntimeError::new_err(format!("serializing unsigned: {e}")))
+    }
+}
+
+impl Unsigned {
     /// Get the `age_ts` field, which is used to generate the `age` field when
     /// serializing an event.
     pub fn age_ts(&self) -> PyResult<Option<Number>> {

@@ -30,6 +30,7 @@ pub mod libpq;
 pub mod logging;
 pub mod matrix_const;
 pub mod msc4388_rendezvous;
+pub mod persist;
 pub mod push;
 pub mod reactor;
 pub mod rendezvous;
@@ -110,6 +111,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     storage::python::register_module(py, m)?;
     storage::stream_ids::register_module(py, m)?;
     msc4388_rendezvous::register_module(py, m)?;
+    persist::register_module(py, m)?;
     segmenter::register_module(py, m)?;
     state::register_module(py, m)?;
     sync::register_module(py, m)?;

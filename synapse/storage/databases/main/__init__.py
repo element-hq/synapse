@@ -40,7 +40,9 @@ from synapse.storage.databases.main.thread_subscriptions import (
 )
 from synapse.storage.engines import BaseDatabaseEngine
 from synapse.storage.types import Cursor
+from synapse.synapse_rust.persist import PersistEffects
 from synapse.types import get_domain_from_id
+from synapse.util.caches.stream_change_cache import StreamChangeCache
 
 from .account_data import AccountDataStore
 from .appservice import ApplicationServiceStore, ApplicationServiceTransactionStore
@@ -179,6 +181,73 @@ class DataStore(
         self.database_engine = database.engine
 
         super().__init__(database, db_conn, hs)
+
+    def _apply_rust_persist_effects(self, effects: PersistEffects) -> None:
+        """Apply what a Rust persist transaction asks for once it has
+        committed: the cache updates the Python transaction queues with
+        `txn.call_after`. See `synapse_rust.persist.PersistEffects`.
+
+        Invalidations come before prefills, so a prefill is not lost to an
+        invalidation of the same key. The stream IDs are finished last, as
+        Python's `get_next_mult` does once the transaction's callbacks have
+        run, so the current token never passes an event before the stream
+        change caches know about it.
+        """
+        for (
+            stream_ordering,
+            event_id,
+            room_id,
+            etype,
+            state_key,
+            redacts,
+            relates_to,
+            backfilled,
+        ) in effects.events:
+            self._invalidate_caches_for_event(
+                stream_ordering,
+                event_id,
+                room_id,
+                etype,
+                state_key,
+                redacts,
+                relates_to,
+                backfilled=backfilled,
+            )
+
+        for event_id in effects.event_cache_invalidations:
+            self._invalidate_local_get_event_cache(event_id)
+
+        for room_id, members_changed in effects.state_caches:
+            self._invalidate_state_caches(room_id, members_changed)
+
+        for cache_name, keys in effects.cache_invalidations:
+            self._attempt_to_invalidate_cache(cache_name, tuple(keys))
+
+        stream_change_caches: dict[str, StreamChangeCache] = {
+            "events": self._events_stream_cache,
+            "current_state_deltas": self._curr_state_delta_stream_cache,
+            "membership": self._membership_stream_cache,
+        }
+        for cache, entity, stream_id in effects.stream_changes:
+            stream_change_caches[cache].entity_has_changed(entity, stream_id)
+
+        for event_id, state_group in effects.state_group_prefills:
+            self._get_state_group_for_event.prefill((event_id,), state_group)
+
+        if effects.latest_event_ids is not None:
+            room_id, extremities = effects.latest_event_ids
+            self.get_latest_event_ids_in_room.prefill(
+                (room_id,), frozenset(extremities)
+            )
+
+        if effects.stream_ids:
+            id_gen = (
+                self._backfill_id_gen if effects.backfilled else self._stream_id_gen
+            )
+            id_gen._mark_ids_as_finished(effects.stream_ids)
+            self.hs.get_replication_notifier().notify_replication()
+        if effects.new_replication_data:
+            self.hs.get_notifier().on_new_replication_data()
 
     async def get_users_paginate(
         self,

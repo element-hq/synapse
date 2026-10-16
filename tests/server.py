@@ -86,6 +86,10 @@ from twisted.web.server import Request, Site
 
 from synapse.api.constants import MAX_REQUEST_SIZE
 from synapse.config.database import DatabaseConnectionConfig
+from synapse.config.experimental import (
+    RUST_EVENT_PERSISTENCE_LEVELS,
+    RustEventPersistenceLevel,
+)
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
@@ -106,6 +110,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
+from synapse.synapse_rust.persist import Persister as RustPersister
 from synapse.synapse_rust.runtime import RustRuntime, set_virtual_time_msec
 from synapse.synapse_rust.state import (
     StateResolutionHandler as RustStateResolutionHandler,
@@ -124,6 +129,7 @@ from tests.utils import (
     POSTGRES_PASSWORD,
     POSTGRES_PORT,
     POSTGRES_USER,
+    RUST_PERSIST_FOR_TESTS,
     RUST_STATE_RES_FOR_TESTS,
     RUST_SYNC_FOR_TESTS,
     RUST_SYNC_STRICT_FOR_TESTS,
@@ -1328,6 +1334,16 @@ def setup_test_homeserver(
             Literal["off", "shadow", "on"], RUST_SYNC_FOR_TESTS
         )
 
+    if RUST_PERSIST_FOR_TESTS:
+        if RUST_PERSIST_FOR_TESTS not in RUST_EVENT_PERSISTENCE_LEVELS:
+            raise ValueError(
+                "SYNAPSE_TEST_RUST_PERSIST must be one of "
+                + ", ".join(RUST_EVENT_PERSISTENCE_LEVELS)
+            )
+        config.experimental.rust_event_persistence = cast(
+            RustEventPersistenceLevel, RUST_PERSIST_FOR_TESTS
+        )
+
     if USE_POSTGRES_FOR_TESTS:
         test_db = "synapse_test_%s" % uuid.uuid4().hex
 
@@ -1546,6 +1562,14 @@ def setup_test_homeserver(
                 Any, _BlockingRustCalls(main_store._rust_event_loader)
             )
 
+        # Likewise for the Rust persister, whose persists would otherwise
+        # finish after the test has moved on.
+        persistence = hs.get_storage_controllers().persistence
+        if persistence is not None and persistence._rust_persister is not None:
+            persistence._rust_persister = cast(
+                Any, _BlockingRustCalls(persistence._rust_persister)
+            )
+
     return hs
 
 
@@ -1597,7 +1621,7 @@ class _BlockingRustStateResolution:
 
 
 class _BlockingRustCalls:
-    """Wraps the Rust `SyncHandler` or `RustStore` so that each of its entry
+    """Wraps the Rust `SyncHandler`, `RustStore` or `Persister` so that each of its entry
     points blocks, for the reason `_BlockingRustStateResolution` gives.
 
     Every entry point `name` that returns a Deferred has a `name_blocking`
@@ -1605,7 +1629,7 @@ class _BlockingRustCalls:
     that twin's result in an already-fired Deferred.
     """
 
-    def __init__(self, handler: "RustSyncHandler | RustStore") -> None:
+    def __init__(self, handler: "RustSyncHandler | RustStore | RustPersister") -> None:
         self._handler = handler
 
     def __getattr__(self, name: str) -> Any:

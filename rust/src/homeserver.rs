@@ -109,6 +109,33 @@ impl HomeServer {
             .unbind())
     }
 
+    /// This instance's name (`hs.get_instance_name()`).
+    pub fn instance_name(&self, py: Python<'_>) -> PyResult<String> {
+        self.0
+            .bind(py)
+            .call_method0(intern!(py, "get_instance_name"))?
+            .extract()
+    }
+
+    /// The instances that write events (`hs.config.worker.writers.events`).
+    pub fn event_writers(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        self.0
+            .bind(py)
+            .getattr(intern!(py, "config"))?
+            .getattr(intern!(py, "worker"))?
+            .getattr(intern!(py, "writers"))?
+            .getattr(intern!(py, "events"))?
+            .extract()
+    }
+
+    /// The main datastore (`hs.get_datastores().main`).
+    pub fn main_datastore<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        self.0
+            .bind(py)
+            .call_method0(intern!(py, "get_datastores"))?
+            .getattr(intern!(py, "main"))
+    }
+
     /// The main database pool (`hs.get_datastores().main.db_pool`).
     pub fn main_database_pool<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         self.0

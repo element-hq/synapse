@@ -625,35 +625,38 @@ class _PreCollectHooks(Collector):
     """
 
     def __init__(self) -> None:
-        self._instance_id_to_hook_map: dict[str, Callable[[], None]] = {}
+        self._instance_id_to_hooks_map: dict[str, list[Callable[[], None]]] = {}
 
     def describe(self) -> Iterable[Metric]:
         return []
 
     def collect(self) -> Iterable[Metric]:
-        for homeserver_instance_id, hook in list(self._instance_id_to_hook_map.items()):
-            try:
-                hook()
-            except Exception:
-                logger.exception(
-                    "Exception running a pre-collect hook for homeserver_instance_id=%s",
-                    homeserver_instance_id,
-                )
+        for homeserver_instance_id, hooks in list(
+            self._instance_id_to_hooks_map.items()
+        ):
+            for hook in list(hooks):
+                try:
+                    hook()
+                except Exception:
+                    logger.exception(
+                        "Exception running a pre-collect hook for homeserver_instance_id=%s",
+                        homeserver_instance_id,
+                    )
         return []
 
     def register_hook(
         self, *, homeserver_instance_id: str, hook: Callable[[], None]
     ) -> None:
-        """Run `hook` at each collection, until the homeserver shuts down."""
-        assert homeserver_instance_id not in self._instance_id_to_hook_map, (
-            f"A pre-collect hook is already registered for homeserver_instance_id={homeserver_instance_id}"
+        """Run `hook` at each collection, until the homeserver shuts down. A
+        homeserver can register several."""
+        self._instance_id_to_hooks_map.setdefault(homeserver_instance_id, []).append(
+            hook
         )
-        self._instance_id_to_hook_map[homeserver_instance_id] = hook
 
     def unregister_hooks_for_homeserver_instance_id(
         self, homeserver_instance_id: str
     ) -> None:
-        self._instance_id_to_hook_map.pop(homeserver_instance_id, None)
+        self._instance_id_to_hooks_map.pop(homeserver_instance_id, None)
 
 
 # It adds to metrics with the server name label, and has none of its own.

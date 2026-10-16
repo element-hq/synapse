@@ -52,7 +52,7 @@ use std::{cmp::min, sync::Arc};
 
 use anyhow::Error;
 use pyo3::{
-    exceptions::{PyAttributeError, PyKeyError, PyValueError},
+    exceptions::{PyAttributeError, PyKeyError, PyRuntimeError, PyValueError},
     pyclass, pyfunction, pymethods,
     types::{PyAnyMethods, PyDict, PyDictMethods, PyList, PyMapping, PyModule, PyModuleMethods},
     wrap_pyfunction, Bound, IntoPyObject, PyAny, PyResult, Python,
@@ -754,6 +754,26 @@ impl Event {
     /// nothing to strip.
     pub fn to_pdu_value(&self) -> serde_json::Result<Value> {
         serde_json::to_value(&self.parsed_event)
+    }
+
+    /// The `event_json.json` column: the event as
+    /// `get_dict_for_persistence()` returns it, with `unsigned` holding only
+    /// the fields kept in the database, built without the GIL.
+    ///
+    /// The persist transaction drops `redacted` and `redacted_because` from
+    /// that dict. Neither is ever in the Rust event, so there is nothing to
+    /// drop.
+    pub fn to_persistence_value(&self) -> PyResult<Value> {
+        let mut value = serde_json::to_value(&self.parsed_event)
+            .map_err(|e| PyRuntimeError::new_err(format!("serializing event: {e}")))?;
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("event did not serialize to an object"))?;
+        object.insert(
+            UNSIGNED.to_owned(),
+            self.parsed_event.unsigned.persistence_value()?,
+        );
+        Ok(value)
     }
 
     /// Returns the `redacts` field of this event, if it has one.

@@ -69,6 +69,30 @@ enum EventInternalMetadataData {
 }
 
 impl EventInternalMetadataData {
+    /// The field's name and JSON value, as stored in the database.
+    fn to_json_pair(&self) -> (&'static str, serde_json::Value) {
+        use serde_json::Value;
+        use EventInternalMetadataData as Data;
+
+        match self {
+            Data::OutOfBandMembership(o) => ("out_of_band_membership", Value::Bool(*o)),
+            Data::SendOnBehalfOf(o) => ("send_on_behalf_of", Value::from(&**o)),
+            Data::RecheckRedaction(o) => ("recheck_redaction", Value::Bool(*o)),
+            Data::SoftFailed(o) => ("soft_failed", Value::Bool(*o)),
+            Data::ProactivelySend(o) => ("proactively_send", Value::Bool(*o)),
+            Data::PolicyServerSpammy(o) => ("policy_server_spammy", Value::Bool(*o)),
+            Data::SpamCheckerSpammy(o) => ("spam_checker_spammy", Value::Bool(*o)),
+            Data::Redacted(o) => ("redacted", Value::Bool(*o)),
+            Data::TxnId(o) => ("txn_id", Value::from(&**o)),
+            Data::DelayId(o) => ("delay_id", Value::from(&**o)),
+            Data::TokenId(o) => ("token_id", Value::from(*o)),
+            Data::DeviceId(o) => ("device_id", Value::from(&**o)),
+            Data::CalculatedAuthEventIDs(o) => {
+                ("calculated_auth_event_ids", Value::from(o.clone()))
+            }
+        }
+    }
+
     /// Convert the field to its name and python object.
     fn to_python_pair<'a>(&self, py: Python<'a>) -> (&'a Bound<'a, PyString>, Bound<'a, PyAny>) {
         match self {
@@ -580,6 +604,21 @@ impl EventInternalMetadata {
         inner.received_ts = received_ts;
         inner.instance_name = instance_name;
         Ok(())
+    }
+
+    /// The `internal_metadata` column, as `get_dict()` returns it, built
+    /// without the GIL.
+    pub fn to_persistence_value(&self) -> PyResult<serde_json::Value> {
+        Ok(serde_json::Value::Object(
+            self.read_inner()?
+                .data
+                .iter()
+                .map(|entry| {
+                    let (key, value) = entry.to_json_pair();
+                    (key.to_owned(), value)
+                })
+                .collect(),
+        ))
     }
 
     /// The event's stream ordering, if known.

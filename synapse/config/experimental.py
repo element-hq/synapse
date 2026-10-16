@@ -61,6 +61,18 @@ RUST_FEDERATION_SENDING_LEVELS: tuple[RustFederationSendingLevel, ...] = (
     "queues",
 )
 
+RustEventPersistenceLevel = Literal["off", "shadow", "prepare", "transaction", "full"]
+
+# The levels of `rust_event_persistence`, in order. Each implies the ones
+# before it.
+RUST_EVENT_PERSISTENCE_LEVELS: tuple[RustEventPersistenceLevel, ...] = (
+    "off",
+    "shadow",
+    "prepare",
+    "transaction",
+    "full",
+)
+
 
 class ExperimentalConfig(Config):
     """Config section for enabling experimental features
@@ -391,6 +403,36 @@ class ExperimentalConfig(Config):
         self.rust_federation_sending: RustFederationSendingLevel = (
             rust_federation_sending
         )
+
+        # How much of event persistence runs in Rust. Needs the native Rust
+        # Postgres driver, and only applies to the instances that write
+        # events. One ordered level, each implying the ones before it:
+        #  - "off": all Python.
+        #  - "shadow": Rust also computes what is worked out before the write
+        #    transaction (forward extremities, the current state delta, the
+        #    chain cover index), and differences from Python are logged.
+        #  - "prepare": Rust's results for that are used.
+        #  - "transaction": Rust also runs the write transaction.
+        #  - "full": Rust persists each queued batch.
+        # The levels are being built up in that order. So far every level
+        # other than "off" only builds the Rust persister.
+        rust_event_persistence = experimental.get("rust_event_persistence", "off")
+        # YAML reads an unquoted `off` as a boolean.
+        if rust_event_persistence is False:
+            rust_event_persistence = "off"
+        if rust_event_persistence not in RUST_EVENT_PERSISTENCE_LEVELS:
+            raise ConfigError(
+                "experimental_features.rust_event_persistence must be one of "
+                + ", ".join(repr(level) for level in RUST_EVENT_PERSISTENCE_LEVELS),
+                ("experimental", "rust_event_persistence"),
+            )
+        self.rust_event_persistence: RustEventPersistenceLevel = rust_event_persistence
+
+    def rust_event_persistence_at_least(self, level: RustEventPersistenceLevel) -> bool:
+        """Whether `rust_event_persistence` is `level` or a later one."""
+        return RUST_EVENT_PERSISTENCE_LEVELS.index(
+            self.rust_event_persistence
+        ) >= RUST_EVENT_PERSISTENCE_LEVELS.index(level)
 
     def rust_federation_sending_at_least(
         self, level: RustFederationSendingLevel

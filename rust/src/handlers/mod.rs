@@ -23,6 +23,7 @@ use pyo3::{
 };
 
 use crate::homeserver::HomeServer;
+use crate::persist::python::Persister;
 use crate::state::StateResolutionHandler;
 use crate::sync::SyncHandler;
 
@@ -35,6 +36,9 @@ struct RustHandlers {
     state_resolution: Option<Py<StateResolutionHandler>>,
     /// Only when the main database uses the native Rust driver.
     sync: Option<Py<SyncHandler>>,
+    /// Only when `rust_event_persistence` is not `off`, the main database
+    /// uses the native Rust driver and this instance writes events.
+    persister: Option<Py<Persister>>,
 }
 
 #[pymethods]
@@ -74,9 +78,22 @@ impl RustHandlers {
         let rust_connection_pool_class = py
             .import("synapse.storage.rust_pool")?
             .getattr("RustConnectionPool")?;
-        let (state_resolution, sync) =
+        let (state_resolution, sync, persister) =
             if connection_pool.is_instance(&rust_connection_pool_class)? {
                 let connection_pool = connection_pool.unbind();
+                let persister = if config.experimental.rust_event_persistence != "off" {
+                    Persister::for_homeserver(
+                        py,
+                        &homeserver,
+                        connection_pool.clone_ref(py),
+                        runtime.clone(),
+                        Arc::clone(&store),
+                    )?
+                    .map(|persister| Py::new(py, persister))
+                    .transpose()?
+                } else {
+                    None
+                };
                 (
                     Some(Py::new(
                         py,
@@ -90,15 +107,17 @@ impl RustHandlers {
                         py,
                         SyncHandler::new(connection_pool, runtime.clone(), store, &config),
                     )?),
+                    persister,
                 )
             } else {
-                (None, None)
+                (None, None, None)
             };
 
         Ok(RustHandlers {
             versions,
             state_resolution,
             sync,
+            persister,
         })
     }
 
@@ -119,6 +138,14 @@ impl RustHandlers {
     #[getter]
     fn sync(&self, py: Python<'_>) -> Option<Py<SyncHandler>> {
         self.sync.as_ref().map(|h| h.clone_ref(py))
+    }
+
+    /// The Rust event persister, or `None` if `rust_event_persistence` is
+    /// `off`, the main database does not use the native Rust driver, or this
+    /// instance does not write events.
+    #[getter]
+    fn persister(&self, py: Python<'_>) -> Option<Py<Persister>> {
+        self.persister.as_ref().map(|h| h.clone_ref(py))
     }
 }
 

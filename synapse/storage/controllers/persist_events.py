@@ -43,6 +43,7 @@ from prometheus_client import Counter, Histogram
 
 from twisted.internet import defer
 
+import synapse.metrics
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
@@ -64,11 +65,16 @@ from synapse.logging.opentracing import (
     start_active_span_follows_from,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics import SERVER_NAME_LABEL, pre_collect_hooks
 from synapse.storage.controllers.state import StateStorageController
 from synapse.storage.databases import Databases
-from synapse.storage.databases.main.events import DeltaState
+from synapse.storage.databases.main.events import (
+    DeltaState,
+    event_counter,
+    persist_event_counter,
+)
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
+from synapse.synapse_rust.persist import Persister
 from synapse.types import (
     PersistedEventPosition,
     RoomStreamToken,
@@ -339,6 +345,49 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
             pass
 
 
+def flush_rust_persist_metrics(persister: Persister, server_name: str) -> None:
+    """Add what the Rust persister counted since the last call to the metrics
+    the Python path updates directly."""
+    counts = persister.take_metrics()
+    labels = {SERVER_NAME_LABEL: server_name}
+
+    if counts["persisted_events"]:
+        persist_event_counter.labels(**labels).inc(counts["persisted_events"])
+    for (event_type, origin_type), count in counts["persisted_events_by_type"].items():
+        event_counter.labels(type=event_type, origin_type=origin_type, **labels).inc(
+            count
+        )
+
+    for counter, key in (
+        (state_delta_counter, "state_delta"),
+        (state_delta_single_event_counter, "state_delta_single_event"),
+        (state_delta_reuse_delta_counter, "state_delta_reuse_delta"),
+        (state_resolutions_during_persistence, "state_resolutions"),
+        (potential_times_prune_extremities, "potential_times_prune_extremities"),
+        (times_pruned_extremities, "times_pruned_extremities"),
+    ):
+        if counts[key]:
+            counter.labels(**labels).inc(counts[key])
+
+    for histogram, key in (
+        (forward_extremities_counter, "forward_extremities"),
+        (stale_forward_extremities_counter, "stale_forward_extremities"),
+        (
+            msc4242_state_dag_forward_extremities_counter,
+            "state_dag_forward_extremities",
+        ),
+    ):
+        child = histogram.labels(**labels)
+        for value, count in counts[key].items():
+            for _ in range(count):
+                child.observe(value)
+
+    if counts["persisted_position"] is not None:
+        synapse.metrics.event_persisted_position.labels(**labels).set(
+            counts["persisted_position"]
+        )
+
+
 class EventsPersistenceStorageController:
     """High level interface for handling persisting newly received events.
 
@@ -372,6 +421,29 @@ class EventsPersistenceStorageController:
         self._state_resolution_handler = hs.get_state_resolution_handler()
         self._state_controller = state_controller
         self.hs = hs
+
+        # The Rust persister, at `rust_event_persistence` levels other than
+        # "off". It needs the native Rust Postgres driver.
+        self._rust_persister: Persister | None = None
+        rust_level = hs.config.experimental.rust_event_persistence
+        if rust_level != "off":
+            self._rust_persister = hs.get_rust_handlers().persister
+            if self._rust_persister is None:
+                logger.warning(
+                    "rust_event_persistence is %r but the main database does not "
+                    "use the native Rust driver: persisting events in Python",
+                    rust_level,
+                )
+            else:
+                pre_collect_hooks.register_hook(
+                    homeserver_instance_id=hs.get_instance_id(),
+                    hook=self._flush_rust_persist_metrics,
+                )
+
+    def _flush_rust_persist_metrics(self) -> None:
+        """Add what the Rust persister counted to the metrics."""
+        if self._rust_persister is not None:
+            flush_rust_persist_metrics(self._rust_persister, self.server_name)
 
     async def _process_event_persist_queue_task(
         self,

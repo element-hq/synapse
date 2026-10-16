@@ -376,6 +376,17 @@ main() {
     export PASS_SYNAPSE_RUST_SYNC="$RUST_SYNC"
   fi
 
+  if [[ -n "$RUST_PERSIST" ]]; then
+    # Set `experimental_features.rust_event_persistence` (off, shadow,
+    # prepare, transaction or full). Without the native driver on Postgres,
+    # Synapse falls back to Python and the run would not test Rust.
+    if [[ "$RUST_PERSIST" != "off" && ( -z "$RUST_DRIVER" || ( -z "$POSTGRES" && -z "$WORKERS" ) ) ]]; then
+      echo "RUST_PERSIST=$RUST_PERSIST needs RUST_DRIVER=1 and POSTGRES=1 or WORKERS=1" >&2
+      exit 1
+    fi
+    export PASS_SYNAPSE_RUST_PERSIST="$RUST_PERSIST"
+  fi
+
   if [[ -n "$UNIX_SOCKETS" ]]; then
     # Enable full on Unix socket mode for Synapse, Redis and Postgresql
     export PASS_SYNAPSE_USE_UNIX_SOCKET=1
