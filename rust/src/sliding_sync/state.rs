@@ -32,6 +32,7 @@ use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     intern,
     prelude::*,
+    sync::PyOnceLock,
     types::{PyDict, PyTuple},
 };
 
@@ -270,21 +271,41 @@ impl ConnectionState {
     }
 }
 
+/// Python's `HaveSentRoom` class, with one `LIVE` and one `NEVER` value. The
+/// class is frozen, so those two serve every room. The extensions ask for
+/// each room in their lists, so building them per call showed in requests
+/// with hundreds of rooms.
+struct PyHaveSentRoom {
+    class: Py<PyAny>,
+    live: Py<PyAny>,
+    never: Py<PyAny>,
+}
+
+static PY_HAVE_SENT_ROOM: PyOnceLock<PyHaveSentRoom> = PyOnceLock::new();
+
 /// A Python `HaveSentRoom`.
 fn have_sent_room_to_py<'py, T>(
     py: Python<'py>,
     status: &HaveSentRoom<T>,
     token_to_py: impl FnOnce(&T) -> PyResult<Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let class = py
-        .import(intern!(py, "synapse.types.handlers.sliding_sync"))?
-        .getattr(intern!(py, "HaveSentRoom"))?;
+    let cached = PY_HAVE_SENT_ROOM.get_or_try_init(py, || -> PyResult<_> {
+        let class = py
+            .import(intern!(py, "synapse.types.handlers.sliding_sync"))?
+            .getattr(intern!(py, "HaveSentRoom"))?;
+        Ok(PyHaveSentRoom {
+            live: class.call_method0(intern!(py, "live"))?.unbind(),
+            never: class.call_method0(intern!(py, "never"))?.unbind(),
+            class: class.unbind(),
+        })
+    })?;
     match status {
-        HaveSentRoom::Never => class.call_method0(intern!(py, "never")),
-        HaveSentRoom::Live => class.call_method0(intern!(py, "live")),
-        HaveSentRoom::Previously(token) => {
-            class.call_method1(intern!(py, "previously"), (token_to_py(token)?,))
-        }
+        HaveSentRoom::Never => Ok(cached.never.bind(py).clone()),
+        HaveSentRoom::Live => Ok(cached.live.bind(py).clone()),
+        HaveSentRoom::Previously(token) => cached
+            .class
+            .bind(py)
+            .call_method1(intern!(py, "previously"), (token_to_py(token)?,)),
     }
 }
 

@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use indexmap::IndexMap;
-use pyo3::{exceptions::PyKeyError, prelude::*};
+use pyo3::{exceptions::PyKeyError, prelude::*, types::PyDict};
 use regex::Regex;
 
 use crate::push::utils::{glob_to_regex, GlobMatchType};
@@ -389,6 +389,11 @@ async fn rewind_changes(
 /// The positions the events stream change cache has for `room_ids`, and
 /// the earliest it knows: `get_max_pos_of_last_change` and
 /// `get_earliest_known_position`, read under the GIL.
+///
+/// `get_max_pos_of_last_change` is a lookup in the cache's `_entity_to_key`
+/// dict, so this looks each room up in that dict directly. A method call per
+/// joined room was most of the GIL time of an incremental request on a
+/// large account.
 fn stream_cache_positions(
     cache: &Py<PyAny>,
     room_ids: &[Arc<str>],
@@ -398,12 +403,12 @@ fn stream_cache_positions(
         let earliest: i64 = cache
             .call_method0(pyo3::intern!(py, "get_earliest_known_position"))?
             .extract()?;
-        let method = cache.getattr(pyo3::intern!(py, "get_max_pos_of_last_change"))?;
+        let entity_to_key = cache.getattr(pyo3::intern!(py, "_entity_to_key"))?;
+        let entity_to_key = entity_to_key.cast::<PyDict>()?;
         let mut positions = HashMap::with_capacity(room_ids.len());
         for room_id in room_ids {
-            let position: Option<i64> = method.call1((&**room_id,))?.extract()?;
-            if let Some(position) = position {
-                positions.insert(Arc::clone(room_id), position);
+            if let Some(position) = entity_to_key.get_item(&**room_id)? {
+                positions.insert(Arc::clone(room_id), position.extract()?);
             }
         }
         Ok((earliest, positions))
