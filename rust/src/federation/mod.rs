@@ -31,7 +31,6 @@ use pyo3::prelude::*;
 
 pub mod agent;
 pub mod client;
-pub mod gil;
 pub mod queue;
 pub mod signing;
 pub mod transaction;
@@ -88,7 +87,10 @@ fn build_auth_header_for_test(
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "federation")?;
     child_module.add_function(wrap_pyfunction!(build_auth_header_for_test, &child_module)?)?;
-    child_module.add_function(wrap_pyfunction!(gil::federation_gil_stats, &child_module)?)?;
+    child_module.add_function(wrap_pyfunction!(
+        crate::gil::federation_gil_stats,
+        &child_module
+    )?)?;
     child_module.add_class::<agent::python::RustFederationAgentForTest>()?;
     child_module.add_class::<client::python::RustFederationClient>()?;
     child_module.add_class::<transaction::python::RustTransaction>()?;

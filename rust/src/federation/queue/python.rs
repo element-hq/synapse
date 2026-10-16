@@ -48,13 +48,13 @@ use crate::{
     events::Event,
     federation::{
         client::{limiter::NotRetrying, RequestStats},
-        gil::{account, account_held, with_gil},
         transaction::{
             acknowledged_pdus,
             python::{python_acknowledged, RustTransaction, RustTransactionManager},
             Transaction, TransactionResponse, TransactionSender,
         },
     },
+    gil::{account, account_held, with_gil},
     homeserver::HomeServer,
     runtime::RustRuntime,
     storage::{

@@ -53,9 +53,9 @@ use crate::{
     deferred::{create_deferred_with, OnCancel},
     federation::{
         agent::{resolve::SystemResolver, Agent, AgentConfig},
-        gil::{account, with_gil},
         transport::{FederationTransport, PyTransport, TransportError},
     },
+    gil::{account, with_gil},
     homeserver::HomeServer,
     runtime::RustRuntime,
     storage::store::Store,

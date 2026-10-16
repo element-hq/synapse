@@ -19,6 +19,7 @@ pub mod errors;
 pub mod event_auth;
 pub mod events;
 pub mod federation;
+pub mod gil;
 pub mod handlers;
 pub mod homeserver;
 pub mod http;

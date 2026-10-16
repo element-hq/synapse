@@ -13,15 +13,19 @@
  *
  */
 
-//! Accounting for every time federation code takes the GIL.
+//! Accounting for every time code on tokio takes the GIL.
 //!
 //! The GIL is what the reactor thread needs to run, so a tokio thread that
 //! holds it stalls the reactor as surely as work on the reactor thread does.
-//! The federation code aims to take it only at the edges: converting a
-//! request in and a response out. So every `Python::attach` in this module
-//! tree goes through [`with_gil`], which counts the calls and the time held
-//! per call site. Tests pin the counts, so that a new crossing fails a test,
-//! and the counts are exported as metrics.
+//! The federation and event persistence code aim to take it only at the
+//! edges: converting a request in and a response out. So every
+//! `Python::attach` in those module trees goes through [`with_gil`], which
+//! counts the calls and the time held per call site. Tests pin the counts, so
+//! that a new crossing fails a test, and the counts are exported as metrics.
+//!
+//! Event persistence names its sites with the [`PERSIST_SITE_PREFIX`], and
+//! [`persist_gil_stats`] reports those. [`federation_gil_stats`] reports the
+//! rest.
 
 use std::{
     collections::HashMap,
@@ -88,14 +92,31 @@ pub fn snapshot() -> HashMap<&'static str, SiteStats> {
     STATS.lock().expect("poisoned").clone().unwrap_or_default()
 }
 
-/// The counts, as `{site: (calls, seconds held)}`. For the metrics collector
-/// and tests.
-#[pyfunction]
-pub fn federation_gil_stats() -> HashMap<&'static str, (u64, f64)> {
+/// The prefix of the event persistence call sites.
+pub const PERSIST_SITE_PREFIX: &str = "persist_";
+
+/// The counts of the sites `include` accepts, as `{site: (calls, seconds
+/// held)}`.
+fn stats_for(include: impl Fn(&str) -> bool) -> HashMap<&'static str, (u64, f64)> {
     snapshot()
         .into_iter()
+        .filter(|(site, _)| include(site))
         .map(|(site, stats)| (site, (stats.calls, stats.held.as_secs_f64())))
         .collect()
+}
+
+/// The counts of the federation sites, as `{site: (calls, seconds held)}`.
+/// For the metrics collector and tests.
+#[pyfunction]
+pub fn federation_gil_stats() -> HashMap<&'static str, (u64, f64)> {
+    stats_for(|site| !site.starts_with(PERSIST_SITE_PREFIX))
+}
+
+/// The counts of the event persistence sites, as `{site: (calls, seconds
+/// held)}`. For the metrics collector and tests.
+#[pyfunction]
+pub fn persist_gil_stats() -> HashMap<&'static str, (u64, f64)> {
+    stats_for(|site| site.starts_with(PERSIST_SITE_PREFIX))
 }
 
 #[cfg(test)]
@@ -124,5 +145,16 @@ mod tests {
 
         assert_eq!(after.calls, before.calls);
         assert_eq!(after.held, before.held + Duration::from_millis(5));
+    }
+
+    #[test]
+    fn persist_sites_are_reported_apart() {
+        account_held("persist_test_site", Duration::from_millis(1));
+        account_held("federation_test_site", Duration::from_millis(1));
+
+        assert!(persist_gil_stats().contains_key("persist_test_site"));
+        assert!(!persist_gil_stats().contains_key("federation_test_site"));
+        assert!(federation_gil_stats().contains_key("federation_test_site"));
+        assert!(!federation_gil_stats().contains_key("persist_test_site"));
     }
 }

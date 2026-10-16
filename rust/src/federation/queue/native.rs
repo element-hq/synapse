@@ -35,7 +35,7 @@ use super::{
 use crate::{
     database::postgres::pool::{ConnectionPool, PyConnectionPool},
     events::Event,
-    federation::gil::with_gil,
+    gil::with_gil,
     storage::{
         events::RedactBehaviour,
         federation_store::FederationStore,

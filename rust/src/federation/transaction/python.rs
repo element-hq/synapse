@@ -32,13 +32,11 @@ use super::{
 use crate::{
     deferred::{create_deferred_with, OnCancel},
     events::Event,
-    federation::{
-        client::{
-            python::{client_error_to_py, request_send_failed, RustFederationClient},
-            RequestStats,
-        },
-        gil::with_gil,
+    federation::client::{
+        python::{client_error_to_py, request_send_failed, RustFederationClient},
+        RequestStats,
     },
+    gil::with_gil,
     runtime::RustRuntime,
 };
 
