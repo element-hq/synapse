@@ -763,7 +763,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         self.assertEqual(5, int(retry_after_headers[0]))
 
     @unittest.override_config(
-        {"experimental_features": {"msc4140_finalised_retention_period": "1h"}}
+        {"experimental_features": {"msc4140_finalised_retention_period": "1m"}}
     )
     def test_finalised_delayed_events_are_pruned_after_retention_period(
         self,
@@ -793,12 +793,12 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self._assert_finalised(delay_id, event_id=event["event_id"])
 
-        # The finalised delayed event must survive prune runs within its retention period
-        self.reactor.advance(Duration(minutes=30).as_secs())
+        # The finalised delayed event must be discoverable within its retention period
+        self.reactor.advance(Duration(seconds=30).as_secs())
         self._assert_finalised(delay_id, event_id=event["event_id"])
 
-        # ...but not the first prune run after it
-        self.reactor.advance(Duration(minutes=30).as_secs())
+        # ...but not after it
+        self.reactor.advance(Duration(seconds=30).as_secs())
         channel = self.make_request(
             "GET",
             f"{_MANAGEMENT_PATH_PREFIX}/{delay_id}",
@@ -806,6 +806,11 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
         self.assertEqual(Codes.NOT_FOUND, channel.json_body["errcode"], channel.result)
+
+        # The pruning scheduler should have no work left
+        self.assertIsNone(
+            self.hs.get_delayed_events_handler()._next_prune_finalised_call
+        )
 
     @unittest.override_config(
         {"experimental_features": {"msc4140_finalised_retention_limit_per_user": 2}}
@@ -845,13 +850,6 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             schedule_and_cancel(self.user1_access_token) for _ in range(3)
         ]
 
-        # Nothing is pruned until the next prune run
-        for delay_id in user1_delay_ids:
-            self._assert_finalised(delay_id)
-        self._assert_finalised(user2_delay_id, access_token=self.user2_access_token)
-
-        self.reactor.advance(Duration(minutes=5).as_secs())
-
         # Only the oldest finalised delayed event of user1 is pruned
         channel = self.make_request(
             "GET",
@@ -863,6 +861,11 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         for delay_id in user1_delay_ids[1:]:
             self._assert_finalised(delay_id)
         self._assert_finalised(user2_delay_id, access_token=self.user2_access_token)
+
+        # The pruning scheduler should have work left to do
+        self.assertIsNotNone(
+            self.hs.get_delayed_events_handler()._next_prune_finalised_call
+        )
 
     def test_get_delayed_events_auth(self) -> None:
         channel = self.make_request("GET", _MANAGEMENT_PATH_PREFIX)
@@ -1741,9 +1744,22 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, True)
         self._check_for_delayed_event_in_sync(self.user2_access_token, delay_id, False)
 
-    @parameterized.expand((("client_api", False), ("admin_api", True)))
+    @parameterized.expand(
+        (
+            (
+                f"{'admin' if by_admin else 'client'}_api_{'erase' if erase else 'preserve'}",
+                by_admin,
+                erase,
+            )
+            for by_admin in (False, True)
+            for erase in (False, True)
+        )
+    )
+    @unittest.override_config(
+        {"experimental_features": {"msc4140_finalised_retention_limit_per_user": 1}}
+    )
     def test_delayed_events_are_cancelled_on_deactivation(
-        self, _name: str, by_admin: bool
+        self, _name: str, by_admin: bool, erase: bool
     ) -> None:
         store = self.hs.get_datastores().main
         handler = self.hs.get_delayed_events_handler()
@@ -1787,7 +1803,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             channel = self.make_request(
                 "POST",
                 f"/_synapse/admin/v1/deactivate/{self.user1_user_id}",
-                {},
+                {"erase": erase},
                 self.login("admin", "pass"),
             )
         else:
@@ -1800,21 +1816,39 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
                         "user": self.user1_user_id,
                         "password": "pass",
                     },
+                    "erase": erase,
                 },
                 self.user1_access_token,
             )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        # user1's delayed events are gone...
+        # Assert that user1's delayed events are gone.
         self.assertListEqual(
             [], self.get_success(store.get_all_delayed_events_for_user("user1"))
         )
-        for delay_id in user1_delay_ids:
+
+        if erase:
+            # Assert that both delayed events are pruned.
+            for delay_id in user1_delay_ids:
+                self.get_failure(
+                    store.get_delayed_event_for_user(delay_id, "user1"),
+                    NotFoundError,
+                )
+        else:
+            # Assert that the oldest of user1's delayed events are pruned.
             self.get_failure(
-                store.get_delayed_event_for_user(delay_id, "user1"), NotFoundError
+                store.get_delayed_event_for_user(user1_delay_ids[0], "user1"),
+                NotFoundError,
             )
 
-        # ...and the next send has been rescheduled for user2's delayed event.
+            # Assert that the newest of user1's delayed events are finalised.
+            self.assertIsNotNone(
+                self.get_success(
+                    store.get_delayed_event_for_user(user1_delay_ids[1], "user1")
+                ).finalised
+            )
+
+        # Assert that the next send has been rescheduled for user2's delayed event.
         assert handler._next_delayed_event_call is not None
         self.assertGreater(
             handler._next_delayed_event_call.getTime() - self.reactor.seconds(), 1
@@ -1849,8 +1883,9 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             self.user2_access_token, user2_delay_id, True
         )
 
+    @parameterized.expand((("preserve", False), ("erase", True)))
     def test_deactivation_cancels_the_timer_when_no_delayed_events_remain(
-        self,
+        self, _name: str, erase: bool
     ) -> None:
         handler = self.hs.get_delayed_events_handler()
 
@@ -1863,15 +1898,20 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertIsNotNone(handler._next_delayed_event_call)
+        self.assertIsNone(handler._next_prune_finalised_call)
 
         self.get_success(
             self.hs.get_deactivate_account_handler().deactivate_account(
                 self.user1_user_id,
-                erase_data=False,
+                erase_data=erase,
                 requester=create_requester(self.user1_user_id),
             )
         )
         self.assertIsNone(handler._next_delayed_event_call)
+        if erase:
+            self.assertIsNone(handler._next_prune_finalised_call)
+        else:
+            self.assertIsNotNone(handler._next_prune_finalised_call)
 
 
 class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
@@ -2053,19 +2093,25 @@ class DelayedEventsWorkerTestCase(
         self.reactor.advance(Duration(seconds=1).as_secs())
         self._check_for_delayed_event_in_sync(self.access_token, delay_id, True)
 
+    @unittest.override_config(
+        {"experimental_features": {"msc4140_finalised_retention_limit_per_user": 1}}
+    )
     def test_delayed_events_are_cancelled_on_deactivation_from_worker(self) -> None:
         worker_hs = self.make_worker_hs("synapse.app.generic_worker")
         store = self.hs.get_datastores().main
         handler = self.hs.get_delayed_events_handler()
 
-        channel = self._make_delayed_event_request(
-            room_id=self.room_id,
-            delay=Duration(milliseconds=900),
-            event_type=_EVENT_TYPE,
-            content={},
-            access_token=self.access_token,
-        )
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_ids = []
+        for _ in range(2):
+            channel = self._make_delayed_event_request(
+                room_id=self.room_id,
+                delay=Duration(milliseconds=900),
+                event_type=_EVENT_TYPE,
+                content={},
+                access_token=self.access_token,
+            )
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+            delay_ids.append(channel.json_body["delay_id"])
         self.assertIsNotNone(handler._next_delayed_event_call)
 
         # Deactivate the account on the worker. The main process, which is the
@@ -2078,7 +2124,21 @@ class DelayedEventsWorkerTestCase(
             )
         )
 
+        # Assert that user1's delayed events are gone.
         self.assertListEqual(
             [], self.get_success(store.get_all_delayed_events_for_user("user"))
         )
+
+        # Assert that the oldest of user1's delayed events are pruned.
+        self.get_failure(
+            store.get_delayed_event_for_user(delay_ids[0], "user"), NotFoundError
+        )
+
+        # Assert that the newest of user1's delayed events are finalised.
+        self.assertIsNotNone(
+            self.get_success(
+                store.get_delayed_event_for_user(delay_ids[1], "user")
+            ).finalised
+        )
+
         self.assertIsNone(handler._next_delayed_event_call)

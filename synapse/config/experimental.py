@@ -283,6 +283,16 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4140_finalised_retention_limit_per_user"),
             )
 
+        # Since setting either config to 0 disables finalised retention,
+        # set both to 0 if either of them are 0, so that it doesn't make
+        # a difference which of them had been explicitly set to 0.
+        if (
+            not self.msc4140_finalised_retention_period
+            or not self.msc4140_finalised_retention_limit_per_user
+        ):
+            self.msc4140_finalised_retention_period = Duration()
+            self.msc4140_finalised_retention_limit_per_user = 0
+
         # MSC4143: Matrix RTC Transport using Livekit Backend
         self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
 
