@@ -283,9 +283,7 @@ class SlidingSyncStoreForTest:
         to_token: RoomStreamToken,
         excluded_room_ids: list[str],
         membership_may_have_changed: bool,
-    ) -> list[
-        tuple[str, str | None, str, str | None, tuple[str, int], str | None]
-    ]: ...
+    ) -> list[tuple[str, str | None, str, str | None, tuple[str, int], str | None]]: ...
     def membership_delta_changes(
         self,
         user_id: str,
@@ -313,13 +311,17 @@ class SlidingSyncStoreForTest:
         changed_since: set[str] | None,
     ) -> set[str]: ...
     def max_event_pos(
-        self, room_ids: list[str], now_token: RoomStreamToken
+        self,
+        room_ids: list[str],
+        now_token: RoomStreamToken,
+        last_change_pos: dict[str, int],
     ) -> dict[str, int | None]: ...
     def last_event_pos_before(
         self,
         room_ids: list[str],
         end_token: RoomStreamToken,
         now_token: RoomStreamToken,
+        last_change_pos: dict[str, int],
     ) -> dict[str, int]: ...
     def cached_member_counts(self, room_id: str) -> dict[str, int]: ...
     def room_type(self, room_id: str) -> tuple[bool, str | None]:

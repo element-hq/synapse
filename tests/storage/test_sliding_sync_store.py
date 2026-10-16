@@ -392,11 +392,46 @@ class SlidingSyncStoreTestCase(unittest.HomeserverTestCase):
                 self.helper.join(room_id, self.bob, tok=self.bob_tok)
         return rooms
 
+    def _null_event_deltas(self, rng: random.Random, rooms: list[str]) -> None:
+        """Add rows without an event to Bob's membership deltas, as the server
+        leaving a room or a state reset write them, at random positions.
+        Their previous event is one of Bob's memberships of the room, or
+        none."""
+        lo, hi = self._stream_range()
+        for _ in range(6):
+            room_id = rng.choice(rooms)
+            rows = self.get_success(
+                self.store.db_pool.execute(
+                    "memberships",
+                    "SELECT event_id FROM room_memberships"
+                    " WHERE user_id = ? AND room_id = ? ORDER BY event_id",
+                    self.bob,
+                    room_id,
+                )
+            )
+            prev_event_id = rng.choice([row[0] for row in rows] + [None])
+            self.get_success(
+                self.store.db_pool.simple_insert(
+                    "current_state_delta_stream",
+                    {
+                        "stream_id": rng.randint(lo, hi),
+                        "room_id": room_id,
+                        "type": EventTypes.Member,
+                        "state_key": self.bob,
+                        "event_id": None,
+                        "prev_event_id": prev_event_id,
+                        "instance_name": rng.choice(WRITERS + [None]),
+                    },
+                    desc="null_event_delta",
+                )
+            )
+
     @parameterized.expand(SEEDS)
     def test_snapshot_membership_changes(self, seed: int) -> None:
         rng = random.Random(seed)
         rooms = self._random_memberships(rng)
         self._scatter_writers(rng, self.bob)
+        self._null_event_deltas(rng, rooms)
         lo, hi = self._stream_range()
         for _ in range(10):
             from_token = self._random_token(rng, lo, hi)
@@ -433,6 +468,7 @@ class SlidingSyncStoreTestCase(unittest.HomeserverTestCase):
         rng = random.Random(seed)
         rooms = self._random_memberships(rng)
         self._scatter_writers(rng, self.bob)
+        self._null_event_deltas(rng, rooms)
         lo, hi = self._stream_range()
         for _ in range(10):
             from_token = self._random_token(rng, lo, hi)
@@ -562,17 +598,25 @@ class SlidingSyncStoreTestCase(unittest.HomeserverTestCase):
             now_token = self._random_token(rng, (lo + hi) // 2, hi)
             end_token = self._random_token(rng, lo, hi)
             subset = rng.sample(rooms, rng.randint(0, len(rooms)))
+            # What the events stream cache knows of some of the rooms. A
+            # position may be anything, as both sides take it as it is.
+            last_change_pos = {
+                room_id: rng.randint(lo, hi)
+                for room_id in rng.sample(subset, rng.randint(0, len(subset)))
+            }
             # Start each round cold, which the mirror carries over.
             self.store._get_max_event_pos.invalidate_all()
             with (
-                patch.object(cache, "get_max_pos_of_last_change", return_value=None),
+                patch.object(
+                    cache, "get_max_pos_of_last_change", side_effect=last_change_pos.get
+                ),
                 patch.object(self.store, "get_room_max_token", return_value=now_token),
             ):
                 expected_max = self.get_success(
                     self.store._bulk_get_max_event_pos(subset)
                 )
                 self.assertEqual(
-                    self.rust.max_event_pos(subset, now_token),
+                    self.rust.max_event_pos(subset, now_token, last_change_pos),
                     dict(expected_max),
                     now_token,
                 )
@@ -583,17 +627,19 @@ class SlidingSyncStoreTestCase(unittest.HomeserverTestCase):
                     )
                 )
                 self.assertEqual(
-                    self.rust.last_event_pos_before(subset, end_token, now_token),
+                    self.rust.last_event_pos_before(
+                        subset, end_token, now_token, last_change_pos
+                    ),
                     expected_last,
                     f"{end_token} now {now_token}",
                 )
 
     def test_max_event_pos_invalidated_by_new_events(self) -> None:
         now = self.store.get_room_max_token()
-        before = self.rust.max_event_pos([self.room_id], now)[self.room_id]
+        before = self.rust.max_event_pos([self.room_id], now, {})[self.room_id]
         self.helper.send(self.room_id, "hi", tok=self.alice_tok)
         now = self.store.get_room_max_token()
-        after = self.rust.max_event_pos([self.room_id], now)[self.room_id]
+        after = self.rust.max_event_pos([self.room_id], now, {})[self.room_id]
         assert before is not None and after is not None
         self.assertGreater(after, before)
         self.assertEqual(after, now.stream)

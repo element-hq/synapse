@@ -769,12 +769,19 @@ impl<'a> SlidingSyncReader<'a> {
     /// in each room, capped at `now_token`, the current room key
     /// (`get_room_max_token`), or `None` for a room without a
     /// `sliding_sync_joined_rooms` row. Through the mirror of
-    /// `_get_max_event_pos`, which Python fills from the events stream
-    /// cache too.
+    /// `_get_max_event_pos`.
+    ///
+    /// `last_change_pos` is `_events_stream_cache.get_max_pos_of_last_change`
+    /// for the rooms it knows. As in Python, the misses are answered from it
+    /// alone, uncapped, when it knows them all. Otherwise every miss goes to
+    /// the database, whose answer wins, and its positions stand only for the
+    /// rooms without a row: Python's batch loop runs over all the rooms
+    /// rather than the ones it didn't know.
     pub async fn max_event_pos(
         &self,
         room_ids: &[Arc<str>],
         now_token: &RoomStreamToken,
+        last_change_pos: &HashMap<Arc<str>, i64>,
     ) -> anyhow::Result<HashMap<Arc<str>, Option<i64>>> {
         self.store()
             .caches()
@@ -782,8 +789,11 @@ impl<'a> SlidingSyncReader<'a> {
             .get_or_load_many(room_ids, |missing| async move {
                 let mut results: HashMap<Arc<str>, Option<i64>> = missing
                     .iter()
-                    .map(|room_id| (Arc::clone(room_id), None))
+                    .map(|room_id| (Arc::clone(room_id), last_change_pos.get(room_id).copied()))
                     .collect();
+                if results.values().all(Option::is_some) {
+                    return Ok(results);
+                }
                 let mut recheck = Vec::new();
                 {
                     let borrowed = self.borrow().await?;
@@ -826,15 +836,19 @@ impl<'a> SlidingSyncReader<'a> {
 
     /// `bulk_get_last_event_pos_in_room_before_stream_ordering`: the stream
     /// position of the last event at or before `end_token` in each room
-    /// that has one. `now_token` is as for [`Self::max_event_pos`].
+    /// that has one. `now_token` and `last_change_pos` are as for
+    /// [`Self::max_event_pos`].
     pub async fn last_event_pos_before(
         &self,
         room_ids: &[Arc<str>],
         end_token: &RoomStreamToken,
         now_token: &RoomStreamToken,
+        last_change_pos: &HashMap<Arc<str>, i64>,
     ) -> anyhow::Result<HashMap<Arc<str>, i64>> {
         // Most rooms' latest event is before the token, and cached.
-        let uncapped = self.max_event_pos(room_ids, now_token).await?;
+        let uncapped = self
+            .max_event_pos(room_ids, now_token, last_change_pos)
+            .await?;
         let mut results = HashMap::with_capacity(uncapped.len());
         let mut recheck = Vec::new();
         let min_token = end_token.stream;
@@ -1747,6 +1761,10 @@ fn arcs(ids: Vec<String>) -> Vec<Arc<str>> {
     ids.into_iter().map(Arc::from).collect()
 }
 
+fn arc_keys<V>(map: HashMap<String, V>) -> HashMap<Arc<str>, V> {
+    map.into_iter().map(|(k, v)| (Arc::from(k), v)).collect()
+}
+
 /// The sliding sync store's queries, each run to completion on the tokio
 /// runtime with the GIL released, over the native driver's pool and the
 /// Rust sliding sync handler's caches. For tests only.
@@ -1968,10 +1986,17 @@ impl PySlidingSyncStoreForTest {
         py: Python<'_>,
         room_ids: Vec<String>,
         now_token: RoomStreamToken,
+        last_change_pos: HashMap<String, i64>,
     ) -> PyResult<HashMap<String, Option<i64>>> {
         let room_ids = arcs(room_ids);
+        let last_change_pos = arc_keys(last_change_pos);
         let positions = self.run(py, |reader| {
-            async move { reader.max_event_pos(&room_ids, &now_token).await }.boxed()
+            async move {
+                reader
+                    .max_event_pos(&room_ids, &now_token, &last_change_pos)
+                    .await
+            }
+            .boxed()
         })?;
         Ok(positions
             .into_iter()
@@ -1985,12 +2010,14 @@ impl PySlidingSyncStoreForTest {
         room_ids: Vec<String>,
         end_token: RoomStreamToken,
         now_token: RoomStreamToken,
+        last_change_pos: HashMap<String, i64>,
     ) -> PyResult<HashMap<String, i64>> {
         let room_ids = arcs(room_ids);
+        let last_change_pos = arc_keys(last_change_pos);
         let positions = self.run(py, |reader| {
             async move {
                 reader
-                    .last_event_pos_before(&room_ids, &end_token, &now_token)
+                    .last_event_pos_before(&room_ids, &end_token, &now_token, &last_change_pos)
                     .await
             }
             .boxed()
