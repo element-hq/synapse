@@ -1,0 +1,1 @@
+Compute and encode the rooms of simplified sliding sync responses in Rust when the experimental `rust_sliding_sync` option is on.
