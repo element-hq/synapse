@@ -166,3 +166,19 @@ def per_connection_state_for_test(
     now_ms: int,
 ) -> tuple[bool, int, int]:
     """`(has_updates, len(state), len(mutable state))`."""
+
+# A room for user in the test form `(room_id, sender, membership, event_id,
+# stream, has_known_state, room_type, is_encrypted)`.
+_PyRoom = tuple[str, str | None, str, str | None, int, bool, str | None, bool]
+
+def filter_membership_for_sync_for_test(
+    user_id: str, room: _PyRoom, newly_left: bool
+) -> bool: ...
+def filter_rooms_for_test(
+    rooms: list[_PyRoom],
+    filters: str,
+    dm_room_ids: set[str],
+    room_tags: dict[str, set[str]],
+    sent_before: set[str],
+) -> list[str]:
+    """`filters` is JSON. Raises `NotImplementedError` as Python does."""

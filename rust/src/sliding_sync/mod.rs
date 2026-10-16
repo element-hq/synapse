@@ -40,6 +40,7 @@ pub mod config;
 pub mod connection;
 pub mod request;
 pub mod required_state;
+pub mod room_lists;
 
 /// Computes sliding sync responses with the Rust implementation, reading
 /// the database through the native Postgres driver.
@@ -167,6 +168,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     config::register_test_functions(&child_module)?;
     connection::register_test_functions(&child_module)?;
     required_state::register_test_functions(&child_module)?;
+    room_lists::register_test_functions(&child_module)?;
 
     m.add_submodule(&child_module)?;
 

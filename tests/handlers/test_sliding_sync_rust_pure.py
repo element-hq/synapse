@@ -16,9 +16,10 @@
 (`rust/src/sliding_sync/`) against the Python it ports, over generated
 inputs."""
 
+import json
 import random
 from types import SimpleNamespace
-from typing import AbstractSet, Any, Mapping, cast
+from typing import AbstractSet, Any, Coroutine, Mapping, TypeVar, cast
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
@@ -28,8 +29,13 @@ from synapse.handlers.sliding_sync import (
     _required_state_request,
     _state_filter_with_meta,
 )
+from synapse.handlers.sliding_sync.room_lists import (
+    SlidingSyncRoomLists,
+    filter_membership_for_sync,
+)
+from synapse.storage.roommember import RoomsForUserSlidingSync
 from synapse.synapse_rust import sliding_sync as rust
-from synapse.types import RoomStreamToken
+from synapse.types import PersistedEventPosition, RoomStreamToken, StreamToken
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoom,
     HaveSentRoomFlag,
@@ -44,6 +50,8 @@ from synapse.types.state import StateFilter
 from synapse.util.clock import Clock
 
 from tests import unittest
+
+T = TypeVar("T")
 
 # The values the generators draw state types and keys from: the wildcards,
 # local and remote users, and plain strings.
@@ -593,3 +601,162 @@ class ConnectionStateTestCase(unittest.TestCase):
                     len(python),
                 ),
             )
+
+
+PyRoom = tuple[str, str | None, str, str | None, int, bool, str | None, bool]
+
+
+def _run(coroutine: Coroutine[Any, Any, T]) -> T:
+    """Run a coroutine that never waits."""
+    try:
+        coroutine.send(None)
+    except StopIteration as e:
+        return e.value
+    raise AssertionError("the coroutine waited")
+
+
+def _random_room(rng: random.Random, room_id: str) -> PyRoom:
+    membership = rng.choice(
+        [Membership.JOIN, Membership.INVITE, Membership.LEAVE, Membership.BAN]
+    )
+    state_reset = rng.random() < 0.1
+    return (
+        room_id,
+        None if state_reset else rng.choice([_USER_ID, "@bob:test"]),
+        membership,
+        None if state_reset else f"$event_{room_id}",
+        rng.randint(1, 100),
+        rng.random() < 0.8,
+        rng.choice([None, None, "m.space", "org.example.type"]),
+        rng.random() < 0.5,
+    )
+
+
+def _python_room(room: PyRoom) -> RoomsForUserSlidingSync:
+    (
+        room_id,
+        sender,
+        membership,
+        event_id,
+        stream,
+        has_known_state,
+        room_type,
+        is_encrypted,
+    ) = room
+    return RoomsForUserSlidingSync(
+        room_id=room_id,
+        sender=sender,
+        membership=membership,
+        event_id=event_id,
+        event_pos=PersistedEventPosition("master", stream),
+        room_version_id="10",
+        has_known_state=has_known_state,
+        room_type=room_type,
+        is_encrypted=is_encrypted,
+    )
+
+
+def _random_filters(rng: random.Random) -> dict[str, Any]:
+    filters: dict[str, Any] = {}
+    types = [None, "m.space", "org.example.type", "org.other"]
+    tags = ["m.favourite", "m.lowpriority", "u.work"]
+    if rng.random() < 0.4:
+        filters["is_dm"] = rng.random() < 0.5
+    if rng.random() < 0.4:
+        filters["is_encrypted"] = rng.random() < 0.5
+    if rng.random() < 0.4:
+        filters["is_invite"] = rng.random() < 0.5
+    if rng.random() < 0.3:
+        filters["room_types"] = rng.sample(types, rng.randint(0, 2))
+    if rng.random() < 0.3:
+        filters["not_room_types"] = rng.sample(types, rng.randint(0, 2))
+    if rng.random() < 0.3:
+        filters["tags"] = rng.sample(tags, rng.randint(0, 2))
+    if rng.random() < 0.3:
+        filters["not_tags"] = rng.sample(tags, rng.randint(0, 2))
+    if rng.random() < 0.03:
+        filters["spaces"] = ["!space:test"]
+    if rng.random() < 0.03:
+        filters["room_name_like"] = "name"
+    return filters
+
+
+class _FakeTagStore:
+    def __init__(self, room_tags: dict[str, set[str]]) -> None:
+        self.room_tags = room_tags
+
+    async def get_tags_for_user(self, user_id: str) -> dict[str, dict[str, Any]]:
+        return {
+            room_id: {tag: {} for tag in tags}
+            for room_id, tags in self.room_tags.items()
+        }
+
+
+class RoomListFilterTestCase(unittest.TestCase):
+    """`rust/src/sliding_sync/room_lists/filter.rs`"""
+
+    def test_filter_membership_for_sync(self) -> None:
+        rng = random.Random(9)
+        for _ in range(500):
+            room = _random_room(rng, "!r:test")
+            newly_left = rng.random() < 0.3
+            self.assertEqual(
+                rust.filter_membership_for_sync_for_test(_USER_ID, room, newly_left),
+                filter_membership_for_sync(
+                    user_id=_USER_ID,
+                    room_membership_for_user=_python_room(room),
+                    newly_left=newly_left,
+                ),
+                (room, newly_left),
+            )
+
+    def test_filter_rooms_using_tables(self) -> None:
+        rng = random.Random(10)
+        not_implemented = 0
+        for _ in range(2000):
+            rooms = [_random_room(rng, room_id) for room_id in _ROOMS]
+            filters = _random_filters(rng)
+            dm_room_ids = {room_id for room_id in _ROOMS if rng.random() < 0.3}
+            room_tags = {
+                room_id: set(rng.sample(["m.favourite", "m.lowpriority", "u.work"], 1))
+                for room_id in _ROOMS
+                if rng.random() < 0.4
+            }
+            sent_before = {room_id for room_id in _ROOMS if rng.random() < 0.5}
+
+            fake_room_lists = cast(
+                SlidingSyncRoomLists,
+                SimpleNamespace(store=_FakeTagStore(room_tags)),
+            )
+            previous_state = PerConnectionState(
+                rooms=RoomStatusMap(
+                    statuses={room_id: HaveSentRoom.live() for room_id in sent_before}
+                )
+            )
+            try:
+                python: set[str] | None = set(
+                    _run(
+                        SlidingSyncRoomLists.filter_rooms_using_tables(
+                            fake_room_lists,
+                            _USER_ID,
+                            {room[0]: _python_room(room) for room in rooms},
+                            previous_state,
+                            SlidingSyncConfig.SlidingSyncList.Filters(**filters),
+                            cast(StreamToken, None),
+                            dm_room_ids,
+                        )
+                    )
+                )
+            except NotImplementedError:
+                python = None
+                not_implemented += 1
+            try:
+                result: set[str] | None = set(
+                    rust.filter_rooms_for_test(
+                        rooms, json.dumps(filters), dm_room_ids, room_tags, sent_before
+                    )
+                )
+            except NotImplementedError:
+                result = None
+            self.assertEqual(result, python, (rooms, filters))
+        self.assertGreater(not_implemented, 0)
