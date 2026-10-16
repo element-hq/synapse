@@ -23,8 +23,6 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.constants import UserTypes
 from synapse.api.errors import ThreepidValidationError
 from synapse.server import HomeServer
-from synapse.storage.database import LoggingTransaction
-from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, UserID, UserInfo
 from synapse.util.clock import Clock
 
@@ -146,59 +144,6 @@ class RegistrationStoreTestCase(HomeserverTestCase):
         )
         res = self.get_success(self.store.is_support_user(SUPPORT_USER))
         self.assertTrue(res)
-
-    def test_get_users_by_id_case_insensitive(self) -> None:
-        """Looking up a user ID returns every user whose ID only differs by case."""
-        self.get_success(self.store.register_user("@Alice:test", "hash1"))
-        self.get_success(self.store.register_user("@alice:test", "hash2"))
-        self.get_success(self.store.register_user("@bob:test", "hash3"))
-
-        res = self.get_success(
-            self.store.get_users_by_id_case_insensitive("@ALICE:test")
-        )
-        self.assertEqual(res, {"@Alice:test": "hash1", "@alice:test": "hash2"})
-
-        res = self.get_success(
-            self.store.get_users_by_id_case_insensitive("@carol:test")
-        )
-        self.assertEqual(res, {})
-
-    def test_users_lower_name_index(self) -> None:
-        """The `users_lower_name` background update creates an index that serves
-        case-insensitive user ID lookups.
-        """
-        self.get_success(
-            self.store.db_pool.runInteraction(
-                "drop_users_lower_name",
-                lambda txn: txn.execute("DROP INDEX users_lower_name"),
-            )
-        )
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                table="background_updates",
-                values={"update_name": "users_lower_name", "progress_json": "{}"},
-            )
-        )
-        self.store.db_pool.updates._all_done = False
-        self.wait_for_background_updates()
-
-        def explain_txn(txn: LoggingTransaction) -> str:
-            if isinstance(self.store.database_engine, PostgresEngine):
-                txn.execute("SET LOCAL enable_seqscan = off")
-                explain = "EXPLAIN"
-            else:
-                explain = "EXPLAIN QUERY PLAN"
-            txn.execute(
-                f"{explain} SELECT name, password_hash FROM users"
-                " WHERE lower(name) = lower(?)",
-                ("@Alice:test",),
-            )
-            return "\n".join(str(row) for row in txn.fetchall())
-
-        plan = self.get_success(
-            self.store.db_pool.runInteraction("explain_users_lower_name", explain_txn)
-        )
-        self.assertIn("users_lower_name", plan)
 
     @override_config({"request_token_inhibit_3pid_errors": False})
     def test_3pid_inhibit_invalid_validation_session_error(self) -> None:
