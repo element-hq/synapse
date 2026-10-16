@@ -1,0 +1,1 @@
+Fix [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) that expired during sync processing being returned as expired events in the sticky section of the sync response.

@@ -33,6 +33,7 @@ from synapse.events.utils import (
     EventFormat,
     FilteredEvent,
     SerializeEventConfig,
+    SerializeEventFilter,
     strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
@@ -666,7 +667,12 @@ class SyncRestServlet(RestServlet):
                 # appearing in the timeline won't appear again here
                 result["msc4354_sticky"] = {
                     "events": await self._event_serializer.serialize_events(
-                        room.sticky, time_now, config=serialize_options
+                        room.sticky,
+                        time_now,
+                        config=serialize_options,
+                        # Drop any sticky events which have expired since they
+                        # were selected (or since this `SyncResult` was cached).
+                        filter=SerializeEventFilter(sticky_only=True),
                     )
                 }
             if room.unread_thread_notifications:
@@ -1242,7 +1248,12 @@ class SlidingSyncRestServlet(RestServlet):
                 ]
             rooms_out[room_id] = {
                 "events": await self.event_serializer.serialize_events(
-                    sticky_events_to_write, time_now, config=serialize_options
+                    sticky_events_to_write,
+                    time_now,
+                    config=serialize_options,
+                    # Drop any sticky events which have expired since they
+                    # were selected.
+                    filter=SerializeEventFilter(sticky_only=True),
                 )
             }
 
