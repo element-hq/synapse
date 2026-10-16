@@ -1,0 +1,1 @@
+Compute the room lists of simplified sliding sync responses, and keep the per-connection state, in Rust when the experimental `rust_sliding_sync` option is on.
