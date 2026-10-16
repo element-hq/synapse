@@ -47,7 +47,7 @@ use crate::events::{
     filter::event_visible_to_server,
     redact_event_py, Event,
 };
-use crate::state::StateKey;
+use crate::state::{StateKey, StateMap};
 use crate::storage::{events::RedactBehaviour, sync_store::SyncReader};
 
 /// `EventTypes.Dummy`.
@@ -485,7 +485,10 @@ pub async fn filter_events_for_server(
         }
     }
     let event_to_group = reader.state_group_for_events(&with_state).await?;
-    if let Some(missing) = with_state.iter().find(|id| !event_to_group.contains_key(*id)) {
+    if let Some(missing) = with_state
+        .iter()
+        .find(|id| !event_to_group.contains_key(*id))
+    {
         anyhow::bail!("No state group for event {missing}");
     }
     let mut groups: Vec<i64> = event_to_group.values().copied().collect();
@@ -521,9 +524,9 @@ pub async fn filter_events_for_server(
                 .get(&**vis_id)
                 .ok_or_else(|| anyhow::anyhow!("Missing history visibility event {vis_id}"))?;
             if let Some(value) = vis_event.content().get_field(HISTORY_VISIBILITY) {
-                vis = value.as_str().ok_or_else(|| {
-                    anyhow::anyhow!("Invalid history visibility in {vis_id}")
-                })?;
+                vis = value
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid history visibility in {vis_id}"))?;
             }
         }
         history_visibility.insert(event.event_id(), vis);
@@ -531,7 +534,7 @@ pub async fn filter_events_for_server(
 
     // `_event_to_memberships`, for the events with restricted visibility:
     // the memberships at each of the target server's users.
-    let restricted: Vec<Arc<str>> = events
+    let restricted: HashSet<Arc<str>> = events
         .iter()
         .filter(|event| {
             !matches!(
@@ -541,15 +544,34 @@ pub async fn filter_events_for_server(
         })
         .map(|event| Arc::from(event.event_id()))
         .collect();
+    let mut restricted_state: HashMap<Arc<str>, Arc<StateMap>> = HashMap::new();
     let mut member_events: HashMap<Arc<str>, Event> = HashMap::new();
     if !restricted.is_empty() {
+        let restricted: Vec<Arc<str>> = restricted.iter().cloned().collect();
         // Python waits for the full state of these.
         if !reader.partial_state_events(&restricted).await?.is_empty() {
             return Ok(ServerFiltered::NeedsFullState);
         }
-        let mut member_ids: Vec<Arc<str>> = restricted
-            .iter()
-            .filter_map(|id| state_of(id))
+        // The groups read above may be from before the full state arrived:
+        // that swaps each event's group, and the cache may not have heard
+        // yet. Python reads the group after waiting, so read it again now,
+        // from the database.
+        let fresh = reader.state_group_for_events_uncached(&restricted).await?;
+        if let Some(missing) = restricted.iter().find(|id| !fresh.contains_key(*id)) {
+            anyhow::bail!("No state group for event {missing}");
+        }
+        let mut fresh_groups: Vec<i64> = fresh.values().copied().collect();
+        fresh_groups.sort_unstable();
+        fresh_groups.dedup();
+        let fresh_state = reader.state_for_groups(&fresh_groups).await?;
+        for (event_id, group) in fresh {
+            if let Some(state) = fresh_state.get(&group) {
+                restricted_state.insert(event_id, Arc::clone(state));
+            }
+        }
+
+        let mut member_ids: Vec<Arc<str>> = restricted_state
+            .values()
             .flat_map(|state| state.iter())
             .filter(|(key, _)| is_target_member(key, filter.target_server_name))
             .map(|(_, event_id)| Arc::clone(event_id))
@@ -568,8 +590,8 @@ pub async fn filter_events_for_server(
     for event in &events {
         let event_id = event.event_id();
         let mut memberships: Vec<(&str, &str)> = Vec::new();
-        if restricted.iter().any(|id| &**id == event_id) {
-            for (key, member_id) in state_of(event_id).into_iter().flat_map(|state| state.iter()) {
+        if let Some(state) = restricted_state.get(event_id) {
+            for (key, member_id) in state.iter() {
                 if !is_target_member(key, filter.target_server_name) {
                     continue;
                 }

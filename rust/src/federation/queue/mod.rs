@@ -280,8 +280,11 @@ pub type Observer = Arc<dyn AwaitableObserver>;
 #[async_trait]
 pub trait QueueHooks: Send + Sync + 'static {
     /// `_catch_up_transmission_loop`, for `queue`.
-    async fn catch_up(&self, queue: &DestinationQueue, observer: &Observer)
-        -> Result<(), LoopError>;
+    async fn catch_up(
+        &self,
+        queue: &DestinationQueue,
+        observer: &Observer,
+    ) -> Result<(), LoopError>;
 
     /// The to-device messages and device list updates to send.
     async fn device_edus(
@@ -1109,6 +1112,23 @@ impl DestinationQueue {
 
     pub fn set_catchup_last_skipped(&self, stream_ordering: i64) {
         self.state().catchup_last_skipped = stream_ordering;
+    }
+
+    /// End catch-up, once nothing is left after `last_successful`. Returns
+    /// false, and leaves catch-up on, if a PDU after it was skipped while we
+    /// caught up. One lock covers the check and the end, so a PDU that
+    /// [`Self::send_pdu`] skips in between cannot be lost.
+    pub fn try_finish_catching_up(&self, last_successful: i64) -> bool {
+        let mut state = self.state();
+        let skipped = state.catchup_last_skipped;
+        if skipped != 0 && skipped > last_successful {
+            // Which is also how a room purged while we loop ends up, so
+            // reset it rather than loop hot.
+            state.catchup_last_skipped = 0;
+            return false;
+        }
+        state.catching_up = false;
+        true
     }
 
     pub fn last_successful_stream_ordering(&self) -> Option<i64> {

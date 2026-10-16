@@ -571,6 +571,25 @@ async fn pdus_skipped_while_catching_up() {
 }
 
 #[tokio::test]
+async fn finish_catching_up_after_a_skip() {
+    let h = harness();
+    h.queue.set_last_successful_stream_ordering(Some(3));
+    h.queue.state().transmission_loop_enabled = false;
+    h.queue.send_pdu(pdu("$a", 8));
+
+    // A PDU after our position was skipped, so catch-up goes on.
+    assert!(!h.queue.try_finish_catching_up(3));
+    assert!(h.queue.catching_up());
+    assert_eq!(h.queue.catchup_last_skipped(), 0);
+
+    // Once it is ended, the next PDU is queued.
+    assert!(h.queue.try_finish_catching_up(8));
+    assert!(!h.queue.catching_up());
+    h.queue.send_pdu(pdu("$b", 9));
+    assert_eq!(h.queue.pending_pdu_count(), 1);
+}
+
+#[tokio::test]
 async fn data_queued_mid_send_is_not_lost() {
     let h = harness();
     h.queue.set_catching_up(false);

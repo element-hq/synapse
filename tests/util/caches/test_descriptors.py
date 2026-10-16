@@ -688,6 +688,10 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
         two_mirror.invalidate.assert_called_with(("foo",))
         self.assertEqual(get_awaitable_result(a.two("foo", "bar")), "foobar")
 
+        # A prefill replaces the value, so the mirror drops its copy.
+        a.one.prefill(("baz",), "other")
+        one_mirror.invalidate.assert_called_with(("baz",))
+
     def test_invalidate_missing(self) -> None:
         class A:
             server_name = "test_server"  # nb must be called this for @cached

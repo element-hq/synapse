@@ -55,8 +55,8 @@ use crate::{
             Transaction, TransactionResponse, TransactionSender,
         },
     },
-    runtime::RustRuntime,
     homeserver::HomeServer,
+    runtime::RustRuntime,
     storage::{
         federation_store::{FederationStore, FederationStoreConfig},
         sync_store::{SyncStore, SyncStoreConfig},

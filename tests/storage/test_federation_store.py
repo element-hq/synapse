@@ -458,6 +458,31 @@ class CatchUpStoreTestCase(unittest.HomeserverTestCase):
                     ),
                 )
 
+    def test_catch_up_room_event_ids_limit(self) -> None:
+        """More rooms are due than one batch takes."""
+        for i in range(55):
+            event_id = self.helper.send(self.rooms[0], f"m{i}", tok=self.tok)[
+                "event_id"
+            ]
+            event = self.get_success(self.store.get_event(event_id))
+            stream_ordering = event.internal_metadata.stream_ordering
+            assert stream_ordering is not None
+            # A room for each, as the catch-up query takes one event per room.
+            room_id = f"!r{i}:test"
+            self.get_success(
+                self.store.db_pool.simple_insert(
+                    "rooms", {"room_id": room_id, "is_public": False}
+                )
+            )
+            self.get_success(
+                self.store.store_destination_rooms_entries(
+                    [DEST], room_id, stream_ordering
+                )
+            )
+        python = self.get_success(self.store.get_catch_up_room_event_ids(DEST, 0))
+        self.assertEqual(len(python), 50)
+        self.assertEqual(self.rust.get_catch_up_room_event_ids(DEST, 0), python)
+
     def test_prev_events_for_room(self) -> None:
         for room_id in self.rooms:
             self._send(room_id, sticky=False)
@@ -498,9 +523,11 @@ class CatchUpStoreTestCase(unittest.HomeserverTestCase):
             (orderings[2], orderings[7], [orderings[4]]),
             (orderings[5], orderings[6], []),
         ]
+        backlogged = False
         for old, new, sent in cases:
-            # With and without a backlog already further on.
-            for existing in (None, 1_000_000):
+            # With no backlog, one before any new position, which stays, and
+            # one further on, which is moved back.
+            for existing in (None, 0, 1_000_000):
                 self._clear_backlog()
                 if existing is not None:
                     self.get_success(
@@ -522,6 +549,8 @@ class CatchUpStoreTestCase(unittest.HomeserverTestCase):
                     )
                 )
                 python = self._backlog()
+                if existing is None and python:
+                    backlogged = True
 
                 self._clear_backlog()
                 if existing is not None:
@@ -539,8 +568,8 @@ class CatchUpStoreTestCase(unittest.HomeserverTestCase):
                     DEST, old, new, sent
                 )
                 self.assertEqual(self._backlog(), python, (old, new, sent, existing))
-        # The cases did backlog something.
-        self.assertNotEqual(python, [])
+        # The cases did backlog something of their own.
+        self.assertTrue(backlogged)
 
     def _seed_backlog(self) -> list[int]:
         """Sticky and plain events in each room, with every room backlogged
@@ -586,6 +615,43 @@ class CatchUpStoreTestCase(unittest.HomeserverTestCase):
             self.rust.get_backlogged_sticky_events_for_destination(DEST, 50, later)
         )
         self.assertEqual(self._backlog(), [])
+
+    def test_backlogged_sticky_events_cleanup(self) -> None:
+        """A room whose backlog is past its sticky events is cleaned up. One
+        whose position is at its last sticky event is kept, and sent."""
+        self._seed_backlog()
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "sticky_events", None, ("room_id", "stream_id", "event_id")
+            )
+        )
+        last: dict[str, tuple[int, str]] = {}
+        for room_id, stream_id, event_id in rows:
+            if room_id not in last or stream_id > last[room_id][0]:
+                last[room_id] = (stream_id, event_id)
+        # The backlog query takes the first room it finds, which is by room
+        # ID. Leave the last room with something to send, so the others are
+        # cleaned up first.
+        *empty, kept = sorted(self.rooms)
+        seeded = [(DEST, room_id, last[room_id][0] + 1) for room_id in empty]
+        seeded.append((DEST, kept, last[kept][0]))
+        now = self.clock.time_msec()
+
+        self._clear_backlog()
+        self._seed_backlog_rows(seeded)
+        python = self.get_success(
+            self.store.get_backlogged_sticky_events_for_destination(DEST, limit=50)
+        )
+        assert python is not None
+        python_rows = self._backlog()
+
+        self._clear_backlog()
+        self._seed_backlog_rows(seeded)
+        rust = self.rust.get_backlogged_sticky_events_for_destination(DEST, 50, now)
+        self.assertEqual(rust, (kept, last[kept][0], [last[kept][1]]))
+        self.assertEqual((python[0].to_string(), python[1], python[2]), rust)
+        self.assertEqual(self._backlog(), python_rows)
+        self.assertEqual(self._backlog(), [(DEST, kept, last[kept][0])])
 
     def test_mark_backlogged_sticky_events_sent(self) -> None:
         self._seed_backlog()
@@ -666,6 +732,33 @@ class CatchUpStoreTestCase(unittest.HomeserverTestCase):
             "backoff.example.com",
             self.rust.get_catch_up_outstanding_destinations(None, now + 120_000),
         )
+
+        # More than one page.
+        self.get_success(
+            self.store.store_destination_rooms_entries(
+                [f"d{i:02}.example.com" for i in range(30)], self.rooms[0], 1_000_000
+            )
+        )
+        after = None
+        pages = []
+        while True:
+            python = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "outstanding",
+                    self.store._get_catch_up_outstanding_destinations_txn,
+                    now,
+                    after,
+                )
+            )
+            self.assertEqual(
+                self.rust.get_catch_up_outstanding_destinations(after, now), python
+            )
+            if not python:
+                break
+            pages.append(python)
+            after = python[-1]
+        self.assertGreater(len(pages), 1)
+        self.assertEqual(len(pages[0]), 25)
         self.assertNotIn(
             "backoff.example.com",
             self.rust.get_catch_up_outstanding_destinations(None, now),

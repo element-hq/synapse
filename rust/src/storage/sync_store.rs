@@ -1580,6 +1580,36 @@ impl<'a> SyncReader<'a> {
         Ok(groups)
     }
 
+    /// The state group of each event, read from the database and not the
+    /// cache. For when the cache may be behind a write we know has
+    /// committed, such as an event getting its full state.
+    pub async fn state_group_for_events_uncached(
+        &self,
+        event_ids: &[Arc<str>],
+    ) -> anyhow::Result<HashMap<Arc<str>, i64>> {
+        let mut groups = HashMap::with_capacity(event_ids.len());
+        if event_ids.is_empty() {
+            return Ok(groups);
+        }
+        let borrowed = self.borrow().await?;
+        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
+            let batch: Vec<&str> = batch.iter().map(|id| &**id).collect();
+            let rows = borrowed
+                .query(
+                    "SELECT event_id, state_group FROM event_to_state_groups
+                    WHERE event_id = ANY($1)",
+                    &[&batch],
+                )
+                .await?;
+            for row in rows {
+                let event_id: String = row.try_get(0)?;
+                let group: i64 = row.try_get(1)?;
+                groups.insert(Arc::from(event_id), group);
+            }
+        }
+        Ok(groups)
+    }
+
     /// `_get_state_for_groups` for whole groups: the full state of each
     /// group, from the state group cache or the database.
     pub async fn state_for_groups(

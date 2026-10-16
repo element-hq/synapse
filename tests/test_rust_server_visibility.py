@@ -31,6 +31,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.server import HomeServer
+from synapse.storage.database import LoggingTransaction
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.sync import SyncStoreForTest
 from synapse.util.clock import Clock
@@ -198,6 +199,86 @@ class RustServerVisibilityTestCase(unittest.HomeserverTestCase):
                 filter_out_remote_partial_state_events=False,
             )
         )
+
+    @parameterized.expand([("prefill", True), ("race", False)])
+    def test_retry_after_full_state(self, _: str, prefill: bool) -> None:
+        """After an event gets its full state, the filter reads the new
+        state group. With `prefill`, the cache hears of the change as it does
+        in Synapse. Without it, the filter runs before the cache hears."""
+        self.get_success(
+            inject_visibility_event(self.hs, ROOM_ID, f"@creator:{LOCAL}", "joined")
+        )
+        # The state before `@u:a` joined stands in for the partial state.
+        early = self.get_success(
+            inject_message_event(self.hs, ROOM_ID, f"@creator:{LOCAL}")
+        )
+        self.get_success(inject_member_event(self.hs, ROOM_ID, "@u:a", "join"))
+        event = self.get_success(
+            inject_message_event(self.hs, ROOM_ID, f"@creator:{LOCAL}")
+        )
+        full_group = self.get_success(
+            self.store._get_state_group_for_event(event.event_id)
+        )
+        partial_group = self.get_success(
+            self.store._get_state_group_for_event(early.event_id)
+        )
+
+        self.get_success(
+            self.store.db_pool.simple_update_one(
+                "event_to_state_groups",
+                {"event_id": event.event_id},
+                {"state_group": partial_group},
+            )
+        )
+        self.store._get_state_group_for_event.invalidate((event.event_id,))
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "partial_state_rooms", {"room_id": ROOM_ID}
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "partial_state_events", {"room_id": ROOM_ID, "event_id": event.event_id}
+            )
+        )
+        flags = {
+            "redact": False,
+            "filter_out_erased_senders": False,
+            "filter_out_remote_partial_state_events": False,
+        }
+        # This caches the partial state group in Rust.
+        self.assertIsNone(
+            self.rust.filter_events_for_server("a", LOCAL, [event], **flags)
+        )
+
+        # As `_update_state_for_partial_state_event_txn` does.
+        def unpartial_txn(txn: LoggingTransaction) -> None:
+            self.store.db_pool.simple_update_one_txn(
+                txn,
+                "event_to_state_groups",
+                {"event_id": event.event_id},
+                {"state_group": full_group},
+            )
+            self.store.db_pool.simple_delete_one_txn(
+                txn, "partial_state_events", {"event_id": event.event_id}
+            )
+            if prefill:
+                txn.call_after(
+                    self.store._get_state_group_for_event.prefill,
+                    (event.event_id,),
+                    full_group,
+                )
+
+        self.get_success(self.store.db_pool.runInteraction("unpartial", unpartial_txn))
+        if prefill:
+            filtered = self._compare("a", [event], flags)
+        else:
+            # Neither cache has heard yet, so only check Rust. Python reads
+            # the group once its cache has heard.
+            rust = self.rust.filter_events_for_server("a", LOCAL, [event], **flags)
+            assert rust is not None
+            filtered = rust
+        self.assertEqual([e.event_id for e in filtered], [event.event_id])
 
     def _inject_outlier(self) -> EventBase:
         builder = self.hs.get_event_builder_factory().for_room_version(

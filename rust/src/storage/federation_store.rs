@@ -68,6 +68,10 @@ pub struct FederationStore {
     config: FederationStoreConfig,
 }
 
+/// How many times [`FederationStore::get_backlogged_sticky_events_for_destination`]
+/// cleans up the backlog before it gives up.
+const STICKY_BACKLOG_CLEANUP_ATTEMPTS: usize = 3;
+
 impl FederationStore {
     pub fn new(config: FederationStoreConfig) -> Self {
         FederationStore { config }
@@ -478,9 +482,7 @@ impl FederationStore {
                 ],
             )
             .await?;
-        rows.iter()
-            .map(|row| Ok(row.try_get(0)?))
-            .collect()
+        rows.iter().map(|row| Ok(row.try_get(0)?)).collect()
     }
 
     /// `get_prev_events_for_room`: the room's 10 deepest forward
@@ -501,9 +503,7 @@ impl FederationStore {
                 &[&room_id],
             )
             .await?;
-        rows.iter()
-            .map(|row| Ok(row.try_get(0)?))
-            .collect()
+        rows.iter().map(|row| Ok(row.try_get(0)?)).collect()
     }
 
     /// `get_backlogged_sticky_events_for_destination`: up to `limit` of
@@ -527,9 +527,17 @@ impl FederationStore {
         let mut backlog = self
             .try_backlogged_sticky_events(&conn, destination, limit, now_ms, &pattern)
             .await?;
-        if matches!(&backlog, Some((_, _, events)) if events.is_empty()) {
-            // The room is backlogged but has no sticky events to send, as
-            // they expired, say. Clean up and try again.
+        // The room is backlogged but has no sticky events to send, as they
+        // expired, say. Clean up and try again. Python's single snapshot
+        // makes one retry enough. Each of our statements takes a fresh one,
+        // so events can expire between the cleanup and the retry. Then the
+        // retry finds another empty room, and we clean up again.
+        let mut attempts = 0;
+        while matches!(&backlog, Some((_, _, events)) if events.is_empty()) {
+            attempts += 1;
+            if attempts > STICKY_BACKLOG_CLEANUP_ATTEMPTS {
+                anyhow::bail!("Sticky event backlog for {destination} not cleaned up");
+            }
             conn.query(
                 "WITH to_clean_up AS (
                     SELECT backlog.room_id
@@ -550,15 +558,11 @@ impl FederationStore {
             backlog = self
                 .try_backlogged_sticky_events(&conn, destination, limit, now_ms, &pattern)
                 .await?;
-            if matches!(&backlog, Some((_, _, events)) if events.is_empty()) {
-                anyhow::bail!("Sticky event backlog for {destination} not cleaned up");
-            }
         }
         conn.commit().await?;
 
-        Ok(backlog.map(|(room_id, position, events)| {
-            (room_id, position.unwrap_or_default(), events)
-        }))
+        Ok(backlog
+            .map(|(room_id, position, events)| (room_id, position.unwrap_or_default(), events)))
     }
 
     /// One try of [`FederationStore::get_backlogged_sticky_events_for_destination`]:
@@ -694,9 +698,7 @@ impl FederationStore {
                 &[&after, &now_ms],
             )
             .await?;
-        rows.iter()
-            .map(|row| Ok(row.try_get(0)?))
-            .collect()
+        rows.iter().map(|row| Ok(row.try_get(0)?)).collect()
     }
 
     /// `mark_backlogged_sticky_events_after_catchup_transaction`: a
@@ -1041,6 +1043,8 @@ impl Conn {
 
     /// Open a `READ COMMITTED` transaction. Its writes are upserts and
     /// deletes on rows only this sender writes, so it needs no retry loop.
+    /// Each statement reads its own snapshot, so a caller that reads a row
+    /// twice must allow for other writers in between.
     async fn begin(&mut self) -> anyhow::Result<()> {
         // Set before awaiting: if we are dropped after BEGIN is sent but
         // before it returns, the transaction is open and must be rolled back.
@@ -1276,8 +1280,12 @@ impl PyFederationStoreForTest {
     ) -> PyResult<()> {
         self.run(
             py,
-            self.store
-                .mark_backlogged_sticky_events_sent(&self.pool, destination, room_id, position),
+            self.store.mark_backlogged_sticky_events_sent(
+                &self.pool,
+                destination,
+                room_id,
+                position,
+            ),
         )
     }
 

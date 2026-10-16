@@ -403,6 +403,180 @@ class RustQueuesNativeTestCase(RustQueuesTestCase):
             [self.event.content["body"]],
         )
 
+    def test_catch_up_notifies_module(self) -> None:
+        """The module hears of the events catch-up sent."""
+        destination = "catchup.example.com"
+        self._catch_up_destination(destination, self.event)
+        latest = self._send_event("newer")
+        queue = self.sender._get_per_destination_queue(destination)
+        assert isinstance(queue, RustPerDestinationQueue)
+        self.transport.responses.append(
+            json_response(200, {"pdus": {latest.event_id: {}}})
+        )
+
+        queue.attempt_new_transaction()
+        self._settle()
+
+        # The module gets a new copy of the event, so compare by ID.
+        self.delivered.assert_awaited_once()
+        assert self.delivered.await_args is not None
+        [delivery] = self.delivered.await_args.args
+        self.assertEqual(delivery.server_name, destination)
+        self.assertEqual([e.event_id for e in delivery.events], [latest.event_id])
+        self.assertEqual(delivery.method, FederatedEventDeliveryMethod.SEND)
+
+    def test_catch_up_send_fails(self) -> None:
+        """A failed catch-up send records nothing, and leaves the destination
+        catching up."""
+        destination = "catchup.example.com"
+        self._catch_up_destination(destination, self.event)
+        queue = self.sender._get_per_destination_queue(destination)
+        assert isinstance(queue, RustPerDestinationQueue)
+        self.transport.responses.append(
+            json_response(403, {"errcode": "M_FORBIDDEN", "error": "no"})
+        )
+
+        queue.attempt_new_transaction()
+        self._settle()
+
+        self.assertEqual(len(self.transport.requests), 1)
+        stream_ordering = self.event.internal_metadata.stream_ordering
+        assert stream_ordering is not None
+        self.assertEqual(
+            self.get_success(
+                self.store.get_destination_last_successful_stream_ordering(destination)
+            ),
+            stream_ordering - 1,
+        )
+        self.assertTrue(queue._catching_up)
+        self.delivered.assert_not_awaited()
+
+    def _backlog_sticky(self, destination: str, body: str) -> EventBase:
+        """Leave `destination` to catch up past a sticky event, which is
+        returned, and a later plain one."""
+        self._catch_up_destination(destination, self.event)
+        event_id = self.helper.send_sticky_event(
+            self.room_id,
+            "m.room.message",
+            duration=Duration(minutes=10),
+            content={"body": body, "msgtype": "m.text"},
+            tok=self.tok,
+        )["event_id"]
+        latest = self._send_event("latest")
+        stream_ordering = latest.internal_metadata.stream_ordering
+        assert stream_ordering is not None
+        self.get_success(
+            self.store.store_destination_rooms_entries(
+                [destination], self.room_id, stream_ordering
+            )
+        )
+        return self.get_success(self.store.get_event(event_id))
+
+    def _backlog_rows(self, destination: str) -> list[tuple[str]]:
+        return self.get_success(
+            self.store.db_pool.simple_select_list(
+                "destination_rooms_sticky_events_backlog",
+                {"destination": destination},
+                ["room_id"],
+            )
+        )
+
+    def _sent_bodies(self) -> list[list[str]]:
+        return [
+            [pdu["content"].get("body") for pdu in json.loads(request.body)["pdus"]]
+            for request in self.transport.requests
+        ]
+
+    def test_sticky_backlog_filtered_out(self) -> None:
+        """A sticky batch the destination may not see is not sent, and the
+        backlog still moves on, in Rust."""
+        self.hs.get_module_api_callbacks().federation._on_event_delivered_over_federation_callbacks.clear()
+        destination = "sticky.example.com"
+        self._backlog_sticky(destination, "sticky")
+        # The sender's events are hidden once they are erased.
+        self.get_success(self.store.mark_user_erased(self.event.sender))
+        queue = self.sender._get_per_destination_queue(destination)
+        assert isinstance(queue, RustPerDestinationQueue)
+        self.transport.responses.extend([json_response(200, {})] * 2)
+
+        before = federation_gil_stats()
+        queue.attempt_new_transaction()
+        self._settle()
+
+        # Catch-up sends the event the destination missed, which is the
+        # room's latest, unfiltered. The sticky event is not sent.
+        self.assertEqual(self._sent_bodies(), [["latest"]])
+        self.assertEqual(self._backlog_rows(destination), [])
+        self.assertFalse(queue._rust.sticky_backlogged)
+        calls = self._queue_calls(before)
+        self.assertNotIn("queue_sticky_backlog", calls)
+        self.assertNotIn("queue_complete", calls)
+
+    def _set_partial_state(self, event: EventBase) -> None:
+        """Mark `event`, and so its room, as having partial state."""
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "partial_state_rooms", {"room_id": self.room_id}
+            )
+        )
+        self.store.is_partial_state_room.invalidate((self.room_id,))
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "partial_state_events",
+                {"room_id": self.room_id, "event_id": event.event_id},
+            )
+        )
+        self.store.is_partial_state_event.invalidate((event.event_id,))
+
+    def test_sticky_backlog_needs_full_state(self) -> None:
+        """A sticky batch that needs the full state to filter goes to the
+        Python hook, which waits for it."""
+        self.hs.get_module_api_callbacks().federation._on_event_delivered_over_federation_callbacks.clear()
+        destination = "sticky.example.com"
+        self.helper.send_state(
+            self.room_id,
+            "m.room.history_visibility",
+            {"history_visibility": "joined"},
+            tok=self.tok,
+        )
+        sticky = self._backlog_sticky(destination, "sticky")
+        self._set_partial_state(sticky)
+        queue = self.sender._get_per_destination_queue(destination)
+        assert isinstance(queue, RustPerDestinationQueue)
+        self.transport.responses.extend([json_response(200, {})] * 2)
+
+        before = federation_gil_stats()
+        queue.attempt_new_transaction()
+        self._settle()
+        # Catch-up sent the event the destination missed. The sticky batch
+        # waits in Python for the full state.
+        self.assertEqual(self._sent_bodies(), [["latest"]])
+        self.assertIn("queue_sticky_backlog", self._queue_calls(before))
+        self.assertNotEqual(self._backlog_rows(destination), [])
+
+        self.get_success(
+            self.store.db_pool.simple_delete_one(
+                "partial_state_events", {"event_id": sticky.event_id}
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_delete_one(
+                "partial_state_rooms", {"room_id": self.room_id}
+            )
+        )
+        self.store.is_partial_state_room.invalidate((self.room_id,))
+        self.store.is_partial_state_event.invalidate((sticky.event_id,))
+        self.hs.get_storage_controllers().state.notify_event_un_partial_stated(
+            sticky.event_id
+        )
+        self._settle()
+
+        # The destination has no members, so may not see the sticky event.
+        # Python's batch is still recorded as sent.
+        self.assertEqual(self._sent_bodies(), [["latest"]])
+        self.assertEqual(self._backlog_rows(destination), [])
+        self.assertIn("queue_complete", self._queue_calls(before))
+
     def test_sticky_backlog(self) -> None:
         """Catching up past a sticky event backlogs it, and the loop then
         sends it, all without taking the GIL."""

@@ -28,9 +28,9 @@ use async_trait::async_trait;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*};
 
 use super::{
-    changes::StreamChanges, metrics::QueueMetrics, python::PyHooks, Completion,
-    DestinationQueue, DeviceEdus, DeviceEdusRequest, LoopError, Observer, PduBody, QueueHooks,
-    QueuedPdu, StickyBatch, MAX_PDUS_PER_TRANSACTION, QUEUE_LOG,
+    changes::StreamChanges, metrics::QueueMetrics, python::PyHooks, Completion, DestinationQueue,
+    DeviceEdus, DeviceEdusRequest, LoopError, Observer, PduBody, QueueHooks, QueuedPdu,
+    StickyBatch, MAX_PDUS_PER_TRANSACTION, QUEUE_LOG,
 };
 use crate::{
     database::postgres::pool::{ConnectionPool, PyConnectionPool},
@@ -137,7 +137,9 @@ fn stream_ordering_of(event: &Event) -> Result<i64, LoopError> {
         .internal_metadata()
         .stream_ordering()
         .map(|so| so.get())
-        .ok_or_else(|| LoopError::Other(format!("Event {} has no stream ordering", event.event_id())))
+        .ok_or_else(|| {
+            LoopError::Other(format!("Event {} has no stream ordering", event.event_id()))
+        })
 }
 
 fn queued_pdu(event: Event) -> Result<Arc<QueuedPdu>, LoopError> {
@@ -182,7 +184,10 @@ impl NativeHooks {
             return Ok(vec![pdu]);
         }
 
-        let ids: Vec<Arc<str>> = extremities.iter().map(|id| Arc::from(id.as_str())).collect();
+        let ids: Vec<Arc<str>> = extremities
+            .iter()
+            .map(|id| Arc::from(id.as_str()))
+            .collect();
         let extremities = reader
             .events(&ids, RedactBehaviour::Redact, false, false)
             .await
@@ -221,7 +226,11 @@ impl NativeHooks {
 #[async_trait]
 impl QueueHooks for NativeHooks {
     /// `_catch_up_transmission_loop`, natively.
-    async fn catch_up(&self, queue: &DestinationQueue, observer: &Observer) -> Result<(), LoopError> {
+    async fn catch_up(
+        &self,
+        queue: &DestinationQueue,
+        observer: &Observer,
+    ) -> Result<(), LoopError> {
         let destination = self.destination.as_str();
         let pool = self.native.pool.get()?;
         let store = &self.native.store;
@@ -249,15 +258,11 @@ impl QueueHooks for NativeHooks {
                 .map_err(db_error)?;
             if event_ids.is_empty() {
                 // Check that no new event was skipped while we caught up.
-                let skipped = queue.catchup_last_skipped();
-                if skipped != 0 && skipped > last_successful {
-                    // Which is also how a room purged while we loop ends up,
-                    // so reset the flag rather than loop hot.
-                    queue.set_catchup_last_skipped(0);
-                    continue;
+                // `send_pdu` runs on the reactor thread while we run here.
+                if queue.try_finish_catching_up(last_successful) {
+                    break;
                 }
-                queue.set_catching_up(false);
-                break;
+                continue;
             }
 
             if first_catch_up_check {

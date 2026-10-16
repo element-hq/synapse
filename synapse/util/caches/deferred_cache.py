@@ -391,6 +391,9 @@ class DeferredCache(Generic[KT, VT]):
         callbacks = (callback,) if callback else ()
         self.cache.set(key, value, callbacks=callbacks)
         self._pending_deferred_cache.pop(key, None)
+        # A prefill replaces the value, so the mirror's copy is stale.
+        for mirror in self._mirrors:
+            mirror.invalidate(key)
 
     def add_mirror(self, mirror: "CacheMirror[KT]") -> None:
         """Invalidate `mirror` whenever this cache is invalidated, with the
@@ -399,7 +402,8 @@ class DeferredCache(Generic[KT, VT]):
         For a cache of the same data that lives elsewhere, such as in Rust,
         and fills itself: every invalidation of this cache, whichever path it
         arrives by (a write on this process, the caches stream, a current
-        state change), then reaches it too.
+        state change), then reaches it too. So does a prefill, which may
+        replace a value the mirror holds.
         """
         self._mirrors.append(mirror)
 
