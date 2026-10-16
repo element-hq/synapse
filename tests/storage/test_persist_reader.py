@@ -1632,3 +1632,340 @@ class StateDeltaTestCase(PersistReaderTestBase):
             delta, (set(), {(EventTypes.Name, ""): name[0].event_id}, False)
         )
         self.assertEqual(counts["state_dag_forward_extremities"], {1: 1})
+
+
+_Snapshot = tuple[str, str, str, str]
+
+
+class SlidingSyncTestCase(PersistReaderTestBase):
+    """`rust/src/persist/sliding_sync.rs` against
+    `_calculate_sliding_sync_table_changes`, over the same database, chunk
+    and delta. Rust sorts the snapshots to insert by user ID."""
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.room_version = self.get_success(self.store.get_room_version(self.room_id))
+        self._counter = 0
+
+    def _new(
+        self,
+        event_type: str,
+        state_key: str,
+        content: dict[str, Any],
+        sender: str | None = None,
+    ) -> tuple[EventBase, EventContext]:
+        """A new state event for the chunk, not persisted."""
+        self._counter += 1
+        fields: dict[str, Any] = {
+            "room_id": self.room_id,
+            "sender": sender or self.alice,
+            "type": event_type,
+            "state_key": state_key,
+            "content": content,
+            "prev_events": [],
+            "auth_events": [],
+            # The event ID hashes the redacted event, which keeps the depth
+            # and not most of the content.
+            "depth": 100 + self._counter,
+        }
+        event = make_test_event(fields, self.room_version)
+        return event, EventContext.for_outlier(self.hs.get_storage_controllers())
+
+    def _state(self) -> dict[tuple[str, str], str]:
+        return dict(
+            self.get_success(self.store.get_partial_current_state_ids(self.room_id))
+        )
+
+    def _send_state(self, event_type: str, content: dict[str, Any]) -> str:
+        return self.helper.send_state(
+            self.room_id, event_type, content, tok=self.alice_tok
+        )["event_id"]
+
+    def _compare(
+        self,
+        events: list[tuple[EventBase, EventContext]],
+        to_insert: dict[tuple[str, str], str],
+        to_delete: list[tuple[str, str]] | None = None,
+        no_longer_in_room: bool = False,
+    ) -> tuple[int | None, dict[str, Any], dict[str, Any], list[_Snapshot], list[str]]:
+        delta = DeltaState(
+            to_delete=to_delete or [],
+            to_insert=to_insert,
+            no_longer_in_room=no_longer_in_room,
+        )
+        expected = self.get_success(
+            self.persist_events_store._calculate_sliding_sync_table_changes(
+                self.room_id,
+                events,
+                delta,
+            )
+        )
+        result = self.rust.calculate_sliding_sync_table_changes(
+            self.room_id,
+            self.hs.hostname,
+            [event for event, _ in events],
+            list(delta.to_delete),
+            dict(delta.to_insert),
+            no_longer_in_room,
+        )
+        bump, joined, shared, inserts, deletes = result
+        self.assertEqual(bump, expected.joined_room_bump_stamp_to_fully_insert)
+        self.assertEqual(joined, expected.joined_room_updates)
+        self.assertEqual(shared, expected.membership_snapshot_shared_insert_values)
+        self.assertEqual(
+            inserts,
+            sorted(
+                (i.user_id, i.sender, i.membership_event_id, i.membership)
+                for i in expected.to_insert_membership_snapshots
+            ),
+        )
+        self.assertEqual(deletes, expected.to_delete_membership_snapshots)
+        return result
+
+    def _both_fail(
+        self,
+        events: list[tuple[EventBase, EventContext]],
+        to_insert: dict[tuple[str, str], str],
+        reason: str,
+        no_longer_in_room: bool = False,
+    ) -> None:
+        delta = DeltaState(
+            to_delete=[], to_insert=to_insert, no_longer_in_room=no_longer_in_room
+        )
+        self.get_failure(
+            self.persist_events_store._calculate_sliding_sync_table_changes(
+                self.room_id,
+                events,
+                delta,
+            ),
+            AssertionError,
+        )
+        with self.assertRaisesRegex(RuntimeError, reason):
+            self.rust.calculate_sliding_sync_table_changes(
+                self.room_id,
+                self.hs.hostname,
+                [event for event, _ in events],
+                [],
+                to_insert,
+                no_longer_in_room,
+            )
+
+    def test_empty_delta(self) -> None:
+        self.assertEqual(self._compare([], {}), (None, {}, {}, [], []))
+
+    def test_local_joins_and_state_in_the_chunk(self) -> None:
+        carol = self.register_user("carol", "pass")
+        dave = self.register_user("dave", "pass")
+        carol_join = self._new(
+            EventTypes.Member, carol, {"membership": "join"}, sender=carol
+        )
+        dave_invite = self._new(EventTypes.Member, dave, {"membership": "invite"})
+        name = self._new(EventTypes.Name, "", {"name": "chunk"})
+        encryption = self._new(
+            EventTypes.RoomEncryption, "", {"algorithm": "m.megolm.v1.aes-sha2"}
+        )
+        # The remote member and the topic are not loaded. They would fail
+        # the step if they were.
+        _, joined, shared, inserts, _ = self._compare(
+            [dave_invite, carol_join, name, encryption],
+            {
+                (EventTypes.Member, dave): dave_invite[0].event_id,
+                (EventTypes.Member, carol): carol_join[0].event_id,
+                (EventTypes.Member, "@remote:other"): "$unknown",
+                (EventTypes.Name, ""): name[0].event_id,
+                (EventTypes.RoomEncryption, ""): encryption[0].event_id,
+                (EventTypes.Topic, ""): "$also_unknown",
+            },
+        )
+        self.assertEqual(
+            inserts,
+            [
+                (carol, carol, carol_join[0].event_id, "join"),
+                (dave, self.alice, dave_invite[0].event_id, "invite"),
+            ],
+        )
+        # The joined room's row exists, so it takes only the delta.
+        self.assertEqual(joined, {"room_name": "chunk", "is_encrypted": True})
+        self.assertEqual(shared, {**joined, "room_type": None, "has_known_state": True})
+
+    def test_missing_joined_room_row(self) -> None:
+        self._send_state(EventTypes.Name, {"name": "stored"})
+        message = self._send("bump")
+        self._send_state(EventTypes.Topic, {"topic": "no bump"})
+        self._write(
+            "DELETE FROM sliding_sync_joined_rooms WHERE room_id = ?", self.room_id
+        )
+        topic = self._new(EventTypes.Topic, "", {"topic": "chunk"})
+        bump, joined, shared, inserts, _ = self._compare(
+            [topic], {(EventTypes.Topic, ""): topic[0].event_id}
+        )
+        (stream,) = self._sql(
+            "SELECT stream_ordering FROM events WHERE event_id = ?", message
+        )[0]
+        self.assertEqual(bump, stream)
+        self.assertEqual(joined, {"room_type": None, "room_name": "stored"})
+        self.assertEqual((shared, inserts), ({}, []))
+
+    def test_state_reset_to_stored_events(self) -> None:
+        state = self._state()
+        old_name = self._send_state(EventTypes.Name, {"name": "old"})
+        self._send_state(EventTypes.Name, {"name": "new"})
+        self._send_state(
+            EventTypes.RoomEncryption, {"algorithm": "m.megolm.v1.aes-sha2"}
+        )
+        # Reset Bob back to his join, out of the chunk, and the name back to
+        # an older event. Alice is reset out of the room.
+        _, joined, shared, inserts, deletes = self._compare(
+            [],
+            {
+                (EventTypes.Member, self.bob): state[(EventTypes.Member, self.bob)],
+                (EventTypes.Name, ""): old_name,
+            },
+            to_delete=[
+                (EventTypes.Member, self.alice),
+                (EventTypes.Member, "@remote:other"),
+                (EventTypes.RoomEncryption, ""),
+                (EventTypes.Create, ""),
+            ],
+        )
+        self.assertEqual(
+            inserts,
+            [(self.bob, self.bob, state[(EventTypes.Member, self.bob)], "join")],
+        )
+        self.assertEqual(deletes, [self.alice])
+        # The deletes clear the joined room's columns. The snapshot drops the
+        # deleted state.
+        self.assertEqual(
+            joined, {"room_name": "old", "room_type": None, "is_encrypted": False}
+        )
+        self.assertEqual(shared, {"room_name": "old", "has_known_state": True})
+
+    def test_redacted_state(self) -> None:
+        name = self._send_state(EventTypes.Name, {"name": "redact me"})
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{self.room_id}/redact/{name}/txn1",
+            {},
+            access_token=self.alice_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self._write(
+            "DELETE FROM sliding_sync_joined_rooms WHERE room_id = ?", self.room_id
+        )
+        topic = self._new(EventTypes.Topic, "", {"topic": "chunk"})
+        _, joined, _, _, _ = self._compare(
+            [topic], {(EventTypes.Topic, ""): topic[0].event_id}
+        )
+        self.assertEqual(joined, {"room_type": None, "room_name": None})
+
+    def test_values_postgres_cannot_store(self) -> None:
+        carol = self.register_user("carol", "pass")
+        carol_join = self._new(
+            EventTypes.Member, carol, {"membership": "join"}, sender=carol
+        )
+        name = self._new(EventTypes.Name, "", {"name": "a\0b"})
+        tombstone = self._new(EventTypes.Tombstone, "", {"replacement_room": 5})
+        encryption = self._new(EventTypes.RoomEncryption, "", {"algorithm": None})
+        _, joined, shared, _, _ = self._compare(
+            [carol_join, name, tombstone, encryption],
+            {
+                (EventTypes.Member, carol): carol_join[0].event_id,
+                (EventTypes.Name, ""): name[0].event_id,
+                (EventTypes.Tombstone, ""): tombstone[0].event_id,
+                (EventTypes.RoomEncryption, ""): encryption[0].event_id,
+            },
+        )
+        self.assertEqual(joined, {"is_encrypted": False})
+        self.assertEqual(shared, {**joined, "room_type": None, "has_known_state": True})
+
+    def test_leave_after_the_server_left(self) -> None:
+        bob_leave = self._new(
+            EventTypes.Member, self.bob, {"membership": "leave"}, sender=self.bob
+        )
+        to_insert = {(EventTypes.Member, self.bob): bob_leave[0].event_id}
+        self._write("DELETE FROM current_state_events WHERE room_id = ?", self.room_id)
+        self.assertEqual(
+            self._compare([bob_leave], to_insert, no_longer_in_room=True),
+            (None, {}, {}, [(self.bob, self.bob, bob_leave[0].event_id, "leave")], []),
+        )
+        # Without state to work from, the server must have left.
+        self._both_fail([bob_leave], to_insert, "no current state")
+
+    def test_missing_membership_event(self) -> None:
+        self._both_fail(
+            [], {(EventTypes.Member, self.bob): "$unknown"}, "events not found"
+        )
+
+    def test_rejected_stored_state(self) -> None:
+        old_name = self._send_state(EventTypes.Name, {"name": "old"})
+        self._send_state(EventTypes.Name, {"name": "new"})
+        self._reject(old_name)
+        self._both_fail([], {(EventTypes.Name, ""): old_name}, "events not found")
+
+    def test_backfilled_bump_events(self) -> None:
+        # Only backfilled events, with negative stream orderings, can bump.
+        self._send("bump")
+
+        def negate(txn: LoggingTransaction) -> None:
+            # Other tables refer to the stream orderings. Skip their foreign
+            # key checks for this transaction.
+            txn.execute("SET LOCAL session_replication_role = replica")
+            txn.execute(
+                "UPDATE events SET stream_ordering = -stream_ordering"
+                " WHERE room_id = ? AND type = ANY(?)",
+                (self.room_id, list(SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES)),
+            )
+
+        self.get_success(self.store.db_pool.runInteraction("negate", negate))
+        self._write(
+            "DELETE FROM sliding_sync_joined_rooms WHERE room_id = ?", self.room_id
+        )
+        topic = self._new(EventTypes.Topic, "", {"topic": "chunk"})
+        bump, _, _, _, _ = self._compare(
+            [topic], {(EventTypes.Topic, ""): topic[0].event_id}
+        )
+        self.assertIsNone(bump)
+
+    def test_stored_tombstone(self) -> None:
+        self._send_state(EventTypes.Tombstone, {"replacement_room": "!next:test"})
+        self._write(
+            "DELETE FROM sliding_sync_joined_rooms WHERE room_id = ?", self.room_id
+        )
+        topic = self._new(EventTypes.Topic, "", {"topic": "chunk"})
+        _, joined, _, _, _ = self._compare(
+            [topic], {(EventTypes.Topic, ""): topic[0].event_id}
+        )
+        self.assertEqual(
+            joined, {"room_type": None, "tombstone_successor_room_id": "!next:test"}
+        )
+
+    def test_space_with_a_redacted_create_event(self) -> None:
+        # A redaction would drop the create event's `type` up to room
+        # version 10, but neither side serves a redacted create event.
+        self.room_id = self.helper.create_room_as(
+            self.alice,
+            room_version=RoomVersions.V10.identifier,
+            extra_content={"creation_content": {"type": "m.space"}},
+            tok=self.alice_tok,
+        )
+        self._write(
+            "DELETE FROM sliding_sync_joined_rooms WHERE room_id = ?", self.room_id
+        )
+        topic = self._new(EventTypes.Topic, "", {"topic": "chunk"})
+        to_insert = {(EventTypes.Topic, ""): topic[0].event_id}
+        _, joined, _, _, _ = self._compare([topic], to_insert)
+        self.assertEqual(joined, {"room_type": "m.space"})
+
+        # The client API refuses to redact a create event.
+        self.get_success(
+            inject_event(
+                self.hs,
+                room_id=self.room_id,
+                type=EventTypes.Redaction,
+                sender=self.alice,
+                redacts=self._state()[(EventTypes.Create, "")],
+                content={},
+            )
+        )
+        _, joined, _, _, _ = self._compare([topic], to_insert)
+        self.assertEqual(joined, {"room_type": "m.space"})

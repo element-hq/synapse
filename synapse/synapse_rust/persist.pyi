@@ -230,6 +230,26 @@ class PersistReaderForTest:
     ]:
         """`(new_forward_extremities, delta, new_state_dag_extremities,
         counts)`."""
+    def calculate_sliding_sync_table_changes(
+        self,
+        room_id: str,
+        server_name: str,
+        events: list[EventBase],
+        to_delete: list[tuple[str, str]],
+        to_insert: dict[tuple[str, str], str],
+        no_longer_in_room: bool,
+    ) -> tuple[
+        int | None,
+        dict[str, Any],
+        dict[str, Any],
+        list[tuple[str, str, str, str]],
+        list[str],
+    ]:
+        """`(bump_stamp_to_fully_insert, joined_room_updates,
+        membership_snapshot_shared_insert_values,
+        to_insert_membership_snapshots, to_delete_membership_snapshots)`,
+        each snapshot as `(user_id, sender, membership_event_id,
+        membership)`. The snapshots are sorted by user ID."""
 
 def persist_gil_stats() -> dict[str, tuple[int, float]]:
     """`{site: (calls, seconds held)}` for every time event persistence took

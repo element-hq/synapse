@@ -18,6 +18,7 @@
 //! This is being built up from the inside out (see
 //! `renders/event-persistence-rust-plan.md`). So far:
 //!
+//! - [`chain_cover`]: the chain cover index of a chunk's state events.
 //! - [`context`]: what persisting needs from an `EventContext`.
 //! - [`effects`]: the Python cache updates a Rust transaction asks for once
 //!   it commits.
@@ -25,6 +26,7 @@
 //! - [`metrics`]: counts for the Python metrics, flushed when scraped.
 //! - [`python`]: the [`python::Persister`] and test helpers.
 //! - [`reader`]: what persisting reads before its write transaction.
+//! - [`sliding_sync`]: what a chunk changes in the sliding sync tables.
 //! - [`state_delta`]: the room's new current state after a chunk.
 //!
 //! Every GIL hold in this tree goes through [`crate::gil::with_gil`] with a
@@ -39,6 +41,7 @@ pub mod extremities;
 pub mod metrics;
 pub mod python;
 pub mod reader;
+pub mod sliding_sync;
 pub mod state_delta;
 
 /// Called when registering modules with python.

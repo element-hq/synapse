@@ -51,6 +51,7 @@ use super::{
     extremities::{self, NewEvent},
     metrics::PersistCounts,
     python::persist_error_to_py,
+    sliding_sync,
     state_delta::{self, DeltaState, NativeStateResolver, StateAndExtremities},
 };
 use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
@@ -1341,6 +1342,107 @@ impl PyPersistReaderForTest {
             counts.to_py(py)?,
         ))
     }
+
+    /// The sliding sync step (`rust/src/persist/sliding_sync.rs`), as
+    /// `(bump_stamp_to_fully_insert, joined_room_updates,
+    /// membership_snapshot_shared_insert_values,
+    /// to_insert_membership_snapshots, to_delete_membership_snapshots)`.
+    /// Each snapshot is `(user_id, sender, membership_event_id,
+    /// membership)`.
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    fn calculate_sliding_sync_table_changes<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        server_name: String,
+        events: Vec<Py<Event>>,
+        to_delete: Vec<(String, String)>,
+        to_insert: HashMap<(String, String), String>,
+        no_longer_in_room: bool,
+    ) -> PyResult<(
+        Option<i64>,
+        Bound<'py, PyDict>,
+        Bound<'py, PyDict>,
+        Vec<(String, String, String, String)>,
+        Vec<String>,
+    )> {
+        let events: Vec<sliding_sync::SlidingSyncEvent> = events
+            .iter()
+            .filter_map(|event| sliding_sync::SlidingSyncEvent::new(event.bind(py).get()))
+            .collect();
+        let delta = DeltaState {
+            to_delete: to_delete
+                .iter()
+                .map(|(event_type, state_key)| StateKey::new(event_type, state_key))
+                .collect(),
+            to_insert: state_map(to_insert),
+            no_longer_in_room,
+        };
+        let changes = self.run(py, |reader| {
+            async move {
+                sliding_sync::calculate_sliding_sync_table_changes(
+                    &reader,
+                    &room_id,
+                    &server_name,
+                    &events,
+                    &delta,
+                )
+                .await
+            }
+            .boxed()
+        })?;
+        let shared =
+            state_values_to_py(py, &changes.membership_snapshot_shared_insert_values.state)?;
+        if let Some(has_known_state) = changes
+            .membership_snapshot_shared_insert_values
+            .has_known_state
+        {
+            shared.set_item("has_known_state", has_known_state)?;
+        }
+        Ok((
+            changes.joined_room_bump_stamp_to_fully_insert,
+            state_values_to_py(py, &changes.joined_room_updates)?,
+            shared,
+            changes
+                .to_insert_membership_snapshots
+                .iter()
+                .map(|info| {
+                    (
+                        info.user_id.to_string(),
+                        info.sender.to_string(),
+                        info.membership_event_id.to_string(),
+                        info.membership.to_string(),
+                    )
+                })
+                .collect(),
+            changes
+                .to_delete_membership_snapshots
+                .iter()
+                .map(|user_id| user_id.to_string())
+                .collect(),
+        ))
+    }
+}
+
+/// `SlidingSyncStateInsertValues` as a dict holding only the keys set.
+fn state_values_to_py<'py>(
+    py: Python<'py>,
+    values: &sliding_sync::SlidingSyncStateValues,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    if let Some(room_type) = &values.room_type {
+        dict.set_item("room_type", room_type.as_deref())?;
+    }
+    if let Some(is_encrypted) = values.is_encrypted {
+        dict.set_item("is_encrypted", is_encrypted)?;
+    }
+    if let Some(room_name) = &values.room_name {
+        dict.set_item("room_name", room_name.as_deref())?;
+    }
+    if let Some(successor) = &values.tombstone_successor_room_id {
+        dict.set_item("tombstone_successor_room_id", successor.as_deref())?;
+    }
+    Ok(dict)
 }
 
 /// A delta as Python's test reads it: `(to_delete, to_insert,
