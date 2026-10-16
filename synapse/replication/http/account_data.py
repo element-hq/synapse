@@ -49,7 +49,7 @@ class ReplicationAddUserAccountDataRestServlet(ReplicationEndpoint):
 
     NAME = "add_user_account_data"
     PATH_ARGS = ("user_id", "account_data_type")
-    CACHE = False
+    CACHE = True
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
