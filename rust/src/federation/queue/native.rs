@@ -22,10 +22,10 @@
 //! hear about delivered events. Catch-up and the sticky event backlog run
 //! here too, reading events through the shared event cache.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use pyo3::{exceptions::PyRuntimeError, intern, prelude::*};
+use pyo3::prelude::*;
 
 use super::{
     changes::StreamChanges, metrics::QueueMetrics, python::PyHooks, Completion, DestinationQueue,
@@ -33,12 +33,13 @@ use super::{
     StickyBatch, MAX_PDUS_PER_TRANSACTION, QUEUE_LOG,
 };
 use crate::{
-    database::postgres::pool::{ConnectionPool, PyConnectionPool},
+    database::postgres::pool::ConnectionPool,
     events::Event,
     gil::with_gil,
     storage::{
         events::RedactBehaviour,
         federation_store::FederationStore,
+        native_pool::NativePool,
         sync_store::{SyncReader, SyncStore},
     },
     visibility::{filter_events_for_server, ServerFilter, ServerFiltered},
@@ -66,6 +67,13 @@ pub struct Native {
 }
 
 impl Native {
+    /// The connection pool.
+    fn pool(&self) -> Result<ConnectionPool, LoopError> {
+        self.pool
+            .get()
+            .map_err(|err| LoopError::Other(err.to_string()))
+    }
+
     /// The positions of the to-device and device list streams. Takes the
     /// GIL, but not a trip to the reactor: the ID generators are read where
     /// they stand.
@@ -74,41 +82,6 @@ impl Native {
             self.stream_tokens.bind(py).call0()?.extract()
         })
         .map_err(|err: PyErr| LoopError::Other(format!("Failed to read the stream tokens: {err}")))
-    }
-}
-
-/// The native pool, as the Python `RustConnectionPool` holds it. That
-/// replaces its pool when it is closed and started again, so a closed pool
-/// is read again from Python.
-pub struct NativePool {
-    /// The Python `RustConnectionPool`.
-    python: Py<PyAny>,
-    cached: Mutex<Option<ConnectionPool>>,
-}
-
-impl NativePool {
-    pub fn new(python: Py<PyAny>) -> Self {
-        NativePool {
-            python,
-            cached: Mutex::new(None),
-        }
-    }
-
-    pub fn get(&self) -> Result<ConnectionPool, LoopError> {
-        let mut cached = self.cached.lock().expect("poisoned");
-        if let Some(pool) = cached.as_ref().filter(|pool| !pool.is_closed()) {
-            return Ok(pool.clone());
-        }
-        let pool = with_gil("queue_db_pool", |py| -> PyResult<ConnectionPool> {
-            let pool = self.python.bind(py).getattr(intern!(py, "_pool"))?;
-            if pool.is_none() {
-                return Err(PyRuntimeError::new_err("the database pool is closed"));
-            }
-            Ok(pool.cast::<PyConnectionPool>()?.get().pool.clone())
-        })
-        .map_err(|err| LoopError::Other(err.to_string()))?;
-        *cached = Some(pool.clone());
-        Ok(pool)
     }
 }
 
@@ -232,7 +205,7 @@ impl QueueHooks for NativeHooks {
         observer: &Observer,
     ) -> Result<(), LoopError> {
         let destination = self.destination.as_str();
-        let pool = self.native.pool.get()?;
+        let pool = self.native.pool()?;
         let store = &self.native.store;
         let reader = self.native.sync.reader(pool.clone());
 
@@ -378,7 +351,7 @@ impl QueueHooks for NativeHooks {
         }
 
         let (to_device_token, device_list_token) = self.native.stream_tokens()?;
-        let pool = self.native.pool.get()?;
+        let pool = self.native.pool()?;
         let store = &self.native.store;
 
         let (to_device, to_device_stream_id) = if to_device_changed {
@@ -442,7 +415,7 @@ impl QueueHooks for NativeHooks {
         observer: &Observer,
     ) -> Result<Option<StickyBatch>, LoopError> {
         let destination = self.destination.as_str();
-        let pool = self.native.pool.get()?;
+        let pool = self.native.pool()?;
         let Some((room_id, position, event_ids)) = self
             .native
             .store
@@ -538,7 +511,7 @@ impl QueueHooks for NativeHooks {
             || completion.device_list_stream_id.is_some()
             || completion.last_stream_ordering.is_some();
         if writes {
-            let pool = self.native.pool.get()?;
+            let pool = self.native.pool()?;
             let store = &self.native.store;
             if let Some(stream_id) = completion.to_device_stream_id {
                 store
@@ -570,7 +543,7 @@ impl QueueHooks for NativeHooks {
             return Ok(());
         };
         if let Some(NativeStickyPosition(position)) = position.downcast_ref() {
-            let pool = self.native.pool.get()?;
+            let pool = self.native.pool()?;
             return self
                 .native
                 .store

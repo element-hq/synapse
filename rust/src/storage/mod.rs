@@ -17,6 +17,7 @@ pub mod caches;
 pub mod db;
 pub mod events;
 pub mod federation_store;
+pub mod native_pool;
 pub mod pool_querier;
 pub mod python;
 pub mod store;

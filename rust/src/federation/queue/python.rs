@@ -38,7 +38,7 @@ use serde_json::Value;
 use super::{
     changes::StreamChanges,
     metrics::QueueMetrics,
-    native::{Native, NativeHooks, NativePool},
+    native::{Native, NativeHooks},
     Activity, Completion, DestinationQueue, DeviceEdus, DeviceEdusRequest, Edu, LoopError,
     Observer, PduBody, PresenceState, QueueConfig, QueueHooks, QueuedPdu, Receipt, SendOutcome,
     StickyBatch, StickyStreamPosition, TransactionSink,
@@ -59,6 +59,7 @@ use crate::{
     runtime::RustRuntime,
     storage::{
         federation_store::{FederationStore, FederationStoreConfig},
+        native_pool::NativePool,
         sync_store::{SyncStore, SyncStoreConfig},
     },
 };
@@ -132,7 +133,7 @@ impl RustDestinationQueues {
                 allow_device_name_lookup_over_federation,
                 server_name: server_name.clone(),
             }),
-            pool: NativePool::new(db_pool),
+            pool: NativePool::new(db_pool, "queue_db_pool"),
             stream_tokens,
             to_device: StreamChanges::new(to_device_since),
             device_lists: StreamChanges::new(device_lists_since),
