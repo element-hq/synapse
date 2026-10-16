@@ -28,26 +28,26 @@ one by Rust, in turn, so both see the same data and the same warm caches.
 Every request is timed on its own. The table gives the median of `REPS`:
 
 - wall: the whole request, servlet included.
-- reactor: CPU time on the reactor thread, less the time inside Rust calls.
-  The trial wrapper runs each Rust call's top-level future on the reactor
-  thread through `block_on`, where production runs it on a tokio worker. Any
-  Python that Rust calls back into counts as Rust's.
-- process: CPU time of the whole process, Rust's threads included.
+- reactor: CPU time on the reactor thread, less the time inside Rust calls,
+  plus the time in the Python methods Rust calls back into. Rust's direct
+  reads of Python objects under the GIL are not counted. The trial wrapper runs
+  each Rust call's top-level future on the reactor thread through `block_on`,
+  where production runs it on a tokio worker. Trial also runs Python's
+  database functions on the reactor thread. So this column is the time each
+  side holds the GIL, which is what competes with the reactor.
+- process: CPU time of the whole process, Rust's threads and the database
+  driver's included.
 - db: time in database queries, Python's and Rust's. Rust runs some queries
   side by side and adds up each one's time, so this can exceed wall.
 - queries: database queries, Python's and Rust's.
 - txns: database transactions. Rust counts only its explicit transactions,
   not single reads, so compare queries across the two sides.
 
-Trial runs Python's database calls on the reactor thread, which is not the
-case in production. Python's reactor CPU therefore includes its query time,
-and the `db` column shows how much of it that is.
-
 Set `SYNAPSE_BENCH_OUT` to a path to also append the tables there, and
 `SYNAPSE_BENCH_SCALE` to a fraction to make the accounts smaller for a quick
 check of the script itself. Set `SYNAPSE_BENCH_PROFILE` to a directory to get
 a cProfile dump of one more request per scenario and side, run after the
-timed ones.
+timed ones. The dump covers that request alone.
 """
 
 import cProfile
@@ -146,13 +146,38 @@ def _histogram_total(histogram: object, server_name: str, suffix: str) -> float:
     return total
 
 
+class _TimedPython:
+    """Wraps a Python object that Rust calls back into, and adds up the CPU
+    time of each method call on it."""
+
+    def __init__(self, wrapped: Any, calls: "_TimedRustCalls") -> None:
+        self._wrapped = wrapped
+        self._calls = calls
+
+    def __getattr__(self, name: str) -> Any:
+        value = getattr(self._wrapped, name)
+        if not callable(value):
+            return value
+
+        def timed(*args: Any, **kwargs: Any) -> Any:
+            start = time.thread_time()
+            try:
+                return value(*args, **kwargs)
+            finally:
+                self._calls.python_cpu += time.thread_time() - start
+
+        return timed
+
+
 class _TimedRustCalls(_BlockingRustCalls):
     """Blocking Rust calls that add up the reactor thread's CPU time inside
-    them."""
+    them, and inside that, the time in the Python objects they call back
+    into."""
 
     def __init__(self, handler: Any) -> None:
         super().__init__(handler)
         self.cpu = 0.0
+        self.python_cpu = 0.0
 
     def __getattr__(self, name: str) -> Any:
         call = super().__getattr__(name)
@@ -160,6 +185,10 @@ class _TimedRustCalls(_BlockingRustCalls):
             return call
 
         def timed(*args: Any, **kwargs: Any) -> Any:
+            if "events_stream_cache" in kwargs:
+                kwargs["events_stream_cache"] = _TimedPython(
+                    kwargs["events_stream_cache"], self
+                )
             start = time.thread_time()
             try:
                 return call(*args, **kwargs)
@@ -220,6 +249,7 @@ class SlidingSyncBenchmark(SlidingSyncBase):
         self.user2_tok = self.login(self.user2_id, "pass")
         self.conn_seq = 0
         self.lines: list[str] = []
+        self.profile: cProfile.Profile | None = None
 
     def _rust_requests(self) -> float:
         return rust_sliding_sync_requests_counter.labels(
@@ -261,14 +291,23 @@ class SlidingSyncBenchmark(SlidingSyncBase):
     ) -> tuple[Sample, str]:
         db, queries, txns = self._db_totals()
         rust_cpu = self.rust.cpu
+        python_cpu = self.rust.python_cpu
         wall = time.perf_counter()
         reactor = time.thread_time()
         process = time.process_time()
 
-        _, pos = self._sync(side, conn_id, body, since)
+        if self.profile is not None:
+            _, pos = self.profile.runcall(self._sync, side, conn_id, body, since)
+        else:
+            _, pos = self._sync(side, conn_id, body, since)
 
         wall = time.perf_counter() - wall
-        reactor = time.thread_time() - reactor - (self.rust.cpu - rust_cpu)
+        reactor = (
+            time.thread_time()
+            - reactor
+            - (self.rust.cpu - rust_cpu)
+            + (self.rust.python_cpu - python_cpu)
+        )
         process = time.process_time() - process
         db_after, queries_after, txns_after = self._db_totals()
         sample = Sample(
@@ -297,8 +336,11 @@ class SlidingSyncBenchmark(SlidingSyncBase):
         profile_dir = os.environ.get("SYNAPSE_BENCH_PROFILE")
         if profile_dir:
             for side in ("python", "rust"):
-                profile = cProfile.Profile()
-                profile.runcall(rep, side)
+                profile = self.profile = cProfile.Profile()
+                try:
+                    rep(side)
+                finally:
+                    self.profile = None
                 slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
                 profile.dump_stats(
                     os.path.join(
@@ -462,7 +504,11 @@ class SlidingSyncBenchmark(SlidingSyncBase):
             )
             wide = _list_body(499, timeline_limit=1, extensions=extensions)
             self._bench(
-                f"incremental, 500 rooms sent{suffix}",
+                f"incremental [0,19], 500 rooms sent before{suffix}",
+                self._incremental(wide, first),
+            )
+            self._bench(
+                f"incremental [0,499], nothing changed{suffix}",
                 self._incremental(wide, wide),
             )
         self._report("2000 rooms, one message each")
