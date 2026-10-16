@@ -1,0 +1,1 @@
+Encode the sliding sync rooms section in Rust as JSON bytes, without the GIL.

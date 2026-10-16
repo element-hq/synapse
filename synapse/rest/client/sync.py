@@ -21,7 +21,7 @@
 import itertools
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Literal, Mapping, Sequence
 
 import attr
 
@@ -52,7 +52,7 @@ from synapse.handlers.sync import (
     SyncConfig,
     SyncResult,
 )
-from synapse.http.server import HttpServer
+from synapse.http.server import HttpServer, respond_with_json_bytes
 from synapse.http.servlet import (
     RestServlet,
     parse_and_validate_json_object_from_request,
@@ -61,7 +61,13 @@ from synapse.http.servlet import (
     parse_string,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
+from synapse.logging.context import defer_to_thread
+from synapse.logging.opentracing import (
+    log_kv,
+    set_tag,
+    start_active_span,
+    trace_with_opname,
+)
 from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.synapse_rust.sliding_sync import (
     RoomResult as RustSlidingSyncRoomResult,
@@ -79,7 +85,7 @@ from synapse.types.handlers.sliding_sync import AnySlidingSyncRoomResult
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.cancellation import cancellable
-from synapse.util.json import json_decoder
+from synapse.util.json import json_decoder, json_encoder
 
 from ._base import client_patterns, set_timeline_upper_limit
 
@@ -972,8 +978,9 @@ class SlidingSyncRestServlet(RestServlet):
         self.filtering = hs.get_filtering()
         self.sliding_sync_handler = hs.get_sliding_sync_handler()
         self.event_serializer = hs.get_event_client_serializer()
+        self.reactor = hs.get_reactor()
 
-    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict] | None:
         requester = await self.auth.get_user_by_req_experimental_feature(
             request, allow_guest=True, feature=ExperimentalFeature.MSC3575
         )
@@ -1060,30 +1067,34 @@ class SlidingSyncRestServlet(RestServlet):
             logger.info("Client has disconnected; not serializing response.")
             return 200, {}
 
-        response_content = await self.encode_response(requester, sliding_sync_results)
+        response_bytes = await self.encode_response(requester, sliding_sync_results)
 
-        return 200, response_content
+        respond_with_json_bytes(request, 200, response_bytes, send_cors=True)
+        return None
 
     @trace_with_opname("sliding_sync.encode_response")
     async def encode_response(
         self,
         requester: Requester,
         sliding_sync_result: SlidingSyncResult,
-    ) -> JsonDict:
-        response: JsonDict = defaultdict(dict)
+    ) -> bytes:
+        """The response body. The JSON encoding runs on a thread, as
+        `respond_with_json` does."""
+        response: JsonDict = {}
 
         response["pos"] = await sliding_sync_result.next_pos.to_string(self.store)
         serialized_lists = self.encode_lists(sliding_sync_result.lists)
         if serialized_lists:
             response["lists"] = serialized_lists
-        response["rooms"] = await self.encode_rooms(
-            requester, sliding_sync_result.rooms
-        )
+        rooms = await self.encode_rooms(requester, sliding_sync_result.rooms)
         response["extensions"] = await self.encode_extensions(
             requester, sliding_sync_result.extensions, sliding_sync_result.rooms
         )
 
-        return response
+        with start_active_span("encode_json_response"):
+            return await defer_to_thread(
+                self.reactor, _encode_sliding_sync_response, response, rooms
+            )
 
     @trace_with_opname("sliding_sync.encode_lists")
     def encode_lists(
@@ -1112,7 +1123,7 @@ class SlidingSyncRestServlet(RestServlet):
         self,
         requester: Requester,
         rooms: Mapping[str, AnySlidingSyncRoomResult],
-    ) -> JsonDict:
+    ) -> "_EncodedRooms":
         time_now = self.clock.time_msec()
 
         serialize_options = await self.event_serializer.create_config(
@@ -1126,7 +1137,7 @@ class SlidingSyncRestServlet(RestServlet):
             for room in rooms.values()
             if isinstance(room, RustSlidingSyncRoomResult)
         ]
-        encoded_in_rust: dict[str, JsonDict] = {}
+        encode_in_rust = None
         if rust_rooms:
             # Module callbacks take Python events, so only then do the rooms'
             # events become Python objects.
@@ -1135,20 +1146,18 @@ class SlidingSyncRestServlet(RestServlet):
                 unsigned_additions = await self.event_serializer.unsigned_additions(
                     event for room in rust_rooms for event in room.events_to_serialize()
                 )
-            encoded = encode_rust_sliding_sync_rooms(
-                rust_rooms,
-                time_now,
-                serialize_options,
-                unsigned_additions=unsigned_additions,
-            )
-            encoded_in_rust = {
-                room.room_id: entry for room, entry in zip(rust_rooms, encoded)
-            }
+
+            def encode_in_rust() -> bytes:
+                return encode_rust_sliding_sync_rooms(
+                    rust_rooms,
+                    time_now,
+                    serialize_options,
+                    unsigned_additions=unsigned_additions,
+                )
 
         serialized_rooms: dict[str, JsonDict] = {}
         for room_id, room_result in rooms.items():
             if isinstance(room_result, RustSlidingSyncRoomResult):
-                serialized_rooms[room_id] = encoded_in_rust[room_id]
                 continue
 
             serialized_rooms[room_id] = {
@@ -1255,7 +1264,7 @@ class SlidingSyncRestServlet(RestServlet):
                 # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1117629919
                 serialized_rooms[room_id]["invite_state"] = room_result.stripped_state
 
-        return serialized_rooms
+        return _EncodedRooms(python=serialized_rooms, encode_in_rust=encode_in_rust)
 
     @trace_with_opname("sliding_sync.encode_extensions")
     async def encode_extensions(
@@ -1468,6 +1477,33 @@ def _serialise_thread_subscriptions(
         out["prev_batch"] = thread_subscriptions.prev_batch.to_string()
 
     return out
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _EncodedRooms:
+    """The rooms section of a sliding sync response."""
+
+    python: JsonDict
+    """The rooms Python computed, encoded as dicts, by room ID."""
+    encode_in_rust: Callable[[], bytes] | None
+    """Encodes the rooms Rust computed as JSON object members, or `None` when
+    there are none."""
+
+
+def _encode_sliding_sync_response(response: JsonDict, rooms: _EncodedRooms) -> bytes:
+    """Encodes `response` with `rooms` as its rooms section. Rust's rooms are
+    spliced in as bytes, so they never become Python objects."""
+    rooms_json = json_encoder.encode(rooms.python).encode("utf-8")
+    if rooms.encode_in_rust is not None:
+        rust_json = rooms.encode_in_rust()
+        if rooms.python:
+            rooms_json = b"{" + rust_json + b"," + rooms_json[1:]
+        else:
+            rooms_json = b"{" + rust_json + b"}"
+
+    # `response` always holds `pos`, so its object is never empty.
+    response_json = json_encoder.encode(response).encode("utf-8")
+    return response_json[:-1] + b',"rooms":' + rooms_json + b"}"
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

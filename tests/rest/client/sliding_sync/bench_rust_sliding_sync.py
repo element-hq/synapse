@@ -57,6 +57,7 @@ import statistics
 import time
 from typing import Any, Callable
 from unittest import SkipTest
+from unittest.mock import patch
 
 import attr
 
@@ -239,6 +240,23 @@ class SlidingSyncBenchmark(SlidingSyncBase):
         if rust is None:
             raise SkipTest("needs the native Rust Postgres driver")
         self.rust = _TimedRustCalls(rust)
+        # The servlet's Rust encoder releases the GIL while it encodes, so
+        # count it with the blocking calls. That leaves out its argument
+        # conversion, which holds the GIL.
+        encode_rooms = sync.encode_rust_sliding_sync_rooms
+
+        def timed_encode_rooms(*args: Any, **kwargs: Any) -> bytes:
+            start = time.thread_time()
+            try:
+                return encode_rooms(*args, **kwargs)
+            finally:
+                self.rust.cpu += time.thread_time() - start
+
+        patcher = patch.object(
+            sync, "encode_rust_sliding_sync_rooms", timed_encode_rooms
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.handler = hs.get_sliding_sync_handler()
         self.handler._rust_sliding_sync_strict = True
         self.server_name = hs.hostname

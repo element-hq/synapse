@@ -16,9 +16,11 @@
 //! events never become Python objects.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pythonize::pythonize;
+use pyo3::types::PyBytes;
 use serde_json::{json, Map, Value};
 
 use crate::events::json_object::JsonObject;
@@ -165,8 +167,11 @@ pub fn encode_room(
     Ok(Value::Object(room))
 }
 
-/// `encode_rooms` for `rooms`, in order. `unsigned_additions` are the
-/// module callbacks' additions to the rooms' events, by event ID.
+/// `encode_rooms` for `rooms`, as JSON object members: `"room_id":{...}`
+/// joined by commas, with no braces around them, so the servlet can splice
+/// them into the rooms object next to rooms Python encoded.
+/// `unsigned_additions` are the module callbacks' additions to the rooms'
+/// events, by event ID. The encoding runs without the GIL.
 #[pyfunction]
 #[pyo3(signature = (rooms, time_now_ms, config, *, unsigned_additions = None))]
 pub fn encode_rooms<'py>(
@@ -175,13 +180,33 @@ pub fn encode_rooms<'py>(
     time_now_ms: i64,
     config: &SerializeEventConfig,
     unsigned_additions: Option<HashMap<String, JsonObject>>,
-) -> PyResult<Vec<Bound<'py, PyAny>>> {
+) -> PyResult<Bound<'py, PyBytes>> {
     let unsigned_additions = unsigned_additions.unwrap_or_default();
-    rooms
-        .iter()
-        .map(|room| {
-            let encoded = encode_room(&room.get().entry, time_now_ms, config, &unsigned_additions)?;
-            Ok(pythonize(py, &encoded)?)
-        })
-        .collect()
+    let entries: Vec<Arc<RoomEntry>> = rooms.iter().map(|room| room.get().entry.clone()).collect();
+    let encoded =
+        py.detach(|| encode_rooms_json(&entries, time_now_ms, config, &unsigned_additions))?;
+    Ok(PyBytes::new(py, &encoded))
+}
+
+/// The members of the rooms object for `entries`.
+fn encode_rooms_json(
+    entries: &[Arc<RoomEntry>],
+    time_now_ms: i64,
+    config: &SerializeEventConfig,
+    unsigned_additions: &HashMap<String, JsonObject>,
+) -> PyResult<Vec<u8>> {
+    let mut out = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        if index > 0 {
+            out.push(b',');
+        }
+        let room = encode_room(entry, time_now_ms, config, unsigned_additions)?;
+        serde_json::to_writer(&mut out, &entry.room_id)
+            .and_then(|()| {
+                out.push(b':');
+                serde_json::to_writer(&mut out, &room)
+            })
+            .map_err(|err| PyValueError::new_err(format!("encoding room: {err}")))?;
+    }
+    Ok(out)
 }

@@ -265,8 +265,10 @@ def encode_rooms(
     config: SerializeEventConfig,
     *,
     unsigned_additions: Mapping[str, JsonDict] | None = None,
-) -> list[JsonDict]:
-    """The servlet's `encode_rooms` for rooms computed in Rust, in order."""
+) -> bytes:
+    """The servlet's `encode_rooms` for rooms computed in Rust, as JSON object
+    members (`"room_id":{...}` joined by commas, no braces). Encodes without
+    the GIL."""
 
 class SlidingSyncStats:
     """What the Rust implementation did for one request."""
