@@ -240,3 +240,11 @@ def room_config_to_persist_for_test(
     ignore_timeline_bound: bool,
     limited: bool | None,
 ) -> tuple[int, dict[str, list[str]]] | None: ...
+def find_relevant_room_ids_for_test(
+    requested_lists: list[str] | None,
+    requested_room_ids: list[str] | None,
+    actual_lists: list[tuple[str, list[list[str]]]],
+    actual_room_ids: set[str],
+) -> list[str]:
+    """Each list as its operations' room IDs. Raises `AssertionError` as
+    Python does."""

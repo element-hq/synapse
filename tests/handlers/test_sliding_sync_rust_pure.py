@@ -35,6 +35,7 @@ from synapse.handlers.sliding_sync import (
     _stripped_state,
     _timeline_bounds,
 )
+from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.handlers.sliding_sync.room_lists import (
     SlidingSyncRoomLists,
     _sync_list_ops,
@@ -53,11 +54,13 @@ from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoom,
     HaveSentRoomFlag,
+    OperationType,
     PerConnectionState,
     RoomLazyMembershipChanges,
     RoomStatusMap,
     RoomSyncConfig,
     SlidingSyncConfig,
+    SlidingSyncResult,
     StateValues,
 )
 from synapse.types.state import StateFilter
@@ -1210,3 +1213,69 @@ class RoomHelpersTestCase(unittest.TestCase):
                 (python.timeline_limit, _as_sets(python.required_state_map)),
                 context,
             )
+
+
+class RelevantRoomIdsTestCase(unittest.TestCase):
+    """`rust/src/sliding_sync/extensions/relevant.rs`"""
+
+    def test_against_python(self) -> None:
+        rng = random.Random(18)
+        names = ["a", "b", "c", "*"]
+        raised = 0
+        for _ in range(2000):
+            actual_lists = [
+                (
+                    name,
+                    [
+                        rng.sample(_ROOMS, rng.randint(0, 3))
+                        for _ in range(rng.choice([1, 1, 1, 1, 0, 2]))
+                    ],
+                )
+                for name in rng.sample(names[:3], rng.randint(0, 3))
+            ]
+            actual_room_ids = set(rng.sample(_ROOMS, rng.randint(0, 3)))
+            requested_lists = rng.choice(
+                [None, rng.sample(names + ["missing"], rng.randint(0, 3))]
+            )
+            requested_room_ids = rng.choice(
+                [None, rng.sample([*_ROOMS[:4], "*"], rng.randint(0, 3))]
+            )
+
+            try:
+                python: list[str] | None = sorted(
+                    SlidingSyncExtensionHandler.find_relevant_room_ids_for_extension(
+                        cast(SlidingSyncExtensionHandler, None),
+                        requested_lists,
+                        requested_room_ids,
+                        {
+                            name: SlidingSyncResult.SlidingWindowList(
+                                count=0,
+                                ops=[
+                                    SlidingSyncResult.SlidingWindowList.Operation(
+                                        op=OperationType.SYNC,
+                                        range=(0, 0),
+                                        room_ids=room_ids,
+                                    )
+                                    for room_ids in ops
+                                ],
+                            )
+                            for name, ops in actual_lists
+                        },
+                        actual_room_ids,
+                    )
+                )
+            except AssertionError:
+                python = None
+                raised += 1
+            try:
+                result: list[str] | None = rust.find_relevant_room_ids_for_test(
+                    requested_lists, requested_room_ids, actual_lists, actual_room_ids
+                )
+            except AssertionError:
+                result = None
+            self.assertEqual(
+                result,
+                python,
+                (requested_lists, requested_room_ids, actual_lists, actual_room_ids),
+            )
+        self.assertGreater(raised, 0)

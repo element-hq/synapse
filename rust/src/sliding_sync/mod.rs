@@ -38,6 +38,7 @@ use crate::storage::sync_store::{SyncDbStats, SyncStore};
 
 pub mod config;
 pub mod connection;
+pub mod extensions;
 pub mod request;
 pub mod required_state;
 pub mod room;
@@ -168,6 +169,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<request::SlidingSyncRequest>()?;
     config::register_test_functions(&child_module)?;
     connection::register_test_functions(&child_module)?;
+    extensions::register_test_functions(&child_module)?;
     required_state::register_test_functions(&child_module)?;
     room::register_test_functions(&child_module)?;
     room_lists::register_test_functions(&child_module)?;
