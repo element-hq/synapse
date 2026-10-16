@@ -47,7 +47,7 @@ use pyo3::{
 };
 
 use crate::caches::{python::PyCacheKey, Cache};
-use crate::database::postgres::pool::PyConnectionPool;
+use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
 use crate::deferred::create_deferred;
 use crate::event_auth::AuthFailure;
 use crate::events::Event;
@@ -351,9 +351,9 @@ impl StateResStats {
 }
 
 /// What a resolution's deferred resolves to: the state and the stats.
-struct ResolveOutput {
-    state: StateMap,
-    stats: StateResStats,
+pub(crate) struct ResolveOutput {
+    pub(crate) state: StateMap,
+    pub(crate) stats: StateResStats,
 }
 
 impl<'py> IntoPyObject<'py> for ResolveOutput {
@@ -381,15 +381,9 @@ enum StateGroupsResult {
     State(StateMap),
 }
 
-/// Port of `_make_state_cache_entry`: how `new_state` relates to the input
-/// groups, in the order they were given, as the Python breaks ties by its
-/// dict's order.
-fn make_state_cache_entry(
-    new_state: StateMap,
-    groups: &[(i64, Arc<StateMap>)],
-) -> StateGroupsResult {
-    // First look for exact matches, by the set of event IDs as the Python
-    // does.
+/// The first of the input groups whose state is `new_state`, compared by
+/// the set of event IDs as `_make_state_cache_entry` does.
+pub(crate) fn matching_group(new_state: &StateMap, groups: &[(i64, Arc<StateMap>)]) -> Option<i64> {
     let new_event_ids: HashSet<&Arc<str>> = new_state.values().collect();
     for (group, state) in groups {
         if new_event_ids.len() != state.len() {
@@ -397,8 +391,21 @@ fn make_state_cache_entry(
         }
         let old_event_ids: HashSet<&Arc<str>> = state.values().collect();
         if new_event_ids == old_event_ids {
-            return StateGroupsResult::Group(*group);
+            return Some(*group);
         }
+    }
+    None
+}
+
+/// Port of `_make_state_cache_entry`: how `new_state` relates to the input
+/// groups, in the order they were given, as the Python breaks ties by its
+/// dict's order.
+fn make_state_cache_entry(
+    new_state: StateMap,
+    groups: &[(i64, Arc<StateMap>)],
+) -> StateGroupsResult {
+    if let Some(group) = matching_group(&new_state, groups) {
+        return StateGroupsResult::Group(group);
     }
 
     // Failing that, the closest match. A delta cannot remove keys, so a
@@ -522,6 +529,11 @@ impl StateResolutionHandler {
 
     pub(crate) fn caches(&self) -> Arc<StoreCaches> {
         Arc::clone(&self.store.caches)
+    }
+
+    /// The conflict cache, which the Rust event persister shares.
+    pub(crate) fn conflict_cache(&self) -> Arc<ConflictCache> {
+        Arc::clone(&self.cache)
     }
 
     /// Convert the state sets under the GIL and start a resolution: either
@@ -653,65 +665,93 @@ impl StateResolutionHandler {
         let caches = self.caches();
 
         Ok(Started::Pending(Box::pin(async move {
-            let start = Instant::now();
-            let store = PostgresStateResStore::begin(&pool, handle, Some(caches))
-                .await
-                .map_err(resolve_error_to_py)?;
-            let mut connection_time = start.elapsed();
-            let prepared = v2::prepare(
-                &store,
+            resolve_on_pool(
+                &pool,
+                handle,
+                caches,
+                &cache,
                 &room_id,
                 room_version,
                 &state_sets,
                 (unconflicted, conflicted),
                 events,
-                Some(&cache),
+                stats,
             )
             .await
-            .map_err(resolve_error_to_py)?;
-
-            // The rest does no I/O, so give the connection back first.
-            let finish_start = Instant::now();
-            let db = store.finish().await.map_err(resolve_error_to_py)?;
-            connection_time += finish_start.elapsed();
-            let resolution = match prepared {
-                v2::Prepared::Done(resolution) => resolution,
-                v2::Prepared::Pending(pending) => pending
-                    .run(Some(&cache))
-                    .await
-                    .map_err(resolve_error_to_py)?,
-            };
-
-            let core = &resolution.stats;
-            let stats = StateResStats {
-                total_time: start.elapsed().as_secs_f64(),
-                convert_in_time: stats.convert_in_time,
-                state_map_cache_hits: stats.state_map_cache_hits,
-                db_time: db.db_time.as_secs_f64(),
-                parse_time: db.parse_time.as_secs_f64(),
-                cpu_time: (core.sort_time + core.auth_time + core.mainline_time).as_secs_f64(),
-                sort_time: core.sort_time.as_secs_f64(),
-                auth_time: core.auth_time.as_secs_f64(),
-                mainline_time: core.mainline_time.as_secs_f64(),
-                auth_chain_time: core.auth_chain_time.as_secs_f64(),
-                load_events_time: core.load_events_time.as_secs_f64(),
-                connection_time: connection_time.as_secs_f64(),
-                db_queries: db.queries,
-                db_rows: db.rows,
-                db_events: db.events_fetched,
-                event_cache_hits: db.events_cached,
-                chain_position_cache_hits: db.chain_positions_cached,
-                chain_link_cache_hits: db.chain_links_cached,
-                convert_out_time: 0.0,
-                conflicted_events: core.conflicted_events,
-                cache_hit: core.cache_hit,
-            };
-            Ok(ResolveOutput {
-                state: resolution.merged(),
-                stats,
-            })
+            .map_err(resolve_error_to_py)
         })))
     }
+}
+
+/// Resolve converted state sets with conflicts over the native pool: the
+/// reads in one read-only transaction on a pooled connection, which goes
+/// back to the pool before the algorithm runs. `stats` holds what the
+/// caller recorded before. For callers in Rust, and behind
+/// [`StateResolutionHandler`]'s deferreds.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn resolve_on_pool(
+    pool: &ConnectionPool,
+    handle: tokio::runtime::Handle,
+    caches: Arc<StoreCaches>,
+    cache: &ConflictCache,
+    room_id: &str,
+    room_version: &'static RoomVersion,
+    state_sets: &[Arc<StateMap>],
+    separated: (StateMap, v2::Conflicted),
+    events: EventMap,
+    stats: StateResStats,
+) -> anyhow::Result<ResolveOutput> {
+    let start = Instant::now();
+    let store = PostgresStateResStore::begin(pool, handle, Some(caches)).await?;
+    let mut connection_time = start.elapsed();
+    let prepared = v2::prepare(
+        &store,
+        room_id,
+        room_version,
+        state_sets,
+        separated,
+        events,
+        Some(cache),
+    )
+    .await?;
+
+    // The rest does no I/O, so give the connection back first.
+    let finish_start = Instant::now();
+    let db = store.finish().await?;
+    connection_time += finish_start.elapsed();
+    let resolution = match prepared {
+        v2::Prepared::Done(resolution) => resolution,
+        v2::Prepared::Pending(pending) => pending.run(Some(cache)).await?,
+    };
+
+    let core = &resolution.stats;
+    let stats = StateResStats {
+        total_time: start.elapsed().as_secs_f64(),
+        convert_in_time: stats.convert_in_time,
+        state_map_cache_hits: stats.state_map_cache_hits,
+        db_time: db.db_time.as_secs_f64(),
+        parse_time: db.parse_time.as_secs_f64(),
+        cpu_time: (core.sort_time + core.auth_time + core.mainline_time).as_secs_f64(),
+        sort_time: core.sort_time.as_secs_f64(),
+        auth_time: core.auth_time.as_secs_f64(),
+        mainline_time: core.mainline_time.as_secs_f64(),
+        auth_chain_time: core.auth_chain_time.as_secs_f64(),
+        load_events_time: core.load_events_time.as_secs_f64(),
+        connection_time: connection_time.as_secs_f64(),
+        db_queries: db.queries,
+        db_rows: db.rows,
+        db_events: db.events_fetched,
+        event_cache_hits: db.events_cached,
+        chain_position_cache_hits: db.chain_positions_cached,
+        chain_link_cache_hits: db.chain_links_cached,
+        convert_out_time: 0.0,
+        conflicted_events: core.conflicted_events,
+        cache_hit: core.cache_hit,
+    };
+    Ok(ResolveOutput {
+        state: resolution.merged(),
+        stats,
+    })
 }
 
 /// State sets converted from Python, with the interner that built them (so

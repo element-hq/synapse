@@ -169,6 +169,61 @@ class PersistReaderForTest:
         events_and_contexts: list[tuple[EventBase, EventContext]],
         now_ms: int,
     ) -> tuple[set[str], dict[str, Any]]: ...
+    def get_new_state_after_events(
+        self,
+        room_id: str,
+        server_name: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        old_latest_event_ids: list[str],
+        new_latest_event_ids: list[str],
+        should_prune: bool,
+        now_ms: int,
+    ) -> tuple[
+        dict[tuple[str, str], str] | None,
+        dict[tuple[str, str], str] | None,
+        set[str],
+        dict[str, Any],
+    ]:
+        """`(current_state, delta_ids, new_latest_event_ids, counts)`."""
+    def calculate_state_delta(
+        self, room_id: str, current_state: dict[tuple[str, str], str]
+    ) -> tuple[list[tuple[str, str]], dict[tuple[str, str], str]]:
+        """`(to_delete, to_insert)`."""
+    def is_server_still_joined(
+        self,
+        room_id: str,
+        server_name: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        to_delete: list[tuple[str, str]],
+        to_insert: dict[tuple[str, str], str],
+    ) -> bool: ...
+    def calculate_new_forward_extremities_and_state_delta(
+        self,
+        room_id: str,
+        server_name: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        now_ms: int,
+    ) -> tuple[
+        set[str] | None,
+        tuple[list[tuple[str, str]], dict[tuple[str, str], str], bool] | None,
+        dict[str, Any],
+    ]:
+        """`(new_forward_extremities, delta, counts)`, the delta as
+        `(to_delete, to_insert, no_longer_in_room)`."""
+    def process_state_dag_forward_extremities_and_state_delta(
+        self,
+        room_id: str,
+        server_name: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        now_ms: int,
+    ) -> tuple[
+        set[str] | None,
+        tuple[list[tuple[str, str]], dict[tuple[str, str], str], bool] | None,
+        set[str] | None,
+        dict[str, Any],
+    ]:
+        """`(new_forward_extremities, delta, new_state_dag_extremities,
+        counts)`."""
 
 def persist_gil_stats() -> dict[str, tuple[int, float]]:
     """`{site: (calls, seconds held)}` for every time event persistence took

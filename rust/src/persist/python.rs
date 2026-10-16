@@ -29,6 +29,7 @@ use crate::{
     events::Event,
     homeserver::HomeServer,
     runtime::RustRuntime,
+    state::ConflictCache,
     storage::{
         native_pool::NativePool,
         store::Store,
@@ -64,6 +65,8 @@ pub(super) struct PersisterInner {
     pub server_name: String,
     pub instance_name: String,
     pub metrics: PersistMetrics,
+    /// The Rust state resolution handler's conflict cache.
+    pub conflict_cache: Arc<ConflictCache>,
 }
 
 impl Persister {
@@ -76,6 +79,7 @@ impl Persister {
         connection_pool: Py<PyAny>,
         runtime: RustRuntime,
         store: Arc<Store>,
+        conflict_cache: Arc<ConflictCache>,
     ) -> PyResult<Option<Persister>> {
         let instance_name = homeserver.instance_name(py)?;
         if !homeserver.event_writers(py)?.contains(&instance_name) {
@@ -112,6 +116,7 @@ impl Persister {
                 server_name: homeserver.hostname(py)?,
                 instance_name,
                 metrics: PersistMetrics::default(),
+                conflict_cache,
             }),
         }))
     }
@@ -178,7 +183,7 @@ pub fn persist_context_for_test<'py>(
             .transpose()?,
     )?;
     let deltas = PyDict::new(py);
-    for (key, delta) in &context.state_group_deltas {
+    for (key, delta) in context.state_group_deltas.iter() {
         deltas.set_item(key, state_map_to_py(py, delta)?)?;
     }
     dict.set_item("state_group_deltas", deltas)?;

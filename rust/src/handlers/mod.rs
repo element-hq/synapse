@@ -81,6 +81,11 @@ impl RustHandlers {
         let (state_resolution, sync, persister) =
             if connection_pool.is_instance(&rust_connection_pool_class)? {
                 let connection_pool = connection_pool.unbind();
+                let state_resolution = StateResolutionHandler::new(
+                    connection_pool.clone_ref(py),
+                    runtime.clone(),
+                    Arc::clone(&store),
+                );
                 let persister = if config.experimental.rust_event_persistence != "off" {
                     Persister::for_homeserver(
                         py,
@@ -88,6 +93,7 @@ impl RustHandlers {
                         connection_pool.clone_ref(py),
                         runtime.clone(),
                         Arc::clone(&store),
+                        state_resolution.conflict_cache(),
                     )?
                     .map(|persister| Py::new(py, persister))
                     .transpose()?
@@ -95,14 +101,7 @@ impl RustHandlers {
                     None
                 };
                 (
-                    Some(Py::new(
-                        py,
-                        StateResolutionHandler::new(
-                            connection_pool.clone_ref(py),
-                            runtime.clone(),
-                            Arc::clone(&store),
-                        ),
-                    )?),
+                    Some(Py::new(py, state_resolution)?),
                     Some(Py::new(
                         py,
                         SyncHandler::new(connection_pool, runtime.clone(), store, &config),

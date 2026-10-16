@@ -25,6 +25,7 @@
 //! - [`metrics`]: counts for the Python metrics, flushed when scraped.
 //! - [`python`]: the [`python::Persister`] and test helpers.
 //! - [`reader`]: what persisting reads before its write transaction.
+//! - [`state_delta`]: the room's new current state after a chunk.
 //!
 //! Every GIL hold in this tree goes through [`crate::gil::with_gil`] with a
 //! site named `persist_*`, so that tests can pin the count per site.
@@ -37,6 +38,7 @@ pub mod extremities;
 pub mod metrics;
 pub mod python;
 pub mod reader;
+pub mod state_delta;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {

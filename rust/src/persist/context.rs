@@ -42,7 +42,8 @@ pub struct PersistContext {
     pub state_delta_due_to_event: Option<StateMap>,
     /// Deltas between pairs of state groups `(prev, current)` known when the
     /// context was built, which can save a state resolution.
-    pub state_group_deltas: HashMap<(i64, i64), StateMap>,
+    /// Shared, since every event of a chunk carries a copy.
+    pub state_group_deltas: Arc<HashMap<(i64, i64), StateMap>>,
     /// Whether the state at the event is partial.
     pub partial_state: bool,
     /// Whether an application service sent the event. Only used to label
@@ -79,7 +80,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PersistContext {
                 .getattr(intern!(py, "state_group_before_event"))?
                 .extract()?,
             state_delta_due_to_event,
-            state_group_deltas,
+            state_group_deltas: Arc::new(state_group_deltas),
             partial_state: context.getattr(intern!(py, "partial_state"))?.extract()?,
             app_service: !context.getattr(intern!(py, "app_service"))?.is_none(),
         })

@@ -31,53 +31,110 @@ use std::{
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use log::{error, info};
+use serde_json::Value;
 
 use super::{context::PersistContext, metrics::PersistCounts, reader::PersistReader};
-use crate::{events::Event, storage::events::RedactBehaviour};
+use crate::{events::Event, state::StateMap, storage::events::RedactBehaviour};
 
 /// `EventTypes.Dummy`.
 const DUMMY: &str = "org.matrix.dummy_event";
+/// `EventTypes.Create`.
+const CREATE: &str = "m.room.create";
 
-/// What the extremity calculations read from an event being persisted.
+/// What the pre-transaction computation reads from an event being
+/// persisted and its context.
 #[derive(Clone, Debug, Default)]
 pub struct NewEvent {
     pub event_id: Arc<str>,
+    pub event_type: Arc<str>,
+    /// The state key, if it is a state event. In an MSC4242 room, that is
+    /// what puts it in the state DAG.
+    pub state_key: Option<Arc<str>>,
     pub sender: Arc<str>,
     pub depth: i64,
     pub prev_event_ids: Vec<Arc<str>>,
     /// The MSC4242 `prev_state_events`, if the event's format has them.
     pub prev_state_events: Option<Vec<Arc<str>>>,
-    /// Whether the event has a state key, which in an MSC4242 room is
-    /// what puts it in the state DAG.
-    pub is_state: bool,
+    /// `content.membership`, if it is a string.
+    pub membership: Option<Arc<str>>,
+    /// For a create event, `content.room_version` as
+    /// `_get_new_state_after_events` reads it: `"1"` if it is missing, and
+    /// `None` if it is falsy in Python's terms, which sends the reader to
+    /// the database. A value that is not a string fails to parse as a
+    /// room version, as Python's `KNOWN_ROOM_VERSIONS` lookup fails for it.
+    pub create_room_version: Option<Arc<str>>,
     pub outlier: bool,
     pub soft_failed: bool,
     pub rejected: bool,
+    /// The context's state group, the state after the event. `None` for an
+    /// outlier.
+    pub state_group: Option<i64>,
+    /// The context's `state_group_deltas`.
+    pub state_group_deltas: Arc<HashMap<(i64, i64), StateMap>>,
 }
 
 impl NewEvent {
     pub fn new(event: &Event, context: &PersistContext) -> anyhow::Result<Self> {
         let metadata = event.internal_metadata();
+        let content = event.content();
+        let membership = match content.get_field("membership") {
+            Some(Value::String(membership)) => Some(Arc::from(membership.as_str())),
+            _ => None,
+        };
+        let create_room_version = if event.type_() == CREATE && event.state_key() == Some("") {
+            match content.get_field("room_version") {
+                None => Some(Arc::from("1")),
+                Some(Value::String(version)) if version.is_empty() => None,
+                Some(Value::String(version)) => Some(Arc::from(version.as_str())),
+                Some(value) if is_falsy(value) => None,
+                // Prefixed so that a number such as `10` is not read as
+                // the room version `"10"`.
+                Some(value) => Some(Arc::from(format!("not a string: {value}"))),
+            }
+        } else {
+            None
+        };
         Ok(NewEvent {
             event_id: Arc::from(event.event_id()),
+            event_type: Arc::from(event.type_()),
+            state_key: event.state_key().map(Arc::from),
             sender: Arc::from(event.sender()),
             depth: event.depth(),
             prev_event_ids: event.prev_event_ids().into_iter().map(Arc::from).collect(),
             prev_state_events: event
                 .prev_state_event_ids()
                 .map(|ids| ids.iter().map(|id| Arc::from(id.as_str())).collect()),
-            is_state: event.state_key().is_some(),
+            membership,
+            create_room_version,
             outlier: metadata.is_outlier()?,
             soft_failed: metadata.soft_failed()?,
             rejected: context.is_rejected(),
+            state_group: context.state_group,
+            state_group_deltas: Arc::clone(&context.state_group_deltas),
         })
     }
 
-    /// The `prev_state_events`, which an event in the state DAG must have.
+    pub fn is_state(&self) -> bool {
+        self.state_key.is_some()
+    }
+
+    /// The prev state events, which an event in the state DAG must have.
     fn prev_state(&self) -> anyhow::Result<&[Arc<str>]> {
         self.prev_state_events
             .as_deref()
             .ok_or_else(|| anyhow!("{} has no prev_state_events", self.event_id))
+    }
+}
+
+/// Whether Python would read a JSON value as false.
+fn is_falsy(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Bool(b) => !b,
+        Value::Number(n) => n.as_f64() == Some(0.0),
+        Value::String(s) => s.is_empty(),
+        Value::Array(a) => a.is_empty(),
+        Value::Object(o) => o.is_empty(),
     }
 }
 
@@ -245,7 +302,7 @@ pub async fn calculate_new_state_dag_extremities(
     events: &[NewEvent],
     counts: &mut PersistCounts,
 ) -> anyhow::Result<HashSet<Arc<str>>> {
-    let state_events: Vec<&NewEvent> = events.iter().filter(|event| event.is_state).collect();
+    let state_events: Vec<&NewEvent> = events.iter().filter(|event| event.is_state()).collect();
     if state_events.is_empty() {
         return Ok(existing.clone());
     }
@@ -434,7 +491,7 @@ fn domain_from_id(id: &str) -> anyhow::Result<&str> {
 }
 
 /// `HomeServer.is_mine_id`: false for a malformed ID.
-fn is_mine_id(id: &str, server_name: &str) -> bool {
+pub(super) fn is_mine_id(id: &str, server_name: &str) -> bool {
     id.split_once(':')
         .is_some_and(|(_, domain)| domain == server_name)
 }
@@ -556,7 +613,7 @@ mod tests {
 
     fn state_event(id: &str, prev_state: &[&str]) -> NewEvent {
         NewEvent {
-            is_state: true,
+            state_key: Some(Arc::from("")),
             prev_state_events: Some(prev_state.iter().map(|p| Arc::from(*p)).collect()),
             ..new_event(id, &[])
         }

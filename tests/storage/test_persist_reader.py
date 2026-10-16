@@ -25,7 +25,7 @@ from unittest import SkipTest
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes
+from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
@@ -35,8 +35,10 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main.event_federation import EventFederationStore
+from synapse.storage.databases.main.events import DeltaState
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.persist import PersistReaderForTest
+from synapse.types import StateMap, create_requester
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.util.clock import Clock
 
@@ -955,3 +957,440 @@ class ExtremitiesTestCase(PersistReaderTestBase):
             ),
             {keep, being_persisted[0].event_id},
         )
+
+
+_Delta = tuple[set[tuple[str, str]], dict[tuple[str, str], str], bool]
+
+
+def _python_delta(delta: DeltaState | None) -> _Delta | None:
+    if delta is None:
+        return None
+    return (set(delta.to_delete), dict(delta.to_insert), delta.no_longer_in_room)
+
+
+def _rust_delta(
+    delta: tuple[list[tuple[str, str]], dict[tuple[str, str], str], bool] | None,
+) -> _Delta | None:
+    if delta is None:
+        return None
+    to_delete, to_insert, no_longer_in_room = delta
+    return (set(to_delete), to_insert, no_longer_in_room)
+
+
+class StateDeltaTestCase(PersistReaderTestBase):
+    """The state delta in `rust/src/persist/state_delta.rs` against the
+    controller's Python methods, over the same database and the same new
+    events, which are built with real contexts but not persisted."""
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config["experimental_features"]["msc4242_enabled"] = True
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        persistence = hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.persistence = persistence
+
+    def _create(
+        self,
+        event_type: str,
+        content: dict[str, Any],
+        *,
+        state_key: str | None = None,
+        sender: str | None = None,
+        prev_event_ids: list[str] | None = None,
+        room_id: str | None = None,
+    ) -> tuple[EventBase, EventContext]:
+        """An event as the event creation handler builds it, with its state
+        group stored but the event not persisted."""
+        event_dict: dict[str, Any] = {
+            "type": event_type,
+            "room_id": room_id or self.room_id,
+            "sender": sender or self.alice,
+            "content": content,
+        }
+        if state_key is not None:
+            event_dict["state_key"] = state_key
+        event, unpersisted = self.get_success(
+            self.hs.get_event_creation_handler().create_event(
+                create_requester(sender or self.alice),
+                event_dict,
+                prev_event_ids=prev_event_ids,
+            )
+        )
+        context = self.get_success(unpersisted.persist(event))
+        return event, context
+
+    def _topic(
+        self, topic: str, prev_event_ids: list[str] | None = None
+    ) -> tuple[EventBase, EventContext]:
+        return self._create(
+            EventTypes.Topic,
+            {"topic": topic},
+            state_key="",
+            prev_event_ids=prev_event_ids,
+        )
+
+    def _leave(
+        self, user: str, prev_event_ids: list[str] | None = None
+    ) -> tuple[EventBase, EventContext]:
+        return self._create(
+            EventTypes.Member,
+            {"membership": Membership.LEAVE},
+            state_key=user,
+            sender=user,
+            prev_event_ids=prev_event_ids,
+        )
+
+    def _persist(self, event_and_context: tuple[EventBase, EventContext]) -> str:
+        event, context = event_and_context
+        self.get_success(self.persistence.persist_event(event, context))
+        return event.event_id
+
+    def _latest(self) -> set[str]:
+        return set(
+            self.get_success(self.store.get_latest_event_ids_in_room(self.room_id))
+        )
+
+    def _new_state(
+        self,
+        events: list[tuple[EventBase, EventContext]],
+        old: set[str],
+        new: set[str],
+    ) -> tuple[StateMap[str] | None, StateMap[str] | None, set[str], dict[str, Any]]:
+        current_state, delta_ids, new_latest = self.get_success(
+            self.persistence._get_new_state_after_events(
+                self.room_id, events, old, set(new)
+            )
+        )
+        rust_state, rust_delta, rust_latest, counts = (
+            self.rust.get_new_state_after_events(
+                self.room_id,
+                self.hs.hostname,
+                events,
+                list(old),
+                list(new),
+                True,
+                self.clock.time_msec(),
+            )
+        )
+        self.assertEqual(
+            rust_state, None if current_state is None else dict(current_state)
+        )
+        self.assertEqual(rust_delta, None if delta_ids is None else dict(delta_ids))
+        self.assertEqual(rust_latest, new_latest)
+        return rust_state, rust_delta, rust_latest, counts
+
+    def test_get_new_state_after_events(self) -> None:
+        latest = self._latest()
+
+        # A message: the state groups do not change.
+        message = self._create(EventTypes.Message, {"msgtype": "m.text", "body": "x"})
+        current_state, delta, _, _ = self._new_state(
+            [message], latest, {message[0].event_id}
+        )
+        self.assertIsNone(current_state)
+        self.assertIsNone(delta)
+
+        # A state event: its context knows the delta.
+        topic = self._topic("one")
+        current_state, delta, _, _ = self._new_state(
+            [topic], latest, {topic[0].event_id}
+        )
+        self.assertIsNone(current_state)
+        self.assertEqual(delta, {(EventTypes.Topic, ""): topic[0].event_id})
+
+        # Without the delta, the new group's state.
+        topic[1].state_group_deltas = {}
+        current_state, delta, _, counts = self._new_state(
+            [topic], latest, {topic[0].event_id}
+        )
+        assert current_state is not None
+        self.assertIsNone(delta)
+        self.assertEqual(current_state[(EventTypes.Topic, "")], topic[0].event_id)
+        self.assertEqual(counts["state_resolutions"], 0)
+
+    def test_resolution_of_a_fork(self) -> None:
+        (parent,) = self._latest()
+        persisted = self._persist(self._topic("persisted", [parent]))
+        fork = self._topic("fork", [parent])
+        current_state, delta, latest, counts = self._new_state(
+            [fork], {persisted}, {persisted, fork[0].event_id}
+        )
+        assert current_state is not None
+        self.assertIsNone(delta)
+        self.assertIn(
+            current_state[(EventTypes.Topic, "")], {persisted, fork[0].event_id}
+        )
+        self.assertEqual(latest, {persisted, fork[0].event_id})
+        self.assertEqual(counts["state_resolutions"], 1)
+
+    def _pending_deletions(self, groups: list[int]) -> dict[int, tuple[int, int]]:
+        rows = self.get_success(
+            self.hs.get_datastores().state_deletion.db_pool.simple_select_many_batch(
+                table="state_groups_pending_deletion",
+                column="state_group",
+                iterable=groups,
+                retcols=("state_group", "sequence_number", "insertion_ts"),
+            )
+        )
+        return {group: (sequence, ts) for group, sequence, ts in rows}
+
+    def test_resolution_bumps_pending_deletions(self) -> None:
+        (parent,) = self._latest()
+        persisted_topic = self._topic("persisted", [parent])
+        persisted = self._persist(persisted_topic)
+        fork = self._topic("fork", [parent])
+        persisted_group = persisted_topic[1].state_group
+        fork_group = fork[1].state_group
+        assert persisted_group is not None and fork_group is not None
+        groups = [persisted_group, fork_group]
+
+        self.get_success(
+            self.hs.get_datastores().state_deletion.mark_state_groups_as_pending_deletion(
+                groups
+            )
+        )
+        before = self._pending_deletions(groups)
+        self.assertEqual(before.keys(), set(groups))
+
+        # Only Rust runs, so the bump is its own.
+        self.reactor.advance(60)
+        self.rust.get_new_state_after_events(
+            self.room_id,
+            self.hs.hostname,
+            [fork],
+            [persisted],
+            [persisted, fork[0].event_id],
+            True,
+            self.clock.time_msec(),
+        )
+        after = self._pending_deletions(groups)
+        for group in groups:
+            self.assertGreater(after[group][0], before[group][0])
+            self.assertEqual(after[group][1], self.clock.time_msec())
+
+    def test_resolution_of_a_deleted_group(self) -> None:
+        (parent,) = self._latest()
+        persisted = self._persist(self._topic("persisted", [parent]))
+        fork = self._topic("fork", [parent])
+        fork[1]._state_group = 1_000_000_000
+        new = {persisted, fork[0].event_id}
+
+        failure = self.get_failure(
+            self.persistence._get_new_state_after_events(
+                self.room_id, [fork], {persisted}, set(new)
+            ),
+            Exception,
+        )
+        self.assertIn("deleted", str(failure.value))
+        with self.assertRaisesRegex(Exception, "State groups have been deleted"):
+            self.rust.get_new_state_after_events(
+                self.room_id,
+                self.hs.hostname,
+                [fork],
+                [persisted],
+                list(new),
+                True,
+                self.clock.time_msec(),
+            )
+
+    def test_calculate_state_delta(self) -> None:
+        current = dict(
+            self.get_success(self.store.get_partial_current_state_ids(self.room_id))
+        )
+        new_state = dict(current)
+        del new_state[(EventTypes.JoinRules, "")]
+        new_state[(EventTypes.Name, "")] = "$changed"
+        new_state[(EventTypes.Topic, "")] = "$added"
+
+        expected = self.get_success(
+            self.persistence._calculate_state_delta(self.room_id, new_state)
+        )
+        to_delete, to_insert = self.rust.calculate_state_delta(self.room_id, new_state)
+        self.assertEqual(set(to_delete), set(expected.to_delete))
+        self.assertEqual(to_insert, expected.to_insert)
+        self.assertEqual(set(to_delete), {(EventTypes.JoinRules, "")})
+        self.assertEqual(
+            to_insert,
+            {(EventTypes.Name, ""): "$changed", (EventTypes.Topic, ""): "$added"},
+        )
+
+    def _still_joined(
+        self,
+        events: list[tuple[EventBase, EventContext]],
+        to_delete: list[tuple[str, str]],
+        to_insert: dict[tuple[str, str], str],
+    ) -> bool:
+        expected = self.get_success(
+            self.persistence._is_server_still_joined(
+                self.room_id, events, DeltaState(to_delete, to_insert)
+            )
+        )
+        result = self.rust.is_server_still_joined(
+            self.room_id, self.hs.hostname, events, to_delete, to_insert
+        )
+        self.assertEqual(result, expected)
+        return result
+
+    def test_is_server_still_joined(self) -> None:
+        alice_key = (EventTypes.Member, self.alice)
+        bob_key = (EventTypes.Member, self.bob)
+        alice_leave = self._leave(self.alice)
+        bob_leave = self._leave(self.bob)
+
+        # No local membership changes.
+        self.assertTrue(
+            self._still_joined(
+                [], [(EventTypes.Member, "@x:remote")], {(EventTypes.Topic, ""): "$t"}
+            )
+        )
+        # Alice leaves, Bob is still joined.
+        self.assertTrue(
+            self._still_joined([alice_leave], [], {alice_key: alice_leave[0].event_id})
+        )
+        # Both leave, or one leaves and the other's membership goes.
+        self.assertFalse(
+            self._still_joined(
+                [alice_leave, bob_leave],
+                [],
+                {
+                    alice_key: alice_leave[0].event_id,
+                    bob_key: bob_leave[0].event_id,
+                },
+            )
+        )
+        self.assertFalse(
+            self._still_joined(
+                [alice_leave], [bob_key], {alice_key: alice_leave[0].event_id}
+            )
+        )
+        # A join in the database, which is Alice's current membership.
+        alice_join = self.get_success(
+            self.store.get_partial_current_state_ids(self.room_id)
+        )[alice_key]
+        self.assertTrue(
+            self._still_joined([alice_leave], [bob_key], {alice_key: alice_join})
+        )
+
+    def test_still_joined_by_a_join_in_the_chunk(self) -> None:
+        alice_key = (EventTypes.Member, self.alice)
+        bob_key = (EventTypes.Member, self.bob)
+        # Alice changes her display name, a join. Bob's membership goes, so
+        # only the join in the chunk keeps the server in the room.
+        rejoin = self._create(
+            EventTypes.Member,
+            {"membership": Membership.JOIN, "displayname": "Alice"},
+            state_key=self.alice,
+        )
+        self.assertTrue(
+            self._still_joined([rejoin], [bob_key], {alice_key: rejoin[0].event_id})
+        )
+        # Without the event in the chunk, the server reads the database,
+        # where the join is not stored.
+        self.assertFalse(
+            self._still_joined([], [bob_key], {alice_key: rejoin[0].event_id})
+        )
+
+    def _orchestrate(
+        self, events: list[tuple[EventBase, EventContext]]
+    ) -> tuple[set[str] | None, _Delta | None, dict[str, Any]]:
+        forward, delta = self.get_success(
+            self.persistence._calculate_new_forward_extremities_and_state_delta(
+                self.room_id, events
+            )
+        )
+        rust_forward, rust_delta, counts = (
+            self.rust.calculate_new_forward_extremities_and_state_delta(
+                self.room_id, self.hs.hostname, events, self.clock.time_msec()
+            )
+        )
+        self.assertEqual(rust_forward, forward)
+        self.assertEqual(_rust_delta(rust_delta), _python_delta(delta))
+        return rust_forward, _rust_delta(rust_delta), counts
+
+    def test_calculate_new_forward_extremities_and_state_delta(self) -> None:
+        # A message only moves the extremity.
+        message = self._create(EventTypes.Message, {"msgtype": "m.text", "body": "x"})
+        forward, delta, counts = self._orchestrate([message])
+        self.assertEqual(forward, {message[0].event_id})
+        self.assertIsNone(delta)
+        self.assertEqual(counts["state_delta"], 0)
+
+        # A state event, whose delta the context knows.
+        topic = self._topic("one")
+        forward, delta, counts = self._orchestrate([topic])
+        self.assertEqual(
+            delta, (set(), {(EventTypes.Topic, ""): topic[0].event_id}, False)
+        )
+        self.assertEqual(counts["state_delta"], 1)
+        self.assertEqual(counts["state_delta_single_event"], 1)
+        self.assertEqual(counts["state_delta_reuse_delta"], 1)
+
+        # The last local user leaves, so the server leaves the room.
+        self._persist(topic)
+        self._persist(self._leave(self.alice))
+        bob_leave = self._leave(self.bob)
+        forward, delta, counts = self._orchestrate([bob_leave])
+        self.assertEqual(
+            delta,
+            (set(), {(EventTypes.Member, self.bob): bob_leave[0].event_id}, True),
+        )
+
+    def test_orchestration_resolves_a_fork(self) -> None:
+        (parent,) = self._latest()
+        persisted = self._persist(self._topic("persisted", [parent]))
+        fork = self._topic("fork", [parent])
+        forward, delta, counts = self._orchestrate([fork])
+        self.assertEqual(forward, {persisted, fork[0].event_id})
+        assert delta is not None
+        self.assertEqual(counts["state_resolutions"], 1)
+        self.assertEqual(counts["state_delta"], 1)
+        self.assertEqual(counts["state_delta_single_event"], 0)
+
+    def test_state_dag_orchestration(self) -> None:
+        room_id = self.helper.create_room_as(
+            self.alice,
+            room_version=RoomVersions.MSC4242v12.identifier,
+            tok=self.alice_tok,
+        )
+
+        def compare(
+            events: list[tuple[EventBase, EventContext]],
+        ) -> tuple[set[str] | None, _Delta | None, set[str] | None, dict[str, Any]]:
+            forward, delta, state_dag = self.get_success(
+                self.persistence._process_state_dag_forward_extremities_and_state_delta(
+                    room_id,
+                    events,  # type: ignore[arg-type]
+                )
+            )
+            rust_forward, rust_delta, rust_state_dag, counts = (
+                self.rust.process_state_dag_forward_extremities_and_state_delta(
+                    room_id, self.hs.hostname, events, self.clock.time_msec()
+                )
+            )
+            self.assertEqual(rust_forward, forward)
+            self.assertEqual(_rust_delta(rust_delta), _python_delta(delta))
+            self.assertEqual(rust_state_dag, state_dag)
+            return rust_forward, _rust_delta(rust_delta), rust_state_dag, counts
+
+        # A message moves only the room DAG.
+        message = self._create(
+            EventTypes.Message, {"msgtype": "m.text", "body": "x"}, room_id=room_id
+        )
+        forward, delta, state_dag, _ = compare([message])
+        self.assertEqual(forward, {message[0].event_id})
+        self.assertIsNone(delta)
+
+        # A state event moves both, and the state.
+        name = self._create(
+            EventTypes.Name, {"name": "dag"}, state_key="", room_id=room_id
+        )
+        forward, delta, state_dag, counts = compare([name])
+        self.assertEqual(state_dag, {name[0].event_id})
+        self.assertEqual(
+            delta, (set(), {(EventTypes.Name, ""): name[0].event_id}, False)
+        )
+        self.assertEqual(counts["state_dag_forward_extremities"], {1: 1})

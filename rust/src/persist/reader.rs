@@ -50,13 +50,17 @@ use super::{
     extremities::{self, NewEvent},
     metrics::PersistCounts,
     python::persist_error_to_py,
+    state_delta::{self, DeltaState, NativeStateResolver, StateAndExtremities},
 };
 use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
 use crate::events::Event;
+use crate::state::{ConflictCache, EventMap, StateKey, StateMap, StateResEvent};
+use crate::storage::caches::StoreCaches;
 use crate::storage::events::Querier;
 use crate::storage::sync_store::{
     PersistedEventPosition, SyncReader, SyncStore, SELECT_MANY_BATCH_SIZE,
 };
+use crate::types::state_filter::state_map_to_py;
 
 /// How many events `_get_events_which_are_prevs` and
 /// `_get_prevs_before_rejected` handle per transaction.
@@ -692,6 +696,8 @@ pub struct PyPersistReaderForTest {
     store: Arc<SyncStore>,
     pool: ConnectionPool,
     handle: Handle,
+    caches: Arc<StoreCaches>,
+    conflict_cache: Arc<ConflictCache>,
 }
 
 impl PyPersistReaderForTest {
@@ -707,6 +713,62 @@ impl PyPersistReaderForTest {
         })
         .map_err(persist_error_to_py)
     }
+
+    /// Run one of the two orchestrating steps.
+    fn run_orchestration(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        server_name: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        now_ms: i64,
+        state_dag: bool,
+    ) -> PyResult<(StateAndExtremities, PersistCounts)> {
+        let (events, event_map) = chunk(py, &events_and_contexts)?;
+        let resolver = self.resolver();
+        self.run(py, |reader| {
+            async move {
+                let mut counts = PersistCounts::default();
+                let result = if state_dag {
+                    state_delta::process_state_dag_forward_extremities_and_state_delta(
+                        &reader,
+                        &resolver,
+                        &room_id,
+                        &server_name,
+                        &events,
+                        &event_map,
+                        now_ms,
+                        &mut counts,
+                    )
+                    .await?
+                } else {
+                    state_delta::calculate_new_forward_extremities_and_state_delta(
+                        &reader,
+                        &resolver,
+                        &room_id,
+                        &server_name,
+                        &events,
+                        &event_map,
+                        now_ms,
+                        &mut counts,
+                    )
+                    .await?
+                };
+                Ok((result, counts))
+            }
+            .boxed()
+        })
+    }
+
+    /// A state resolver over the same pool.
+    fn resolver(&self) -> NativeStateResolver {
+        NativeStateResolver {
+            pool: self.pool.clone(),
+            handle: self.handle.clone(),
+            caches: Arc::clone(&self.caches),
+            conflict_cache: Arc::clone(&self.conflict_cache),
+        }
+    }
 }
 
 #[pymethods]
@@ -718,6 +780,8 @@ impl PyPersistReaderForTest {
             store: Arc::clone(&persister.inner.sync),
             pool: pool.pool.clone(),
             handle: pool.handle.clone(),
+            caches: Arc::clone(&persister.inner.store.caches),
+            conflict_cache: Arc::clone(&persister.inner.conflict_cache),
         }
     }
 
@@ -1076,6 +1140,218 @@ impl PyPersistReaderForTest {
         })?;
         Ok((strings(result), counts.to_py(py)?))
     }
+
+    // The state delta over the reader and the native state resolver, each
+    // returning its result and what it counted.
+
+    /// `(current_state, delta_ids, new_latest_event_ids, counts)`.
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    fn get_new_state_after_events<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        server_name: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        old_latest_event_ids: Vec<String>,
+        new_latest_event_ids: Vec<String>,
+        should_prune: bool,
+        now_ms: i64,
+    ) -> PyResult<(
+        Option<Bound<'py, PyDict>>,
+        Option<Bound<'py, PyDict>>,
+        HashSet<String>,
+        Bound<'py, PyDict>,
+    )> {
+        let (events, event_map) = chunk(py, &events_and_contexts)?;
+        let old: HashSet<Arc<str>> = arcs(old_latest_event_ids).into_iter().collect();
+        let new: HashSet<Arc<str>> = arcs(new_latest_event_ids).into_iter().collect();
+        let resolver = self.resolver();
+        let (result, counts) = self.run(py, |reader| {
+            async move {
+                let mut counts = PersistCounts::default();
+                let result = state_delta::get_new_state_after_events(
+                    &reader,
+                    &resolver,
+                    &room_id,
+                    &server_name,
+                    &events,
+                    &event_map,
+                    &old,
+                    new,
+                    should_prune,
+                    now_ms,
+                    &mut counts,
+                )
+                .await?;
+                Ok((result, counts))
+            }
+            .boxed()
+        })?;
+        Ok((
+            result
+                .current_state
+                .map(|state| state_map_to_py(py, &state))
+                .transpose()?,
+            result
+                .delta_ids
+                .map(|delta| state_map_to_py(py, &delta))
+                .transpose()?,
+            strings(result.new_latest_event_ids),
+            counts.to_py(py)?,
+        ))
+    }
+
+    /// `(to_delete, to_insert)`.
+    #[allow(clippy::type_complexity)]
+    fn calculate_state_delta<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        current_state: HashMap<(String, String), String>,
+    ) -> PyResult<(Vec<(String, String)>, Bound<'py, PyDict>)> {
+        let current_state = state_map(current_state);
+        let delta = self.run(py, |reader| {
+            async move {
+                    state_delta::calculate_state_delta(&reader, &room_id, &current_state).await
+                }
+                .boxed()
+        })?;
+        let (to_delete, to_insert, _) = delta_to_py(py, &delta)?;
+        Ok((to_delete, to_insert))
+    }
+
+    fn is_server_still_joined(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        server_name: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        to_delete: Vec<(String, String)>,
+        to_insert: HashMap<(String, String), String>,
+    ) -> PyResult<bool> {
+        let (events, _) = chunk(py, &events_and_contexts)?;
+        let delta = DeltaState {
+            to_delete: to_delete
+                .iter()
+                .map(|(event_type, state_key)| StateKey::new(event_type, state_key))
+                .collect(),
+            to_insert: state_map(to_insert),
+            no_longer_in_room: false,
+        };
+        self.run(py, |reader| {
+            async move {
+                state_delta::is_server_still_joined(
+                    &reader,
+                    &room_id,
+                    &server_name,
+                    &events,
+                    &delta,
+                )
+                .await
+            }
+            .boxed()
+        })
+    }
+
+    /// `(new_forward_extremities, delta, counts)`, the delta as
+    /// `(to_delete, to_insert, no_longer_in_room)`.
+    #[allow(clippy::type_complexity)]
+    fn calculate_new_forward_extremities_and_state_delta<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        server_name: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        now_ms: i64,
+    ) -> PyResult<(
+        Option<HashSet<String>>,
+        Option<PyDelta<'py>>,
+        Bound<'py, PyDict>,
+    )> {
+        let (result, counts) =
+            self.run_orchestration(py, room_id, server_name, events_and_contexts, now_ms, false)?;
+        Ok((
+            result.new_forward_extremities.map(strings),
+            result
+                .state_delta
+                .map(|delta| delta_to_py(py, &delta))
+                .transpose()?,
+            counts.to_py(py)?,
+        ))
+    }
+
+    /// `(new_forward_extremities, delta, new_state_dag_extremities, counts)`,
+    /// the delta as `(to_delete, to_insert, no_longer_in_room)`.
+    #[allow(clippy::type_complexity)]
+    fn process_state_dag_forward_extremities_and_state_delta<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        server_name: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        now_ms: i64,
+    ) -> PyResult<(
+        Option<HashSet<String>>,
+        Option<PyDelta<'py>>,
+        Option<HashSet<String>>,
+        Bound<'py, PyDict>,
+    )> {
+        let (result, counts) =
+            self.run_orchestration(py, room_id, server_name, events_and_contexts, now_ms, true)?;
+        Ok((
+            result.new_forward_extremities.map(strings),
+            result
+                .state_delta
+                .map(|delta| delta_to_py(py, &delta))
+                .transpose()?,
+            result.new_state_dag_extremities.map(strings),
+            counts.to_py(py)?,
+        ))
+    }
+}
+
+/// A delta as Python's test reads it: `(to_delete, to_insert,
+/// no_longer_in_room)`.
+type PyDelta<'py> = (Vec<(String, String)>, Bound<'py, PyDict>, bool);
+
+fn delta_to_py<'py>(py: Python<'py>, delta: &DeltaState) -> PyResult<PyDelta<'py>> {
+    Ok((
+        delta
+            .to_delete
+            .iter()
+            .map(|key| (key.0.to_string(), key.1.to_string()))
+            .collect(),
+        state_map_to_py(py, &delta.to_insert)?,
+        delta.no_longer_in_room,
+    ))
+}
+
+fn state_map(map: HashMap<(String, String), String>) -> StateMap {
+    map.into_iter()
+        .map(|((event_type, state_key), event_id)| {
+            (StateKey::new(&event_type, &state_key), Arc::from(event_id))
+        })
+        .collect()
+}
+
+/// The chunk's events as the computation reads them, and as state
+/// resolution's map of events in flight.
+fn chunk(
+    py: Python<'_>,
+    events_and_contexts: &[(Py<Event>, PersistContext)],
+) -> PyResult<(Vec<NewEvent>, EventMap)> {
+    let events = new_events(py, events_and_contexts)?;
+    let event_map = events_and_contexts
+        .iter()
+        .map(|(event, _)| {
+            let event = event.bind(py).get();
+            (
+                Arc::from(event.event_id()),
+                StateResEvent::new(event.shallow_clone()),
+            )
+        })
+        .collect();
+    Ok((events, event_map))
 }
 
 fn new_events(
