@@ -1051,7 +1051,8 @@ class OidcProvider:
         claims = await self._verify_jwt(
             alg_values=alg_values,
             token=id_token,
-            claims_cls=CodeIDToken,
+            # Use a custom verification class that allows int `sub` fields.
+            claims_cls=_CodeIDTokenWithIntegerSubject,
             claims_options=claims_options,
             claims_params=claims_params,
         )
@@ -1519,6 +1520,34 @@ class OidcProvider:
         request.setHeader(b"Cache-Control", b"no-cache, no-store")
         request.setHeader(b"Pragma", b"no-cache")
         finish_request(request)
+
+
+class _CodeIDTokenWithIntegerSubject(CodeIDToken):  # type: ignore[misc]
+    """Preserve compatibility with providers that issue integer `sub` fields."""
+
+    def validate(self, now: int | None = None, leeway: int = 0) -> None:
+        """"""
+        subject = self.get("sub")
+
+        if type(subject) is not int:
+            # Validate the typical way.
+            super().validate(now, leeway)
+            return
+
+        # Convert the `sub` field to a string.
+        #
+        # OIDC requires a string subject, but Authlib before 1.7 accepted integers.
+        # The original token's signature has already been verified by jwt.decode.
+        self["sub"] = str(subject)
+
+        try:
+            # Try validating with a str `sub`.
+            # If validation still fails, the exception will still bubble up.
+            super().validate(now, leeway)
+        finally:
+            # Preserve the original value for custom mapping providers and anything
+            # else.
+            self["sub"] = subject
 
 
 class LogoutToken(JWTClaims):  # type: ignore[misc]
