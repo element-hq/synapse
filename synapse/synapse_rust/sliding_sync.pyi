@@ -182,3 +182,33 @@ def filter_rooms_for_test(
     sent_before: set[str],
 ) -> list[str]:
     """`filters` is JSON. Raises `NotImplementedError` as Python does."""
+
+def sort_rooms_for_test(
+    rooms: list[_PyRoom],
+    earliest_cache_position: int,
+    cache: dict[str, int],
+    to_stream: int,
+    limit: int | None,
+    recheck: dict[str, int | None],
+    joined_positions: dict[str, int],
+) -> list[str]:
+    """Raises `KeyError` as Python does."""
+
+def sync_list_ops_for_test(
+    ranges: list[tuple[int, int]],
+    sorted_room_ids: list[str],
+    room_sync_config: tuple[int, dict[str, list[str]]],
+    relevant_room_map: list[tuple[str, tuple[int, dict[str, list[str]]]]],
+) -> tuple[
+    list[tuple[tuple[int, int], list[str]]],
+    list[tuple[str, tuple[int, dict[str, list[str]]]]],
+]: ...
+def rooms_to_send_for_test(
+    relevant_room_map: list[tuple[str, tuple[int, dict[str, list[str]]]]],
+    room_configs: dict[str, tuple[int, dict[str, list[str]]]],
+    statuses: dict[str, tuple[str, int | None]],
+    last_used_ts: int | None,
+    rooms_that_have_updates: set[str],
+    now_ms: int,
+) -> list[str]:
+    """Raises `ValueError` where Python raises `SlidingSyncUnknownPosition`."""

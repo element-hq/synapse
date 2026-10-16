@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from typing import AbstractSet, Any, Coroutine, Mapping, TypeVar, cast
 
 from synapse.api.constants import EventTypes, Membership
+from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.events import EventBase
 from synapse.handlers.sliding_sync import (
     MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER,
@@ -31,11 +32,17 @@ from synapse.handlers.sliding_sync import (
 )
 from synapse.handlers.sliding_sync.room_lists import (
     SlidingSyncRoomLists,
+    _sync_list_ops,
     filter_membership_for_sync,
 )
 from synapse.storage.roommember import RoomsForUserSlidingSync
 from synapse.synapse_rust import sliding_sync as rust
-from synapse.types import PersistedEventPosition, RoomStreamToken, StreamToken
+from synapse.types import (
+    PersistedEventPosition,
+    RoomStreamToken,
+    StrCollection,
+    StreamToken,
+)
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoom,
     HaveSentRoomFlag,
@@ -760,3 +767,228 @@ class RoomListFilterTestCase(unittest.TestCase):
                 result = None
             self.assertEqual(result, python, (rooms, filters))
         self.assertGreater(not_implemented, 0)
+
+
+class _FakeStreamCache:
+    def __init__(self, earliest: int, positions: dict[str, int]) -> None:
+        self.earliest = earliest
+        self.positions = positions
+
+    def get_earliest_known_position(self) -> int:
+        return self.earliest
+
+    def get_max_pos_of_last_change(self, room_id: str) -> int | None:
+        return self.positions.get(room_id)
+
+
+class _FakeSortStore:
+    def __init__(
+        self,
+        stream_cache: _FakeStreamCache,
+        recheck: dict[str, int | None],
+        joined_positions: dict[str, int],
+    ) -> None:
+        self._events_stream_cache = stream_cache
+        self.recheck = recheck
+        self.joined_positions = joined_positions
+
+    async def get_last_event_pos_in_room_before_stream_ordering(
+        self, room_id: str, end_token: RoomStreamToken
+    ) -> tuple[str, PersistedEventPosition] | None:
+        stream = self.recheck[room_id]
+        if stream is None:
+            return None
+        return ("$event", PersistedEventPosition("master", stream))
+
+    async def bulk_get_last_event_pos_in_room_before_stream_ordering(
+        self, room_ids: list[str], end_token: RoomStreamToken
+    ) -> dict[str, int]:
+        return {
+            room_id: self.joined_positions[room_id]
+            for room_id in room_ids
+            if room_id in self.joined_positions
+        }
+
+
+class _FakeUpdatesStore:
+    def __init__(self, rooms_with_updates: set[str]) -> None:
+        self.rooms_with_updates = rooms_with_updates
+
+    async def get_rooms_that_have_updates_since_sliding_sync_table(
+        self, room_ids: StrCollection, from_key: RoomStreamToken
+    ) -> set[str]:
+        return {room_id for room_id in room_ids if room_id in self.rooms_with_updates}
+
+
+class RoomListSortTestCase(unittest.TestCase):
+    """`rust/src/sliding_sync/room_lists/sort.rs` and `lists.rs`"""
+
+    def test_sort_rooms(self) -> None:
+        rng = random.Random(11)
+        early = 0
+        for _ in range(2000):
+            rooms = [_random_room(rng, room_id) for room_id in _ROOMS]
+            # Joined rooms are the common case.
+            rooms = [
+                (r[0], r[1], Membership.JOIN, *r[3:]) if rng.random() < 0.6 else r
+                for r in rooms
+            ]
+            joined = [r[0] for r in rooms if r[2] == Membership.JOIN]
+            earliest = rng.randint(0, 50)
+            to_stream = rng.randint(40, 100)
+            cache = {
+                room_id: rng.randint(earliest + 1, 120)
+                for room_id in joined
+                if rng.random() < 0.7
+            }
+            recheck = {
+                room_id: rng.choice([None, rng.randint(1, to_stream)])
+                for room_id in _ROOMS
+            }
+            joined_positions = {
+                room_id: rng.randint(1, to_stream)
+                for room_id in joined
+                if rng.random() < 0.98
+            }
+            limit = rng.choice([None, 1, 2, 3, 5, 8])
+
+            store = _FakeSortStore(
+                _FakeStreamCache(earliest, cache), recheck, joined_positions
+            )
+            fake_room_lists = cast(SlidingSyncRoomLists, SimpleNamespace(store=store))
+            to_token = cast(
+                StreamToken,
+                SimpleNamespace(room_key=RoomStreamToken(stream=to_stream)),
+            )
+            try:
+                python: list[str] | None = [
+                    room.room_id
+                    for room in _run(
+                        SlidingSyncRoomLists.sort_rooms(
+                            fake_room_lists,
+                            {room[0]: _python_room(room) for room in rooms},
+                            to_token,
+                            limit=limit,
+                        )
+                    )
+                ]
+            except KeyError:
+                python = None
+            try:
+                result: list[str] | None = rust.sort_rooms_for_test(
+                    rooms, earliest, cache, to_stream, limit, recheck, joined_positions
+                )
+            except KeyError:
+                result = None
+            self.assertEqual(result, python, (rooms, cache, limit))
+            if python is not None and len(python) < len(rooms):
+                early += 1
+        self.assertGreater(early, 0)
+
+    def test_sync_list_ops(self) -> None:
+        rng = random.Random(12)
+        for _ in range(2000):
+            sorted_room_ids = rng.sample(_ROOMS, rng.randint(0, len(_ROOMS)))
+            ranges = []
+            for _ in range(rng.randint(1, 3)):
+                start = rng.randint(0, 9)
+                # Pydantic allows an end before the start, but not below 0.
+                ranges.append((start, max(0, start + rng.randint(-1, 4))))
+            config = _python_config(rng.randint(0, 10), _random_required_state(rng))
+            relevant = {
+                room_id: _python_config(rng.randint(0, 10), _random_required_state(rng))
+                for room_id in rng.sample(_ROOMS, rng.randint(0, 3))
+            }
+            rust_relevant = [(k, _to_rust(v)) for k, v in relevant.items()]
+
+            ops = _sync_list_ops(ranges, sorted_room_ids, config, relevant)
+            rust_ops, rust_map = rust.sync_list_ops_for_test(
+                ranges, sorted_room_ids, _to_rust(config), rust_relevant
+            )
+            context = (ranges, sorted_room_ids, config, rust_relevant)
+            self.assertEqual(
+                rust_ops,
+                [(tuple(op.range), list(op.room_ids)) for op in ops],
+                context,
+            )
+            self.assertEqual(
+                [(k, (limit, _as_sets(m))) for k, (limit, m) in rust_map],
+                [
+                    (k, (v.timeline_limit, _as_sets(v.required_state_map)))
+                    for k, v in relevant.items()
+                ],
+                context,
+            )
+
+    def test_rooms_to_send(self) -> None:
+        rng = random.Random(13)
+        now_ms = 10 * _HOUR_MS
+        reset = 0
+        for _ in range(1000):
+            many = rng.random() < 0.2
+            room_ids = [f"!many{i}:test" for i in range(130)] if many else list(_ROOMS)
+            relevant = {
+                room_id: _python_config(rng.randint(0, 5), _random_required_state(rng))
+                for room_id in room_ids
+                if rng.random() < 0.8
+            }
+            room_configs = {
+                room_id: _python_config(rng.randint(0, 5), _random_required_state(rng))
+                for room_id in room_ids
+                if rng.random() < 0.5
+            }
+            statuses = _random_statuses(rng)
+            if many:
+                statuses = dict.fromkeys(room_ids, ("live", None))
+            rooms_with_updates = {
+                room_id for room_id in room_ids if rng.random() < (0.9 if many else 0.3)
+            }
+            last_used_ts = rng.choice([None, now_ms - 2 * _HOUR_MS, now_ms - 60_000])
+
+            previous_state = PerConnectionState(
+                last_used_ts=last_used_ts,
+                rooms=RoomStatusMap(
+                    statuses={
+                        k: HaveSentRoom(
+                            HaveSentRoomFlag(flag),
+                            RoomStreamToken(stream=token) if token else None,
+                        )
+                        for k, (flag, token) in statuses.items()
+                    }
+                ),
+                room_configs=room_configs,
+            )
+            fake_room_lists = cast(
+                SlidingSyncRoomLists,
+                SimpleNamespace(
+                    store=_FakeUpdatesStore(rooms_with_updates),
+                    _clock=_FakeClock(now_ms),
+                ),
+            )
+            from_token = cast(
+                StreamToken, SimpleNamespace(room_key=RoomStreamToken(stream=1))
+            )
+            try:
+                python: list[str] | None = list(
+                    _run(
+                        SlidingSyncRoomLists._filter_relevant_rooms_to_send(
+                            fake_room_lists, previous_state, from_token, relevant
+                        )
+                    )
+                )
+            except SlidingSyncUnknownPosition:
+                python = None
+                reset += 1
+            try:
+                result: list[str] | None = rust.rooms_to_send_for_test(
+                    [(k, _to_rust(v)) for k, v in relevant.items()],
+                    {k: _to_rust(v) for k, v in room_configs.items()},
+                    statuses,
+                    last_used_ts,
+                    {room_id for room_id in relevant if room_id in rooms_with_updates},
+                    now_ms,
+                )
+            except ValueError:
+                result = None
+            self.assertEqual(result, python)
+        self.assertGreater(reset, 0)

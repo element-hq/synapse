@@ -84,6 +84,8 @@ once_cell = "1.18.0"
 # Fast hashing for the integer-keyed maps in state resolution.
 rustc-hash = "2.1.1"
 itertools = "0.15.0"
+# Maps that keep insertion order, as the Python dicts they port do.
+indexmap = "2.10.0"
 # Used by the `libpq` module to load the system libpq at runtime, so that
 # libpq is an optional runtime dependency rather than a build-time one.
 libloading = "0.8"
