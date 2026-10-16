@@ -26,22 +26,28 @@
 //! ([`SlidingSyncHandler::defer`]), and a `_blocking` twin runs to completion
 //! for tests ([`SlidingSyncHandler::block_on`]).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyModule};
+use request::SlidingSyncRequest;
+use result::{RoomInput, RoomsResult};
 
 use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
 use crate::deferred::{create_deferred_with, OnCancel};
 use crate::runtime::RustRuntime;
-use crate::storage::sync_store::{SyncDbStats, SyncStore};
+use crate::storage::sync_store::{anyhow_to_py, SyncDbStats, SyncStore};
 
 pub mod config;
 pub mod connection;
+pub mod encode;
 pub mod extensions;
 pub mod request;
 pub mod required_state;
+pub mod result;
 pub mod room;
+pub mod room_entry;
 pub mod room_lists;
 
 /// Computes sliding sync responses with the Rust implementation, reading
@@ -101,6 +107,62 @@ impl SlidingSyncHandler {
     ) -> PyResult<T> {
         let handle = self.runtime.tokio_handle()?;
         py.detach(|| handle.block_on(future))
+    }
+
+    /// Start computing the entries of `rooms`: read them from Python, and
+    /// return the future that computes them off the GIL.
+    fn start_room_entries(
+        &self,
+        py: Python<'_>,
+        request: &Bound<'_, SlidingSyncRequest>,
+        rooms: Vec<Bound<'_, RoomInput>>,
+        instance_ids: HashMap<String, i64>,
+    ) -> PyResult<BoxFuture<'static, PyResult<RoomsResult>>> {
+        let pool = self.pool(py)?;
+        let request = Arc::clone(&request.get().data);
+        let rooms: Vec<_> = rooms.iter().map(|room| room.get().data.clone()).collect();
+        let store = Arc::clone(&self.store);
+        let now_ms = self.runtime.clock().now_millis() as i64;
+        Ok(Box::pin(async move {
+            let reader = store.sliding_sync_reader(pool);
+            let outcomes =
+                room_entry::generate_room_entries(&reader, &request, &instance_ids, now_ms, &rooms)
+                    .await
+                    .map_err(anyhow_to_py)?;
+            let stats = SlidingSyncStats::from_db(&reader.stats());
+            Ok(RoomsResult::new(outcomes, request.from.is_some(), stats))
+        }))
+    }
+}
+
+#[pymethods]
+impl SlidingSyncHandler {
+    /// `get_room_sync_data` for each of `rooms`, twenty at a time: a
+    /// deferred resolving to a `RoomsResult`. `instance_ids` are
+    /// `get_id_for_instance` for the writers the rooms' tokens may name.
+    #[pyo3(signature = (request, rooms, *, instance_ids))]
+    fn generate_room_entries<'py>(
+        &self,
+        py: Python<'py>,
+        request: &Bound<'py, SlidingSyncRequest>,
+        rooms: Vec<Bound<'py, RoomInput>>,
+        instance_ids: HashMap<String, i64>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let future = self.start_room_entries(py, request, rooms, instance_ids)?;
+        self.defer(py, future)
+    }
+
+    /// As [`Self::generate_room_entries`], but blocks.
+    #[pyo3(signature = (request, rooms, *, instance_ids))]
+    fn generate_room_entries_blocking(
+        &self,
+        py: Python<'_>,
+        request: &Bound<'_, SlidingSyncRequest>,
+        rooms: Vec<Bound<'_, RoomInput>>,
+        instance_ids: HashMap<String, i64>,
+    ) -> PyResult<RoomsResult> {
+        let future = self.start_room_entries(py, request, rooms, instance_ids)?;
+        self.block_on(py, future)
     }
 }
 
@@ -167,6 +229,10 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<SlidingSyncHandler>()?;
     child_module.add_class::<SlidingSyncStats>()?;
     child_module.add_class::<request::SlidingSyncRequest>()?;
+    child_module.add_class::<RoomInput>()?;
+    child_module.add_class::<result::RoomResult>()?;
+    child_module.add_class::<RoomsResult>()?;
+    child_module.add_function(wrap_pyfunction!(encode::encode_rooms, &child_module)?)?;
     child_module.add_class::<crate::storage::sliding_sync_store::PySlidingSyncStoreForTest>()?;
     config::register_test_functions(&child_module)?;
     connection::register_test_functions(&child_module)?;
