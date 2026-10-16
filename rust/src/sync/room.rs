@@ -297,6 +297,7 @@ pub async fn generate_room_entry(
                     &context.client_filter,
                     &events,
                     &HashSet::new(),
+                    false,
                     context.now_ms(),
                 )
                 .await?;

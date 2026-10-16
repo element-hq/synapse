@@ -651,7 +651,7 @@ async fn room_entry(
 }
 
 /// The message of a panic's payload.
-fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+pub(crate) fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
     if let Some(message) = panic.downcast_ref::<&str>() {
         message
     } else if let Some(message) = panic.downcast_ref::<String>() {

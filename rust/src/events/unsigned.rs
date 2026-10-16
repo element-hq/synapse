@@ -310,6 +310,16 @@ impl Unsigned {
         Ok(self.py_read()?.persisted_fields.replaces_state.clone())
     }
 
+    /// The `invite_room_state` field: the stripped state an invite carries.
+    pub fn invite_room_state(&self) -> PyResult<Option<Vec<serde_json::Value>>> {
+        Ok(self.py_read()?.persisted_fields.invite_room_state.clone())
+    }
+
+    /// The `knock_room_state` field: the stripped state a knock carries.
+    pub fn knock_room_state(&self) -> PyResult<Option<Vec<serde_json::Value>>> {
+        Ok(self.py_read()?.persisted_fields.knock_room_state.clone())
+    }
+
     /// Whether both `prev_content` and `prev_sender` are set.
     pub fn has_prev_content_and_sender(&self) -> PyResult<bool> {
         let unsigned = self.py_read()?;
