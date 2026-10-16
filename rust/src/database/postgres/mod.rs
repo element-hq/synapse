@@ -20,6 +20,7 @@ mod helpers;
 pub mod pool;
 mod tls;
 mod value;
+pub mod write;
 
 /// Register the `postgres` submodule (the `ConnectionPool`, `Connection` and
 /// `Cursor` classes and the DBAPI2 exception hierarchy) under the parent
