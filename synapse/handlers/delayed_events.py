@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Optional
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes, StickyEvent, StickyEventField
-from synapse.api.errors import Codes, ShadowBanError, SynapseError
+from synapse.api.errors import Codes, ShadowBanError, SynapseError, cs_error
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.context import make_deferred_yieldable
@@ -32,17 +32,15 @@ from synapse.storage.databases.main.delayed_events import (
     DelayedEventDetails,
     DelayedEventResponse,
     DelayedEventResponseLegacyCompat,
-    EventType,
-    StateKey,
     Timestamp,
 )
 from synapse.types import (
     JsonDict,
     Requester,
-    RoomID,
     UserID,
     create_requester,
 )
+from synapse.util.async_helpers import yieldable_gather_results
 from synapse.util.duration import Duration
 from synapse.util.events import generate_fake_event_id
 
@@ -75,11 +73,22 @@ class DelayedEventsHandler:
         )
 
         self._next_delayed_event_call: Optional[IDelayedCall] = None
+        self._next_prune_finalised_call: Optional[IDelayedCall] = None
 
         if hs.config.worker.worker_app is None:
             self._repl_client = None
 
             async def _schedule_db_events() -> None:
+                # Before sending any more delayed events, prune all finalised ones
+                # (and kick off the timer for the next age-based pruning).
+                min_finalised_ts = await self._store.prune_finalised_delayed_events(
+                    self._get_current_ts(),
+                    self._config.experimental.msc4140_finalised_retention_period,
+                    self._config.experimental.msc4140_finalised_retention_limit_per_user,
+                )
+                if min_finalised_ts is not None:
+                    self._schedule_prune_finalised(min_finalised_ts)
+
                 # Process any delayed events that are due to be sent.
                 #
                 # We set `reprocess_events` to True in case any events had been
@@ -116,6 +125,47 @@ class DelayedEventsHandler:
     @property
     def _is_master(self) -> bool:
         return self._repl_client is None
+
+    async def _prune_finalised_by_age(self) -> None:
+        self._next_prune_finalised_call = None
+
+        min_finalised_ts = await self._store.prune_finalised_delayed_events_by_age(
+            self._get_current_ts(),
+            self._config.experimental.msc4140_finalised_retention_period,
+        )
+        if min_finalised_ts is not None:
+            self._schedule_prune_finalised(min_finalised_ts)
+
+    def _schedule_prune_finalised_or_none(
+        self, min_finalised_ts: Timestamp | None
+    ) -> None:
+        if min_finalised_ts is not None:
+            self._schedule_prune_finalised(min_finalised_ts)
+        elif self._next_prune_finalised_call is not None:
+            self._next_prune_finalised_call.cancel()
+            self._next_prune_finalised_call = None
+
+    def _schedule_prune_finalised(self, min_finalised_ts: Timestamp) -> None:
+        current_ts = self._get_current_ts()
+        min_finalised_age_ms = current_ts - min_finalised_ts
+        delay = max(
+            self._config.experimental.msc4140_finalised_retention_period
+            - Duration(milliseconds=min_finalised_age_ms),
+            Duration(),
+        )
+
+        if self._next_prune_finalised_call is None:
+            self._next_prune_finalised_call = self._clock.call_later(
+                delay,
+                self.hs.run_as_background_process,
+                "_prune_finalised_by_age",
+                self._prune_finalised_by_age,
+            )
+        elif (
+            self._next_prune_finalised_call.getTime() * 1000
+            < current_ts + delay.as_millis()
+        ):
+            self._next_prune_finalised_call.reset(delay.as_secs())
 
     async def add(
         self,
@@ -221,15 +271,23 @@ class DelayedEventsHandler:
         await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
         await make_deferred_yieldable(self._initialized_from_db)
 
-        next_send_ts = await self._store.cancel_delayed_event(
+        ret = await self._store.cancel_delayed_event(
             delay_id=delay_id,
             user_localpart=requester.user.localpart,
+            finalised_ts=self._get_current_ts(),
+            retention_limit=self._config.experimental.msc4140_finalised_retention_limit_per_user,
         )
+        if ret is None:
+            return
 
+        next_send_ts, min_finalised_ts = ret
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
+        self._schedule_prune_finalised_or_none(min_finalised_ts)
 
-    async def cancel_all_for_user(self, user_localpart: str) -> None:
+    async def cancel_all_for_user(
+        self, user_localpart: str, erase_data: bool = False
+    ) -> None:
         """
         Cancels the scheduled delivery of all delayed events owned by the local user
         with the given localpart, e.g. because their account is being deactivated.
@@ -238,6 +296,11 @@ class DelayedEventsHandler:
 
         Goes through replication if this is not the main process, as only the
         main process handles sending delayed events.
+
+        Args:
+            user_localpart: The localpart of the local user whose delayed events to cancel.
+            erase_data: Whether to completely erase cancelled delayed events, rather than
+                retaining them as finalised delayed events that the user may query later.
         """
         if not self._is_master:
             await self._cancel_all_for_user_client(
@@ -248,10 +311,18 @@ class DelayedEventsHandler:
 
         await make_deferred_yieldable(self._initialized_from_db)
 
-        next_send_ts = await self._store.cancel_delayed_events_for_user(user_localpart)
+        ret = await self._store.cancel_delayed_events_for_user(
+            user_localpart,
+            self._get_current_ts(),
+            self._config.experimental.msc4140_finalised_retention_limit_per_user
+            if not erase_data
+            else 0,
+        )
 
+        next_send_ts, min_finalised_ts = ret
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
+        self._schedule_prune_finalised_or_none(min_finalised_ts)
 
     async def restart(self, requester: Requester, delay_id: str) -> None:
         """
@@ -282,22 +353,31 @@ class DelayedEventsHandler:
         """
         Immediately sends the matching delayed event, instead of waiting for its scheduled delivery.
 
+        If the delayed event has already been sent, this does nothing.
+        If sending it fails, it stays scheduled, so that sending may be retried
+        until its scheduled send time.
+
         Raises:
             NotFoundError: if no matching delayed event could be found.
+            SynapseError: if the delayed event has already been cancelled,
+                or if sending it failed.
         """
         assert self._is_master
         await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
         await make_deferred_yieldable(self._initialized_from_db)
 
-        event, next_send_ts = await self._store.process_target_delayed_event(
+        ret = await self._store.process_target_delayed_event(
             delay_id=delay_id,
             user_localpart=requester.user.localpart,
         )
+        if ret is None:
+            return
 
+        event, next_send_ts = ret
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
 
-        await self._send_event(event)
+        await self._send_event(event, False)
 
     async def _send_on_timeout(self) -> None:
         self._next_delayed_event_call = None
@@ -312,28 +392,15 @@ class DelayedEventsHandler:
         await self._send_events(events)
 
     async def _send_events(self, events: list[DelayedEventDetails]) -> None:
-        sent_state: set[tuple[RoomID, EventType, StateKey]] = set()
+        events_by_room: dict[str, list[DelayedEventDetails]] = {}
         for event in events:
-            if event.state_key is not None:
-                state_info = (event.room_id, event.type, event.state_key)
-                if state_info in sent_state:
-                    continue
-            else:
-                state_info = None
-            try:
-                # TODO: send in background if message event or non-conflicting state event
-                await self._send_event(event)
-                if state_info is not None:
-                    sent_state.add(state_info)
-            except Exception:
-                logger.exception("Failed to send delayed event")
+            events_by_room.setdefault(str(event.room_id), []).append(event)
 
-            for room_id, event_type, state_key in sent_state:
-                await self._store.delete_processed_delayed_state_events(
-                    room_id=str(room_id),
-                    event_type=event_type,
-                    state_key=state_key,
-                )
+        async def send_events(events: list[DelayedEventDetails]) -> None:
+            for event in events:
+                await self._send_event(event, True)
+
+        await yieldable_gather_results(send_events, events_by_room.values())
 
     def _schedule_next_at_or_none(self, next_send_ts: Timestamp | None) -> None:
         if next_send_ts is not None:
@@ -360,7 +427,8 @@ class DelayedEventsHandler:
         self, requester: Requester, delay_id: str
     ) -> DelayedEventResponse:
         """
-        Return the specified pending delayed event requested by the given user.
+        Return the specified delayed event requested by the given user,
+        whether it is still scheduled or has been finalised.
 
         Raises:
             NotFoundError: if no matching delayed event could be found.
@@ -375,7 +443,7 @@ class DelayedEventsHandler:
         self, requester: Requester
     ) -> list[DelayedEventResponseLegacyCompat]:
         """
-        Return all pending delayed events owned by the given user.
+        Return all scheduled delayed events owned by the given user.
         Includes fields from earlier revisions of MSC4140 for
         compatibility with clients that still expect them.
         """
@@ -388,8 +456,22 @@ class DelayedEventsHandler:
     async def _send_event(
         self,
         event: DelayedEventDetails,
-        txn_id: str | None = None,
+        finalise_error: bool,
     ) -> None:
+        """
+        Sends the given delayed event, which must have been marked as processed,
+        and finalises it in the DB.
+
+        Args:
+            event: The delayed event to send.
+            finalise_error: Whether to finalise the delayed event with the error
+                if sending it fails. If False, the delayed event is instead
+                unmarked as processed, so that it stays scheduled, and the error
+                is re-raised.
+
+        Raises:
+            Exception: whatever sending the event raised, if finalise_error is False.
+        """
         user_id = UserID(event.user_localpart, self._config.server.server_name)
         user_id_str = user_id.to_string()
         room_id_str = event.room_id.to_string()
@@ -400,6 +482,8 @@ class DelayedEventsHandler:
             device_id=event.device_id,
         )
 
+        finalised_ts: Timestamp | None = None
+        send_error: JsonDict | None = None
         try:
             if event.state_key is not None:
                 is_requester_admin = await self._auth.is_server_admin(requester)
@@ -454,20 +538,52 @@ class DelayedEventsHandler:
                 ) = await self._event_creation_handler.create_and_send_nonmember_event(
                     requester,
                     event_dict,
-                    txn_id=txn_id,
                     delay_id=event.delay_id,
                 )
                 event_id = sent_event.event_id
+                if event.origin_server_ts is None:
+                    finalised_ts = Timestamp(sent_event.origin_server_ts)
         except ShadowBanError:
             event_id = generate_fake_event_id()
-        finally:
-            # TODO: If this is a temporary error, retry. Otherwise, consider notifying clients of the failure
-            try:
-                await self._store.delete_processed_delayed_event(event.delay_id)
-            except Exception:
-                logger.exception("Failed to delete processed delayed event")
+        except Exception as e:
+            if not finalise_error:
+                # Keep the delayed event scheduled, so that sending it may be
+                # retried until its scheduled send time.
+                try:
+                    next_send_ts = await self._store.unprocess_delayed_event(
+                        event.delay_id
+                    )
+                except Exception:
+                    logger.exception("Failed to reschedule delayed event")
+                else:
+                    if self._next_send_ts_changed(next_send_ts):
+                        self._schedule_next_at_or_none(next_send_ts)
+                raise
 
-        set_tag("event_id", event_id)
+            # Do not retry, even if the error may be temporary.
+            # Record the error for the user to find and act on instead.
+            if isinstance(e, SynapseError):
+                send_error = e.error_dict(None)
+            else:
+                logger.exception("Failed to send delayed event")
+                send_error = cs_error("Internal server error")
+
+        if finalised_ts is None:
+            finalised_ts = self._get_current_ts()
+        try:
+            min_finalised_ts = await self._store.finalise_processed_delayed_event(
+                event.delay_id,
+                event.user_localpart,
+                send_error if send_error is not None else event_id,
+                finalised_ts,
+                self._config.experimental.msc4140_finalised_retention_limit_per_user,
+            )
+            self._schedule_prune_finalised_or_none(min_finalised_ts)
+        except Exception:
+            logger.exception("Failed to finalise processed delayed event")
+
+        if send_error is None:
+            set_tag("event_id", event_id)
 
     def _get_current_ts(self) -> Timestamp:
         return Timestamp(self._clock.time_msec())
