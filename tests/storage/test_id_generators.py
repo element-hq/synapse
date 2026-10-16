@@ -270,9 +270,9 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
         If the `get_next()` async context manager is cancelled while
         `__aenter__` is allocating a stream ID, the DB interaction that runs the
-        sequence has already added the ID to `_unfinished_ids`, but `__aexit__`
+        sequence has already recorded the ID as unfinished, but `__aexit__`
         is never called (Python only invokes `__aexit__` if `__aenter__`
-        returned). The abandoned ID is therefore leaked into `_unfinished_ids`
+        returned). The abandoned ID is therefore leaked into the unfinished IDs
         forever, which permanently pins the persisted stream position: new rows
         keep getting higher IDs, but `get_current_token()` can never advance past
         `leaked_id - 1` until the process restarts.
@@ -291,7 +291,7 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         # We model the cancellation at the seam it actually happens in
         # production: `__aenter__` awaits `runInteraction("_load_next_mult_id")`,
         # whose transaction runs in a thread pool and so *always* completes -
-        # allocating stream ID 8 and adding it to `_unfinished_ids` - but the
+        # allocating stream ID 8 and recording it as unfinished - but the
         # awaiting coroutine is handed a `CancelledError` because the enclosing
         # `/sync` request was cancelled. We reproduce that by letting the real
         # interaction run (applying its side effects) and then failing the
@@ -302,7 +302,7 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         async def blocking_run_interaction(desc, func, *args, **kwargs):  # type: ignore[no-untyped-def]
             result = await original_run_interaction(desc, func, *args, **kwargs)
             if desc == "_load_next_mult_id":
-                # Stream ID 8 is now allocated and recorded in `_unfinished_ids`.
+                # Stream ID 8 is now allocated and recorded as unfinished.
                 # Deliver the cancellation here, exactly as a cancelled `/sync`
                 # would land it on this `await`.
                 await make_deferred_yieldable(cancel_enter)
@@ -321,7 +321,7 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
             write = ensureDeferred(presence_like_write())
 
             # The write is now blocked inside `__aenter__`, i.e. after stream ID
-            # 8 has been allocated and added to `_unfinished_ids`.
+            # 8 has been allocated and recorded as unfinished.
             self.assertNoResult(write)
 
             # The client goes away and the `/sync` request is cancelled.
@@ -340,7 +340,7 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         self.get_success(_successful_write())
 
         # On the buggy code the token is still stuck at 7 (ID 8 is leaked in
-        # `_unfinished_ids`, blocking everything behind it). Once the leak is
+        # the unfinished IDs, blocking everything behind it). Once the leak is
         # fixed, the token advances to 9: ID 8 was allocated (and abandoned) by
         # the cancelled write, so the successful write above takes ID 9.
         self.assertEqual(
@@ -892,6 +892,41 @@ class BackwardsMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         self.assertEqual(id_gen_2.get_positions(), {"first": -1, "second": -2})
         self.assertEqual(id_gen_1.get_persisted_upto_position(), -2)
         self.assertEqual(id_gen_2.get_persisted_upto_position(), -2)
+
+    def test_restart_with_own_rows_past_stream_positions(self) -> None:
+        """On restart, rows of our own past `stream_positions` move our
+        position to the furthest of them, not the nearest.
+
+        The loader once sorted the rows by their stored, negative stream ID
+        before negating them, so it visited ours furthest first and left our
+        position at the nearest.
+        """
+
+        def _insert(txn: LoggingTransaction) -> None:
+            # The table and `stream_positions` hold the negative IDs, the
+            # sequence the positive ones.
+            for stream_id, instance_name in (
+                (-1, "second"),
+                (-2, "first"),
+                (-3, "first"),
+            ):
+                txn.execute(
+                    "INSERT INTO foobar (stream_id, instance_name) VALUES (?, ?)",
+                    (stream_id, instance_name),
+                )
+            txn.execute("SELECT setval('foobar_seq', 3)")
+            # `second` is at 1, so the loader reads every row from 1 on. Our
+            # rows at 2 and 3 never reached `stream_positions`.
+            txn.execute(
+                "INSERT INTO stream_positions VALUES ('test_stream', 'second', -1)"
+            )
+
+        self.get_success(self.db_pool.runInteraction("_insert", _insert))
+
+        id_gen = self._create_id_generator("first", writers=["first", "second"])
+
+        self.assertEqual(id_gen.get_positions()["first"], -3)
+        self.assertEqual(id_gen.get_persisted_upto_position(), -3)
 
 
 class MultiTableMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):

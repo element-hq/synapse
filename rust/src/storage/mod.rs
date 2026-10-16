@@ -20,4 +20,5 @@ pub mod federation_store;
 pub mod pool_querier;
 pub mod python;
 pub mod store;
+pub mod stream_ids;
 pub mod sync_store;

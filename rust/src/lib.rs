@@ -108,6 +108,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     rendezvous::register_module(py, m)?;
     runtime::register_module(py, m)?;
     storage::python::register_module(py, m)?;
+    storage::stream_ids::register_module(py, m)?;
     msc4388_rendezvous::register_module(py, m)?;
     segmenter::register_module(py, m)?;
     state::register_module(py, m)?;

@@ -1,0 +1,1 @@
+Keep the stream ID bookkeeping of multi-writer streams in Rust, so Rust code can allocate stream IDs.
