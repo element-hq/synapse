@@ -1074,6 +1074,18 @@ class FederationClient(FederationBase):
                 await self._member_key_handler.persist_pending_join_key(
                     room_id, member_key
                 )
+                # Say who the key belongs to, and sign for it: a membership
+                # event with no linkage information leaves the member
+                # attributable to nobody, unroutable, and soft failed
+                # everywhere. Whatever the client asked for is replaced by
+                # what we are willing to vouch for.
+                pdu_dict["content"].pop(EventContentFields.MSC4430_LOCALPART, None)
+                pdu_dict["content"].pop(EventContentFields.MSC4430_DOMAIN, None)
+                pdu_dict["content"].update(
+                    await self._member_key_handler.linkage_content_for_local_user(
+                        user_id
+                    )
+                )
                 signers = await self._member_key_handler.get_signers_for_event_dict(
                     room_version, pdu_dict
                 )

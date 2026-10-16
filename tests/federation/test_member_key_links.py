@@ -46,7 +46,7 @@ from synapse.crypto.event_signing import (
     compute_event_signature,
     compute_member_key_room_signature,
 )
-from synapse.events import make_event_from_dict
+from synapse.events import EventBase, make_event_from_dict
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
@@ -460,3 +460,115 @@ class MemberKeyFederationTestCase(unittest.FederatingHomeserverTestCase):
             f"?ver={ROOM_VERSION.identifier}",
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+
+
+class OutboundMemberKeyJoinTestCase(unittest.FederatingHomeserverTestCase):
+    """The join *we* send when one of our users joins another server's member
+    key room: it must name our user and be signed for, or the room we join will
+    know nothing about who we are."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})["msc4430_enabled"] = True
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.store = hs.get_datastores().main
+        self.federation_client = hs.get_federation_client()
+        self.member_key_handler = hs.get_member_key_handler()
+        self.alice = self.register_user("alice", "pass")
+        self.room_id = "!room:" + OTHER
+
+    def _make_membership_event(self, content: JsonDict | None = None) -> EventBase:
+        """Drive the outbound half of a join: the remote returns a template for
+        our member key, and we complete and sign it."""
+        member_key = self.get_success(
+            self.member_key_handler.member_key_for_remote_join(self.room_id, self.alice)
+        )
+
+        async def template(
+            destination: str,
+            room_id: str,
+            user_id: str,
+            membership: str,
+            params: object,
+        ) -> JsonDict:
+            # What a resident of a member key room answers `/make_join` with.
+            self.assertEqual(
+                params[MemberKeys.MAKE_MEMBERSHIP_PARAM],  # type: ignore[index]
+                member_key,
+            )
+            return {
+                "room_version": ROOM_VERSION.identifier,
+                "event": {
+                    "type": EventTypes.Member,
+                    "room_id": room_id,
+                    "sender": member_key,
+                    "state_key": member_key,
+                    "content": {"membership": Membership.JOIN},
+                    "depth": 12,
+                    "prev_events": [],
+                    "prev_state_events": [],
+                    "origin_server_ts": self.clock.time_msec(),
+                },
+            }
+
+        self.federation_client.transport_layer.make_membership_event = template  # type: ignore[method-assign]
+        _, event, _ = self.get_success(
+            self.federation_client.make_membership_event(
+                [OTHER],
+                self.room_id,
+                self.alice,
+                Membership.JOIN,
+                content if content is not None else {},
+                params={MemberKeys.MAKE_MEMBERSHIP_PARAM: member_key},
+                member_key=member_key,
+            )
+        )
+        return event
+
+    def test_join_names_our_user_and_is_signed_for(self) -> None:
+        event = self._make_membership_event()
+
+        self.assertEqual(event.content[EventContentFields.MSC4430_LOCALPART], "alice")
+        self.assertEqual(
+            event.content[EventContentFields.MSC4430_DOMAIN], self.hs.hostname
+        )
+        # Signed by the member key, and vouched for by us.
+        self.assertEqual(
+            set(event.signatures.as_dict()),
+            {MemberKeys.SIGNATURE_ENTITY, self.hs.hostname},
+        )
+        # The key is kept, so a later event in that room is signed by the same one.
+        local_key = self.get_success(
+            self.store.get_local_member_key(self.room_id, self.alice)
+        )
+        assert local_key is not None
+        self.assertEqual(local_key.member_key, event.sender)
+
+    def test_clients_cannot_assert_linkage_on_a_remote_join(self) -> None:
+        event = self._make_membership_event(
+            {
+                EventContentFields.MSC4430_LOCALPART: "mallory",
+                EventContentFields.MSC4430_DOMAIN: "evil.example",
+            }
+        )
+        self.assertEqual(event.content[EventContentFields.MSC4430_LOCALPART], "alice")
+        self.assertEqual(
+            event.content[EventContentFields.MSC4430_DOMAIN], self.hs.hostname
+        )
+
+    def test_erased_user_joins_without_a_localpart(self) -> None:
+        self.get_success(self.store.mark_user_erased(self.alice))
+        event = self._make_membership_event()
+        self.assertNotIn(EventContentFields.MSC4430_LOCALPART, event.content)
+        self.assertEqual(
+            event.content[EventContentFields.MSC4430_DOMAIN], self.hs.hostname
+        )

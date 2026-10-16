@@ -698,6 +698,23 @@ class MemberKeyHandler:
 
         return signers
 
+    async def linkage_content_for_local_user(self, user_id: str) -> JsonDict:
+        """The linkage information this server vouches for about one of its
+        users: our domain, and their localpart unless they are erased, in which
+        case their name is not published again.
+
+        The counterpart of `_is_our_linkage`, for the places that have to fill
+        linkage information in rather than check it: an event we build for one
+        of our users in a room we are not in yet (a join over federation), where
+        `translate_event_dict` has no part to play.
+        """
+        user = UserID.from_string(user_id)
+        assert self._is_mine_id(user_id), f"{user_id} is not a local user"
+        content: JsonDict = {EventContentFields.MSC4430_DOMAIN: user.domain}
+        if not await self._store.is_user_erased(user_id):
+            content[EventContentFields.MSC4430_LOCALPART] = user.localpart
+        return content
+
     async def _is_our_linkage(self, user_id: str, content: JsonDict) -> bool:
         """Whether a membership event's linkage information is exactly what this
         server vouches for about `user_id`: our domain, and their localpart

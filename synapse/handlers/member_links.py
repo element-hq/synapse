@@ -292,6 +292,15 @@ class MemberLinkHandler:
         if not self._enabled or not member_keys:
             return
 
+        # A key of ours is not somebody else's claim to check: we know who it
+        # belongs to, and `msc4430_member_links` describes only other servers'
+        # keys. (After a member key is moved to another server, that server's
+        # claim is still not ours to record against our own copy of the key.)
+        ours = await self._store.get_local_member_keys_by_key(room_id, member_keys)
+        member_keys = [key for key in member_keys if ours.get(key) is None]
+        if not member_keys:
+            return
+
         state_ids = await self._current_member_event_ids(room_id, member_keys)
         events = await self._store.get_events(list(state_ids.values()))
 
