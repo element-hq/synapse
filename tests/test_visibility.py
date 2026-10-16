@@ -18,19 +18,21 @@
 #
 #
 import logging
+import sqlite3
 from unittest.mock import patch
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes
+from synapse.api.constants import AccountDataTypes, EventTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import create_requester
+from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.visibility import (
     filter_and_transform_events_for_client,
     filter_events_for_server,
@@ -39,7 +41,7 @@ from synapse.visibility import (
 from tests import unittest
 from tests.test_utils.event_injection import inject_event, inject_member_event
 from tests.unittest import HomeserverTestCase
-from tests.utils import create_room
+from tests.utils import USE_POSTGRES_FOR_TESTS, create_room
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,7 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
         filtered = self.get_success(
             filter_events_for_server(
                 self._storage_controllers,
+                self.clock,
                 "test_server",
                 "hs",
                 events_to_filter,
@@ -136,6 +139,7 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
             self.get_success(
                 filter_events_for_server(
                     self._storage_controllers,
+                    self.clock,
                     "remote_hs",
                     "hs",
                     [outlier],
@@ -155,6 +159,7 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
         filtered = self.get_success(
             filter_events_for_server(
                 self._storage_controllers,
+                self.clock,
                 "remote_hs",
                 "local_hs",
                 [outlier, evt],
@@ -173,6 +178,7 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
         filtered = self.get_success(
             filter_events_for_server(
                 self._storage_controllers,
+                self.clock,
                 "other_server",
                 "local_hs",
                 [outlier, evt],
@@ -229,6 +235,7 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
         filtered = self.get_success(
             filter_events_for_server(
                 self._storage_controllers,
+                self.clock,
                 "test_server",
                 "local_hs",
                 events_to_filter,
@@ -275,6 +282,95 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
             )
         )
         return event
+
+
+class FilterEventsForServerStickyEventsTestCase(HomeserverTestCase):
+    """
+    Tests that MSC4354 Sticky Events are exempt from history visibility checks
+    when filtering events for remote servers.
+    """
+
+    if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
+        # We need the JSON functionality in SQLite
+        skip = f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4354_enabled": True}
+        return config
+
+    def test_joined_history_visibility_sticky_events_visible_to_newly_joined_server(
+        self,
+    ) -> None:
+        """
+        Tests that, in a joined history visibility room, a newly-joined server
+        can see sticky events from before it joined, but not regular events.
+        Once the sticky events expire, the exemption no longer applies.
+        """
+        self.register_user("resident", "password")
+        tok = self.login("resident", "password")
+        room_id = self.helper.create_room_as("resident", tok=tok)
+        self.helper.send_state(
+            room_id,
+            "m.room.history_visibility",
+            body={"history_visibility": "joined"},
+            tok=tok,
+        )
+
+        # Send 3 timeline events: regular, sticky, regular
+        # (We have this 'sandwich' to prove that history visibility filtering is working)
+        regular_1_event_id = self.helper.send(room_id, body="regular 1", tok=tok)[
+            "event_id"
+        ]
+        sticky_event_id = self.helper.send_sticky_event(
+            room_id,
+            type=EventTypes.Message,
+            content={"body": "sticky", "msgtype": "m.text"},
+            duration=Duration(hours=1),
+            tok=tok,
+        )["event_id"]
+        regular_2_event_id = self.helper.send(room_id, body="regular 2", tok=tok)[
+            "event_id"
+        ]
+
+        # Now a user on a remote server joins
+        self.get_success(
+            inject_member_event(self.hs, room_id, "@joiner:remote", "join")
+        )
+
+        events = self.get_success(
+            self.hs.get_datastores().main.get_events_as_list(
+                [regular_1_event_id, sticky_event_id, regular_2_event_id]
+            )
+        )
+
+        def filter_for_remote() -> list[str]:
+            filtered = self.get_success(
+                filter_events_for_server(
+                    self.hs.get_storage_controllers(),
+                    self.clock,
+                    "remote",
+                    "test",
+                    events,
+                    redact=False,
+                    filter_out_erased_senders=True,
+                    filter_out_remote_partial_state_events=True,
+                )
+            )
+            return [e.event_id for e in filtered]
+
+        # The remote server can only see the sticky event
+        self.assertEqual(filter_for_remote(), [sticky_event_id])
+
+        # Once the sticky event expires, the remote server can't see it anymore
+        self.reactor.advance(Duration(hours=1).as_secs())
+        self.assertEqual(filter_for_remote(), [])
 
 
 class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
