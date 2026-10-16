@@ -15,6 +15,7 @@ from typing import Any
 
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
+from synapse.synapse_rust.database.postgres import ConnectionPool
 
 class Persister:
     """Persists events in Rust, on the events writer, over the native driver.
@@ -98,6 +99,50 @@ class PersistEffects:
     @property
     def new_replication_data(self) -> bool:
         """Whether rows were written to the cache invalidation stream."""
+
+class PersistReaderForTest:
+    """The persist reads (`rust/src/persist/reader.rs`), each run to
+    completion on the tokio runtime over the native driver's pool. The chain
+    cover reads each get a connection of their own. For
+    `tests/storage/test_persist_reader.py`."""
+
+    def __init__(self, pool: ConnectionPool, persister: Persister) -> None: ...
+    def latest_event_ids_in_room(self, room_id: str) -> set[str]: ...
+    def state_dag_extremities(self, room_id: str) -> set[str]: ...
+    def events_which_are_prevs(self, event_ids: list[str]) -> list[str]: ...
+    def prevs_before_rejected(
+        self, event_ids: list[str], include_soft_failed: bool
+    ) -> set[str]: ...
+    def have_seen_events(self, event_ids: list[str]) -> set[str]: ...
+    def membership_from_event_ids(
+        self, event_ids: list[str]
+    ) -> dict[str, tuple[str, str]]:
+        """Event ID to `(user_id, membership)`, for membership events only."""
+    def is_local_host_in_room_ignoring_users(
+        self, room_id: str, ignore_users: list[str]
+    ) -> bool: ...
+    def room_version_id(self, room_id: str) -> str | None: ...
+    def has_sliding_sync_joined_room(self, room_id: str) -> bool: ...
+    def last_event_pos_in_room(
+        self, room_id: str, event_types: list[str] | None = None
+    ) -> tuple[str, str, int] | None:
+        """`(event_id, instance_name, stream)`."""
+    def soft_failed_sticky_events(
+        self, room_id: str, senders: list[str] | None, now_ms: int
+    ) -> list[str]: ...
+    def has_auth_chain_index(self, room_id: str) -> bool: ...
+    def events_with_chain_ids(self, event_ids: list[str]) -> set[str]: ...
+    def chains_to_calculate(self, room_ids: list[str]) -> list[tuple[str, str, str]]:
+        """`(event_id, type, state_key)` rows."""
+    def auth_event_ids(self, event_id: str) -> list[str]: ...
+    def auth_event_chains(
+        self, event_ids: list[str]
+    ) -> list[tuple[str, str, str, int | None, int | None]]:
+        """`(event_id, type, state_key, chain_id, sequence_number)` rows."""
+    def chain_links(self, chains: list[int]) -> list[tuple[int, int, int, int]]:
+        """`(origin_chain_id, origin_sequence_number, target_chain_id,
+        target_sequence_number)` rows."""
+    def max_sequence_numbers(self, chain_ids: list[int]) -> dict[int, int]: ...
 
 def persist_gil_stats() -> dict[str, tuple[int, float]]:
     """`{site: (calls, seconds held)}` for every time event persistence took

@@ -31,18 +31,25 @@
 
 use std::{
     fmt::Write as _,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicU8, Ordering},
 };
 
+use async_trait::async_trait;
 use futures::{future::try_join_all, future::BoxFuture};
 use log::warn;
 use tokio::runtime::Handle;
 use tokio_postgres::{types::ToSql, Row};
 
 use super::pool::{ConnectionPool, PooledConnection};
+use crate::storage::events::Querier;
 
 /// Python's `MAX_NUMBER_OF_ATTEMPTS`.
 const MAX_ATTEMPTS: u32 = 5;
+
+/// Values of [`WriteTxn::failed`].
+const NOT_FAILED: u8 = 0;
+const FAILED: u8 = 1;
+const FAILED_RETRYABLE: u8 = 2;
 
 /// Why a write failed.
 #[derive(Debug)]
@@ -111,8 +118,16 @@ impl std::fmt::Display for WriteError {
 impl std::error::Error for WriteError {}
 
 impl From<anyhow::Error> for WriteError {
+    /// A [`WriteError`] that went through `anyhow` on its way out, as one
+    /// from a [`Querier`] call does, comes back as itself, so that a
+    /// conflict is still retried. Anything else is [`WriteError::Other`].
     fn from(error: anyhow::Error) -> Self {
-        WriteError::Other(error)
+        match error.downcast_ref::<WriteError>() {
+            Some(WriteError::Other(_)) | None => WriteError::Other(error),
+            Some(_) => error
+                .downcast::<WriteError>()
+                .expect("checked by downcast_ref"),
+        }
     }
 }
 
@@ -147,8 +162,9 @@ pub struct WriteTxn {
     in_transaction: bool,
     /// A statement failed, so Postgres has aborted the transaction. A
     /// `COMMIT` would then roll back without an error, so the closure must
-    /// not be able to report success after catching the error.
-    failed: AtomicBool,
+    /// not be able to report success after catching the error. Holds one of
+    /// the `FAILED_*` values, for the first failure.
+    failed: AtomicU8,
 }
 
 impl WriteTxn {
@@ -158,7 +174,7 @@ impl WriteTxn {
         let txn = WriteTxn {
             conn: Some(conn),
             in_transaction: true,
-            failed: AtomicBool::new(false),
+            failed: AtomicU8::new(NOT_FAILED),
         };
         txn.conn()
             .batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
@@ -174,8 +190,18 @@ impl WriteTxn {
     /// The error for a failed statement, noting that the transaction is now
     /// aborted.
     fn statement_failed(&self, context: &str, error: tokio_postgres::Error) -> WriteError {
-        self.failed.store(true, Ordering::Relaxed);
-        WriteError::from_pg(context, error)
+        let error = WriteError::from_pg(context, error);
+        let failed = if error.is_retryable() {
+            FAILED_RETRYABLE
+        } else {
+            FAILED
+        };
+        // Keep the first: later statements fail only because it aborted the
+        // transaction.
+        let _ =
+            self.failed
+                .compare_exchange(NOT_FAILED, failed, Ordering::Relaxed, Ordering::Relaxed);
+        error
     }
 
     /// Run a statement that returns rows.
@@ -289,11 +315,23 @@ impl WriteTxn {
     }
 
     async fn commit(mut self) -> Result<(), WriteError> {
-        if self.failed.load(Ordering::Relaxed) {
-            self.rollback().await;
-            return Err(WriteError::Other(anyhow::anyhow!(
-                "a statement failed, so the transaction was rolled back"
-            )));
+        match self.failed.load(Ordering::Relaxed) {
+            NOT_FAILED => {}
+            // The closure caught an error that a retry may get past, so
+            // retry rather than fail for good.
+            FAILED_RETRYABLE => {
+                self.rollback().await;
+                return Err(WriteError::Conflict(
+                    "a statement failed with a retryable error, so the transaction was rolled back"
+                        .to_owned(),
+                ));
+            }
+            _ => {
+                self.rollback().await;
+                return Err(WriteError::Other(anyhow::anyhow!(
+                    "a statement failed, so the transaction was rolled back"
+                )));
+            }
         }
         self.conn()
             .batch_execute("COMMIT")
@@ -316,6 +354,17 @@ impl WriteTxn {
             return;
         }
         self.in_transaction = false;
+    }
+}
+
+/// For the read helpers shared with the read-only paths, such as the chain
+/// cover reads in `persist::reader`.
+#[async_trait]
+impl Querier for WriteTxn {
+    async fn query(&self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> anyhow::Result<Vec<Row>> {
+        WriteTxn::query(self, sql, params)
+            .await
+            .map_err(anyhow::Error::new)
     }
 }
 
@@ -457,6 +506,7 @@ mod tests {
         Arc,
     };
 
+    use anyhow::Context;
     use futures::FutureExt;
     use tokio::runtime::Runtime;
 
@@ -724,6 +774,142 @@ mod tests {
 
             assert_eq!(result, 3);
             assert_eq!(rows(&pool, &table).await[0].1, 21);
+        });
+        teardown(&rt, &pool, &table);
+    }
+
+    #[test]
+    fn write_errors_survive_anyhow() {
+        let through = |error: WriteError| -> WriteError {
+            let error: anyhow::Result<()> = Err(anyhow::Error::new(error));
+            error.context("reading the chain links").unwrap_err().into()
+        };
+        assert!(matches!(
+            through(WriteError::Conflict("simulated".into())),
+            WriteError::Conflict(_)
+        ));
+        assert!(matches!(
+            through(WriteError::Constraint {
+                sqlstate: "23505".into(),
+                message: "simulated".into()
+            }),
+            WriteError::Constraint { sqlstate, .. } if sqlstate == "23505"
+        ));
+        assert!(matches!(
+            through(WriteError::ConnectionLost("simulated".into())),
+            WriteError::ConnectionLost(_)
+        ));
+        assert!(matches!(
+            through(WriteError::Cancelled("simulated".into())),
+            WriteError::Cancelled(_)
+        ));
+        // Anything else keeps its context.
+        let WriteError::Other(error) = through(WriteError::Other(anyhow::anyhow!("boom"))) else {
+            panic!("expected Other");
+        };
+        assert_eq!(format!("{error:#}"), "reading the chain links: boom");
+    }
+
+    #[test]
+    fn serialization_failure_through_querier_is_retried() {
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            pool.get()
+                .await
+                .unwrap()
+                .batch_execute(&format!("INSERT INTO {table} (id, n) VALUES ('a', 0)"))
+                .await
+                .unwrap();
+
+            // As in `serialization_failure_is_retried`, with the statements
+            // going through `Querier` and `anyhow`.
+            let attempts = Arc::new(AtomicU32::new(0));
+            let result = run_write_interaction(&pool, "conflict", |txn, _| {
+                let (pool, table, attempts) = (&pool, &table, Arc::clone(&attempts));
+                async move {
+                    let querier: &dyn Querier = txn;
+                    let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                    querier
+                        .query(&format!("SELECT n FROM {table} WHERE id = 'a'"), &[])
+                        .await?;
+                    if attempt == 1 {
+                        pool.get()
+                            .await
+                            .unwrap()
+                            .batch_execute(&format!("UPDATE {table} SET n = n + 10 WHERE id = 'a'"))
+                            .await
+                            .unwrap();
+                    }
+                    querier
+                        .query(
+                            &format!("UPDATE {table} SET n = n + 1 WHERE id = 'a' RETURNING n"),
+                            &[],
+                        )
+                        .await
+                        .context("bumping n")?;
+                    Ok(attempt)
+                }
+                .boxed()
+            })
+            .await
+            .unwrap();
+
+            assert_eq!(result, 2);
+            assert_eq!(rows(&pool, &table).await[0].1, 11);
+        });
+        teardown(&rt, &pool, &table);
+    }
+
+    #[test]
+    fn caught_serialization_failure_is_retried() {
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            pool.get()
+                .await
+                .unwrap()
+                .batch_execute(&format!("INSERT INTO {table} (id, n) VALUES ('a', 0)"))
+                .await
+                .unwrap();
+
+            // The first attempt hits a serialization failure and swallows
+            // it. The commit is refused, and as the error was retryable the
+            // whole interaction runs again.
+            let attempts = Arc::new(AtomicU32::new(0));
+            let result = run_write_interaction(&pool, "caught conflict", |txn, _| {
+                let (pool, table, attempts) = (&pool, &table, Arc::clone(&attempts));
+                async move {
+                    let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                    txn.query(&format!("SELECT n FROM {table} WHERE id = 'a'"), &[])
+                        .await?;
+                    if attempt == 1 {
+                        pool.get()
+                            .await
+                            .unwrap()
+                            .batch_execute(&format!("UPDATE {table} SET n = n + 10 WHERE id = 'a'"))
+                            .await
+                            .unwrap();
+                    }
+                    let update = txn
+                        .execute(&format!("UPDATE {table} SET n = n + 1 WHERE id = 'a'"), &[])
+                        .await;
+                    if attempt == 1 {
+                        assert!(matches!(update, Err(WriteError::Conflict(_))), "{update:?}");
+                    } else {
+                        update?;
+                    }
+                    Ok(attempt)
+                }
+                .boxed()
+            })
+            .await
+            .unwrap();
+
+            assert_eq!(result, 2);
+            assert_eq!(rows(&pool, &table).await[0].1, 11);
         });
         teardown(&rt, &pool, &table);
     }

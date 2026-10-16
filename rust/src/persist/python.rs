@@ -29,6 +29,7 @@ use crate::{
         native_pool::NativePool,
         store::Store,
         stream_ids::{PyStreamIdTracker, StreamIdTracker},
+        sync_store::{SyncStore, SyncStoreConfig},
     },
     types::state_filter::state_map_to_py,
 };
@@ -50,6 +51,9 @@ pub(super) struct PersisterInner {
     pub pool: NativePool,
     pub runtime: RustRuntime,
     pub store: Arc<Store>,
+    /// The sync store over the same caches, which the
+    /// [`super::reader::PersistReader`] builds on.
+    pub sync: Arc<SyncStore>,
     pub events_stream: Arc<StreamIdTracker>,
     pub backfill_stream: Arc<StreamIdTracker>,
     pub cache_stream: Arc<StreamIdTracker>,
@@ -93,6 +97,10 @@ impl Persister {
             inner: Arc::new(PersisterInner {
                 pool: NativePool::new(connection_pool, "persist_db_pool"),
                 runtime,
+                sync: Arc::new(SyncStore::new(
+                    Arc::clone(&store.caches),
+                    SyncStoreConfig::from_config(&homeserver.config(py)?),
+                )),
                 store,
                 events_stream: tracker(intern!(py, "_stream_id_gen"))?,
                 backfill_stream: tracker(intern!(py, "_backfill_id_gen"))?,

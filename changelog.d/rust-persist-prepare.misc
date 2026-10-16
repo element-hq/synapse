@@ -1,0 +1,1 @@
+Add the Rust reads for persisting events before the write transaction, behind `experimental_features.rust_event_persistence`.

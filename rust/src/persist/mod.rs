@@ -23,6 +23,7 @@
 //!   it commits.
 //! - [`metrics`]: counts for the Python metrics, flushed when scraped.
 //! - [`python`]: the [`python::Persister`] and test helpers.
+//! - [`reader`]: what persisting reads before its write transaction.
 //!
 //! Every GIL hold in this tree goes through [`crate::gil::with_gil`] with a
 //! site named `persist_*`, so that tests can pin the count per site.
@@ -33,12 +34,14 @@ pub mod context;
 pub mod effects;
 pub mod metrics;
 pub mod python;
+pub mod reader;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "persist")?;
     child_module.add_class::<python::Persister>()?;
     child_module.add_class::<effects::PersistEffects>()?;
+    child_module.add_class::<reader::PyPersistReaderForTest>()?;
     child_module.add_function(wrap_pyfunction!(
         crate::gil::persist_gil_stats,
         &child_module

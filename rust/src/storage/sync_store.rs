@@ -244,7 +244,7 @@ impl<'a> SyncReader<'a> {
 
     /// Borrow a connection for a group of statements that need no common
     /// snapshot.
-    async fn borrow(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
+    pub(crate) async fn borrow(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
         let start = Instant::now();
         let conn = self
             .pool
@@ -267,17 +267,20 @@ impl<'a> SyncReader<'a> {
     /// snapshot. Such a transaction cannot fail with a serialization error
     /// or a deadlock, so there is no retry loop. Finish with
     /// [`Borrowed::commit`].
-    async fn begin(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
+    pub(crate) async fn begin(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
         let mut borrowed = self.borrow().await?;
+        // Set before awaiting: if we are dropped after BEGIN is sent but
+        // before it returns, the transaction is open and must be rolled back
+        // before the connection goes back to the pool.
+        borrowed.in_transaction = true;
         borrowed
             .execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
             .await?;
-        borrowed.in_transaction = true;
         Ok(borrowed)
     }
 
     /// Run one statement on a connection borrowed for it.
-    async fn query_one_shot(
+    pub(crate) async fn query_one_shot(
         &self,
         sql: &str,
         params: &[&(dyn ToSql + Sync)],
@@ -1997,7 +2000,7 @@ impl<'a> SyncReader<'a> {
 
 /// How many values to send per `= ANY` statement, as
 /// `simple_select_many_batch` does.
-const SELECT_MANY_BATCH_SIZE: usize = 1000;
+pub(crate) const SELECT_MANY_BATCH_SIZE: usize = 1000;
 
 /// How many state groups to load per transaction, as
 /// `_get_state_groups_from_groups` does.
