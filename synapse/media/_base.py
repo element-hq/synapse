@@ -119,6 +119,15 @@ MAXIMUM_ALLOWED_MAX_TIMEOUT_MS = 60_000
 _IMMUTABLE_ETAG = "1"
 
 
+def is_head_request(request: SynapseRequest) -> bool:
+    """Whether the client only wants the response headers.
+
+    HEAD requests are routed to the GET handlers, and Twisted discards any body
+    written for them, so there is no point reading the media to send it.
+    """
+    return request.method == b"HEAD"
+
+
 def respond_404(request: SynapseRequest) -> None:
     assert request.path is not None
     respond_with_json(
@@ -146,8 +155,9 @@ async def respond_with_file(
 
         add_file_headers(request, media_type, file_size, upload_name)
 
-        with open(file_path, "rb") as f:
-            await ThreadedFileSender(hs).beginFileTransfer(f, request)
+        if not is_head_request(request):
+            with open(file_path, "rb") as f:
+                await ThreadedFileSender(hs).beginFileTransfer(f, request)
 
         finish_request(request)
     else:
@@ -376,7 +386,8 @@ async def respond_with_multipart_responder(
         )
 
         try:
-            await responder.write_to_consumer(multipart_consumer)
+            if not is_head_request(request):
+                await responder.write_to_consumer(multipart_consumer)
         except ConsumerRequestedStopError as e:
             logger.debug("Failed to write to consumer: %s %s", type(e), e)
             # Unregister the producer, if it has one, so Twisted doesn't complain
@@ -423,7 +434,8 @@ async def respond_with_responder(
         logger.debug("Responding to media request with responder %s", responder)
         add_file_headers(request, media_type, file_size, upload_name)
         try:
-            await responder.write_to_consumer(request)
+            if not is_head_request(request):
+                await responder.write_to_consumer(request)
         except ConsumerRequestedStopError as e:
             logger.debug("Failed to write to consumer: %s %s", type(e), e)
             # Unregister the producer, if it has one, so Twisted doesn't complain
