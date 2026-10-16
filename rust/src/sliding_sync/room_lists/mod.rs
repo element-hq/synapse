@@ -47,7 +47,9 @@ pub struct RoomForUser {
     /// `None` after a state reset.
     pub event_id: Option<Arc<str>>,
     pub event_pos: PersistedEventPosition,
-    pub room_version_id: Arc<str>,
+    /// `None` when the `rooms` row has no version, which only the reads
+    /// that keep unknown versions return.
+    pub room_version_id: Option<Arc<str>>,
     pub has_known_state: bool,
     pub room_type: Option<Arc<str>>,
     pub is_encrypted: bool,
@@ -78,7 +80,7 @@ pub(crate) fn room_from_py(room: PyRoomForUser) -> RoomForUser {
             instance_name: Arc::from("master"),
             stream,
         },
-        room_version_id: Arc::from("10"),
+        room_version_id: Some(Arc::from("10")),
         has_known_state,
         room_type: room_type.map(Arc::from),
         is_encrypted,

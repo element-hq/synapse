@@ -12,7 +12,8 @@
 
 """Simplified sliding sync (MSC4186) in Rust. See `rust/src/sliding_sync/`."""
 
-from synapse.types import JsonDict, RoomStreamToken
+from synapse.synapse_rust.database.postgres import ConnectionPool
+from synapse.types import JsonDict, JsonMapping, RoomStreamToken
 from synapse.types.state import StateFilter
 
 class SlidingSyncHandler:
@@ -248,3 +249,79 @@ def find_relevant_room_ids_for_test(
 ) -> list[str]:
     """Each list as its operations' room IDs. Raises `AssertionError` as
     Python does."""
+
+# A membership snapshot as `(room_id, sender, membership, event_id,
+# room_version_id, instance_name, stream, has_known_state, room_type,
+# is_encrypted)`.
+_PySnapshot = tuple[
+    str, str | None, str, str | None, str | None, str, int, bool, str | None, bool
+]
+
+class SlidingSyncStoreForTest:
+    """The sliding sync store's queries (`rust/src/storage/sliding_sync_store.rs`),
+    each run to completion on the tokio runtime, over the native driver's pool
+    and the Rust store's caches. For `tests/storage/test_sliding_sync_store.py`."""
+
+    def __init__(self, pool: ConnectionPool, handler: SlidingSyncHandler) -> None: ...
+    def rooms_from_snapshots(self, user_id: str) -> dict[str, _PySnapshot]: ...
+    def self_leave_rooms_after(
+        self, user_id: str, to_token: RoomStreamToken
+    ) -> dict[str, _PySnapshot]: ...
+    def snapshot_room(self, user_id: str, room_id: str) -> _PySnapshot | None: ...
+    def snapshot_rooms(
+        self, user_id: str, room_ids: list[str]
+    ) -> dict[str, _PySnapshot]: ...
+    def snapshot_membership_changes(
+        self,
+        user_id: str,
+        from_token: RoomStreamToken,
+        to_token: RoomStreamToken,
+        excluded_room_ids: list[str],
+        membership_may_have_changed: bool,
+    ) -> list[
+        tuple[str, str | None, str, str | None, tuple[str, int], str | None]
+    ]: ...
+    def membership_delta_changes(
+        self,
+        user_id: str,
+        from_token: RoomStreamToken,
+        to_token: RoomStreamToken,
+        excluded_room_ids: list[str],
+        membership_may_have_changed: bool,
+    ) -> list[
+        tuple[
+            str,
+            str | None,
+            tuple[str, int],
+            str,
+            str | None,
+            str | None,
+            tuple[str, int] | None,
+            str | None,
+            str | None,
+        ]
+    ]: ...
+    def rooms_with_updates_since(
+        self,
+        room_ids: list[str],
+        from_token: RoomStreamToken,
+        changed_since: set[str] | None,
+    ) -> set[str]: ...
+    def max_event_pos(
+        self, room_ids: list[str], now_token: RoomStreamToken
+    ) -> dict[str, int | None]: ...
+    def last_event_pos_before(
+        self,
+        room_ids: list[str],
+        end_token: RoomStreamToken,
+        now_token: RoomStreamToken,
+    ) -> dict[str, int]: ...
+    def cached_member_counts(self, room_id: str) -> dict[str, int]: ...
+    def room_type(self, room_id: str) -> tuple[bool, str | None]:
+        """`(known, room_type)`: not known is `ROOM_UNKNOWN_SENTINEL`."""
+    def room_version_id(self, room_id: str) -> str | None: ...
+    def partial_rooms(self) -> set[str]: ...
+    def tags_for_user(self, user_id: str) -> dict[str, dict[str, JsonMapping]]: ...
+    def is_encrypted_at(
+        self, room_id: str, to_token: RoomStreamToken, now_token: RoomStreamToken
+    ) -> bool: ...

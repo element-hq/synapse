@@ -19,5 +19,6 @@ pub mod events;
 pub mod federation_store;
 pub mod pool_querier;
 pub mod python;
+pub mod sliding_sync_store;
 pub mod store;
 pub mod sync_store;

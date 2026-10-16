@@ -167,6 +167,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<SlidingSyncHandler>()?;
     child_module.add_class::<SlidingSyncStats>()?;
     child_module.add_class::<request::SlidingSyncRequest>()?;
+    child_module.add_class::<crate::storage::sliding_sync_store::PySlidingSyncStoreForTest>()?;
     config::register_test_functions(&child_module)?;
     connection::register_test_functions(&child_module)?;
     extensions::register_test_functions(&child_module)?;

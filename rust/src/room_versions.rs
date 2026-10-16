@@ -550,6 +550,16 @@ static KNOWN_ROOM_VERSIONS: LazyLock<KnownRoomVersionsMapping> = LazyLock::new(|
     }
 });
 
+/// Whether `identifier` is in `KNOWN_ROOM_VERSIONS`, which experimental
+/// versions can join at runtime.
+pub fn is_known_room_version(identifier: &str) -> bool {
+    KNOWN_ROOM_VERSIONS
+        .versions
+        .read()
+        .map(|versions| versions.iter().any(|v| v.identifier == identifier))
+        .unwrap_or(false)
+}
+
 /// Container class for room version constants.
 ///
 /// This should contain all room versions that we know about.

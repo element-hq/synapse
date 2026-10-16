@@ -49,12 +49,16 @@
 //! `synapse.util.caches.mirror_rust_cache`. They are filled by the sync
 //! store's readers.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use crate::caches::{python::CacheHandle, registry::CacheRegistry, Cache};
 use crate::federation::client::limiter::RetryTimings;
 use crate::state::StateMap;
 use crate::storage::events::CachedEvent;
+use crate::storage::sliding_sync_store::{RoomType, SnapshotRooms, UserTags};
 use crate::storage::sync_store::{RetentionRow, RoomNotifCounts, RoomSummary};
 
 pub type EventCache = Cache<Arc<str>, CachedEvent>;
@@ -145,7 +149,36 @@ pub struct StoreCaches {
     pub unread_counts: Arc<UnreadCountsCache>,
     /// `get_destination_retry_timings`.
     pub destination_retry_timings: Arc<Cache<Arc<str>, Option<RetryTimings>>>,
+    /// `get_member_counts`.
+    pub member_counts: Arc<MemberCountsCache>,
+    /// `get_global_account_data_by_type_for_user`, keyed on user and type,
+    /// and invalidated by user alone as well, as a `tree=True` cache.
+    pub global_account_data: Arc<GlobalAccountDataCache>,
+    /// `get_tags_for_user`.
+    pub tags_for_user: Arc<Cache<Arc<str>, Arc<UserTags>>>,
+    /// `get_room_type`.
+    pub room_types: Arc<Cache<Arc<str>, RoomType>>,
+    /// `get_room_version_id`. A room without one is not cached, as Python
+    /// raises for it.
+    pub room_version_ids: Arc<Cache<Arc<str>, Arc<str>>>,
+    /// `get_partial_rooms`, under its one key, weighed by rooms.
+    pub partial_rooms: Arc<Cache<(), Arc<HashSet<Arc<str>>>>>,
+
+    // Sliding sync.
+    /// `get_sliding_sync_rooms_for_user_from_membership_snapshots`, weighed
+    /// by rooms.
+    pub sliding_sync_rooms_for_user: Arc<Cache<Arc<str>, Arc<SnapshotRooms>>>,
+    /// `_get_max_event_pos`. `None` for a room the batch load did not find,
+    /// as Python's `cachedList` stores.
+    pub max_event_pos: Arc<Cache<Arc<str>, Option<i64>>>,
 }
+
+/// Room ID to its number of members by membership.
+pub type MemberCountsCache = Cache<Arc<str>, Arc<HashMap<String, i64>>>;
+
+/// `(user_id, account_data_type)` to the user's global account data of
+/// that type.
+pub type GlobalAccountDataCache = Cache<(Arc<str>, Arc<str>), Option<Arc<serde_json::Value>>>;
 
 /// User ID to the rooms they are joined to.
 pub type RoomsForUserCache = Cache<Arc<str>, Arc<HashSet<Arc<str>>>>;
@@ -194,6 +227,20 @@ impl StoreCaches {
                 5000,
                 |counts| counts.threads.len() + 1,
             ),
+            member_counts: registry.new_cache("rust_get_member_counts", 1000),
+            global_account_data: registry
+                .new_cache("rust_get_global_account_data_by_type_for_user", 5000),
+            tags_for_user: registry.new_cache("rust_get_tags_for_user", 1000),
+            room_types: registry.new_cache("rust_get_room_type", 10_000),
+            room_version_ids: registry.new_cache("rust_get_room_version_id", 10_000),
+            partial_rooms: registry
+                .new_weighted_cache("rust_get_partial_rooms", 10_000, |rooms| rooms.len()),
+            sliding_sync_rooms_for_user: registry.new_weighted_cache(
+                "rust_get_sliding_sync_rooms_for_user_from_membership_snapshots",
+                10_000,
+                |rooms| rooms.len(),
+            ),
+            max_event_pos: registry.new_cache("rust_get_max_event_pos", 1000),
         }
     }
 
@@ -227,6 +274,20 @@ impl StoreCaches {
                 "get_destination_retry_timings",
                 &self.destination_retry_timings,
             ),
+            mirror("get_member_counts", &self.member_counts),
+            mirror(
+                "get_global_account_data_by_type_for_user",
+                &self.global_account_data,
+            ),
+            mirror("get_tags_for_user", &self.tags_for_user),
+            mirror("get_room_type", &self.room_types),
+            mirror("get_room_version_id", &self.room_version_ids),
+            mirror("get_partial_rooms", &self.partial_rooms),
+            mirror(
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots",
+                &self.sliding_sync_rooms_for_user,
+            ),
+            mirror("_get_max_event_pos", &self.max_event_pos),
         ]
     }
 

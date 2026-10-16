@@ -240,13 +240,13 @@ impl<'a> SyncReader<'a> {
         *lock_ignoring_poison(&self.stats)
     }
 
-    fn update_stats(&self, f: impl FnOnce(&mut SyncDbStats)) {
+    pub(crate) fn update_stats(&self, f: impl FnOnce(&mut SyncDbStats)) {
         f(&mut lock_ignoring_poison(&self.stats));
     }
 
     /// Borrow a connection for a group of statements that need no common
     /// snapshot.
-    async fn borrow(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
+    pub(crate) async fn borrow(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
         let start = Instant::now();
         let conn = self
             .pool
@@ -269,7 +269,7 @@ impl<'a> SyncReader<'a> {
     /// snapshot. Such a transaction cannot fail with a serialization error
     /// or a deadlock, so there is no retry loop. Finish with
     /// [`Borrowed::commit`].
-    async fn begin(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
+    pub(crate) async fn begin(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
         let mut borrowed = self.borrow().await?;
         borrowed
             .execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
@@ -280,7 +280,7 @@ impl<'a> SyncReader<'a> {
     }
 
     /// Run one statement on a connection borrowed for it.
-    async fn query_one_shot(
+    pub(crate) async fn query_one_shot(
         &self,
         sql: &str,
         params: &[&(dyn ToSql + Sync)],
@@ -807,30 +807,37 @@ impl<'a> SyncReader<'a> {
     }
 
     /// `get_global_account_data_by_type_for_user`: the user's account data
-    /// of the type, if any.
+    /// of the type, if any, through its mirror.
     pub async fn global_account_data_by_type(
         &self,
         user_id: &str,
         data_type: &str,
-    ) -> anyhow::Result<Option<serde_json::Value>> {
-        let rows = self
-            .query_one_shot(
-                "SELECT content FROM account_data WHERE user_id = $1 AND account_data_type = $2",
-                &[&user_id, &data_type],
-            )
-            .await?;
-        let Some(row) = rows.first() else {
-            return Ok(None);
-        };
-        let content: Option<String> = row.try_get(0)?;
-        match content.filter(|content| !content.is_empty()) {
-            Some(content) => {
-                Ok(Some(serde_json::from_str(&content).with_context(|| {
-                    format!("account data {data_type} of {user_id}")
-                })?))
-            }
-            None => Ok(None),
-        }
+    ) -> anyhow::Result<Option<Arc<serde_json::Value>>> {
+        self.store
+            .caches
+            .global_account_data
+            .get_or_load((Arc::from(user_id), Arc::from(data_type)), || async {
+                let rows = self
+                    .query_one_shot(
+                        "SELECT content FROM account_data
+                        WHERE user_id = $1 AND account_data_type = $2",
+                        &[&user_id, &data_type],
+                    )
+                    .await?;
+                let Some(row) = rows.first() else {
+                    return Ok(None);
+                };
+                let content: Option<String> = row.try_get(0)?;
+                match content.filter(|content| !content.is_empty()) {
+                    Some(content) => Ok(Some(Arc::new(
+                        serde_json::from_str(&content)
+                            .with_context(|| format!("account data {data_type} of {user_id}"))?,
+                    ))),
+                    None => Ok(None),
+                }
+            })
+            .await
+            .map_err(anyhow::Error::new)
     }
 
     /// `ignored_users`: the users the user ignores.
@@ -963,7 +970,7 @@ impl<'a> SyncReader<'a> {
     }
 
     /// [`SyncReader::events`] on a connection already borrowed.
-    async fn load_events(
+    pub(crate) async fn load_events(
         &self,
         borrowed: &Borrowed<'_, '_>,
         event_ids: &[Arc<str>],
@@ -2131,7 +2138,7 @@ impl<'a> SyncReader<'a> {
 
 /// How many values to send per `= ANY` statement, as
 /// `simple_select_many_batch` does.
-const SELECT_MANY_BATCH_SIZE: usize = 1000;
+pub(crate) const SELECT_MANY_BATCH_SIZE: usize = 1000;
 
 /// How many state groups to load per transaction, as
 /// `_get_state_groups_from_groups` does.
@@ -2139,10 +2146,10 @@ const STATE_GROUP_BATCH_SIZE: usize = 100;
 
 /// Interns strings, so the event types of one result share an allocation.
 #[derive(Default)]
-struct Interner(HashSet<Arc<str>>);
+pub(crate) struct Interner(HashSet<Arc<str>>);
 
 impl Interner {
-    fn intern(&mut self, s: &str) -> Arc<str> {
+    pub(crate) fn intern(&mut self, s: &str) -> Arc<str> {
         if let Some(existing) = self.0.get(s) {
             return Arc::clone(existing);
         }
@@ -2240,7 +2247,7 @@ impl Borrowed<'_, '_> {
     }
 
     /// Run statements that return nothing.
-    async fn execute(&self, sql: &str) -> anyhow::Result<()> {
+    pub(crate) async fn execute(&self, sql: &str) -> anyhow::Result<()> {
         let start = Instant::now();
         self.conn()
             .batch_execute(sql)
@@ -2304,11 +2311,14 @@ impl Querier for Borrowed<'_, '_> {
 // Test-only entry points, so trial can compare the Rust store against the
 // Python one on a real schema.
 
-fn anyhow_to_py(e: anyhow::Error) -> PyErr {
+pub(crate) fn anyhow_to_py(e: anyhow::Error) -> PyErr {
     pyo3::exceptions::PyRuntimeError::new_err(format!("{e:#}"))
 }
 
-fn json_to_py<'py>(py: Python<'py>, value: &serde_json::Value) -> PyResult<Bound<'py, PyAny>> {
+pub(crate) fn json_to_py<'py>(
+    py: Python<'py>,
+    value: &serde_json::Value,
+) -> PyResult<Bound<'py, PyAny>> {
     pythonize::pythonize(py, value).map_err(Into::into)
 }
 
@@ -2493,7 +2503,7 @@ impl PySyncStoreForTest {
             }
             .boxed()
         })?;
-        data.as_ref().map(|data| json_to_py(py, data)).transpose()
+        data.as_deref().map(|data| json_to_py(py, data)).transpose()
     }
 
     fn ignored_users(&self, py: Python<'_>, user_id: String) -> PyResult<HashSet<String>> {
