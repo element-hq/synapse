@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.defer import Deferred
 
+from synapse.synapse_rust.sliding_sync import SlidingSyncHandler
 from synapse.synapse_rust.state import StateResolutionHandler
 from synapse.synapse_rust.sync import SyncHandler
 from synapse.types import JsonDict
@@ -44,3 +45,8 @@ class RustHandlers:
     def sync(self) -> SyncHandler | None:
         """The Rust sync handler, or None if the main database does not use
         the native Rust Postgres driver."""
+
+    @property
+    def sliding_sync(self) -> SlidingSyncHandler | None:
+        """The Rust sliding sync handler, or None if the main database does not
+        use the native Rust Postgres driver."""

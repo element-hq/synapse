@@ -376,6 +376,12 @@ main() {
     export PASS_SYNAPSE_RUST_SYNC="$RUST_SYNC"
   fi
 
+  if [[ -n "$RUST_SLIDING_SYNC" ]]; then
+    # Set `experimental_features.rust_sliding_sync` (off or on). The Rust
+    # sliding sync handler needs RUST_DRIVER=1.
+    export PASS_SYNAPSE_RUST_SLIDING_SYNC="$RUST_SLIDING_SYNC"
+  fi
+
   if [[ -n "$UNIX_SOCKETS" ]]; then
     # Enable full on Unix socket mode for Synapse, Redis and Postgresql
     export PASS_SYNAPSE_USE_UNIX_SOCKET=1

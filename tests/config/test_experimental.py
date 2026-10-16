@@ -74,6 +74,25 @@ class ExperimentalConfigTestCase(unittest.TestCase):
         with self.assertRaises(ConfigError):
             _read_config({"experimental_features": {"rust_state_res": "maybe"}})
 
+    @parameterized.expand(
+        [
+            # YAML reads these as booleans.
+            ("rust_sliding_sync: on", "on"),
+            ("rust_sliding_sync: off", "off"),
+            ("rust_sliding_sync: 'on'", "on"),
+            ("{}", "off"),
+        ]
+    )
+    def test_rust_sliding_sync(self, features_yaml: str, expected: str) -> None:
+        config = _read_config({"experimental_features": yaml.safe_load(features_yaml)})
+        self.assertEqual(config.rust_sliding_sync, expected)
+
+    @parameterized.expand([("shadow",), ("maybe",)])
+    def test_rust_sliding_sync_rejects_unknown_modes(self, mode: str) -> None:
+        """There is no shadow mode."""
+        with self.assertRaises(ConfigError):
+            _read_config({"experimental_features": {"rust_sliding_sync": mode}})
+
 
 def _read_config(config_values: JsonDict) -> ExperimentalConfig:
     config = ExperimentalConfig(RootConfig())

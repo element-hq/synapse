@@ -196,6 +196,8 @@ pub struct SyncDbStats {
     pub checkouts: u64,
     /// Time spent waiting for a connection.
     pub checkout_time: Duration,
+    /// Transactions begun.
+    pub transactions: u64,
     /// Statements executed.
     pub queries: u64,
     /// Rows returned.
@@ -273,6 +275,7 @@ impl<'a> SyncReader<'a> {
             .execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
             .await?;
         borrowed.in_transaction = true;
+        self.update_stats(|stats| stats.transactions += 1);
         Ok(borrowed)
     }
 

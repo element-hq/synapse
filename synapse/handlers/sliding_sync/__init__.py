@@ -18,7 +18,7 @@ from itertools import chain
 from typing import TYPE_CHECKING, AbstractSet, Mapping
 
 import attr
-from prometheus_client import Histogram
+from prometheus_client import Counter, Histogram
 from typing_extensions import assert_never
 
 from synapse.api.constants import Direction, EventTypes, Membership
@@ -45,6 +45,10 @@ from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.roommember import (
     MemberSummary,
+)
+from synapse.synapse_rust.sliding_sync import (
+    SlidingSyncHandler as RustSlidingSyncHandler,
+    SlidingSyncStats as RustSlidingSyncStats,
 )
 from synapse.types import (
     JsonDict,
@@ -86,6 +90,82 @@ sync_processing_time = Histogram(
     labelnames=["initial", SERVER_NAME_LABEL],
 )
 
+# Room entries computed in `rust_sliding_sync: on` mode. `result` is "rust",
+# "fallback" for a room left to Python, or "error" for a room Python computed
+# after the Rust handler failed on it.
+rust_sliding_sync_rooms_counter = Counter(
+    "synapse_sliding_sync_rust_rooms_total",
+    "Room entries of sliding sync responses computed in `rust_sliding_sync: on` "
+    "mode, by whether Rust computed them or fell back to Python",
+    labelnames=["result", SERVER_NAME_LABEL],
+)
+
+# Requests served in `rust_sliding_sync: on` mode. `result` is "rust" for a
+# request Rust took part in, "fallback" for one Python computed in full because
+# Rust does not cover it (the sliding sync background updates have not finished,
+# or a list uses a filter Python does not implement either), or "error" for one
+# Python computed in full after the Rust handler failed on it.
+rust_sliding_sync_requests_counter = Counter(
+    "synapse_sliding_sync_rust_requests_total",
+    "Sliding sync requests in `rust_sliding_sync: on` mode, by whether Rust "
+    "took part or Python computed the whole response",
+    labelnames=["result", SERVER_NAME_LABEL],
+)
+
+# What the Rust implementation did per request, from its `SlidingSyncStats`.
+rust_sliding_sync_db_time = Histogram(
+    "synapse_sliding_sync_rust_db_seconds",
+    "Time a Rust sliding sync request spent waiting on database statements",
+    labelnames=[SERVER_NAME_LABEL],
+)
+rust_sliding_sync_checkout_time = Histogram(
+    "synapse_sliding_sync_rust_db_checkout_seconds",
+    "Time a Rust sliding sync request spent waiting for database connections",
+    labelnames=[SERVER_NAME_LABEL],
+)
+_RUST_COUNT_BUCKETS = (0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000)
+rust_sliding_sync_transactions = Histogram(
+    "synapse_sliding_sync_rust_db_transactions",
+    "Database transactions begun per Rust sliding sync request",
+    labelnames=[SERVER_NAME_LABEL],
+    buckets=_RUST_COUNT_BUCKETS,
+)
+rust_sliding_sync_queries = Histogram(
+    "synapse_sliding_sync_rust_db_queries",
+    "Database statements executed per Rust sliding sync request",
+    labelnames=[SERVER_NAME_LABEL],
+    buckets=_RUST_COUNT_BUCKETS,
+)
+rust_sliding_sync_rooms_computed = Histogram(
+    "synapse_sliding_sync_rust_rooms_computed",
+    "Room entries the Rust implementation computed per sliding sync request",
+    labelnames=[SERVER_NAME_LABEL],
+    buckets=_RUST_COUNT_BUCKETS,
+)
+rust_sliding_sync_lazy_member_lookups = Histogram(
+    "synapse_sliding_sync_rust_lazy_member_lookups",
+    "Rooms whose lazy-loaded members the Rust implementation looked up in the "
+    "connection state, per sliding sync request",
+    labelnames=[SERVER_NAME_LABEL],
+    buckets=_RUST_COUNT_BUCKETS,
+)
+
+
+def observe_rust_sliding_sync_stats(
+    stats: RustSlidingSyncStats, server_name: str
+) -> None:
+    """Record one request's `SlidingSyncStats` in the histograms."""
+    labels = {SERVER_NAME_LABEL: server_name}
+    rust_sliding_sync_db_time.labels(**labels).observe(stats.db_time)
+    rust_sliding_sync_checkout_time.labels(**labels).observe(stats.checkout_time)
+    rust_sliding_sync_transactions.labels(**labels).observe(stats.transactions)
+    rust_sliding_sync_queries.labels(**labels).observe(stats.queries)
+    rust_sliding_sync_rooms_computed.labels(**labels).observe(stats.rooms_computed)
+    rust_sliding_sync_lazy_member_lookups.labels(**labels).observe(
+        stats.lazy_member_lookups
+    )
+
+
 # Limit the number of state_keys we should remember sending down the connection for each
 # (room_id, user_id). We don't want to store and pull out too much data in the database.
 #
@@ -112,6 +192,23 @@ class SlidingSyncHandler:
         self.connection_store = SlidingSyncConnectionStore(self.clock, self.store)
         self.extensions = SlidingSyncExtensionHandler(hs)
         self.room_lists = SlidingSyncRoomLists(hs)
+
+        # The Rust sliding sync handler, used when the `rust_sliding_sync`
+        # experimental option is "on". It needs the native Rust Postgres driver.
+        self._rust_sliding_sync_mode = hs.config.experimental.rust_sliding_sync
+        self._rust_sliding_sync: RustSlidingSyncHandler | None = None
+        if self._rust_sliding_sync_mode != "off":
+            self._rust_sliding_sync = hs.get_rust_handlers().sliding_sync
+            if self._rust_sliding_sync is None:
+                logger.warning(
+                    "rust_sliding_sync is %r but the main database does not use "
+                    "the native Rust driver: using the Python sliding sync handler",
+                    self._rust_sliding_sync_mode,
+                )
+
+        # Whether a Rust error raises rather than falling back to Python. Tests
+        # set it.
+        self._rust_sliding_sync_strict = False
 
     async def wait_for_sync_for_user(
         self,
