@@ -63,6 +63,10 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
+from synapse.synapse_rust.sliding_sync import (
+    RoomResult as RustSlidingSyncRoomResult,
+    encode_rooms as encode_rust_sliding_sync_rooms,
+)
 from synapse.synapse_rust.sync import RoomsEncoder as RustRoomsEncoder
 from synapse.types import (
     JsonDict,
@@ -71,6 +75,7 @@ from synapse.types import (
     SlidingSyncStreamToken,
     StreamToken,
 )
+from synapse.types.handlers.sliding_sync import AnySlidingSyncRoomResult
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.cancellation import cancellable
@@ -1106,7 +1111,7 @@ class SlidingSyncRestServlet(RestServlet):
     async def encode_rooms(
         self,
         requester: Requester,
-        rooms: dict[str, SlidingSyncResult.RoomResult],
+        rooms: Mapping[str, AnySlidingSyncRoomResult],
     ) -> JsonDict:
         time_now = self.clock.time_msec()
 
@@ -1115,8 +1120,37 @@ class SlidingSyncRestServlet(RestServlet):
             requester=requester,
         )
 
+        # The rooms the Rust handler computed are encoded in Rust.
+        rust_rooms = [
+            room
+            for room in rooms.values()
+            if isinstance(room, RustSlidingSyncRoomResult)
+        ]
+        encoded_in_rust: dict[str, JsonDict] = {}
+        if rust_rooms:
+            # Module callbacks take Python events, so only then do the rooms'
+            # events become Python objects.
+            unsigned_additions: Mapping[str, JsonDict] = {}
+            if self.event_serializer.has_unsigned_callbacks:
+                unsigned_additions = await self.event_serializer.unsigned_additions(
+                    event for room in rust_rooms for event in room.events_to_serialize()
+                )
+            encoded = encode_rust_sliding_sync_rooms(
+                rust_rooms,
+                time_now,
+                serialize_options,
+                unsigned_additions=unsigned_additions,
+            )
+            encoded_in_rust = {
+                room.room_id: entry for room, entry in zip(rust_rooms, encoded)
+            }
+
         serialized_rooms: dict[str, JsonDict] = {}
         for room_id, room_result in rooms.items():
+            if isinstance(room_result, RustSlidingSyncRoomResult):
+                serialized_rooms[room_id] = encoded_in_rust[room_id]
+                continue
+
             serialized_rooms[room_id] = {
                 "notification_count": room_result.notification_count,
                 "highlight_count": room_result.highlight_count,
@@ -1228,7 +1262,7 @@ class SlidingSyncRestServlet(RestServlet):
         self,
         requester: Requester,
         extensions: SlidingSyncResult.Extensions,
-        ref_rooms_results: Mapping[str, SlidingSyncResult.RoomResult],
+        ref_rooms_results: Mapping[str, AnySlidingSyncRoomResult],
     ) -> JsonDict:
         """
         Args:
@@ -1343,7 +1377,7 @@ class SlidingSyncRestServlet(RestServlet):
         self,
         requester: Requester,
         sticky_events: SlidingSyncResult.Extensions.StickyEventsExtension,
-        ref_rooms_results: Mapping[str, SlidingSyncResult.RoomResult],
+        ref_rooms_results: Mapping[str, AnySlidingSyncRoomResult],
     ) -> JsonDict:
         """
         Serialise the sticky events extension response.
@@ -1385,9 +1419,7 @@ class SlidingSyncRestServlet(RestServlet):
                 # Nothing to deduplicate
                 sticky_events_to_write = possibly_duplicated_sticky_events
             else:
-                sent_event_ids_in_room_section = {
-                    ev.event.event_id for ev in room_result.timeline_events
-                }
+                sent_event_ids_in_room_section = set(room_result.timeline_event_ids)
                 sticky_events_to_write = [
                     ev
                     for ev in possibly_duplicated_sticky_events

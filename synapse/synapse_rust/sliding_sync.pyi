@@ -12,13 +12,121 @@
 
 """Simplified sliding sync (MSC4186) in Rust. See `rust/src/sliding_sync/`."""
 
+from collections.abc import Mapping
+from typing import AbstractSet
+
+from twisted.internet.defer import Deferred
+
+from synapse.events import EventBase
 from synapse.synapse_rust.database.postgres import ConnectionPool
+from synapse.synapse_rust.events import SerializeEventConfig
 from synapse.types import JsonDict, JsonMapping, RoomStreamToken
 from synapse.types.state import StateFilter
 
 class SlidingSyncHandler:
     """Computes sliding sync responses in Rust, reading the database through
     the native Postgres driver. Built by `RustHandlers`."""
+
+    def generate_room_entries(
+        self,
+        request: SlidingSyncRequest,
+        rooms: list[RoomInput],
+        *,
+        instance_ids: Mapping[str, int],
+    ) -> Deferred[RoomsResult]:
+        """`get_room_sync_data` for each of `rooms`, twenty at a time.
+        `instance_ids` are `get_id_for_instance` for the writers the rooms'
+        tokens may name."""
+    def generate_room_entries_blocking(
+        self,
+        request: SlidingSyncRequest,
+        rooms: list[RoomInput],
+        *,
+        instance_ids: Mapping[str, int],
+    ) -> RoomsResult: ...
+
+class RoomInput:
+    """The input of one room's `get_room_sync_data`."""
+
+    def __init__(
+        self,
+        *,
+        room_id: str,
+        sender: str | None,
+        membership: str,
+        event_id: str | None,
+        instance_name: str,
+        stream: int,
+        room_version_id: str | None,
+        timeline_limit: int,
+        required_state_map: Mapping[str, AbstractSet[str]],
+        prev_room_sync_config: tuple[int, Mapping[str, AbstractSet[str]]] | None,
+        room_status: str,
+        room_status_token: RoomStreamToken | None,
+        newly_joined: bool,
+        newly_left: bool,
+        is_dm: bool,
+    ) -> None:
+        """`room_status` is a `HaveSentRoomFlag` value, with its token for
+        "previously"."""
+    @property
+    def room_id(self) -> str: ...
+
+class RoomResult:
+    """One room's entry, computed in Rust: what `current_sync_for_user` and the
+    extensions read of a `SlidingSyncResult.RoomResult`."""
+
+    def __bool__(self) -> bool: ...
+    @property
+    def room_id(self) -> str: ...
+    @property
+    def initial(self) -> bool: ...
+    @property
+    def unstable_expanded_timeline(self) -> bool: ...
+    @property
+    def timeline_event_ids(self) -> list[str]: ...
+    @property
+    def timeline_senders(self) -> list[str]: ...
+    @property
+    def required_state_member_keys(self) -> list[str]: ...
+    @property
+    def hero_user_ids(self) -> list[str]: ...
+    def events_to_serialize(self) -> list[EventBase]:
+        """Every event the room's encoding serializes, for module callbacks."""
+
+class RoomsResult:
+    """What `generate_room_entries` made of the rooms."""
+
+    def take_entries(self) -> list[RoomResult]:
+        """The entries to send. A second call returns an empty list."""
+    @property
+    def empty(self) -> list[str]:
+        """The rooms computed with nothing to send."""
+    @property
+    def room_config_updates(self) -> list[tuple[str, int, dict[str, set[str]]]]:
+        """`(room_id, timeline_limit, required_state_map)` for each room whose
+        config the connection records."""
+    @property
+    def lazy_memberships(
+        self,
+    ) -> list[tuple[str, dict[str, int | None], set[str]]]:
+        """`(room_id, returned_user_id_to_last_seen_ts_map,
+        invalidated_user_ids)` for each room computed."""
+    @property
+    def fallbacks(self) -> list[tuple[str, str]]: ...
+    @property
+    def errors(self) -> list[tuple[str, str]]: ...
+    @property
+    def stats(self) -> SlidingSyncStats: ...
+
+def encode_rooms(
+    rooms: list[RoomResult],
+    time_now_ms: int,
+    config: SerializeEventConfig,
+    *,
+    unsigned_additions: Mapping[str, JsonDict] | None = None,
+) -> list[JsonDict]:
+    """The servlet's `encode_rooms` for rooms computed in Rust, in order."""
 
 class SlidingSyncStats:
     """What the Rust implementation did for one request."""

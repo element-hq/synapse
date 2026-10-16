@@ -25,6 +25,7 @@ from typing import (
     Mapping,
     MutableMapping,
     Sequence,
+    TypeAlias,
     TypeVar,
     cast,
 )
@@ -35,6 +36,7 @@ from pydantic import ConfigDict
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.events.utils import FilteredEvent
+from synapse.synapse_rust.sliding_sync import RoomResult as RustRoomResult
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -204,6 +206,31 @@ class SlidingSyncResult:
         invited_count: int | None
         notification_count: int
         highlight_count: int
+
+        @property
+        def timeline_event_ids(self) -> list[str]:
+            """The IDs of the timeline's events. The extensions read this,
+            which a room computed in Rust has too."""
+            return [event.event.event_id for event in self.timeline_events]
+
+        @property
+        def timeline_senders(self) -> list[str]:
+            """The senders of the timeline's events."""
+            return [event.event.sender for event in self.timeline_events]
+
+        @property
+        def required_state_member_keys(self) -> list[str]:
+            """The state keys of the membership events in `required_state`."""
+            return [
+                event.state_key
+                for event in self.required_state
+                if event.type == EventTypes.Member
+            ]
+
+        @property
+        def hero_user_ids(self) -> list[str]:
+            """The user IDs of the heroes."""
+            return [hero.user_id for hero in self.heroes or ()]
 
         def __bool__(self) -> bool:
             """Are there any updates that should be returned immediately to
@@ -483,7 +510,8 @@ class SlidingSyncResult:
 
     next_pos: SlidingSyncStreamToken
     lists: Mapping[str, SlidingWindowList]
-    rooms: dict[str, RoomResult]
+    # A room computed in Rust is a `synapse_rust.sliding_sync.RoomResult`.
+    rooms: dict[str, "AnySlidingSyncRoomResult"]
     extensions: Extensions
 
     def __bool__(self) -> bool:
@@ -511,6 +539,11 @@ class SlidingSyncResult:
             rooms={},
             extensions=SlidingSyncResult.Extensions(),
         )
+
+
+# A room's entry in a response: computed in Python, or in Rust, which has the
+# properties of the Python one that the extensions read.
+AnySlidingSyncRoomResult: TypeAlias = SlidingSyncResult.RoomResult | RustRoomResult
 
 
 class StateValues:

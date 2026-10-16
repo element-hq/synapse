@@ -52,6 +52,7 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.handlers.sliding_sync import (
+    AnySlidingSyncRoomResult,
     HaveSentRoomFlag,
     MutablePerConnectionState,
     OperationType,
@@ -103,7 +104,7 @@ class SlidingSyncExtensionHandler:
         all_interested_room_ids: set[str],
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
-        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, AnySlidingSyncRoomResult],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions:
@@ -690,7 +691,7 @@ class SlidingSyncExtensionHandler:
         new_connection_state: "MutablePerConnectionState",
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
-        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, AnySlidingSyncRoomResult],
         receipts_request: SlidingSyncConfig.Extensions.ReceiptsExtension,
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
@@ -815,10 +816,10 @@ class SlidingSyncExtensionHandler:
                 # in the timeline to avoid bloating and blowing up the sync response
                 # as the number of users in the room increases. (this behavior is part of the spec)
                 initial_rooms_and_event_ids = [
-                    (room_id, event.event.event_id)
+                    (room_id, event_id)
                     for room_id in initial_rooms
                     if room_id in actual_room_response_map
-                    for event in actual_room_response_map[room_id].timeline_events
+                    for event_id in actual_room_response_map[room_id].timeline_event_ids
                 ]
                 initial_receipts = await self.store.get_linearized_receipts_for_events(
                     room_and_event_ids=initial_rooms_and_event_ids,
@@ -894,7 +895,7 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
-        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, AnySlidingSyncRoomResult],
         typing_request: SlidingSyncConfig.Extensions.TypingExtension,
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
@@ -1129,7 +1130,7 @@ class SlidingSyncExtensionHandler:
         user_id: str,
         actual_room_ids: set[str],
         sync_config: SlidingSyncConfig,
-        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, AnySlidingSyncRoomResult],
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
     ) -> tuple[set[str], set[str]]:
         """
@@ -1186,16 +1187,11 @@ class SlidingSyncExtensionHandler:
                 if room_id not in lazy_rooms:
                     continue
                 # Include users from timeline events
-                for timeline_event in room_data.timeline_events:
-                    lazy_profile_user_ids.add(timeline_event.event.sender)
+                lazy_profile_user_ids.update(room_data.timeline_senders)
                 # Include users from required state
-                for state_event in room_data.required_state:
-                    if state_event.type == EventTypes.Member:
-                        lazy_profile_user_ids.add(state_event.state_key)
+                lazy_profile_user_ids.update(room_data.required_state_member_keys)
                 # Include heroes
-                if room_data.heroes:
-                    for hero in room_data.heroes:
-                        lazy_profile_user_ids.add(hero.user_id)
+                lazy_profile_user_ids.update(room_data.hero_user_ids)
 
         non_lazy_rooms = actual_room_ids.difference(lazy_rooms)
         # If we still have non-lazy rooms, get their members.
@@ -1290,7 +1286,7 @@ class SlidingSyncExtensionHandler:
         actual_room_ids: set[str],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
-        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, AnySlidingSyncRoomResult],
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
     ) -> SlidingSyncResult.Extensions.ProfilesExtension | None:
         """
