@@ -25,7 +25,7 @@ from unittest import SkipTest
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventTypes, Membership, StickyEventField
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
@@ -41,6 +41,7 @@ from synapse.synapse_rust.persist import PersistReaderForTest
 from synapse.types import StateMap, create_requester
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.test_utils.event_builders import make_test_event
@@ -1969,3 +1970,293 @@ class SlidingSyncTestCase(PersistReaderTestBase):
         )
         _, joined, _, _, _ = self._compare([topic], to_insert)
         self.assertEqual(joined, {"room_type": "m.space"})
+
+
+class StickyTestCase(PersistReaderTestBase):
+    """`rust/src/persist/sticky.rs` against
+    `compute_sticky_events_to_un_soft_fail`, over the same database, chunk
+    and delta."""
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config["experimental_features"]["msc4354_enabled"] = True
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.room_version = self.get_success(self.store.get_room_version(self.room_id))
+        self.carol = self.register_user("carol", "pass")
+        self.carol_tok = self.login("carol", "pass")
+        self._counter = 0
+
+    def _sticky(self, sender: str, minutes: int = 10) -> str:
+        """A soft-failed sticky event, as federation would persist one."""
+        self._counter += 1
+        return self.get_success(
+            inject_event(
+                self.hs,
+                room_id=self.room_id,
+                sender=sender,
+                type=EventTypes.Message,
+                content={"msgtype": "m.text", "body": f"sticky {self._counter}"},
+                internal_metadata={"soft_failed": True},
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=minutes).as_millis()
+                ),
+            )
+        ).event_id
+
+    def _new(
+        self,
+        event_type: str,
+        state_key: str,
+        content: dict[str, Any],
+        sender: str | None = None,
+    ) -> tuple[EventBase, EventContext]:
+        """A new state event for the chunk, not persisted."""
+        self._counter += 1
+        fields: dict[str, Any] = {
+            "room_id": self.room_id,
+            "sender": sender or self.alice,
+            "type": event_type,
+            "state_key": state_key,
+            "content": content,
+            "prev_events": [],
+            "auth_events": [],
+            "depth": 100 + self._counter,
+        }
+        event = make_test_event(fields, self.room_version)
+        return event, EventContext.for_outlier(self.hs.get_storage_controllers())
+
+    def _power_levels(self, users: dict[str, Any]) -> dict[str, Any]:
+        # The creator has unlimited power in room version 12.
+        return {"users": users, "events_default": 0}
+
+    def _compare(
+        self,
+        events: list[tuple[EventBase, EventContext]],
+        to_insert: dict[tuple[str, str], str],
+        to_delete: list[tuple[str, str]] | None = None,
+        no_longer_in_room: bool = False,
+    ) -> set[str]:
+        delta = DeltaState(
+            to_delete=to_delete or [],
+            to_insert=to_insert,
+            no_longer_in_room=no_longer_in_room,
+        )
+        expected = self.get_success(
+            self.store.compute_sticky_events_to_un_soft_fail(
+                self.room_id, events, delta
+            )
+        )
+        result = self.rust.compute_sticky_events_to_un_soft_fail(
+            self.room_id,
+            [event for event, _ in events],
+            list(delta.to_delete),
+            dict(delta.to_insert),
+            no_longer_in_room,
+            self.clock.time_msec(),
+        )
+        self.assertEqual(result, expected)
+        return result
+
+    def _devoiced_bob(self) -> str:
+        """Bob can't send messages, and has a soft-failed sticky event."""
+        self.helper.send_state(
+            self.room_id,
+            EventTypes.PowerLevels,
+            self._power_levels({self.bob: -1}),
+            tok=self.alice_tok,
+        )
+        return self._sticky(self.bob)
+
+    def _pl_delta(
+        self, users: dict[str, Any]
+    ) -> tuple[list[tuple[EventBase, EventContext]], dict[tuple[str, str], str]]:
+        pl = self._new(EventTypes.PowerLevels, "", self._power_levels(users))
+        return [pl], {(EventTypes.PowerLevels, ""): pl[0].event_id}
+
+    def test_power_levels_from_the_chunk(self) -> None:
+        sticky = self._devoiced_bob()
+        self.assertEqual(self._compare(*self._pl_delta({self.bob: 0})), {sticky})
+        self.assertEqual(self._compare(*self._pl_delta({self.bob: -5})), set())
+
+    def test_stored_power_levels(self) -> None:
+        # The state rolls back to power levels that are already stored.
+        old_pl = self.helper.send_state(
+            self.room_id,
+            EventTypes.PowerLevels,
+            self._power_levels({}),
+            tok=self.alice_tok,
+        )["event_id"]
+        sticky = self._devoiced_bob()
+        self.assertEqual(
+            self._compare([], {(EventTypes.PowerLevels, ""): old_pl}), {sticky}
+        )
+
+    def test_member_changes_recheck_only_those_senders(self) -> None:
+        # Alice's event would pass, but her membership doesn't change.
+        self._sticky(self.alice)
+        carol_sticky = self._sticky(self.carol)
+        carol_join = self._new(
+            EventTypes.Member, self.carol, {"membership": "join"}, sender=self.carol
+        )
+        self.assertEqual(
+            self._compare(
+                [carol_join], {(EventTypes.Member, self.carol): carol_join[0].event_id}
+            ),
+            {carol_sticky},
+        )
+
+    def test_stored_membership(self) -> None:
+        # Carol joined and left, and the state rolls back to her join.
+        carol_join = self.helper.join(self.room_id, self.carol, tok=self.carol_tok)[
+            "event_id"
+        ]
+        self.helper.leave(self.room_id, self.carol, tok=self.carol_tok)
+        carol_sticky = self._sticky(self.carol)
+        self.assertEqual(
+            self._compare([], {(EventTypes.Member, self.carol): carol_join}),
+            {carol_sticky},
+        )
+
+    def test_join_rules_recheck_everyone(self) -> None:
+        alice_sticky = self._sticky(self.alice)
+        self._sticky(self.carol)
+        join_rules = self._new(EventTypes.JoinRules, "", {"join_rule": "public"})
+        self.assertEqual(
+            self._compare(
+                [join_rules], {(EventTypes.JoinRules, ""): join_rules[0].event_id}
+            ),
+            {alice_sticky},
+        )
+
+    def test_non_critical_changes(self) -> None:
+        self._sticky(self.alice)
+        topic = self._new(EventTypes.Topic, "", {"topic": "new"})
+        self.assertEqual(
+            self._compare([topic], {(EventTypes.Topic, ""): topic[0].event_id}),
+            set(),
+        )
+
+    def test_no_longer_in_room(self) -> None:
+        self._sticky(self.alice)
+        events, to_insert = self._pl_delta({})
+        self.assertEqual(
+            self._compare(events, to_insert, no_longer_in_room=True), set()
+        )
+
+    def test_deleted_membership(self) -> None:
+        self._sticky(self.alice)
+        events, to_insert = self._pl_delta({})
+        self.assertEqual(
+            self._compare(
+                events, to_insert, to_delete=[(EventTypes.Member, self.alice)]
+            ),
+            set(),
+        )
+
+    def test_malformed_power_levels(self) -> None:
+        """Both fail on power levels the auth rules can't read."""
+        self._devoiced_bob()
+        events, to_insert = self._pl_delta({self.bob: "abc"})
+        delta = DeltaState(to_delete=[], to_insert=to_insert)
+        python = self.get_failure(
+            self.store.compute_sticky_events_to_un_soft_fail(
+                self.room_id, events, delta
+            ),
+            Exception,
+        )
+        with self.assertRaises(Exception) as rust:
+            self.rust.compute_sticky_events_to_un_soft_fail(
+                self.room_id,
+                [event for event, _ in events],
+                [],
+                dict(to_insert),
+                False,
+                self.clock.time_msec(),
+            )
+        self.assertEqual(type(rust.exception), python.type)
+
+    def test_redacted_power_levels(self) -> None:
+        """Both read stored auth state redacted. Redaction keeps every power
+        level field the rules read, so Bob stays devoiced."""
+        sticky = self._devoiced_bob()
+        pl_id = self.get_success(
+            self.store.get_partial_filtered_current_state_ids(self.room_id)
+        )[(EventTypes.PowerLevels, "")]
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{self.room_id}/redact/{pl_id}/txn1",
+            {},
+            access_token=self.alice_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        member = self._new(
+            EventTypes.Member, self.bob, {"membership": "join"}, sender=self.bob
+        )
+        self.assertEqual(
+            self._compare(
+                [member], {(EventTypes.Member, self.bob): member[0].event_id}
+            ),
+            set(),
+        )
+        # A soft-failed event of Bob's is still there to recheck.
+        self.assertIn(
+            sticky,
+            self.rust.soft_failed_sticky_events(
+                self.room_id, None, self.clock.time_msec()
+            ),
+        )
+
+    def test_unneeded_insert(self) -> None:
+        # A change to Carol's membership doesn't touch Alice's auth state.
+        alice_sticky = self._sticky(self.alice)
+        events, to_insert = self._pl_delta({})
+        carol_join = self._new(
+            EventTypes.Member, self.carol, {"membership": "join"}, sender=self.carol
+        )
+        to_insert[(EventTypes.Member, self.carol)] = carol_join[0].event_id
+        self.assertEqual(
+            self._compare(events + [carol_join], to_insert), {alice_sticky}
+        )
+
+    def test_events_in_the_chunk(self) -> None:
+        alice_sticky = self._sticky(self.alice)
+        events, to_insert = self._pl_delta({})
+        sticky_event = self.get_success(self.store.get_event(alice_sticky))
+        self.assertEqual(
+            self._compare(
+                events
+                + [
+                    (
+                        sticky_event,
+                        EventContext.for_outlier(self.hs.get_storage_controllers()),
+                    )
+                ],
+                to_insert,
+            ),
+            set(),
+        )
+
+    def test_expired(self) -> None:
+        self._sticky(self.alice, minutes=1)
+        alice_sticky = self._sticky(self.alice, minutes=5)
+        self.reactor.advance(120)
+        self.assertEqual(self._compare(*self._pl_delta({})), {alice_sticky})
+
+    def test_rejected(self) -> None:
+        self._reject(self._sticky(self.alice))
+        alice_sticky = self._sticky(self.alice)
+        self.assertEqual(self._compare(*self._pl_delta({})), {alice_sticky})
+
+    def test_not_soft_failed(self) -> None:
+        alice_sticky = self._sticky(self.alice)
+        self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "fine", "msgtype": "m.text"},
+            tok=self.alice_tok,
+        )
+        self.assertEqual(self._compare(*self._pl_delta({})), {alice_sticky})

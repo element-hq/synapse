@@ -250,6 +250,18 @@ class PersistReaderForTest:
         to_insert_membership_snapshots, to_delete_membership_snapshots)`,
         each snapshot as `(user_id, sender, membership_event_id,
         membership)`. The snapshots are sorted by user ID."""
+    def compute_sticky_events_to_un_soft_fail(
+        self,
+        room_id: str,
+        events: list[EventBase],
+        to_delete: list[tuple[str, str]],
+        to_insert: dict[tuple[str, str], str],
+        no_longer_in_room: bool,
+        now_ms: int,
+    ) -> set[str]:
+        """The soft-failed sticky events that pass auth once the delta is
+        applied. Raises a malformed event's auth failure as the auth rules
+        raise it."""
 
 def persist_gil_stats() -> dict[str, tuple[int, float]]:
     """`{site: (calls, seconds held)}` for every time event persistence took

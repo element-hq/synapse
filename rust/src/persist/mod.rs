@@ -28,6 +28,7 @@
 //! - [`reader`]: what persisting reads before its write transaction.
 //! - [`sliding_sync`]: what a chunk changes in the sliding sync tables.
 //! - [`state_delta`]: the room's new current state after a chunk.
+//! - [`sticky`]: the soft-failed sticky events a chunk lets through.
 //!
 //! Every GIL hold in this tree goes through [`crate::gil::with_gil`] with a
 //! site named `persist_*`, so that tests can pin the count per site.
@@ -43,6 +44,7 @@ pub mod python;
 pub mod reader;
 pub mod sliding_sync;
 pub mod state_delta;
+pub mod sticky;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {

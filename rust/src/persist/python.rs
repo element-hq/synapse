@@ -26,6 +26,7 @@ use super::{
 };
 use crate::{
     errors::SynapseError,
+    event_auth::AuthFailure,
     events::Event,
     homeserver::HomeServer,
     runtime::RustRuntime,
@@ -132,13 +133,23 @@ impl Persister {
 }
 
 /// Convert an error from persisting to the Python exception the Python
-/// path would raise: a Python exception as it was raised, a 500
-/// `SynapseError` for missing prev state events, as
-/// `_calculate_new_state_dag_extremities` raises, and a `RuntimeError`
-/// otherwise.
+/// path would raise: a Python exception as it was raised, an auth
+/// failure as the auth rules raise it (from any step, state resolution
+/// included), a 500 `SynapseError` for missing
+/// prev state events, as `_calculate_new_state_dag_extremities` raises,
+/// and a `RuntimeError` otherwise.
 pub fn persist_error_to_py(e: anyhow::Error) -> PyErr {
     let e = match e.downcast::<PyErr>() {
         Ok(err) => return err,
+        Err(e) => e,
+    };
+    if e.downcast_ref::<AuthFailure>().is_some() {
+        // The Python exception carries only the failure's message, so log
+        // the context, which names the event.
+        log::warn!("Auth checks failed while persisting: {e:#}");
+    }
+    let e = match e.downcast::<AuthFailure>() {
+        Ok(failure) => return failure.into_py_err(),
         Err(e) => e,
     };
     if let Some(missing) = e.downcast_ref::<MissingPrevStateEvents>() {

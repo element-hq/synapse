@@ -53,6 +53,7 @@ use super::{
     python::persist_error_to_py,
     sliding_sync,
     state_delta::{self, DeltaState, NativeStateResolver, StateAndExtremities},
+    sticky,
 };
 use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
 use crate::events::Event;
@@ -1421,6 +1422,42 @@ impl PyPersistReaderForTest {
                 .map(|user_id| user_id.to_string())
                 .collect(),
         ))
+    }
+
+    /// The passing event IDs.
+    #[allow(clippy::too_many_arguments)]
+    fn compute_sticky_events_to_un_soft_fail(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        events: Vec<Py<Event>>,
+        to_delete: Vec<(String, String)>,
+        to_insert: HashMap<(String, String), String>,
+        no_longer_in_room: bool,
+        now_ms: i64,
+    ) -> PyResult<HashSet<String>> {
+        let events: Vec<Event> = events
+            .iter()
+            .map(|event| event.bind(py).get().shallow_clone())
+            .collect();
+        let delta = DeltaState {
+            to_delete: to_delete
+                .iter()
+                .map(|(event_type, state_key)| StateKey::new(event_type, state_key))
+                .collect(),
+            to_insert: state_map(to_insert),
+            no_longer_in_room,
+        };
+        let passing = self.run(py, |reader| {
+            async move {
+                sticky::compute_sticky_events_to_un_soft_fail(
+                    &reader, &room_id, &events, &delta, now_ms,
+                )
+                .await
+            }
+            .boxed()
+        })?;
+        Ok(strings(passing))
     }
 }
 
