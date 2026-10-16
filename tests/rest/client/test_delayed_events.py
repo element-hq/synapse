@@ -16,7 +16,7 @@
 
 import sqlite3
 from http import HTTPStatus
-from typing import Literal, overload
+from typing import Any, Literal, overload
 from unittest.mock import Mock, patch
 from urllib.parse import urlencode
 
@@ -1695,6 +1695,63 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    @parameterized.expand(
+        (
+            (action, action_in_path)
+            for action in _UpdateDelayedEventAction
+            for action_in_path in (True, False)
+        )
+    )
+    def test_update_delayed_event_being_processed(
+        self,
+        action: _UpdateDelayedEventAction,
+        action_in_path: bool,
+    ) -> None:
+        """Test managing a delayed event that is in the process of being sent."""
+        send_after = Duration(seconds=1)
+        channel = self._make_delayed_event_request(
+            room_id=self.room_id,
+            delay=send_after,
+            event_type=_EVENT_TYPE,
+            content={},
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body["delay_id"]
+
+        # Simulate the server taking a long time to persist delayed events
+        simulated_send_lag = Duration(seconds=5)
+        event_creation_handler = self.hs.get_event_creation_handler()
+        orig_send_fn = event_creation_handler.create_and_send_nonmember_event
+
+        async def slow_send_fn(*args: Any, **kwargs: Any) -> Any:
+            await self.clock.sleep(simulated_send_lag)
+            return await orig_send_fn(*args, **kwargs)
+
+        with patch.object(event_creation_handler, orig_send_fn.__name__, slow_send_fn):
+            # Advance time enough so the delayed event starts being sent,
+            # but not enough for it to finish the sending process
+            self.reactor.advance(send_after.as_secs())
+            channel = self._update_delayed_event(
+                delay_id, action, action_in_path, self.user1_access_token
+            )
+            self.assertEqual(
+                HTTPStatus.SERVICE_UNAVAILABLE, channel.code, channel.result
+            )
+
+            # Advance time enough so the sending process finishes
+            self.reactor.advance(simulated_send_lag.as_secs())
+            channel = self._update_delayed_event(
+                delay_id, action, action_in_path, self.user1_access_token
+            )
+            self.assertEqual(
+                HTTPStatus.OK
+                if action == _UpdateDelayedEventAction.SEND
+                else HTTPStatus.CONFLICT,
+                channel.code,
+                channel.result,
+            )
 
     def test_delayed_state_is_not_cancelled_by_new_state_from_same_user(
         self,

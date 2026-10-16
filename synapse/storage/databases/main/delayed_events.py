@@ -312,22 +312,12 @@ class DelayedEventsStore(SQLBaseStore):
                 ),
             )
             if txn.rowcount == 0:
-                txn.execute(
-                    """
-                    SELECT finalised_event_id IS NOT NULL
-                    FROM delayed_events
-                    WHERE delay_id = ?
-                        AND user_localpart = ?
-                        AND finalised_ts IS NOT NULL
-                    """,
-                    (delay_id, user_localpart),
+                event_was_sent = _handle_mgmt_action_conflict_txn(
+                    txn, delay_id, user_localpart
                 )
-                row = txn.fetchone()
-                if not row:
-                    raise NotFoundError("Delayed event not found")
                 raise SynapseError(
                     HTTPStatus.CONFLICT,
-                    f"Delayed event has already been {'sent' if row[0] else 'cancelled'}",
+                    f"Delayed event has already been {'sent' if event_was_sent else 'cancelled'}",
                 )
 
             next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
@@ -687,20 +677,10 @@ class DelayedEventsStore(SQLBaseStore):
             )
             row = txn.fetchone()
             if not row:
-                txn.execute(
-                    """
-                    SELECT finalised_event_id IS NOT NULL
-                    FROM delayed_events
-                    WHERE delay_id = ?
-                        AND user_localpart = ?
-                        AND finalised_ts IS NOT NULL
-                    """,
-                    (delay_id, user_localpart),
+                event_was_sent = _handle_mgmt_action_conflict_txn(
+                    txn, delay_id, user_localpart
                 )
-                row = txn.fetchone()
-                if not row:
-                    raise NotFoundError("Delayed event not found")
-                elif not row[0]:
+                if not event_was_sent:
                     raise SynapseError(
                         HTTPStatus.CONFLICT,
                         "Delayed event has already been cancelled",
@@ -782,20 +762,10 @@ class DelayedEventsStore(SQLBaseStore):
                 ),
             )
             if txn.rowcount == 0:
-                txn.execute(
-                    """
-                    SELECT finalised_event_id IS NOT NULL
-                    FROM delayed_events
-                    WHERE delay_id = ?
-                        AND user_localpart = ?
-                        AND finalised_ts IS NOT NULL
-                    """,
-                    (delay_id, user_localpart),
+                event_was_sent = _handle_mgmt_action_conflict_txn(
+                    txn, delay_id, user_localpart
                 )
-                row = txn.fetchone()
-                if not row:
-                    raise NotFoundError("Delayed event not found")
-                elif row[0]:
+                if event_was_sent:
                     raise SynapseError(
                         HTTPStatus.CONFLICT,
                         "Delayed event has already been sent",
@@ -1006,6 +976,39 @@ class DelayedEventsStore(SQLBaseStore):
         txn.execute("SELECT MIN(finalised_ts) FROM delayed_events")
         resp = txn.fetchone()
         return Timestamp(resp[0]) if resp is not None else None
+
+
+def _handle_mgmt_action_conflict_txn(
+    txn: LoggingTransaction,
+    delay_id: str,
+    user_localpart: str,
+) -> bool:
+    txn.execute(
+        """
+        SELECT
+            finalised_ts IS NULL AND is_processed,
+            finalised_event_id IS NOT NULL
+        FROM delayed_events
+        WHERE delay_id = ? AND user_localpart = ?
+        """,
+        (delay_id, user_localpart),
+    )
+    row = txn.fetchone()
+    if not row:
+        raise NotFoundError("Delayed event not found")
+
+    event_is_being_sent = row[0]
+    if event_is_being_sent:
+        # TODO: Replace this with something that properly handles the request,
+        # even for workers (e.g. when a worker handles a request to restart a
+        # delayed event that the main worker is in the process of sending).
+        raise SynapseError(
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            f"Unable to manage delayed event {delay_id} that is in the process of being sent",
+        )
+
+    event_was_sent = row[1]
+    return event_was_sent
 
 
 def _generate_delay_id() -> DelayID:
