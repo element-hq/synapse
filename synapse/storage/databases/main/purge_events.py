@@ -87,6 +87,7 @@ purge_room_tables_with_room_id_column = (
     "room_stats_state",
     "room_stats_current",
     "room_stats_earliest_token",
+    "server_announcement_rooms",
     "stream_ordering_to_exterm",
     "users_in_public_rooms",
     "users_who_share_private_rooms",

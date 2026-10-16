@@ -1108,8 +1108,11 @@ class RoomCreationHandler:
         if (
             self._server_notices_mxid is not None
             and user_id == self._server_notices_mxid
+        ) or (
+            user_id == self.config.serverannouncements.room_management_mxid
+            and requester.authenticated_entity == self.hs.hostname
         ):
-            # allow the server notices mxid to create rooms
+            # Allow internal server identities to create their managed rooms.
             is_requester_admin = True
         else:
             is_requester_admin = await self.auth.is_server_admin(requester)
@@ -2500,9 +2503,21 @@ class RoomShutdownHandler:
             logger.info("Kicking %r from %r...", user_id, room_id)
 
             try:
-                # Kick users from room
+                # The announcement room manager is server-owned, not an account
+                # the administrator can impersonate. Its protected membership must
+                # still be removable through the privileged room-shutdown path.
+                is_announcement_manager = (
+                    user_id == self.hs.config.serverannouncements.room_management_mxid
+                    and await self.store.get_server_announcement_id(room_id) is not None
+                    and await self.store.get_user_by_id(user_id) is None
+                )
                 target_requester = create_requester(
-                    user_id, authenticated_entity=requester_user_id
+                    user_id,
+                    authenticated_entity=(
+                        self.hs.hostname
+                        if is_announcement_manager
+                        else requester_user_id
+                    ),
                 )
                 _, stream_id = await self.room_member_handler.update_membership(
                     requester=target_requester,
@@ -2526,7 +2541,7 @@ class RoomShutdownHandler:
                 )
 
                 # Join users to new room
-                if new_room_user_id:
+                if new_room_user_id and not is_announcement_manager:
                     if membership == Membership.JOIN:
                         assert new_room_id is not None
                         await self.room_member_handler.update_membership(

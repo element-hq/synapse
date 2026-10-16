@@ -127,6 +127,13 @@ class ServerNoticesManager:
                 user_id=self.server_notices_mxid, room_id=room.room_id
             )
             if is_server_notices_room:
+                # Make sure this isn't a server announcement room.
+                if (
+                    await self._store.get_server_announcement_id(room.room_id)
+                    is not None
+                ):
+                    continue
+
                 # we found a room which our user shares with the system notice
                 # user
                 return room.room_id

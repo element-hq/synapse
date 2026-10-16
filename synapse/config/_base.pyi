@@ -48,6 +48,7 @@ from synapse.config import (  # noqa: F401
     room_directory,
     saml2,
     server,
+    server_announcements,
     server_notices,
     spam_checker,
     sso,
@@ -111,6 +112,7 @@ class RootConfig:
     userdirectory: user_directory.UserDirectoryConfig
     consent: consent.ConsentConfig
     stats: stats.StatsConfig
+    serverannouncements: server_announcements.ServerAnnouncementsConfig
     servernotices: server_notices.ServerNoticesConfig
     roomdirectory: room_directory.RoomDirectoryConfig
     thirdpartyrules: third_party_event_rules.ThirdPartyRulesConfig

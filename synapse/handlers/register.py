@@ -680,6 +680,11 @@ class RegistrationHandler:
     def check_user_id_not_appservice_exclusive(
         self, user_id: str, allowed_appservice: ApplicationService | None = None
     ) -> None:
+        if user_id == self.hs.config.serverannouncements.room_management_mxid:
+            raise SynapseError(
+                400, "This user ID is reserved.", errcode=Codes.EXCLUSIVE
+            )
+
         # don't allow people to register the server notices mxid
         if self._server_notices_mxid is not None:
             if user_id == self._server_notices_mxid:
