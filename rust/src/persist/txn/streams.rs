@@ -14,8 +14,8 @@
  */
 
 //! The streams a persist takes IDs from inside its transaction, as
-//! Python's `get_next_txn` and `get_next_mult_txn` do: the cache stream and
-//! the sticky events stream.
+//! Python's `get_next_txn` and `get_next_mult_txn` do: the cache stream,
+//! the sticky events stream and the profile updates stream.
 //!
 //! The IDs stay unfinished until the transaction has committed and Python
 //! has applied its effects, as Python finishes them only after the
@@ -59,6 +59,11 @@ impl TxnStream {
     /// The sticky events stream, `_sticky_events_id_gen`.
     pub fn sticky_events(tracker: Arc<StreamIdTracker>) -> Self {
         Self::new(tracker, "sticky_events_sequence")
+    }
+
+    /// The profile updates stream, `_profile_updates_id_gen`.
+    pub fn profile_updates(tracker: Arc<StreamIdTracker>) -> Self {
+        Self::new(tracker, "profile_updates_sequence")
     }
 
     fn lock_pending(&self) -> std::sync::MutexGuard<'_, Vec<i64>> {

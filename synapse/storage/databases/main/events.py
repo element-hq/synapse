@@ -1152,7 +1152,7 @@ class PersistEventsStore:
         # caller waits for both, as Python's transaction cannot be cancelled.
 
         async def persist_and_apply() -> None:
-            effects, _, _ = await make_deferred_yieldable(
+            effects = await make_deferred_yieldable(
                 rust_transaction.persister.persist_events_txn(
                     room_id,
                     events_and_contexts,
@@ -2342,8 +2342,9 @@ class PersistEventsStore:
                     joined_users=profile_update_additions,
                 )
             if profile_update_leaves:
-                # Write the profile updates for LEAVE events
-                for user_id in profile_update_leaves:
+                # Write the profile updates for LEAVE events. In order, so
+                # the stream IDs are taken in the order Rust takes them.
+                for user_id in sorted(profile_update_leaves):
                     self._record_profile_updates_for_user_left_room_txn(
                         txn=txn,
                         user_id=UserID.from_string(user_id),

@@ -15,11 +15,10 @@
 """The Rust write transaction (`rust/src/persist/txn/`) against Python's.
 
 Each test builds the same DAG in two rooms, the twins. Room A's chunks are
-persisted in Python. Room B's are prepared in Rust, then the part of the
-transaction ported to Rust so far runs and commits, then the rest of
-Python's transaction steps run. The test then compares the rows of every
-table the transaction writes, after normalising the IDs that differ between
-the rooms, and the cache updates each room's persists asked for.
+persisted in Python. Room B's are prepared and written in Rust. The test
+then compares the rows of every table the transaction writes, after
+normalising the IDs that differ between the rooms, and the cache updates
+each room's persists asked for.
 
 These need the native Rust Postgres driver:
 
@@ -41,7 +40,7 @@ from unpaddedbase64 import encode_base64
 from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes, StickyEvent
+from synapse.api.constants import EventTypes, ProfileUpdateAction, StickyEvent
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.crypto.event_signing import compute_content_hash
@@ -55,7 +54,6 @@ from synapse.storage.databases.main.events import PersistEventsStore
 from synapse.storage.databases.main.rust_persist import apply_rust_persist_effects
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.synapse_rust.events import redact_event
 from synapse.synapse_rust.persist import PersistEffects
 from synapse.types import create_requester
 from synapse.util.caches.deferred_cache import DeferredCache
@@ -129,6 +127,8 @@ _STREAM_COLUMNS: dict[str | tuple[str, str], str] = {
     ("current_state_delta_stream", "stream_id"): "events",
     ("ex_outlier_stream", "event_stream_ordering"): "ex_outlier",
     ("sticky_events", "stream_id"): "sticky",
+    ("profile_updates", "stream_id"): "profile",
+    ("profile_updates_per_user", "stream_id"): "profile",
     "state_group": "state_groups",
 }
 
@@ -155,7 +155,13 @@ _EFFECT_ARGS: dict[str | tuple[str, str | None], tuple[str | None, ...]] = {
     # An ID generator's stream IDs, by the generator's stream name.
     ("_mark_ids_as_finished", "caches"): ("cache",),
     ("_mark_ids_as_finished", "sticky_events"): ("sticky",),
+    ("_mark_ids_as_finished", "profile_updates"): ("profile",),
 }
+
+# The tables of the profile updates stream, compared on the rows the twin's
+# persists wrote and the rows of the twin's own users, as their rows are by
+# user.
+_PROFILE_TABLES = ("profile_updates", "profile_updates_per_user")
 
 
 def _effect_kinds(name: str, owner: str | None, args: tuple) -> tuple[str | None, ...]:
@@ -182,6 +188,8 @@ class _Twin:
     effects: list[tuple[str, str | None, tuple, dict[str, Any]]] = attr.Factory(list)
     # The cache stream rows its persists wrote.
     cache_rows: list[tuple] = attr.Factory(list)
+    # The profile updates stream IDs its persists took.
+    profile_stream_ids: list[int] = attr.Factory(list)
 
 
 class _Normaliser:
@@ -326,9 +334,9 @@ class _TwinTestBase(unittest.HomeserverTestCase):
 
     @contextmanager
     def _persisting(self, twin: _Twin) -> Iterator[None]:
-        """Persist the twin's events: room A's in Python, room B's through
-        Rust as far as it goes. Records the cache updates and cache stream
-        rows."""
+        """Persist the twin's events: room A's in Python, room B's in Rust.
+        Records the cache updates, the cache stream rows and the profile
+        updates stream IDs."""
         self.hs.config.experimental.rust_event_persistence = (
             "off" if twin.name == "a" else "prepare"
         )
@@ -346,6 +354,7 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                 self._rust_txn(twin, t, **kwargs)
 
         cache_stream_before = self._cache_stream_position()
+        profile_stream_before = self._profile_stream_position()
         store._persist_events_txn = txn  # type: ignore[method-assign,assignment]
         try:
             yield
@@ -353,6 +362,16 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             del store._persist_events_txn
             self.hs.config.experimental.rust_event_persistence = "prepare"
         twin.cache_rows.extend(self._cache_stream_rows(cache_stream_before))
+        twin.profile_stream_ids.extend(
+            row[0]
+            for row in self.get_success(
+                self.store.db_pool.execute(
+                    "test",
+                    "SELECT stream_id FROM profile_updates WHERE stream_id > ?",
+                    profile_stream_before,
+                )
+            )
+        )
 
     def _rust_txn(
         self,
@@ -363,8 +382,8 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         events_and_contexts: list[EventPersistencePair],
         **kwargs: Any,
     ) -> None:
-        """Room B's transaction: the Rust part, committed first, then the
-        rest in Python."""
+        """Room B's transaction, in Rust, committed before the Python
+        transaction it stands in for."""
         prepared = self.persister.last_prepared
         assert prepared is not None
         # The transaction must take the chunk prepared for it.
@@ -372,20 +391,19 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             self.persister.last_chunk,
             (room_id, [event.event_id for event, _ in events_and_contexts]),
         )
-        effects, left, redacted = self.persister.persist_events_txn_blocking(
+        effects = self.persister.persist_events_txn_blocking(
             room_id,
             events_and_contexts,
             prepared,
             inhibit_local_membership_updates=kwargs["inhibit_local_membership_updates"],
         )
         calls = _rust_effects(effects)
-        # As the facade will once Rust commits, so the steps after Rust's,
-        # and the next persist, see the caches Rust invalidated. This also
-        # finishes the cache and sticky events stream IDs, which is
-        # recorded. The test entry allocates no event stream IDs. Unlike
-        # production, the notifiers are called, and the `stream_positions`
-        # update started, inside the Python transaction, and a retry of it
-        # would apply the effects twice.
+        # As the facade does once Rust commits, so the next persist sees the
+        # caches Rust invalidated. This also finishes the stream IDs the
+        # transaction took, which is recorded. The test entry allocates no
+        # event stream IDs. Unlike production, the notifiers are called, and
+        # the `stream_positions` update started, inside the Python
+        # transaction, and a retry of it would apply the effects twice.
         self.assertEqual(effects.stream_ids, [])
         calls.extend(
             self._apply_recorded(
@@ -398,23 +416,6 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                 },
             )
         )
-        # The events left, as the steps after Rust's see them.
-        left_events_and_contexts = []
-        for i in left:
-            event, context = events_and_contexts[i]
-            if i in redacted:
-                event = redact_event(event)
-                event.internal_metadata.redacted_by = redacted[i]
-            left_events_and_contexts.append((event, context))
-        start = len(txn.after_callbacks or [])
-        _python_steps_after_rust(
-            self.events_store,
-            txn,
-            room_id=room_id,
-            events_and_contexts=left_events_and_contexts,
-            **kwargs,
-        )
-        calls.extend(self._python_effects(txn, start))
         twin.effects.extend(_merged_effects(calls))
 
     def _apply_recorded(
@@ -461,7 +462,11 @@ class _TwinTestBase(unittest.HomeserverTestCase):
 
         original_run = self.hs.run_as_background_process
         with ExitStack() as stack:
-            for id_gen in (self.store._cache_id_gen, self.store._sticky_events_id_gen):
+            for id_gen in (
+                self.store._cache_id_gen,
+                self.store._sticky_events_id_gen,
+                self.store._profile_updates_id_gen,
+            ):
                 assert id_gen is not None
                 stack.enter_context(
                     patch.object(
@@ -564,6 +569,14 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             if isinstance(cache, DeferredCache):
                 names[id(cache)] = name
         return names
+
+    def _profile_stream_position(self) -> int:
+        rows = self.get_success(
+            self.store.db_pool.execute(
+                "test", "SELECT COALESCE(MAX(stream_id), 0) FROM profile_updates"
+            )
+        )
+        return rows[0][0]
 
     def _cache_stream_position(self) -> int:
         rows = self.get_success(
@@ -668,6 +681,15 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         self._step(lambda twin: [self._build(twin, event_type, content, **kwargs)])
         return len(self.twins[0].events) - 1
 
+    def _join_bob(self) -> None:
+        self._send(EventTypes.Member, {"membership": "invite"}, state_key=self.bob)
+        self._send(
+            EventTypes.Member,
+            {"membership": "join", "displayname": "Bob", "avatar_url": "mxc://a/b"},
+            state_key=self.bob,
+            sender=self.bob,
+        )
+
     def _message(self, body: str, **kwargs: Any) -> int:
         return self._send(
             EventTypes.Message, {"msgtype": "m.text", "body": body}, **kwargs
@@ -693,10 +715,26 @@ class _TwinTestBase(unittest.HomeserverTestCase):
     def _dump(self, twin: _Twin) -> dict[str, list[tuple]]:
         """The twin's rows of each table, normalised and sorted."""
         raw: dict[str, tuple[list[str], list[tuple]]] = {}
-        for table in _TABLES:
+        for table in _TABLES + _PROFILE_TABLES:
             columns = self._columns(table)
-            if table in _REMOTE_USER_TABLES:
+            params: tuple = (twin.room_id,)
+            if table == "profile_updates":
+                # Also the twin's own users' rows from outside its persists,
+                # whose rows to others a leave deletes.
+                where = "stream_id = ANY(?) OR user_id LIKE ?"
+                params = (twin.profile_stream_ids, f"%twin-{twin.name}%")
+            elif table == "profile_updates_per_user":
+                where = """stream_id = ANY(?) OR user_id LIKE ? OR stream_id IN (
+                    SELECT stream_id FROM profile_updates WHERE user_id LIKE ?
+                )"""
+                params = (
+                    twin.profile_stream_ids,
+                    f"%twin-{twin.name}%",
+                    f"%twin-{twin.name}%",
+                )
+            elif table in _REMOTE_USER_TABLES:
                 where = "user_id LIKE ?"
+                params = (_remote_user(twin, "%"),)
             elif "room_id" in columns and table not in _UNFILLED_ROOM_ID:
                 where = "room_id = ?"
             elif table == "event_auth_chain_links":
@@ -715,11 +753,19 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                 self.store.db_pool.execute(
                     "test",
                     f"SELECT {', '.join(selected)} FROM {table} WHERE {where}",
-                    _remote_user(twin, "%")
-                    if table in _REMOTE_USER_TABLES
-                    else twin.room_id,
+                    *params,
                 )
             )
+            if table in _PROFILE_TABLES:
+                # The rows from outside the twin's persists are written at
+                # different times in each twin.
+                ts = columns.index("inserted_ts")
+                stream_id = columns.index("stream_id")
+                own = set(twin.profile_stream_ids)
+                rows = [
+                    row if row[stream_id] in own else (*row[:ts], None, *row[ts + 1 :])
+                    for row in rows
+                ]
             raw[table] = (columns, rows)
 
         normaliser = self._normaliser(twin, raw)
@@ -964,35 +1010,6 @@ _STREAM_CHANGE_CACHES = {
     "current_state_deltas": "_curr_state_delta_stream_cache",
     "membership": "MembershipStreamChangeCache",
 }
-
-
-def _python_steps_after_rust(
-    store: PersistEventsStore,
-    txn: LoggingTransaction,
-    *,
-    room_id: str,
-    events_and_contexts: list[EventPersistencePair],
-    inhibit_local_membership_updates: bool,
-    state_delta_for_room: Any,
-    new_forward_extremities: set[str] | None,
-    new_event_links: Any,
-    sliding_sync_table_changes: Any,
-    new_state_dag_forward_extremities: set[str] | None = None,
-    sticky_events_to_un_soft_fail: Any = frozenset(),
-) -> None:
-    """The steps of `_persist_events_txn` that Rust does not do yet, as it
-    runs them: the profile updates at the end of `_update_current_state_txn`.
-    `events_and_contexts` are the events Rust left.
-
-    A copy, so that the production transaction need not be split where the
-    Rust port has got to. It goes once Rust runs the whole transaction. A
-    step added to Python's transaction meanwhile runs in room A only, so its
-    rows differ and the comparison fails."""
-    if state_delta_for_room:
-        assert sliding_sync_table_changes is not None
-        store._record_profile_updates_for_state_delta_txn(
-            txn, room_id, sliding_sync_table_changes
-        )
 
 
 def _power_levels(user_id: str, level: int) -> dict[str, Any]:
@@ -1536,15 +1553,6 @@ class PersistTxnTestCase(_TwinTestBase):
             backfilled=True,
         )
         self._assert_twins_match()
-
-    def _join_bob(self) -> None:
-        self._send(EventTypes.Member, {"membership": "invite"}, state_key=self.bob)
-        self._send(
-            EventTypes.Member,
-            {"membership": "join", "displayname": "Bob", "avatar_url": "mxc://a/b"},
-            state_key=self.bob,
-            sender=self.bob,
-        )
 
     def test_relations_and_their_redaction(self) -> None:
         """Each kind of relation, then redactions of them that clear what
@@ -2096,3 +2104,301 @@ class StateDagPersistTxnTestCase(PersistTxnTestCase):
         config = super().default_config()
         config["experimental_features"]["msc4242_enabled"] = True
         return config
+
+
+class ProfileUpdatesPersistTxnTestCase(_TwinTestBase):
+    """With `include_profile_updates_in_sync`, the profile updates of the
+    membership changes. Each twin has its own local members besides Alice
+    and Bob, so the rooms they share are the twin's own."""
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config["include_profile_updates_in_sync"] = True
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        for twin in self.twins:
+            for name in ("carol", "dave"):
+                self.register_user(f"{name}-twin-{twin.name}", "pass")
+
+    def _user(self, twin: _Twin, name: str) -> str:
+        return f"@{name}-twin-{twin.name}:test"
+
+    def _membership(
+        self,
+        twin: _Twin,
+        name: str,
+        membership: str,
+        *,
+        by_alice: bool = False,
+        **content: Any,
+    ) -> EventPersistencePair:
+        user_id = self._user(twin, name)
+        return self._build(
+            twin,
+            EventTypes.Member,
+            {"membership": membership, **content},
+            state_key=user_id,
+            sender=self.alice if by_alice else user_id,
+        )
+
+    def _profile_rows(self, twin: _Twin) -> int:
+        rows = self.get_success(
+            self.store.db_pool.execute(
+                "test",
+                "SELECT COUNT(*) FROM profile_updates WHERE stream_id = ANY(?)",
+                twin.profile_stream_ids,
+            )
+        )
+        return rows[0][0]
+
+    def test_join_change_and_leave(self) -> None:
+        """An invite counts as a leave and a join as a join. A change of
+        display name is a join again. Leaving the last shared room tells
+        both sides."""
+        for name in ("carol", "dave"):
+            self._step(
+                lambda twin: [self._membership(twin, name, "invite", by_alice=True)]
+            )
+            self._step(lambda twin: [self._membership(twin, name, "join")])
+        self._step(
+            lambda twin: [self._membership(twin, "carol", "join", displayname="C")]
+        )
+        self._step(lambda twin: [self._membership(twin, "carol", "leave")])
+        self._assert_twins_match()
+        self.assertGreater(self._profile_rows(self.twins[1]), 0)
+
+    def test_several_in_one_chunk(self) -> None:
+        """Members joining, then leaving, together take their stream IDs in
+        user ID order."""
+        self._step(
+            lambda twin: [
+                self._membership(twin, name, "invite", by_alice=True)
+                for name in ("dave", "carol")
+            ]
+        )
+        self._step(
+            lambda twin: [
+                self._membership(twin, name, "join") for name in ("dave", "carol")
+            ]
+        )
+        self._step(
+            lambda twin: [
+                self._membership(twin, name, "leave") for name in ("dave", "carol")
+            ]
+        )
+        self._assert_twins_match()
+        self.assertGreater(self._profile_rows(self.twins[1]), 0)
+
+    def test_state_reset_out_of_the_room(self) -> None:
+        """A member whose membership state resolution removes, with their
+        snapshot, is treated as leaving. Dave, of the twin's own, holds the
+        power, as Bob is a member of both twins and his leaves would clear
+        the other twin's rows."""
+        self._step(
+            lambda twin: [self._membership(twin, "dave", "invite", by_alice=True)]
+        )
+        self._step(lambda twin: [self._membership(twin, "dave", "join")])
+
+        def power(dave_level: int, prev: list[int] | None = None) -> None:
+            self._step(
+                lambda twin: [
+                    self._build(
+                        twin,
+                        EventTypes.PowerLevels,
+                        _power_levels(self._user(twin, "dave"), dave_level),
+                        state_key="",
+                        prev=prev,
+                    )
+                ]
+            )
+
+        power(50)
+        base = self._message("base")
+        # Dave invites Carol on one fork, and Alice takes his power away on
+        # the other, so the invite leaves the current state.
+        self._step(
+            lambda twin: [
+                self._build(
+                    twin,
+                    EventTypes.Member,
+                    {"membership": "invite"},
+                    state_key=self._user(twin, "carol"),
+                    sender=self._user(twin, "dave"),
+                    prev=[base],
+                )
+            ]
+        )
+        self.reactor.advance(1)
+        before = len(self.twins[1].profile_stream_ids)
+        power(0, prev=[base])
+        self._assert_twins_match()
+        self.assertEqual(
+            self.get_success(
+                self.store.db_pool.simple_select_onecol(
+                    "sliding_sync_membership_snapshots",
+                    {
+                        "room_id": self.twins[1].room_id,
+                        "user_id": self._user(self.twins[1], "carol"),
+                    },
+                    "membership",
+                )
+            ),
+            [],
+        )
+        self.assertGreater(len(self.twins[1].profile_stream_ids), before)
+
+    def _join_carol_and_dave(self) -> None:
+        for name in ("carol", "dave"):
+            self._step(
+                lambda twin: [self._membership(twin, name, "invite", by_alice=True)]
+            )
+            self._step(lambda twin: [self._membership(twin, name, "join")])
+
+    def _other_room(self, twin: _Twin, names: list[str]) -> None:
+        """A room of the twin's own that the named users join, persisted in
+        Python outside the comparison."""
+        users = [
+            self._user(twin, name) if name != "alice" else self.alice for name in names
+        ]
+        tokens = [self.login(user, "pass") for user in users]
+        room_id = self.helper.create_room_as(users[0], tok=tokens[0])
+        for user, token in zip(users[1:], tokens[1:]):
+            self.helper.invite(room_id, users[0], user, tok=tokens[0])
+            self.helper.join(room_id, user, tok=token)
+        # So the twins' persists after it are later than it in both twins.
+        self.reactor.advance(1)
+
+    def test_leave_while_sharing_another_room(self) -> None:
+        """Carol leaves, but shares another room with Dave, so only Alice
+        and Carol get left room updates about each other."""
+        self._join_carol_and_dave()
+        for twin in self.twins:
+            self._other_room(twin, ["carol", "dave"])
+        before = len(self.twins[1].profile_stream_ids)
+        self._step(lambda twin: [self._membership(twin, "carol", "leave")])
+        self._assert_twins_match()
+        left = self.get_success(
+            self.store.db_pool.execute(
+                "test",
+                """SELECT p.user_id, u.user_id FROM profile_updates AS p
+                INNER JOIN profile_updates_per_user AS u USING (stream_id)
+                WHERE p.stream_id = ANY(?) AND p.action = 'left_room'""",
+                self.twins[1].profile_stream_ids[before:],
+            )
+        )
+        carol = self._user(self.twins[1], "carol")
+        self.assertEqual(
+            sorted(left), sorted([(carol, self.alice), (self.alice, carol)])
+        )
+
+    def test_leave_sharing_every_room(self) -> None:
+        """Carol leaves, but shares another room with every local member, so
+        no one gets a left room update."""
+        self._join_carol_and_dave()
+        for twin in self.twins:
+            self._other_room(twin, ["carol", "dave", "alice"])
+        before = len(self.twins[1].profile_stream_ids)
+        self._step(lambda twin: [self._membership(twin, "carol", "leave")])
+        self._assert_twins_match()
+        self.assertEqual(len(self.twins[1].profile_stream_ids), before)
+
+    def test_leave_deletes_earlier_profile_changes(self) -> None:
+        """Leaving deletes the rows that told the others about the leaver's
+        earlier profile changes, and the leaver about theirs."""
+        self._join_carol_and_dave()
+        for twin in self.twins:
+            for name in ("carol", "dave"):
+                user_id = self._user(twin, name)
+                self.get_success(
+                    self.store.db_pool.runInteraction(
+                        "profile_change",
+                        lambda txn: self.store.record_profile_updates_txn(
+                            txn=txn,
+                            users={user_id},
+                            action=ProfileUpdateAction.UPDATE,
+                            field_names=["displayname"],
+                        ),
+                    )
+                )
+                self.reactor.advance(1)
+        self._step(lambda twin: [self._membership(twin, "carol", "leave")])
+        self._assert_twins_match()
+        carol = self._user(self.twins[1], "carol")
+        dave = self._user(self.twins[1], "dave")
+        rows = self.get_success(
+            self.store.db_pool.execute(
+                "test",
+                """SELECT u.user_id FROM profile_updates AS p
+                INNER JOIN profile_updates_per_user AS u USING (stream_id)
+                WHERE p.user_id = ? AND p.action = 'update'""",
+                carol,
+            )
+        )
+        # Only Carol's own row about her change is left.
+        self.assertEqual(rows, [(carol,)])
+        rows = self.get_success(
+            self.store.db_pool.execute(
+                "test",
+                """SELECT u.user_id FROM profile_updates AS p
+                INNER JOIN profile_updates_per_user AS u USING (stream_id)
+                WHERE p.user_id = ? AND p.action = 'update'""",
+                dave,
+            )
+        )
+        self.assertNotIn((carol,), rows)
+
+    def test_remote_member_state_reset(self) -> None:
+        """A remote member state reset out of the room writes no profile
+        updates: only local members have membership snapshots."""
+        self._step(
+            lambda twin: [self._membership(twin, "dave", "invite", by_alice=True)]
+        )
+        self._step(lambda twin: [self._membership(twin, "dave", "join")])
+        self._step(
+            lambda twin: [
+                self._build(
+                    twin,
+                    EventTypes.PowerLevels,
+                    _power_levels(self._user(twin, "dave"), 50),
+                    state_key="",
+                )
+            ]
+        )
+        base = self._message("base")
+        before = len(self.twins[1].profile_stream_ids)
+        self._step(
+            lambda twin: [
+                self._build(
+                    twin,
+                    EventTypes.Member,
+                    {"membership": "invite"},
+                    state_key=_remote_user(twin),
+                    sender=self._user(twin, "dave"),
+                    prev=[base],
+                )
+            ]
+        )
+        self.reactor.advance(1)
+        self._step(
+            lambda twin: [
+                self._build(
+                    twin,
+                    EventTypes.PowerLevels,
+                    _power_levels(self._user(twin, "dave"), 0),
+                    state_key="",
+                    prev=[base],
+                )
+            ]
+        )
+        self._assert_twins_match()
+        self.assertEqual(len(self.twins[1].profile_stream_ids), before)
+
+    def test_last_local_member_leaves(self) -> None:
+        """The server leaves the room: no local member is left to tell."""
+        self._join_carol_and_dave()
+        for name in ("carol", "dave"):
+            self._step(lambda twin: [self._membership(twin, name, "leave")])
+        self._send(EventTypes.Member, {"membership": "leave"}, state_key=self.alice)
+        self._assert_twins_match()

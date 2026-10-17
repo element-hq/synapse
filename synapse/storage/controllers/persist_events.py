@@ -928,15 +928,13 @@ class EventsPersistenceStorageController:
 
     def _rust_transaction(self, prepared: _PreparedChunk) -> RustTransaction | None:
         """Whether to write the chunk in Rust: at `rust_event_persistence:
-        transaction`, if Rust prepared it. Not on a server that records
-        profile updates, which the Rust transaction leaves to Python."""
+        transaction`, if Rust prepared it."""
         if (
             prepared.rust is None
             or self._rust_persister is None
             or not self.hs.config.experimental.rust_event_persistence_at_least(
                 "transaction"
             )
-            or self.hs.config.server.include_profile_updates_in_sync
         ):
             return None
         return RustTransaction(self._rust_persister, prepared.rust)

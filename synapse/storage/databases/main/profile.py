@@ -1007,7 +1007,8 @@ class ProfileWorkerStore(SQLBaseStore):
         # we'll filter the user out later in the per user updates.
         # We also need to maintain a new users list, as it may shring.
         final_users = []
-        for counter, user_id in enumerate(users):
+        # In order, so the stream IDs are taken in the order Rust takes them.
+        for counter, user_id in enumerate(sorted(users)):
             targets = (
                 target_users - {user_id}
                 if action

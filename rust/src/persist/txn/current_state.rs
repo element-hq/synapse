@@ -14,11 +14,8 @@
  */
 
 //! `_update_current_state_txn`: the room's current state, the tables
-//! derived from it, and the caches that depend on it.
-//!
-//! The profile updates at its end stay in Python for now. They take IDs
-//! from the `profile_updates` stream, which has writers, so it also needs
-//! its `stream_positions` row updated, and Rust has no tracker for it yet.
+//! derived from it, and the caches that depend on it. The profile updates
+//! at its end are in [`super::profile`].
 
 use std::collections::BTreeSet;
 
@@ -28,7 +25,7 @@ use tokio_postgres::types::ToSql;
 
 use super::{
     caches::{invalidate_cache_and_stream, send_invalidation_to_replication},
-    TxnInput,
+    profile, TxnInput,
 };
 use crate::{
     database::postgres::write::{WriteError, WriteTxn},
@@ -54,7 +51,8 @@ const MEMBERS_PER_INVALIDATION: usize = 50;
 /// and `local_current_membership`, and `changes` to the sliding sync
 /// tables. Writes the cache stream rows for the state caches, and stops
 /// tracking the device lists of remote members the server no longer
-/// shares a room with. `stream_id` is the chunk's first stream ordering.
+/// shares a room with, and records the profile updates of the membership
+/// changes. `stream_id` is the chunk's first stream ordering.
 pub async fn update_current_state(
     txn: &WriteTxn,
     input: &TxnInput<'_>,
@@ -273,7 +271,8 @@ pub async fn update_current_state(
         .collect();
     handle_potentially_left_users(txn, input, &remote_members, effects).await?;
     effects.add_state_caches(room_id.to_owned(), members);
-    Ok(())
+
+    profile::record_profile_updates_for_state_delta(txn, input, changes, effects).await
 }
 
 /// A key of the room's state that changes, and its new event, if it has

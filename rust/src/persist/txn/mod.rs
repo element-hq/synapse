@@ -20,17 +20,14 @@
 //! writes, in the same order, and collects in a [`PersistEffects`] the
 //! cache updates Python queues with `txn.call_after`.
 //!
-//! It covers the whole of `_persist_events_txn` but for the profile
-//! updates at the end of `_update_current_state_txn`, which stay in Python,
-//! so a server that records them persists in Python. The steps are the
-//! events themselves ([`events`]), the room's DAG ([`edges`]), the tables
-//! about the events ([`metadata`]), the room's current state
-//! ([`current_state`]), sticky events ([`sticky`]) and the sliding sync
-//! tables ([`sliding_sync`]), with the rows of the cache stream
-//! ([`caches`]) and the IDs of the streams the transaction takes from
-//! ([`streams`]). It returns the events left, which the profile updates
-//! take in `tests/storage/test_rust_persist_txn.py`. That test persists a
-//! chunk through Rust and compares the rows with Python's.
+//! The steps are the events themselves ([`events`]), the room's DAG
+//! ([`edges`]), the tables about the events ([`metadata`]), the room's
+//! current state ([`current_state`]) with its profile updates
+//! ([`profile`]), sticky events ([`sticky`]) and the sliding sync tables
+//! ([`sliding_sync`]), with the rows of the cache stream ([`caches`]) and
+//! the IDs of the streams the transaction takes from ([`streams`]).
+//! `tests/storage/test_rust_persist_txn.py` persists a chunk through Rust
+//! and compares the rows with Python's.
 
 pub mod caches;
 pub mod current_state;
@@ -38,6 +35,7 @@ pub mod edges;
 pub mod events;
 pub mod json;
 pub mod metadata;
+pub mod profile;
 pub mod sliding_sync;
 pub mod sticky;
 pub mod streams;
@@ -141,10 +139,14 @@ pub struct TxnInput<'a> {
     pub enable_ephemeral_messages: bool,
     /// `experimental_features.msc4354_enabled`: sticky events.
     pub msc4354_enabled: bool,
+    /// `server.include_profile_updates_in_sync`.
+    pub include_profile_updates_in_sync: bool,
     /// The cache stream IDs of this persist, over its attempts.
     pub cache_stream: &'a TxnStream,
     /// The sticky events stream IDs of this persist, over its attempts.
     pub sticky_stream: &'a TxnStream,
+    /// The profile updates stream IDs of this persist, over its attempts.
+    pub profile_stream: &'a TxnStream,
 }
 
 impl TxnInput<'_> {
@@ -154,8 +156,8 @@ impl TxnInput<'_> {
     }
 
     /// The streams the transaction takes IDs from.
-    fn streams(&self) -> [&TxnStream; 2] {
-        [self.cache_stream, self.sticky_stream]
+    fn streams(&self) -> [&TxnStream; 3] {
+        [self.cache_stream, self.sticky_stream, self.profile_stream]
     }
 }
 
@@ -179,17 +181,15 @@ fn metadata_error(e: PyErr) -> WriteError {
 }
 
 /// Write the chunk, as `_persist_events_txn` does, adding to `effects` what
-/// Python would queue with `txn.call_after`. Returns the events left, which
-/// the Python steps take: neither persisted before nor rejected.
+/// Python would queue with `txn.call_after`.
 ///
 /// `effects` must start empty: a retried transaction starts again. Once
-/// it commits, hand the stream IDs in `effects` to `input.cache_stream`
-/// and `input.sticky_stream`.
-pub async fn persist_events_txn<'a>(
+/// it commits, hand the stream IDs in `effects` to the streams of `input`.
+pub async fn persist_events_txn(
     txn: &WriteTxn,
-    input: &TxnInput<'a>,
+    input: &TxnInput<'_>,
     effects: &mut PersistEffects,
-) -> Result<Vec<Persisting<'a>>, WriteError> {
+) -> Result<(), WriteError> {
     // An earlier attempt whose commit failed left its stream IDs.
     for stream in input.streams() {
         stream.finish_pending();
@@ -209,7 +209,7 @@ async fn persist_events_txn_steps<'a>(
     txn: &WriteTxn,
     input: &TxnInput<'a>,
     effects: &mut PersistEffects,
-) -> Result<Vec<Persisting<'a>>, WriteError> {
+) -> Result<(), WriteError> {
     let room_id = input.room_id;
 
     // Protect against a race with deleting the room: the share lock holds
@@ -312,7 +312,7 @@ async fn persist_events_txn_steps<'a>(
 
     sliding_sync::update_sliding_sync_joined_room(txn, room_id, &events).await?;
 
-    Ok(events)
+    Ok(())
 }
 
 /// The cache updates Python queues for each event of the chunk at the start

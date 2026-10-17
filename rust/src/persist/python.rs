@@ -21,7 +21,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use anyhow::Context;
 use futures::{future::BoxFuture, FutureExt};
 use http::StatusCode;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyDict};
@@ -56,13 +55,11 @@ use crate::{
     types::state_filter::state_map_to_py,
 };
 
-/// What [`Persister::persist_events_txn`] resolves with.
-type TxnResult = (PersistEffects, Vec<usize>, HashMap<usize, String>);
-
 /// Persists events in Rust, on the events writer, over the native driver.
 ///
 /// Holds what every level needs: the pool, the shared caches, the stream ID
-/// trackers of the events, backfill, cache and sticky events streams
+/// trackers of the events, backfill, cache, sticky events and profile
+/// updates streams
 /// (shared with their Python `MultiWriterIdGenerator`s) and the metrics.
 ///
 /// Each entry point returns a Deferred and has a `_blocking` twin for
@@ -84,6 +81,7 @@ pub(super) struct PersisterInner {
     pub backfill_stream: Arc<StreamIdTracker>,
     pub cache_stream: Arc<StreamIdTracker>,
     pub sticky_stream: Arc<StreamIdTracker>,
+    pub profile_stream: Arc<StreamIdTracker>,
     pub server_name: String,
     pub instance_name: String,
     pub metrics: PersistMetrics,
@@ -95,6 +93,8 @@ pub(super) struct PersisterInner {
     pub enable_search: bool,
     /// `server.enable_ephemeral_messages`.
     pub enable_ephemeral_messages: bool,
+    /// `server.include_profile_updates_in_sync`.
+    pub include_profile_updates_in_sync: bool,
 }
 
 impl Persister {
@@ -155,6 +155,7 @@ impl Persister {
                 backfill_stream: tracker(intern!(py, "_backfill_id_gen"))?,
                 cache_stream: tracker(intern!(py, "_cache_id_gen"))?,
                 sticky_stream: tracker(intern!(py, "_sticky_events_id_gen"))?,
+                profile_stream: tracker(intern!(py, "_profile_updates_id_gen"))?,
                 server_name: homeserver.hostname(py)?,
                 instance_name,
                 metrics: PersistMetrics::default(),
@@ -162,6 +163,7 @@ impl Persister {
                 msc4354_enabled: config.experimental.msc4354_enabled,
                 enable_search: config.server.enable_search,
                 enable_ephemeral_messages: config.server.enable_ephemeral_messages,
+                include_profile_updates_in_sync: config.server.include_profile_updates_in_sync,
             }),
         }))
     }
@@ -176,7 +178,7 @@ impl Persister {
         events_and_contexts: Vec<(Py<Event>, PersistContext)>,
         prepared: &PreparedChunk,
         inhibit_local_membership_updates: bool,
-    ) -> PyResult<BoxFuture<'static, PyResult<TxnResult>>> {
+    ) -> PyResult<BoxFuture<'static, PyResult<PersistEffects>>> {
         let prepared = Arc::clone(&prepared.prepared);
         if !matches!(&*prepared, Prepared::Chunk(_)) {
             return Err(PyRuntimeError::new_err("the chunk was prepared in Python"));
@@ -194,6 +196,7 @@ impl Persister {
             };
             let cache_stream = TxnStream::caches(Arc::clone(&inner.cache_stream));
             let sticky_stream = TxnStream::sticky_events(Arc::clone(&inner.sticky_stream));
+            let profile_stream = TxnStream::profile_updates(Arc::clone(&inner.profile_stream));
             let input = TxnInput {
                 room_id: &room_id,
                 events: &events,
@@ -205,42 +208,26 @@ impl Persister {
                 enable_search: inner.enable_search,
                 enable_ephemeral_messages: inner.enable_ephemeral_messages,
                 msc4354_enabled: inner.msc4354_enabled,
+                include_profile_updates_in_sync: inner.include_profile_updates_in_sync,
                 cache_stream: &cache_stream,
                 sticky_stream: &sticky_stream,
+                profile_stream: &profile_stream,
             };
-            let position = |event: &TxnEvent| {
-                input
-                    .events
-                    .iter()
-                    .position(|x| std::ptr::eq(x, event))
-                    .expect("an event of the chunk")
-            };
-            let result = run_write_interaction(&pool, "persist_events", |txn, _| {
-                let (input, position) = (&input, &position);
+            let effects = run_write_interaction(&pool, "persist_events", |txn, _| {
+                let input = &input;
                 async move {
                     let mut effects = PersistEffects::default();
-                    let events = txn::persist_events_txn(txn, input, &mut effects).await?;
-                    let left = events.iter().map(|e| position(e.source)).collect();
-                    let mut redacted = HashMap::new();
-                    for event in &events {
-                        if let Some(copy) = &event.redacted {
-                            let by = copy
-                                .internal_metadata()
-                                .redacted_by()
-                                .map_err(anyhow::Error::new)?
-                                .context("a redacted copy without redacted_by")?;
-                            redacted.insert(position(event.source), by);
-                        }
-                    }
-                    Ok((effects, left, redacted))
+                    txn::persist_events_txn(txn, input, &mut effects).await?;
+                    Ok(effects)
                 }
                 .boxed()
             })
             .await
             .map_err(write_error_to_py)?;
-            cache_stream.hand_over(result.0.cache_stream_ids());
-            sticky_stream.hand_over(result.0.sticky_stream_ids());
-            Ok(result)
+            cache_stream.hand_over(effects.cache_stream_ids());
+            sticky_stream.hand_over(effects.sticky_stream_ids());
+            profile_stream.hand_over(effects.profile_stream_ids());
+            Ok(effects)
         };
         Ok(future.boxed())
     }
@@ -363,13 +350,10 @@ impl Persister {
 
     /// Run the Rust write transaction over the chunk, whose events must
     /// have their stream orderings set, and commit it. `prepared` is what
-    /// Rust prepared for it. It leaves the profile updates to Python, so it
-    /// is not for a server that records them.
+    /// Rust prepared for it.
     ///
     /// Resolves with what Python applies with `apply_rust_persist_effects`,
-    /// in which the cache and sticky events stream IDs it took are still
-    /// unfinished, and, by position in the chunk, the events left and the
-    /// events stored redacted with the event that redacts each.
+    /// in which the stream IDs the transaction took are still unfinished.
     ///
     /// Python must not cancel the Deferred: the effects of a transaction
     /// that commits must be applied. If it is cancelled, the transaction
@@ -402,7 +386,7 @@ impl Persister {
         events_and_contexts: Vec<(Py<Event>, PersistContext)>,
         prepared: &PreparedChunk,
         inhibit_local_membership_updates: bool,
-    ) -> PyResult<TxnResult> {
+    ) -> PyResult<PersistEffects> {
         let future = self.start_persist_events_txn(
             py,
             room_id,

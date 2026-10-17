@@ -877,7 +877,7 @@ class _CountingPersister:
         self.transactions += 1
 
         def keep(result: Any) -> Any:
-            self.last_effects = result[0]
+            self.last_effects = result
             return result
 
         return self._persister.persist_events_txn(*args, **kwargs).addCallback(keep)
@@ -959,12 +959,32 @@ class RustTransactionTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self.persister.transactions, transactions)
 
     @unittest.override_config({"include_profile_updates_in_sync": True})
-    def test_profile_updates_write_in_python(self) -> None:
-        """The Rust transaction leaves the profile updates to Python, so a
-        server that records them writes in Python."""
-        self.helper.create_room_as(self.user, tok=self.token)
-        self.assertGreater(self.persister.prepares, 0)
-        self.assertEqual(self.persister.transactions, 0)
+    def test_profile_updates_write_in_rust(self) -> None:
+        """A server that records profile updates writes in Rust: the rows
+        are written, and the profile updates stream IDs the transaction took
+        are finished."""
+        bob = self.register_user("bob", "pass")
+        bob_token = self.login("bob", "pass")
+        room_id = self.helper.create_room_as(self.user, tok=self.token)
+        self.helper.invite(room_id, self.user, bob, tok=self.token)
+        transactions = self.persister.transactions
+        self.helper.join(room_id, bob, tok=bob_token)
+        self.assertEqual(self.persister.transactions, transactions + 1)
+        effects = self.persister.last_effects
+        assert effects is not None
+        self.assertNotEqual(effects.profile_stream_ids, [])
+        rows = self.get_success(
+            self.store.db_pool.execute(
+                "test",
+                "SELECT COUNT(*) FROM profile_updates WHERE stream_id = ANY(?)",
+                effects.profile_stream_ids,
+            )
+        )
+        self.assertEqual(rows[0][0], len(effects.profile_stream_ids))
+        self.assertEqual(
+            self.store._profile_updates_id_gen.get_current_token(),
+            max(effects.profile_stream_ids),
+        )
 
     def test_gil_count(self) -> None:
         """Writing a chunk takes the GIL from tokio at no persist site: the

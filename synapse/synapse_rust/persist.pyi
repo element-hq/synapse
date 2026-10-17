@@ -58,16 +58,13 @@ class Persister:
         prepared: PreparedChunk,
         *,
         inhibit_local_membership_updates: bool,
-    ) -> Deferred[tuple[PersistEffects, list[int], dict[int, str]]]:
+    ) -> Deferred[PersistEffects]:
         """Run the Rust write transaction over the chunk, whose events have
         their stream orderings set, and commit it. `prepared` is what Rust
-        prepared for it. It leaves the profile updates to Python, so it is
-        not for a server that records them.
+        prepared for it.
 
         Resolves with what Python applies with `apply_rust_persist_effects`,
-        in which the cache and sticky events stream IDs it took are still
-        unfinished, and, by position in the chunk, the events left and the
-        events stored redacted with the event that redacts each.
+        in which the stream IDs the transaction took are still unfinished.
 
         Must not be cancelled: the effects of a transaction that commits
         must be applied. If it is cancelled, the transaction runs on and its
@@ -81,7 +78,7 @@ class Persister:
         prepared: PreparedChunk,
         *,
         inhibit_local_membership_updates: bool,
-    ) -> tuple[PersistEffects, list[int], dict[int, str]]:
+    ) -> PersistEffects:
         """As `persist_events_txn`, but blocks. For tests."""
 
 class PreparedChunk:
@@ -140,6 +137,7 @@ class PersistEffects:
         cache_invalidations: list[tuple[str, list[str]]] = ...,
         cache_stream_ids: list[int] = ...,
         sticky_stream_ids: list[int] = ...,
+        profile_stream_ids: list[int] = ...,
         event_cache_prefills: list[str] = ...,
         state_group_prefills: list[tuple[str, int]] = ...,
         latest_event_ids: tuple[str, list[str]] | None = None,
@@ -183,6 +181,11 @@ class PersistEffects:
         moved, still unfinished. Python finishes them once the caches are
         invalidated, as `get_next_mult_txn` does, and updates
         `stream_positions`."""
+
+    @property
+    def profile_stream_ids(self) -> list[int]:
+        """The IDs of the profile updates stream rows the transaction wrote,
+        still unfinished. Python finishes them as `sticky_stream_ids`."""
 
     @property
     def event_cache_prefills(self) -> list[str]:
