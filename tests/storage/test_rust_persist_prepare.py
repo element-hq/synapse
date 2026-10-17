@@ -13,7 +13,7 @@
 #
 
 """How `_persist_event_batch` prepares chunks in Rust
-(`rust/src/persist/prepare.rs`) at the `shadow` and `prepare` levels of
+(`rust/src/persist/prepare.rs`) at the `shadow`, `prepare` and `full` levels of
 `rust_event_persistence`. These need the native Rust Postgres driver:
 
     SYNAPSE_TEST_RUST_DRIVER=1 POSTGRES=1 run-trial.sh tests.storage.test_rust_persist_prepare
@@ -21,7 +21,7 @@
 
 from typing import Any
 from unittest import SkipTest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import attr
 
@@ -117,6 +117,30 @@ class _PrepareTestBase(unittest.HomeserverTestCase):
             for result in _RESULTS
             if after[result] != self._counts_before[result]
         }
+
+    def _mock_persister(self, **kwargs: Any) -> Mock:
+        """A mock persister. At `full` it hands each batch back to be
+        persisted chunk by chunk, so the mocked `prepare_chunk` is used."""
+
+        def persist_batch(
+            room_id: str, events_and_contexts: list, **kwargs: Any
+        ) -> Mock:
+            return Mock(events=len(events_and_contexts))
+
+        def batch_next(handle: Mock) -> defer.Deferred:
+            return defer.succeed(
+                Mock(
+                    replaced_events={},
+                    remaining=list(range(handle.events)),
+                    fallback_reason="mocked",
+                )
+            )
+
+        return Mock(
+            persist_batch=Mock(side_effect=persist_batch),
+            batch_next=Mock(side_effect=batch_next),
+            **kwargs,
+        )
 
     def _send(self, body: str, expect_code: int = 200) -> str | None:
         return self.helper.send(
@@ -308,7 +332,7 @@ class ShadowTestCase(_PrepareTestBase):
 
     def test_rust_rejection_python_accepts(self) -> None:
         self.persistence._rust_persist_strict = False
-        self.persistence._rust_persister = Mock(
+        self.persistence._rust_persister = self._mock_persister(
             prepare_chunk=Mock(return_value=defer.fail(SynapseError(500, "no")))
         )
         with self.assertLogs("synapse.storage.controllers.persist_events", "WARNING"):
@@ -317,7 +341,7 @@ class ShadowTestCase(_PrepareTestBase):
 
     def test_rust_error_is_logged(self) -> None:
         self.persistence._rust_persist_strict = False
-        self.persistence._rust_persister = Mock(
+        self.persistence._rust_persister = self._mock_persister(
             prepare_chunk=Mock(return_value=defer.fail(RuntimeError("boom")))
         )
         with self.assertLogs("synapse.storage.controllers.persist_events", "ERROR"):
@@ -326,7 +350,7 @@ class ShadowTestCase(_PrepareTestBase):
 
 
 class PrepareTestCase(_PrepareTestBase):
-    level = "prepare"
+    level: RustEventPersistenceLevel = "prepare"
 
     def test_room_lifecycle(self) -> None:
         chunks = self._room_lifecycle()
@@ -424,7 +448,7 @@ class PrepareTestCase(_PrepareTestBase):
     def test_rejection_is_raised(self) -> None:
         """A chunk Rust rejects is not computed again in Python."""
         self.persistence._rust_persist_strict = False
-        self.persistence._rust_persister = Mock(
+        self.persistence._rust_persister = self._mock_persister(
             prepare_chunk=Mock(return_value=defer.fail(SynapseError(500, "no")))
         )
         in_python = Mock(side_effect=AssertionError("computed in Python"))
@@ -434,7 +458,7 @@ class PrepareTestCase(_PrepareTestBase):
         in_python.assert_not_called()
 
     def test_fallback(self) -> None:
-        self.persistence._rust_persister = Mock(
+        self.persistence._rust_persister = self._mock_persister(
             prepare_chunk=Mock(
                 return_value=defer.succeed(Mock(state_res_fallback="no index"))
             )
@@ -448,7 +472,7 @@ class PrepareTestCase(_PrepareTestBase):
 
     def test_error_uses_python(self) -> None:
         self.persistence._rust_persist_strict = False
-        self.persistence._rust_persister = Mock(
+        self.persistence._rust_persister = self._mock_persister(
             prepare_chunk=Mock(return_value=defer.fail(RuntimeError("boom")))
         )
         with self.assertLogs("synapse.storage.controllers.persist_events", "ERROR"):
@@ -460,8 +484,55 @@ class PrepareTestCase(_PrepareTestBase):
         )
 
     def test_error_fails_strict_mode(self) -> None:
-        self.persistence._rust_persister = Mock(
+        self.persistence._rust_persister = self._mock_persister(
             prepare_chunk=Mock(return_value=defer.fail(RuntimeError("boom")))
         )
         self._send("hello", expect_code=500)
         self.assertEqual(self._counted(), {"error": 1})
+
+
+class FullTestCase(PrepareTestCase):
+    """At `full`, Rust persists each batch, chunk by chunk, and hands back
+    to the chunk path any chunk it cannot prepare. The prepare counter
+    counts the same."""
+
+    level: RustEventPersistenceLevel = "full"
+
+    def test_hand_back_in_the_middle(self) -> None:
+        """A batch whose second chunk Rust cannot prepare: Rust writes the
+        first and hands back the second alone, which Python persists."""
+        room_id = self.helper.create_room_as(
+            self.alice, room_version=RoomVersions.V1.identifier, tok=self.alice_tok
+        )
+        # Siblings, so the messages need no state resolution and the topics,
+        # in the second chunk, need it on state resolution v1.
+        messages = [
+            self._new_event(
+                room_id, EventTypes.Message, {"msgtype": "m.text", "body": str(i)}
+            )
+            for i in range(100)
+        ]
+        topics = [
+            self._new_event(room_id, EventTypes.Topic, {"topic": t}, state_key="")
+            for t in ("A", "B")
+        ]
+        before = self._counts()
+        persist_chunks = self.persistence._persist_chunks
+        handed_back: list[list[str]] = []
+
+        async def recording(
+            room_id: str, events_and_contexts: list, backfilled: bool
+        ) -> None:
+            handed_back.append([event.event_id for event, _ in events_and_contexts])
+            await persist_chunks(room_id, events_and_contexts, backfilled)
+
+        with patch.object(self.persistence, "_persist_chunks", side_effect=recording):
+            self.get_success(self.persistence.persist_events([*messages, *topics]))
+        self.assertEqual(handed_back, [[event.event_id for event, _ in topics]])
+        after = self._counts()
+        counted = {r: after[r] - before[r] for r in _RESULTS if after[r] != before[r]}
+        self.assertEqual(counted, {"rust": 1, "fallback": 1})
+        for event, _ in [*messages, *topics]:
+            self.assertIsNotNone(
+                self.get_success(self.store.get_event(event.event_id, allow_none=True))
+            )

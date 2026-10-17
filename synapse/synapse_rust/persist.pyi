@@ -106,6 +106,71 @@ class Persister:
     ) -> PersistEffects:
         """As `persist_chunk`, but blocks. For tests."""
 
+    def persist_batch(
+        self,
+        room_id: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        *,
+        backfilled: bool,
+    ) -> PersistBatch:
+        """`_persist_event_batch` for a queued batch of `room_id`'s events,
+        one chunk at a time: await `batch_next` until it resolves with a
+        `PersistedBatch`, applying the effects of each `WrittenChunk` before
+        the next step, and call `batch_abort` if they cannot be applied.
+        Converts the events, without I/O."""
+    def batch_next(
+        self, batch: PersistBatch
+    ) -> Deferred[WrittenChunk | PersistedBatch]:
+        """The batch's next step. The first drops the events already
+        persisted under the same transaction ID. Each releases the state
+        groups of the chunk before, then prepares the next chunk, marks the
+        batch's state groups as being persisted, takes the chunk's stream
+        orderings and writes it.
+
+        The chunk's stream IDs are handed over unfinished: must not be
+        cancelled. If the step fails, Rust finishes them and releases the
+        state groups."""
+    def batch_next_blocking(self, batch: PersistBatch) -> WrittenChunk | PersistedBatch:
+        """As `batch_next`, but blocks. For tests."""
+    def batch_abort(self, batch: PersistBatch) -> Deferred[None]:
+        """Give up the batch, releasing its state groups as a failed
+        persist does."""
+    def batch_abort_blocking(self, batch: PersistBatch) -> None:
+        """As `batch_abort`, but blocks. For tests."""
+
+class PersistBatch:
+    """A batch being persisted. See `Persister.persist_batch`."""
+
+class WrittenChunk:
+    """A chunk `Persister.batch_next` wrote."""
+
+    @property
+    def effects(self) -> PersistEffects:
+        """To apply with `apply_rust_persist_effects`, with the chunk's
+        stream IDs unfinished."""
+    @property
+    def prepared(self) -> PreparedChunk:
+        """What Rust prepared for the chunk."""
+    @property
+    def indices(self) -> list[int]:
+        """The chunk's positions in the batch."""
+
+class PersistedBatch:
+    """What `Persister.persist_batch` did, once the batch is done."""
+
+    @property
+    def replaced_events(self) -> dict[str, str]:
+        """The events not persisted as they repeat an event already
+        persisted with the same transaction ID, mapped to that event."""
+    @property
+    def remaining(self) -> list[int]:
+        """The positions in the batch of the events left for Python to
+        persist, in order: the chunk Rust could not prepare and those after
+        it. Empty if Rust persisted them all."""
+    @property
+    def fallback_reason(self) -> str | None:
+        """Why Rust left the `remaining` events."""
+
 class PreparedChunk:
     """What `Persister.prepare_chunk` computed. If `state_res_fallback` is
     set, the rest is empty and Python should compute the chunk itself."""

@@ -82,7 +82,13 @@ from synapse.storage.databases.main.events import (
     persist_event_counter,
 )
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
-from synapse.synapse_rust.persist import Persister, PreparedChunk
+from synapse.storage.databases.main.rust_persist import finish_rust_persist_stream_ids
+from synapse.synapse_rust.persist import (
+    PersistBatch,
+    Persister,
+    PreparedChunk,
+    WrittenChunk,
+)
 from synapse.types import (
     PersistedEventPosition,
     RoomStreamToken,
@@ -90,7 +96,11 @@ from synapse.types import (
     get_domain_from_id,
 )
 from synapse.types.state import StateFilter
-from synapse.util.async_helpers import ObservableDeferred, yieldable_gather_results
+from synapse.util.async_helpers import (
+    ObservableDeferred,
+    delay_cancellation,
+    yieldable_gather_results,
+)
 from synapse.util.metrics import Measure
 from synapse.util.stringutils import shortstr
 
@@ -871,6 +881,14 @@ class EventsPersistenceStorageController:
         if not events_and_contexts:
             return replaced_events
 
+        if (
+            self._rust_persister is not None
+            and self.hs.config.experimental.rust_event_persistence_at_least("full")
+        ):
+            return await self._persist_event_batch_in_rust(
+                room_id, events_and_contexts, backfilled
+            )
+
         # Check if any of the events have a transaction ID that has already been
         # persisted, and if so we don't persist it again.
         #
@@ -892,6 +910,16 @@ class EventsPersistenceStorageController:
             if not events_and_contexts:
                 return replaced_events
 
+        await self._persist_chunks(room_id, events_and_contexts, backfilled)
+        return replaced_events
+
+    async def _persist_chunks(
+        self,
+        room_id: str,
+        events_and_contexts: list[EventPersistencePair],
+        backfilled: bool,
+    ) -> None:
+        """Persist the events, deduplicated, in chunks of 100."""
         chunks = [
             events_and_contexts[x : x + 100]
             for x in range(0, len(events_and_contexts), 100)
@@ -924,7 +952,98 @@ class EventsPersistenceStorageController:
                     rust_transaction=self._rust_transaction(prepared),
                 )
 
-        return replaced_events
+    async def _persist_event_batch_in_rust(
+        self,
+        room_id: str,
+        events_and_contexts: list[EventPersistencePair],
+        backfilled: bool,
+    ) -> dict[str, str]:
+        """`_persist_event_batch` at `rust_event_persistence: full`: Rust
+        deduplicates the batch, then prepares and writes it chunk by chunk,
+        and Python applies what each chunk Rust wrote asks for before the
+        next. A chunk Rust cannot prepare is handed back with the rest of
+        the batch and persisted chunk by chunk, as at lower levels."""
+        assert self._rust_persister is not None
+        persister = self._rust_persister
+        handle = persister.persist_batch(
+            room_id, events_and_contexts, backfilled=backfilled
+        )
+
+        async def persist() -> dict[str, str]:
+            while True:
+                try:
+                    # The Deferred follows the logcontext rules already.
+                    step = await persister.batch_next(handle)
+                except BaseException:
+                    # Rust finished the stream orderings of a chunk it
+                    # failed to write. Tell replication, as `get_next_mult`
+                    # does when its block raises.
+                    self.hs.get_replication_notifier().notify_replication()
+                    raise
+                if not isinstance(step, WrittenChunk):
+                    break
+                await self._apply_rust_batch_chunk(
+                    room_id, events_and_contexts, backfilled, step, handle
+                )
+
+            if step.remaining:
+                logger.debug(
+                    "Persisting %d events of %s chunk by chunk: %s",
+                    len(step.remaining),
+                    room_id,
+                    step.fallback_reason,
+                )
+                await self._persist_chunks(
+                    room_id,
+                    [events_and_contexts[i] for i in step.remaining],
+                    backfilled,
+                )
+            return step.replaced_events
+
+        # Rust carries on with a step if this is cancelled, and its effects
+        # must be applied. Waiting also keeps the room's queue from starting
+        # its next batch while this one, or the rest Rust handed back, is
+        # still being written.
+        return await delay_cancellation(persist())
+
+    async def _apply_rust_batch_chunk(
+        self,
+        room_id: str,
+        events_and_contexts: list[EventPersistencePair],
+        backfilled: bool,
+        step: WrittenChunk,
+        handle: PersistBatch,
+    ) -> None:
+        """Apply what a chunk of the batch Rust wrote asks for, and finish
+        its stream orderings. If that fails, release the batch."""
+        assert self._rust_persister is not None
+        effects = step.effects
+        try:
+            try:
+                prepared = step.prepared
+                chunk = [events_and_contexts[i] for i in step.indices]
+                # Counted as the chunk path counts, once prepared.
+                self._count_rust_prepare("full", "rust")
+                if prepared.state_res_stats is not None:
+                    self._state_resolution_handler.record_rust_state_res_metrics(
+                        room_id, prepared.state_res_stats
+                    )
+            except BaseException:
+                # Only the apply finishes the orderings otherwise.
+                finish_rust_persist_stream_ids(
+                    self.persist_events_store.store, effects, succeeded=False
+                )
+                raise
+            await self.persist_events_store._apply_rust_chunk(
+                room_id,
+                chunk,
+                effects,
+                backfilled=backfilled,
+                new_forward_extremities=prepared.new_forward_extremities,
+            )
+        except BaseException:
+            await self._rust_persister.batch_abort(handle)
+            raise
 
     def _rust_transaction(self, prepared: _PreparedChunk) -> RustTransaction | None:
         """Whether to write the chunk in Rust: at `rust_event_persistence:
@@ -1071,10 +1190,9 @@ class EventsPersistenceStorageController:
         with Measure(
             self._clock, name="rust_prepare_chunk", server_name=self.server_name
         ):
-            rust = await make_deferred_yieldable(
-                self._rust_persister.prepare_chunk(
-                    room_id, chunk, backfilled, shadow=shadow
-                )
+            # The Deferred follows the logcontext rules already.
+            rust = await self._rust_persister.prepare_chunk(
+                room_id, chunk, backfilled, shadow=shadow
             )
         if rust.state_res_fallback is not None:
             logger.info(

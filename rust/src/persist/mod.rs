@@ -18,6 +18,7 @@
 //! This is being built up from the inside out (see
 //! `renders/event-persistence-rust-plan.md`). So far:
 //!
+//! - [`batch`]: the steps around a queued batch's chunks.
 //! - [`chain_cover`]: the chain cover index of a chunk's state events.
 //! - [`context`]: what persisting needs from an `EventContext`.
 //! - [`effects`]: the Python cache updates a Rust transaction asks for once
@@ -38,6 +39,7 @@
 
 use pyo3::prelude::*;
 
+pub mod batch;
 pub mod chain_cover;
 pub mod context;
 pub mod effects;
@@ -56,6 +58,9 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     let child_module = PyModule::new(py, "persist")?;
     child_module.add_class::<python::Persister>()?;
     child_module.add_class::<python::PreparedChunk>()?;
+    child_module.add_class::<python::PersistBatch>()?;
+    child_module.add_class::<python::PersistedBatch>()?;
+    child_module.add_class::<python::WrittenChunk>()?;
     child_module.add_class::<effects::PersistEffects>()?;
     child_module.add_class::<reader::PyPersistReaderForTest>()?;
     child_module.add_function(wrap_pyfunction!(

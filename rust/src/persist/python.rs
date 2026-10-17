@@ -17,7 +17,7 @@
 //! `RustHandlers.persister` hands out, and helpers for tests.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -26,6 +26,7 @@ use http::StatusCode;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyDict};
 
 use super::{
+    batch,
     context::PersistContext,
     effects::PersistEffects,
     extremities::MissingPrevStateEvents,
@@ -186,83 +187,25 @@ impl Persister {
         if !matches!(&*prepared, Prepared::Chunk(_)) {
             return Err(PyRuntimeError::new_err("the chunk was prepared in Python"));
         }
-        let events: Vec<(Event, PersistContext)> = events_and_contexts
-            .into_iter()
-            .map(|(event, context)| (event.bind(py).get().shallow_clone(), context))
-            .collect();
+        let events = shallow_events(py, events_and_contexts);
         let pool = self.inner.pool.get()?;
         let inner = Arc::clone(&self.inner);
-        let future = async move {
+        Ok(async move {
             let Prepared::Chunk(chunk) = &*prepared else {
                 unreachable!("checked above");
             };
-            // Taken as late as possible, as Python takes them: until the
-            // chunk is written, no later event on the stream can be
-            // announced.
-            let event_stream = match orderings {
-                StreamOrderings::Set => None,
-                StreamOrderings::Allocate { backfilled } => {
-                    let stream = if backfilled {
-                        TxnStream::backfill(Arc::clone(&inner.backfill_stream))
-                    } else {
-                        TxnStream::events(Arc::clone(&inner.events_stream))
-                    };
-                    let ids = allocate_stream_orderings(&pool, &stream, events.len())
-                        .await
-                        .map_err(persist_error_to_py)?;
-                    set_persisted_positions(&inner, &events, &ids, backfilled)
-                        .map_err(persist_error_to_py)?;
-                    Some((stream, ids, backfilled))
-                }
-            };
-            let events = events
-                .into_iter()
-                .map(|(event, context)| TxnEvent::new(event, context))
-                .collect::<anyhow::Result<Vec<_>>>()
-                .map_err(persist_error_to_py)?;
-
-            let cache_stream = TxnStream::caches(Arc::clone(&inner.cache_stream));
-            let sticky_stream = TxnStream::sticky_events(Arc::clone(&inner.sticky_stream));
-            let profile_stream = TxnStream::profile_updates(Arc::clone(&inner.profile_stream));
-            let input = TxnInput {
-                room_id: &room_id,
-                events: &events,
-                prepared: chunk,
-                instance_name: &inner.instance_name,
-                server_name: &inner.server_name,
-                clock: inner.runtime.clock(),
+            write_chunk(
+                &inner,
+                &pool,
+                &room_id,
+                events,
+                chunk,
+                orderings,
                 inhibit_local_membership_updates,
-                enable_search: inner.enable_search,
-                enable_ephemeral_messages: inner.enable_ephemeral_messages,
-                msc4354_enabled: inner.msc4354_enabled,
-                include_profile_updates_in_sync: inner.include_profile_updates_in_sync,
-                cache_stream: &cache_stream,
-                sticky_stream: &sticky_stream,
-                profile_stream: &profile_stream,
-            };
-            let mut effects = run_write_interaction(&pool, "persist_events", |txn, _| {
-                let input = &input;
-                async move {
-                    let mut effects = PersistEffects::default();
-                    txn::persist_events_txn(txn, input, &mut effects).await?;
-                    Ok(effects)
-                }
-                .boxed()
-            })
+            )
             .await
-            .map_err(write_error_to_py)?;
-            cache_stream.hand_over(effects.cache_stream_ids());
-            sticky_stream.hand_over(effects.sticky_stream_ids());
-            profile_stream.hand_over(effects.profile_stream_ids());
-            // Finished on drop if the transaction failed, as `get_next_mult`
-            // finishes them when its block raises.
-            if let Some((stream, ids, backfilled)) = event_stream {
-                stream.hand_over(&ids);
-                effects.add_stream_ids(ids, backfilled);
-            }
-            Ok(effects)
-        };
-        Ok(future.boxed())
+        }
+        .boxed())
     }
 
     /// Convert the chunk while the GIL is held, and return the future that
@@ -275,57 +218,37 @@ impl Persister {
         backfilled: bool,
         shadow: bool,
     ) -> PyResult<BoxFuture<'static, PyResult<PreparedChunk>>> {
-        let input = PrepareInput::new(py, room_id, &events_and_contexts, backfilled)?;
+        let events = shallow_events(py, events_and_contexts);
+        let input = PrepareInput::new(room_id, &events, backfilled).map_err(persist_error_to_py)?;
         let pool = self.inner.pool.get()?;
-        let handle = self.inner.runtime.tokio_handle()?;
         let inner = Arc::clone(&self.inner);
         Ok(async move {
-            let resolver = NativeStateResolver {
-                pool: pool.clone(),
-                handle,
-                caches: Arc::clone(&inner.store.caches),
-                conflict_cache: Arc::clone(&inner.conflict_cache),
-            };
-            let reader = PersistReader::new(inner.sync.reader(pool.clone()));
-            let options = PrepareOptions {
-                server_name: &inner.server_name,
-                clock: inner.runtime.clock(),
-                sticky: inner.msc4354_enabled,
-                dry_run: shadow,
-            };
-            // Python reads in `runInteraction`s, which retry on a lost
-            // connection or a cancelled statement. Here the whole chunk is
-            // prepared again. That is safe as its only write, bumping the
-            // state groups it uses, can be repeated, and runs in a write
-            // interaction with its own retries.
-            let mut attempt = 1;
-            loop {
-                let mut counts = PersistCounts::default();
-                match prepare::prepare_chunk(
-                    &reader,
-                    &resolver,
-                    &pool,
-                    &input,
-                    &options,
-                    &mut counts,
-                )
+            let (prepared, counts) = prepare_chunk(&inner, &pool, &input, shadow)
                 .await
-                {
-                    Ok(prepared) => {
-                        return Ok(PreparedChunk {
-                            prepared: Arc::new(prepared),
-                            counts: Mutex::new(Some(counts)),
-                        })
-                    }
-                    Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(&e) => {
-                        log::warn!("[TXN RETRY] {{prepare_chunk}} {e:#} {attempt}/{MAX_ATTEMPTS}");
-                        attempt += 1;
-                    }
-                    Err(e) => return Err(persist_error_to_py(e)),
-                }
-            }
+                .map_err(persist_error_to_py)?;
+            Ok(PreparedChunk {
+                prepared: Arc::new(prepared),
+                counts: Mutex::new(Some(counts)),
+            })
         }
         .boxed())
+    }
+
+    /// The future of the batch's next step. See [`Self::batch_next`].
+    fn start_batch_next(&self, batch: &PersistBatch) -> BoxFuture<'static, PyResult<BatchStep>> {
+        let state = Arc::clone(&batch.state);
+        async move { batch_next(&mut *state.lock().await).await }.boxed()
+    }
+
+    /// The future that releases the batch. See [`Self::batch_abort`].
+    fn start_batch_abort(&self, batch: &PersistBatch) -> BoxFuture<'static, PyResult<()>> {
+        let state = Arc::clone(&batch.state);
+        async move {
+            let mut state = state.lock().await;
+            state.done = true;
+            state.release_guard(true).await
+        }
+        .boxed()
     }
 
     /// Run `future` to completion on the runtime, releasing the GIL. For the
@@ -481,6 +404,74 @@ impl Persister {
         self.block_on(py, future)
     }
 
+    /// `_persist_event_batch` for a queued batch of `room_id`'s events,
+    /// one chunk at a time: Python awaits [`Self::batch_next`] until it
+    /// resolves with a [`PersistedBatch`], applying the effects of each
+    /// [`WrittenChunk`] before the next step, and calls
+    /// [`Self::batch_abort`] if it cannot. Converts the events, without
+    /// I/O.
+    #[pyo3(signature = (room_id, events_and_contexts, *, backfilled))]
+    fn persist_batch(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        backfilled: bool,
+    ) -> PyResult<PersistBatch> {
+        let state = BatchState {
+            inner: Arc::clone(&self.inner),
+            pool: self.inner.pool.get()?,
+            room_id,
+            backfilled,
+            events: shallow_events(py, events_and_contexts),
+            deduplicated: None,
+            next: 0,
+            guard_held: false,
+            done: false,
+        };
+        Ok(PersistBatch {
+            state: Arc::new(tokio::sync::Mutex::new(state)),
+        })
+    }
+
+    /// The batch's next step: a Deferred resolving to the [`WrittenChunk`]
+    /// written, or to the [`PersistedBatch`] once the batch is done, or
+    /// failing as the Python path would. The chunk's stream IDs are handed
+    /// to Python unfinished, so Python must not cancel the Deferred: if it
+    /// is cancelled, the step runs on and the IDs are lost. If the step
+    /// fails, Rust finishes them and releases the state groups.
+    fn batch_next<'py>(
+        &self,
+        py: Python<'py>,
+        batch: &PersistBatch,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let future = self.start_batch_next(batch);
+        create_deferred_with(py, &self.inner.runtime, future, OnCancel::RunOn)
+    }
+
+    /// As [`Self::batch_next`], but blocks.
+    fn batch_next_blocking(&self, py: Python<'_>, batch: &PersistBatch) -> PyResult<BatchStep> {
+        let future = self.start_batch_next(batch);
+        self.block_on(py, future)
+    }
+
+    /// Give up the batch, as Python could not apply a chunk's effects:
+    /// release its state groups as a failed persist does.
+    fn batch_abort<'py>(
+        &self,
+        py: Python<'py>,
+        batch: &PersistBatch,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let future = self.start_batch_abort(batch);
+        create_deferred_with(py, &self.inner.runtime, future, OnCancel::RunOn)
+    }
+
+    /// As [`Self::batch_abort`], but blocks.
+    fn batch_abort_blocking(&self, py: Python<'_>, batch: &PersistBatch) -> PyResult<()> {
+        let future = self.start_batch_abort(batch);
+        self.block_on(py, future)
+    }
+
     /// As [`Self::prepare_chunk`], but blocks.
     #[pyo3(signature = (room_id, events_and_contexts, backfilled, *, shadow))]
     fn prepare_chunk_blocking(
@@ -494,6 +485,416 @@ impl Persister {
         let future =
             self.start_prepare_chunk(py, room_id, events_and_contexts, backfilled, shadow)?;
         self.block_on(py, future)
+    }
+}
+
+/// The events of `events_and_contexts`, sharing their data, internal
+/// metadata included, with the Python events, so that Rust can read them
+/// without the GIL and set their stream orderings.
+fn shallow_events(
+    py: Python<'_>,
+    events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+) -> Vec<(Event, PersistContext)> {
+    events_and_contexts
+        .into_iter()
+        .map(|(event, context)| (event.bind(py).get().shallow_clone(), context))
+        .collect()
+}
+
+/// Prepare the chunk `input`, with what it counted.
+async fn prepare_chunk(
+    inner: &PersisterInner,
+    pool: &ConnectionPool,
+    input: &PrepareInput,
+    shadow: bool,
+) -> anyhow::Result<(Prepared, PersistCounts)> {
+    let resolver = NativeStateResolver {
+        pool: pool.clone(),
+        handle: inner.runtime.tokio_handle()?,
+        caches: Arc::clone(&inner.store.caches),
+        conflict_cache: Arc::clone(&inner.conflict_cache),
+    };
+    let reader = PersistReader::new(inner.sync.reader(pool.clone()));
+    let options = PrepareOptions {
+        server_name: &inner.server_name,
+        clock: inner.runtime.clock(),
+        sticky: inner.msc4354_enabled,
+        dry_run: shadow,
+    };
+    // Python reads in `runInteraction`s, which retry on a lost connection
+    // or a cancelled statement. Here the whole chunk is prepared again.
+    // That is safe as its only write, bumping the state groups it uses, can
+    // be repeated, and runs in a write interaction with its own retries.
+    let mut attempt = 1;
+    loop {
+        let mut counts = PersistCounts::default();
+        match prepare::prepare_chunk(&reader, &resolver, pool, input, &options, &mut counts).await {
+            Ok(prepared) => return Ok((prepared, counts)),
+            Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(&e) => {
+                log::warn!("[TXN RETRY] {{prepare_chunk}} {e:#} {attempt}/{MAX_ATTEMPTS}");
+                attempt += 1;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Write the chunk `events`, which Rust prepared as `chunk`, taking its
+/// stream orderings first if `orderings` says so. Resolves with the
+/// effects, whose stream IDs are unfinished.
+async fn write_chunk(
+    inner: &PersisterInner,
+    pool: &ConnectionPool,
+    room_id: &str,
+    events: Vec<(Event, PersistContext)>,
+    chunk: &prepare::PreparedChunk,
+    orderings: StreamOrderings,
+    inhibit_local_membership_updates: bool,
+) -> PyResult<PersistEffects> {
+    // Taken as late as possible, as Python takes them: until the chunk is
+    // written, no later event on the stream can be announced.
+    let event_stream = match orderings {
+        StreamOrderings::Set => None,
+        StreamOrderings::Allocate { backfilled } => {
+            let stream = if backfilled {
+                TxnStream::backfill(Arc::clone(&inner.backfill_stream))
+            } else {
+                TxnStream::events(Arc::clone(&inner.events_stream))
+            };
+            let ids = allocate_stream_orderings(pool, &stream, events.len())
+                .await
+                .map_err(persist_error_to_py)?;
+            set_persisted_positions(inner, &events, &ids, backfilled)
+                .map_err(persist_error_to_py)?;
+            Some((stream, ids, backfilled))
+        }
+    };
+    let events = events
+        .into_iter()
+        .map(|(event, context)| TxnEvent::new(event, context))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(persist_error_to_py)?;
+
+    let cache_stream = TxnStream::caches(Arc::clone(&inner.cache_stream));
+    let sticky_stream = TxnStream::sticky_events(Arc::clone(&inner.sticky_stream));
+    let profile_stream = TxnStream::profile_updates(Arc::clone(&inner.profile_stream));
+    let input = TxnInput {
+        room_id,
+        events: &events,
+        prepared: chunk,
+        instance_name: &inner.instance_name,
+        server_name: &inner.server_name,
+        clock: inner.runtime.clock(),
+        inhibit_local_membership_updates,
+        enable_search: inner.enable_search,
+        enable_ephemeral_messages: inner.enable_ephemeral_messages,
+        msc4354_enabled: inner.msc4354_enabled,
+        include_profile_updates_in_sync: inner.include_profile_updates_in_sync,
+        cache_stream: &cache_stream,
+        sticky_stream: &sticky_stream,
+        profile_stream: &profile_stream,
+    };
+    let mut effects = run_write_interaction(pool, "persist_events", |txn, _| {
+        let input = &input;
+        async move {
+            let mut effects = PersistEffects::default();
+            txn::persist_events_txn(txn, input, &mut effects).await?;
+            Ok(effects)
+        }
+        .boxed()
+    })
+    .await
+    .map_err(write_error_to_py)?;
+    cache_stream.hand_over(effects.cache_stream_ids());
+    sticky_stream.hand_over(effects.sticky_stream_ids());
+    profile_stream.hand_over(effects.profile_stream_ids());
+    // Finished on drop if the transaction failed, as `get_next_mult`
+    // finishes them when its block raises.
+    if let Some((stream, ids, backfilled)) = event_stream {
+        stream.hand_over(&ids);
+        effects.add_stream_ids(ids, backfilled);
+    }
+    Ok(effects)
+}
+
+/// A queued batch of one room's events, persisted chunk by chunk by
+/// [`batch_next`]. See [`Persister::persist_batch`].
+struct BatchState {
+    inner: Arc<PersisterInner>,
+    pool: ConnectionPool,
+    room_id: String,
+    backfilled: bool,
+    events: Vec<(Event, PersistContext)>,
+    /// Set by the first step.
+    deduplicated: Option<Deduplicated>,
+    /// The position in `kept` of the next chunk.
+    next: usize,
+    /// The state groups are marked as being persisted for the chunk last
+    /// handed to Python, which the next step or [`batch_abort`] releases.
+    guard_held: bool,
+    /// The batch has been persisted, handed back or failed.
+    done: bool,
+}
+
+/// The batch once the events already persisted are dropped.
+struct Deduplicated {
+    replaced_events: HashMap<String, String>,
+    /// The positions in the batch of the events to persist.
+    kept: Vec<usize>,
+    /// What `persisting_state_group_references` holds back from deletion
+    /// around each chunk: the groups of the whole batch, as in Python.
+    state_groups: BTreeSet<i64>,
+}
+
+impl BatchState {
+    fn shallow(&self, i: usize) -> (Event, PersistContext) {
+        (self.events[i].0.shallow_clone(), self.events[i].1.clone())
+    }
+
+    /// `_finish_persisting_txn` for the chunk last written, if its state
+    /// groups are still marked.
+    async fn release_guard(&mut self, error: bool) -> PyResult<()> {
+        if !std::mem::take(&mut self.guard_held) {
+            return Ok(());
+        }
+        let Some(deduplicated) = &self.deduplicated else {
+            return Ok(());
+        };
+        batch::finish_persisting(
+            &self.pool,
+            self.inner.runtime.clock(),
+            &self.inner.instance_name,
+            &deduplicated.state_groups,
+            error,
+        )
+        .await
+        .map_err(write_error_to_py)
+    }
+}
+
+impl Drop for BatchState {
+    /// A batch dropped with its guard held, which Python should not let
+    /// happen, releases it as a failure, as Python's `finally` would.
+    fn drop(&mut self) {
+        if !self.guard_held {
+            return;
+        }
+        let (Some(deduplicated), Ok(handle)) =
+            (self.deduplicated.take(), self.inner.runtime.tokio_handle())
+        else {
+            return;
+        };
+        let inner = Arc::clone(&self.inner);
+        let pool = self.pool.clone();
+        handle.spawn(async move {
+            let result = batch::finish_persisting(
+                &pool,
+                inner.runtime.clock(),
+                &inner.instance_name,
+                &deduplicated.state_groups,
+                true,
+            )
+            .await;
+            if let Err(e) = result {
+                log::warn!("Failed to release the state groups of a dropped batch: {e}");
+            }
+        });
+    }
+}
+
+/// What one [`batch_next`] step did.
+enum BatchStep {
+    /// A chunk was written, and its effects are Python's to apply.
+    Written(WrittenChunk),
+    /// The batch is done.
+    Done(PersistedBatch),
+}
+
+impl<'py> IntoPyObject<'py> for BatchStep {
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        match self {
+            BatchStep::Written(chunk) => Ok(Bound::new(py, chunk)?.into_any()),
+            BatchStep::Done(batch) => Ok(Bound::new(py, batch)?.into_any()),
+        }
+    }
+}
+
+/// One step of `_persist_event_batch` for `state`. The first step drops the
+/// events already persisted under the same transaction ID
+/// (`get_already_persisted_events`). Each step releases the state groups
+/// of the chunk before it, then prepares the next chunk, marks the batch's
+/// state groups as being persisted, takes the chunk's stream orderings and
+/// writes it.
+///
+/// A chunk Rust cannot prepare, because its state resolution falls back to
+/// Python or preparing it fails, is handed back with the rest of the batch
+/// in [`PersistedBatch::remaining`], unwritten.
+async fn batch_next(state: &mut BatchState) -> PyResult<BatchStep> {
+    if state.done {
+        return Err(PyRuntimeError::new_err("the batch is done"));
+    }
+    let result = batch_step(state).await;
+    if !matches!(result, Ok(BatchStep::Written(_))) {
+        state.done = true;
+    }
+    result
+}
+
+async fn batch_step(state: &mut BatchState) -> PyResult<BatchStep> {
+    if state.deduplicated.is_none() {
+        // Retried as Python's `runInteraction`s are.
+        let mut attempt = 1;
+        let replaced_events = loop {
+            let result = async {
+                let querier = PoolQuerier::checkout(&state.pool).await?;
+                batch::already_persisted_events(&querier, &state.events).await
+            }
+            .await;
+            match result {
+                Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(&e) => {
+                    log::warn!(
+                        "[TXN RETRY] {{get_already_persisted_events}} {e:#} {attempt}/{MAX_ATTEMPTS}"
+                    );
+                    attempt += 1;
+                }
+                result => break result.map_err(persist_error_to_py)?,
+            }
+        };
+        let kept: Vec<usize> = (0..state.events.len())
+            .filter(|&i| !replaced_events.contains_key(state.events[i].0.event_id()))
+            .collect();
+        let kept_events: Vec<_> = kept.iter().map(|&i| state.shallow(i)).collect();
+        let state_groups =
+            batch::referenced_state_groups(&kept_events).map_err(persist_error_to_py)?;
+        state.deduplicated = Some(Deduplicated {
+            replaced_events,
+            kept,
+            state_groups,
+        });
+    }
+    state.release_guard(false).await?;
+
+    let deduplicated = state.deduplicated.as_ref().expect("set above");
+    let start = state.next;
+    if start >= deduplicated.kept.len() {
+        return Ok(BatchStep::Done(PersistedBatch {
+            replaced_events: deduplicated.replaced_events.clone(),
+            remaining: Vec::new(),
+            fallback_reason: None,
+        }));
+    }
+    let end = (start + batch::CHUNK_SIZE).min(deduplicated.kept.len());
+    let indices = deduplicated.kept[start..end].to_vec();
+    let chunk: Vec<(Event, PersistContext)> = indices.iter().map(|&i| state.shallow(i)).collect();
+    let hand_back = |reason: String| {
+        BatchStep::Done(PersistedBatch {
+            replaced_events: deduplicated.replaced_events.clone(),
+            remaining: deduplicated.kept[start..].to_vec(),
+            fallback_reason: Some(reason),
+        })
+    };
+
+    let inner = &state.inner;
+    let pool = &state.pool;
+    let prepared = async {
+        let input = PrepareInput::new(state.room_id.clone(), &chunk, state.backfilled)?;
+        prepare_chunk(inner, pool, &input, false).await
+    }
+    .await;
+    let (prepared, counts) = match prepared {
+        Ok((Prepared::StateResFallback(reason), _)) => return Ok(hand_back(reason)),
+        // The chunk path prepares it again, and raises or falls back to
+        // Python as the error and the strictness say.
+        Err(e) => {
+            log::warn!(
+                "Failed to prepare events for {} in Rust, handing them back: {e:#}",
+                state.room_id
+            );
+            return Ok(hand_back(format!("{e:#}")));
+        }
+        Ok(prepared) => prepared,
+    };
+    inner.metrics.record(|total| total.add(counts));
+    let prepared = Arc::new(prepared);
+    let Prepared::Chunk(prepared_chunk) = &*prepared else {
+        unreachable!("handed back above");
+    };
+
+    let guarded = !deduplicated.state_groups.is_empty();
+    if guarded {
+        batch::mark_state_groups_as_persisting(
+            pool,
+            inner.runtime.clock(),
+            &inner.instance_name,
+            &deduplicated.state_groups,
+        )
+        .await
+        .map_err(write_error_to_py)?;
+        state.guard_held = true;
+    }
+    let written = write_chunk(
+        inner,
+        pool,
+        &state.room_id,
+        chunk,
+        prepared_chunk,
+        StreamOrderings::Allocate {
+            backfilled: state.backfilled,
+        },
+        state.backfilled,
+    )
+    .await;
+    let effects = match written {
+        Ok(effects) => effects,
+        Err(e) => {
+            // As Python's `finally`, whose error replaces the persist's.
+            state.release_guard(true).await?;
+            return Err(e);
+        }
+    };
+    state.next = end;
+    Ok(BatchStep::Written(WrittenChunk {
+        effects,
+        prepared,
+        indices,
+    }))
+}
+
+/// [`batch_next`]'s chunk, written, whose effects Python must apply.
+#[pyclass(frozen)]
+pub struct WrittenChunk {
+    effects: PersistEffects,
+    prepared: Arc<Prepared>,
+    indices: Vec<usize>,
+}
+
+#[pymethods]
+impl WrittenChunk {
+    /// What Python applies with `apply_rust_persist_effects`, with the
+    /// chunk's stream IDs unfinished.
+    #[getter]
+    fn effects(&self) -> PersistEffects {
+        self.effects.clone()
+    }
+
+    /// What Rust prepared for the chunk.
+    #[getter]
+    fn prepared(&self) -> PreparedChunk {
+        PreparedChunk {
+            prepared: Arc::clone(&self.prepared),
+            // Counted when it was prepared.
+            counts: Mutex::new(None),
+        }
+    }
+
+    /// The chunk's positions in the batch.
+    #[getter]
+    fn indices(&self) -> Vec<usize> {
+        self.indices.clone()
     }
 }
 
@@ -558,6 +959,44 @@ fn set_persisted_positions(
         )?;
     }
     Ok(())
+}
+
+/// A batch being persisted. See [`Persister::persist_batch`].
+#[pyclass(frozen)]
+pub struct PersistBatch {
+    state: Arc<tokio::sync::Mutex<BatchState>>,
+}
+
+/// What [`Persister::persist_batch`] did, once the batch is done.
+#[pyclass(frozen)]
+pub struct PersistedBatch {
+    replaced_events: HashMap<String, String>,
+    remaining: Vec<usize>,
+    fallback_reason: Option<String>,
+}
+
+#[pymethods]
+impl PersistedBatch {
+    /// The events not persisted as they repeat an event already persisted
+    /// with the same transaction ID, mapped to that event.
+    #[getter]
+    fn replaced_events(&self) -> HashMap<String, String> {
+        self.replaced_events.clone()
+    }
+
+    /// The positions in the batch of the events left for Python to
+    /// persist, in order: the chunk Rust could not prepare and those after
+    /// it. Empty if Rust persisted them all.
+    #[getter]
+    fn remaining(&self) -> Vec<usize> {
+        self.remaining.clone()
+    }
+
+    /// Why Rust left the `remaining` events.
+    #[getter]
+    fn fallback_reason(&self) -> Option<String> {
+        self.fallback_reason.clone()
+    }
 }
 
 /// What [`Persister::prepare_chunk`] computed, in the shapes Python builds

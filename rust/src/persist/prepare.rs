@@ -40,8 +40,6 @@ use std::{
     sync::Arc,
 };
 
-use pyo3::prelude::*;
-
 use super::{
     chain_cover::{self, ChainCoverEvent, NewEventChainLinks},
     context::PersistContext,
@@ -59,8 +57,7 @@ use crate::{
     state::EventMap,
 };
 
-/// A chunk of one room's events, in the shapes the steps read. Built while
-/// the GIL is held, so that the steps run without it.
+/// A chunk of one room's events, in the shapes the steps read.
 pub struct PrepareInput {
     pub room_id: String,
     pub backfilled: bool,
@@ -74,17 +71,16 @@ pub struct PrepareInput {
 }
 
 impl PrepareInput {
+    /// The chunk `events_and_contexts`, which share their data with the
+    /// Python events they were taken from.
     pub fn new(
-        py: Python<'_>,
         room_id: String,
-        events_and_contexts: &[(Py<Event>, PersistContext)],
+        events_and_contexts: &[(Event, PersistContext)],
         backfilled: bool,
-    ) -> PyResult<Self> {
-        let (events, event_map) = reader::chunk(py, events_and_contexts)?;
-        let chunk_events: Vec<&Event> = events_and_contexts
-            .iter()
-            .map(|(event, _)| event.bind(py).get())
-            .collect();
+    ) -> anyhow::Result<Self> {
+        let (events, event_map) = reader::chunk(events_and_contexts)?;
+        let chunk_events: Vec<&Event> =
+            events_and_contexts.iter().map(|(event, _)| event).collect();
         Ok(PrepareInput {
             room_id,
             backfilled,

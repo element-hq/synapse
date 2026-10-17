@@ -57,7 +57,6 @@ from synapse.events import (
 )
 from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventPersistencePair
-from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
@@ -98,7 +97,7 @@ from synapse.util.stringutils import non_null_str_or_none
 if TYPE_CHECKING:
     from synapse.server import HomeServer
     from synapse.storage.databases.main import DataStore
-    from synapse.synapse_rust.persist import Persister, PreparedChunk
+    from synapse.synapse_rust.persist import PersistEffects, Persister, PreparedChunk
 
 
 logger = logging.getLogger(__name__)
@@ -1195,18 +1194,17 @@ class PersistEventsStore:
         # caller waits for both, as Python's transaction cannot be cancelled.
 
         async def persist_and_apply() -> None:
+            # The persister's Deferreds follow the logcontext rules already.
             persister = rust_transaction.persister
             allocate = rust_transaction.allocate_stream_orderings
             if allocate:
                 try:
-                    effects = await make_deferred_yieldable(
-                        persister.persist_chunk(
-                            room_id,
-                            events_and_contexts,
-                            rust_transaction.prepared,
-                            backfilled=backfilled,
-                            inhibit_local_membership_updates=inhibit_local_membership_updates,
-                        )
+                    effects = await persister.persist_chunk(
+                        room_id,
+                        events_and_contexts,
+                        rust_transaction.prepared,
+                        backfilled=backfilled,
+                        inhibit_local_membership_updates=inhibit_local_membership_updates,
                     )
                 except BaseException:
                     # Rust finished the stream orderings it took. Tell
@@ -1215,43 +1213,70 @@ class PersistEventsStore:
                     self.hs.get_replication_notifier().notify_replication()
                     raise
             else:
-                effects = await make_deferred_yieldable(
-                    persister.persist_events_txn(
-                        room_id,
-                        events_and_contexts,
-                        rust_transaction.prepared,
-                        inhibit_local_membership_updates=inhibit_local_membership_updates,
-                    )
-                )
-            # The copy of a duplicated event that Rust wrote, as Python's
-            # `_add_to_cache` reads the deduplicated chunk.
-            written = self._filter_events_and_contexts_for_duplicates(
-                events_and_contexts
-            )
-            events = {event.event_id: event for event, _ in written}
-            if not allocate:
-                apply_rust_persist_effects(self.store, effects, events)
-                return
-            # What follows the write runs before the stream orderings are
-            # finished, as it runs inside `get_next_mult` in Python: the
-            # events must not be announced before, say, the MSC4293
-            # redactions they start are recorded.
-            try:
-                apply_rust_persist_effects(
-                    self.store, effects, events, finish_stream_ids=False
-                )
-                await self._after_persisting_events(
+                effects = await persister.persist_events_txn(
                     room_id,
                     events_and_contexts,
-                    use_negative_stream_ordering=backfilled,
+                    rust_transaction.prepared,
+                    inhibit_local_membership_updates=inhibit_local_membership_updates,
+                )
+            if allocate:
+                await self._apply_rust_chunk(
+                    room_id,
+                    events_and_contexts,
+                    effects,
+                    backfilled=backfilled,
                     new_forward_extremities=new_forward_extremities,
                 )
-            except BaseException:
-                finish_rust_persist_stream_ids(self.store, effects, succeeded=False)
-                raise
-            finish_rust_persist_stream_ids(self.store, effects, succeeded=True)
+            else:
+                apply_rust_persist_effects(
+                    self.store, effects, self._events_written(events_and_contexts)
+                )
 
         await delay_cancellation(persist_and_apply())
+
+    def _events_written(
+        self, events_and_contexts: list[EventPersistencePair]
+    ) -> dict[str, EventBase]:
+        """The copy of each event that a write of the chunk stores, as
+        Python's `_add_to_cache` reads the deduplicated chunk."""
+        written = self._filter_events_and_contexts_for_duplicates(events_and_contexts)
+        return {event.event_id: event for event, _ in written}
+
+    async def _apply_rust_chunk(
+        self,
+        room_id: str,
+        events_and_contexts: list[EventPersistencePair],
+        effects: "PersistEffects",
+        *,
+        backfilled: bool,
+        new_forward_extremities: set[str] | None,
+    ) -> None:
+        """Apply the effects of a chunk Rust wrote, having taken its stream
+        orderings, then run `_after_persisting_events`, then finish the
+        orderings.
+
+        What follows the write runs before the orderings are finished, as
+        it runs inside `get_next_mult` in Python: the events must not be
+        announced before, say, the MSC4293 redactions they start are
+        recorded. The orderings are finished whatever happens.
+        """
+        try:
+            apply_rust_persist_effects(
+                self.store,
+                effects,
+                self._events_written(events_and_contexts),
+                finish_stream_ids=False,
+            )
+            await self._after_persisting_events(
+                room_id,
+                events_and_contexts,
+                use_negative_stream_ordering=backfilled,
+                new_forward_extremities=new_forward_extremities,
+            )
+        except BaseException:
+            finish_rust_persist_stream_ids(self.store, effects, succeeded=False)
+            raise
+        finish_rust_persist_stream_ids(self.store, effects, succeeded=True)
 
     def _persist_events_txn(
         self,

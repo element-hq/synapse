@@ -727,7 +727,7 @@ impl PyPersistReaderForTest {
         now_ms: i64,
         state_dag: bool,
     ) -> PyResult<(StateAndExtremities, PersistCounts)> {
-        let (events, event_map) = chunk(py, &events_and_contexts)?;
+        let (events, event_map) = py_chunk(py, &events_and_contexts)?;
         let resolver = self.resolver();
         self.run(py, |reader| {
             async move {
@@ -1199,7 +1199,7 @@ impl PyPersistReaderForTest {
         HashSet<String>,
         Bound<'py, PyDict>,
     )> {
-        let (events, event_map) = chunk(py, &events_and_contexts)?;
+        let (events, event_map) = py_chunk(py, &events_and_contexts)?;
         let old: HashSet<Arc<str>> = arcs(old_latest_event_ids).into_iter().collect();
         let new: HashSet<Arc<str>> = arcs(new_latest_event_ids).into_iter().collect();
         let resolver = self.resolver();
@@ -1266,7 +1266,7 @@ impl PyPersistReaderForTest {
         to_delete: Vec<(String, String)>,
         to_insert: HashMap<(String, String), String>,
     ) -> PyResult<bool> {
-        let (events, _) = chunk(py, &events_and_contexts)?;
+        let (events, _) = py_chunk(py, &events_and_contexts)?;
         let delta = DeltaState {
             to_delete: to_delete
                 .iter()
@@ -1523,14 +1523,15 @@ fn state_map(map: HashMap<(String, String), String>) -> StateMap {
 /// The chunk's events as the computation reads them, and as state
 /// resolution's map of events in flight.
 pub(super) fn chunk(
-    py: Python<'_>,
-    events_and_contexts: &[(Py<Event>, PersistContext)],
-) -> PyResult<(Vec<NewEvent>, EventMap)> {
-    let events = new_events(py, events_and_contexts)?;
+    events_and_contexts: &[(Event, PersistContext)],
+) -> anyhow::Result<(Vec<NewEvent>, EventMap)> {
+    let events = events_and_contexts
+        .iter()
+        .map(|(event, context)| NewEvent::new(event, context))
+        .collect::<anyhow::Result<_>>()?;
     let event_map = events_and_contexts
         .iter()
         .map(|(event, _)| {
-            let event = event.bind(py).get();
             (
                 Arc::from(event.event_id()),
                 StateResEvent::new(event.shallow_clone()),
@@ -1538,6 +1539,18 @@ pub(super) fn chunk(
         })
         .collect();
     Ok((events, event_map))
+}
+
+/// [`chunk`] of the Python events, for the test entry points.
+fn py_chunk(
+    py: Python<'_>,
+    events_and_contexts: &[(Py<Event>, PersistContext)],
+) -> PyResult<(Vec<NewEvent>, EventMap)> {
+    let events: Vec<(Event, PersistContext)> = events_and_contexts
+        .iter()
+        .map(|(event, context)| (event.bind(py).get().shallow_clone(), context.clone()))
+        .collect();
+    chunk(&events).map_err(persist_error_to_py)
 }
 
 fn new_events(

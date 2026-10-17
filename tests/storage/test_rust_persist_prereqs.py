@@ -40,7 +40,11 @@ from synapse.config.experimental import ExperimentalConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
-from synapse.logging.context import make_deferred_yieldable
+from synapse.logging.context import (
+    LoggingContext,
+    current_context,
+    make_deferred_yieldable,
+)
 from synapse.metrics import SERVER_NAME_LABEL, _PreCollectHooks
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -52,6 +56,7 @@ from synapse.storage.engines import PostgresEngine
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.persist import (
     PersistEffects,
+    WrittenChunk,
     persist_context_for_test,
     persist_gil_stats,
     persistence_json_for_test,
@@ -871,6 +876,8 @@ class _CountingPersister:
         self.transactions = 0
         # Chunks written with Rust taking their stream orderings.
         self.chunks = 0
+        # Batches persisted in Rust.
+        self.batches = 0
         self.last_effects: PersistEffects | None = None
 
     def prepare_chunk(self, *args: Any, **kwargs: Any) -> Any:
@@ -894,6 +901,19 @@ class _CountingPersister:
             return result
 
         return self._persister.persist_chunk(*args, **kwargs).addCallback(keep)
+
+    def persist_batch(self, *args: Any, **kwargs: Any) -> Any:
+        self.batches += 1
+        return self._persister.persist_batch(*args, **kwargs)
+
+    def batch_next(self, *args: Any, **kwargs: Any) -> Any:
+        def keep(step: Any) -> Any:
+            if isinstance(step, WrittenChunk):
+                self.chunks += 1
+                self.last_effects = step.effects
+            return step
+
+        return self._persister.batch_next(*args, **kwargs).addCallback(keep)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._persister, name)
@@ -1031,7 +1051,8 @@ class RustTransactionTestCase(unittest.HomeserverTestCase):
             def persist_events_txn(self, *args: Any, **kwargs: Any) -> Any:
                 d: defer.Deferred = defer.Deferred()
                 gate.append((args, kwargs, d))
-                return d
+                # As the persister's Deferreds do.
+                return make_deferred_yieldable(d)
 
             def __getattr__(self, name: str) -> Any:
                 return getattr(blocking, name)
@@ -1125,16 +1146,20 @@ class RustFullTestCase(unittest.HomeserverTestCase):
         self.token = self.login("alice", "pass")
         self.room_id = self.helper.create_room_as(self.user, tok=self.token)
 
-    def _build(self, body: str) -> tuple[EventBase, EventContext]:
+    def _build(
+        self, body: str, *, txn_id: str | None = None
+    ) -> tuple[EventBase, EventContext]:
+        """A message, sent with `txn_id` from `DEVICE` if given."""
         event, unpersisted_context = self.get_success(
             self.hs.get_event_creation_handler().create_event(
-                create_requester(self.user),
+                create_requester(self.user, device_id="DEVICE" if txn_id else None),
                 {
                     "type": EventTypes.Message,
                     "content": {"msgtype": "m.text", "body": body},
                     "room_id": self.room_id,
                     "sender": self.user,
                 },
+                txn_id=txn_id,
             )
         )
         context = self.get_success(unpersisted_context.persist(event))
@@ -1263,6 +1288,207 @@ class RustFullTestCase(unittest.HomeserverTestCase):
         assert failed is not None
         self.assertGreaterEqual(id_gen.get_current_token(), failed)
 
+    def test_batch_is_one_rust_call(self) -> None:
+        """A batch of 150 events is one Rust call, written in two chunks,
+        with none of it in Python's store entry point."""
+        # Siblings on the room's extremity: an event cannot be built on
+        # one not yet persisted.
+        pairs = [self._build(f"message {i}") for i in range(150)]
+        batches, chunks = self.persister.batches, self.persister.chunks
+        with patch.object(
+            PersistEventsStore,
+            "_persist_events_and_state_updates",
+            side_effect=AssertionError("persisted in Python"),
+        ):
+            self.get_success(self.persistence.persist_events(pairs))
+        self.assertEqual(self.persister.batches, batches + 1)
+        self.assertEqual(self.persister.chunks, chunks + 2)
+        effects = self.persister.last_effects
+        assert effects is not None
+        self.assertEqual(len(effects.stream_ids), 50)
+
+        orderings = [self._event_row(event.event_id)[0] for event, _ in pairs]
+        self.assertEqual(orderings, sorted(orderings))
+        self.assertGreaterEqual(
+            self.store._stream_id_gen.get_current_token(), orderings[-1]
+        )
+
+    def test_transaction_ids(self) -> None:
+        """An event repeating the transaction ID of an earlier one, in the
+        same batch or an earlier one, is not persisted and maps to it."""
+        self.login("alice", "pass", device_id="DEVICE")
+        first = self._build("one", txn_id="txn")
+        again = self._build("one again", txn_id="txn")
+        persisted, _ = self.get_success(self.persistence.persist_events([first, again]))
+        self.assertEqual(
+            [event.event_id for event in persisted], [first[0].event_id] * 2
+        )
+
+        later = self._build("one later", txn_id="txn")
+        persisted, _ = self.get_success(self.persistence.persist_events([later]))
+        self.assertEqual([event.event_id for event in persisted], [first[0].event_id])
+        for event, _ in (again, later):
+            self.assertIsNone(
+                self.get_success(self.store.get_event(event.event_id, allow_none=True))
+            )
+
+    def test_state_groups_held_while_writing(self) -> None:
+        """The batch's state groups are marked as being persisted while each
+        chunk is written, and no longer once it is."""
+        held: list[list[tuple[int, str]]] = []
+        persist_events = self.hs.get_datastores().persist_events
+        assert persist_events is not None
+        apply_chunk = persist_events._apply_rust_chunk
+
+        async def checking(*args: Any, **kwargs: Any) -> None:
+            held.append(
+                await self.store.db_pool.simple_select_list(
+                    "state_groups_persisting",
+                    None,
+                    ("state_group", "instance_name"),
+                )
+            )
+            await apply_chunk(*args, **kwargs)
+
+        event, context = self._build("hello")
+        with patch.object(persist_events, "_apply_rust_chunk", side_effect=checking):
+            self.get_success(self.persistence.persist_events([(event, context)]))
+        assert context.state_group is not None
+        assert context.state_group_before_event is not None
+        groups = {context.state_group, context.state_group_before_event}
+        self.assertEqual(
+            [sorted(rows) for rows in held],
+            [sorted((group, "master") for group in groups)],
+        )
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "state_groups_persisting", None, ("state_group",)
+            )
+        )
+        self.assertEqual(rows, [])
+
+    def test_deleted_state_group_fails(self) -> None:
+        """A chunk whose state group was deleted meanwhile is not written."""
+        event, context = self._build("hello")
+        self.get_success(
+            self.store.db_pool.simple_delete_one(
+                "state_groups", {"id": context.state_group}
+            )
+        )
+        failure = self.get_failure(
+            self.persistence.persist_events([(event, context)]), RuntimeError
+        )
+        self.assertIn("state groups have been deleted", str(failure.value))
+        self.assertIsNone(
+            self.get_success(self.store.get_event(event.event_id, allow_none=True))
+        )
+
+    def _pending_deletion(self, state_group: int) -> tuple[int, int] | None:
+        """`(sequence_number, insertion_ts)` of the group's pending deletion."""
+        row = self.get_success(
+            self.store.db_pool.simple_select_one(
+                "state_groups_pending_deletion",
+                {"state_group": state_group},
+                ("sequence_number", "insertion_ts"),
+                allow_none=True,
+            )
+        )
+        return (row[0], row[1]) if row is not None else None
+
+    def test_pending_deletion_after_persisting(self) -> None:
+        """Once a chunk is written, its state groups are no longer pending
+        deletion. If the write fails, their pending deletion is pushed
+        back, as they may now be referenced."""
+        event, context = self._build("hello")
+        assert context.state_group is not None
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "state_groups_pending_deletion",
+                {"state_group": context.state_group, "insertion_ts": 0},
+            )
+        )
+        before = self._pending_deletion(context.state_group)
+        assert before is not None
+
+        failing, failing_context = self._build("partial")
+        failing_context.partial_state = True
+        self.reactor.advance(1)
+        self.get_failure(
+            self.persistence.persist_events([(failing, failing_context)]),
+            PartialStateConflictError,
+        )
+        after = self._pending_deletion(context.state_group)
+        assert after is not None
+        self.assertGreater(after[0], before[0])
+        self.assertEqual(after[1], self.clock.time_msec())
+
+        self.get_success(self.persistence.persist_events([(event, context)]))
+        self.assertIsNone(self._pending_deletion(context.state_group))
+
+    def test_replaced_event_and_chunks(self) -> None:
+        """A batch whose first event repeats a persisted transaction ID, and
+        whose other 150 go in two chunks: each chunk hands Python the events
+        it wrote."""
+        self.login("alice", "pass", device_id="DEVICE")
+        original = self._build("original", txn_id="txn")
+        self.get_success(self.persistence.persist_events([original]))
+
+        repeat = self._build("repeat", txn_id="txn")
+        new = [self._build(f"message {i}") for i in range(150)]
+        chunks = self.persister.chunks
+        persisted, _ = self.get_success(self.persistence.persist_events([repeat, *new]))
+        self.assertEqual(self.persister.chunks, chunks + 2)
+        effects = self.persister.last_effects
+        assert effects is not None
+        self.assertEqual(len(effects.stream_ids), 50)
+        self.assertEqual(
+            [event.event_id for event in persisted],
+            [original[0].event_id] + [event.event_id for event, _ in new],
+        )
+        self.assertIsNone(
+            self.get_success(self.store.get_event(repeat[0].event_id, allow_none=True))
+        )
+        orderings = [self._event_row(event.event_id)[0] for event, _ in new]
+        self.assertEqual(orderings, sorted(orderings))
+        for i, (event, _) in enumerate(new):
+            stored = self.get_success(self.store.get_event(event.event_id))
+            self.assertEqual(stored.content["body"], f"message {i}")
+
+    def test_same_event_in_two_chunks(self) -> None:
+        """An event in two chunks of a batch is written once, and every
+        ordering the batch took is finished."""
+        first = self._build("first")
+        rest = [self._build(f"message {i}") for i in range(100)]
+        self.get_success(self.persistence.persist_events([first, *rest, first]))
+        rows = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                "events", {"event_id": first[0].event_id}, "stream_ordering"
+            )
+        )
+        self.assertEqual(len(rows), 1)
+        effects = self.persister.last_effects
+        assert effects is not None
+        self.assertEqual(len(effects.stream_ids), 2)
+        self.assertGreaterEqual(
+            self.store._stream_id_gen.get_current_token(), max(effects.stream_ids)
+        )
+
+    def test_logcontext_kept(self) -> None:
+        """Awaiting the batch resumes in the caller's logcontext, so what
+        follows it is accounted to the caller."""
+        event, context = self._build("hello")
+        seen = []
+
+        async def persist() -> None:
+            with LoggingContext(name="persist", server_name="test") as ctx:
+                await self.persistence._persist_event_batch_in_rust(
+                    self.room_id, [(event, context)], False
+                )
+                seen.append(current_context() is ctx)
+
+        self.get_success(defer.ensureDeferred(persist()))
+        self.assertEqual(seen, [True])
+
     def test_gil_count(self) -> None:
         """Taking the stream orderings and setting them on the events takes
         the GIL at no persist site."""
@@ -1360,64 +1586,70 @@ class RustFullTestCase(unittest.HomeserverTestCase):
         self.assertGreaterEqual(
             self.store._stream_id_gen.get_current_token(), stream_ordering
         )
+        # `batch_abort` released the state groups.
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "state_groups_persisting", None, ("state_group",)
+            )
+        )
+        self.assertEqual(rows, [])
 
     def test_cancelled_persist_applies_its_effects(self) -> None:
-        """Cancelling the persist while Rust takes the orderings and writes
-        the chunk waits for both, and the orderings are finished."""
+        """Cancelling the batch while Rust writes a chunk waits for Rust,
+        so the room's queue cannot start another batch alongside, and the
+        chunk's effects are applied and its orderings finished."""
         gate: list[tuple[Any, Any, defer.Deferred]] = []
         blocking = self.persister._persister
 
         class Gated:
-            def persist_chunk(self, *args: Any, **kwargs: Any) -> Any:
+            def batch_next(self, *args: Any, **kwargs: Any) -> Any:
+                # Only the first step, which writes the chunk.
+                if gate:
+                    return blocking.batch_next(*args, **kwargs)
                 d: defer.Deferred = defer.Deferred()
                 gate.append((args, kwargs, d))
-                return d
+                # As the persister's Deferreds do.
+                return make_deferred_yieldable(d)
 
             def __getattr__(self, name: str) -> Any:
                 return getattr(blocking, name)
 
         self.persister._persister = Gated()
 
-        persist_events = self.hs.get_datastores().persist_events
-        assert persist_events is not None
-        original = persist_events._persist_events_in_rust
+        original = self.persistence._persist_event_batch_in_rust
         cancelled = []
 
-        async def cancel_then_wait(*args: Any, **kwargs: Any) -> None:
-            d = defer.ensureDeferred(original(*args, **kwargs))
+        async def cancel_then_wait(*args: Any) -> dict[str, str]:
+            d = defer.ensureDeferred(original(*args))
             d.cancel()
             try:
-                await make_deferred_yieldable(d)
+                return await make_deferred_yieldable(d)
             except defer.CancelledError:
                 cancelled.append(True)
+                return {}
 
+        event, context = self._build("hello")
         with patch.object(
-            persist_events, "_persist_events_in_rust", side_effect=cancel_then_wait
+            self.persistence,
+            "_persist_event_batch_in_rust",
+            side_effect=cancel_then_wait,
         ):
-            channel = make_request(
-                self.reactor,
-                self.site,
-                "PUT",
-                f"/rooms/{self.room_id}/send/m.room.message/txn1",
-                {"msgtype": "m.text", "body": "hello"},
-                access_token=self.token,
-                await_result=False,
+            persisted = defer.ensureDeferred(
+                self.persistence.persist_events([(event, context)])
             )
             self.pump()
             self.assertEqual(len(gate), 1)
-            # Cancelled, but waiting for the write.
+            # Cancelled, but waiting for Rust.
             self.assertEqual(cancelled, [])
             args, kwargs, d = gate[0]
-            blocking.persist_chunk(*args, **kwargs).chainDeferred(d)
-            channel.await_result()
-        self.assertEqual(channel.code, 200, channel.json_body)
-        event_id = channel.json_body["event_id"]
+            blocking.batch_next(*args, **kwargs).chainDeferred(d)
+            self.get_success(persisted)
         self.assertEqual(cancelled, [True])
 
         effects = self.persister.last_effects
         assert effects is not None
         (stream_ordering,) = effects.stream_ids
-        self.assertEqual(self._event_row(event_id)[0], stream_ordering)
+        self.assertEqual(self._event_row(event.event_id)[0], stream_ordering)
         self.assertGreaterEqual(
             self.store._stream_id_gen.get_current_token(), stream_ordering
         )
