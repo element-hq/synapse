@@ -1,0 +1,1 @@
+Fix TLS listeners only offering the P-256 group for key exchange, which prevented the use of the X25519 and post-quantum X25519MLKEM768 groups.
