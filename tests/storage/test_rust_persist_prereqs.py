@@ -25,6 +25,7 @@ from typing import Any, Collection
 from unittest import SkipTest
 from unittest.mock import Mock, patch
 
+from immutabledict import immutabledict
 from prometheus_client import REGISTRY
 
 from twisted.internet.testing import MemoryReactor
@@ -234,6 +235,28 @@ class PersistContextTestCase(unittest.HomeserverTestCase):
             )
         )
         self._assert_converts(context)
+
+    def test_context_from_replication(self) -> None:
+        """A context sent from another worker holds `immutabledict`s."""
+        event, context = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room_id,
+                type=EventTypes.Topic,
+                state_key="",
+                sender=self.user,
+                content={"topic": "a topic"},
+            )
+        )
+        serialized = self.get_success(
+            context.serialize(event, self.hs.get_datastores().main)
+        )
+        received = EventContext.deserialize(
+            self.hs.get_storage_controllers(), serialized
+        )
+        self.assertIsInstance(received._state_delta_due_to_event, immutabledict)
+        self.assertTrue(received.state_group_deltas)
+        self._assert_converts(received)
 
     def test_outlier_and_rejected(self) -> None:
         outlier = EventContext.for_outlier(self.hs.get_storage_controllers())

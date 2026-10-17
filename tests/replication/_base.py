@@ -38,6 +38,7 @@ from synapse.replication.tcp.protocol import (
 )
 from synapse.replication.tcp.resource import ReplicationStreamProtocolFactory
 from synapse.server import HomeServer
+from synapse.storage.rust_pool import RustConnectionPool
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -382,7 +383,14 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
             )
 
         store = worker_hs.get_datastores().main
+        worker_pool = store.db_pool._db_pool
         store.db_pool._db_pool = self.database_pool._db_pool
+        # The worker's Rust handlers hold its own native pool. Point that at
+        # the master's database too, so Rust reads and writes what Python does.
+        if isinstance(worker_pool, RustConnectionPool) and isinstance(
+            self.database_pool._db_pool, RustConnectionPool
+        ):
+            worker_pool._pool = self.database_pool._db_pool._pool
 
         # Set up a resource for the worker
         resource = ReplicationRestResource(worker_hs)

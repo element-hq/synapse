@@ -21,7 +21,7 @@ use std::{collections::HashMap, sync::Arc};
 use pyo3::{
     intern,
     prelude::*,
-    types::{PyDict, PyTuple},
+    types::{PyMapping, PyTuple},
 };
 
 use crate::state::{StateKey, StateMap};
@@ -62,15 +62,19 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PersistContext {
             None
         } else {
             Some(state_map_from_py(
-                state_delta_due_to_event.cast::<PyDict>()?,
+                state_delta_due_to_event.cast::<PyMapping>()?,
             )?)
         };
 
         let mut state_group_deltas = HashMap::new();
         let deltas = context.getattr(intern!(py, "state_group_deltas"))?;
-        for (key, delta) in deltas.cast::<PyDict>()?.iter() {
+        for item in deltas.cast::<PyMapping>()?.items()?.iter() {
+            let (key, delta): (Bound<'_, PyAny>, Bound<'_, PyAny>) = item.extract()?;
             let (prev, current): (i64, i64) = key.extract()?;
-            state_group_deltas.insert((prev, current), state_map_from_py(delta.cast::<PyDict>()?)?);
+            state_group_deltas.insert(
+                (prev, current),
+                state_map_from_py(delta.cast::<PyMapping>()?)?,
+            );
         }
 
         Ok(PersistContext {
@@ -97,10 +101,13 @@ impl PersistContext {
     }
 }
 
-/// Convert a dict of `(type, state_key)` to event ID.
-fn state_map_from_py(dict: &Bound<'_, PyDict>) -> PyResult<StateMap> {
-    let mut map = StateMap::with_capacity(dict.len());
-    for (key, event_id) in dict.iter() {
+/// Convert a mapping of `(type, state_key)` to event ID: a dict, or the
+/// `immutabledict` of a context that came over replication.
+fn state_map_from_py(mapping: &Bound<'_, PyMapping>) -> PyResult<StateMap> {
+    let items = mapping.items()?;
+    let mut map = StateMap::with_capacity(items.len());
+    for item in items.iter() {
+        let (key, event_id): (Bound<'_, PyAny>, Bound<'_, PyAny>) = item.extract()?;
         let key = key.cast_into::<PyTuple>()?;
         let event_type: String = key.get_item(0)?.extract()?;
         let state_key: String = key.get_item(1)?.extract()?;
