@@ -61,7 +61,7 @@ use crate::storage::events::CachedEvent;
 use crate::storage::sliding_sync_store::{
     ConnectionPositionKey, RoomType, SnapshotRooms, StoredConnectionState, UserTags,
 };
-use crate::storage::sync_store::{RetentionRow, RoomNotifCounts, RoomSummary};
+use crate::storage::sync_store::{RelatedEvent, RetentionRow, RoomNotifCounts, RoomSummary};
 
 pub type EventCache = Cache<Arc<str>, CachedEvent>;
 
@@ -156,6 +156,8 @@ pub struct StoreCaches {
     /// `get_global_account_data_by_type_for_user`, keyed on user and type,
     /// and invalidated by user alone as well, as a `tree=True` cache.
     pub global_account_data: Arc<GlobalAccountDataCache>,
+    /// `ignored_users`.
+    pub ignored_users: Arc<IgnoredUsersCache>,
     /// `get_tags_for_user`.
     pub tags_for_user: Arc<Cache<Arc<str>, Arc<UserTags>>>,
     /// `get_room_type`.
@@ -173,12 +175,25 @@ pub struct StoreCaches {
     /// `_get_max_event_pos`. `None` for a room the batch load did not find,
     /// as Python's `cachedList` stores.
     pub max_event_pos: Arc<Cache<Arc<str>, Option<i64>>>,
+
+    // Relations.
+    /// The IDs and count of `get_thread_summary`: the latest threaded reply
+    /// and the number of replies, `None` for an event with no thread.
+    pub thread_summaries: Arc<ThreadSummaryCache>,
+    /// `get_references_for_event`, as `(event_id, sender)` oldest first.
+    pub references: Arc<Cache<Arc<str>, Arc<[RelatedEvent]>>>,
+    /// The ID of `get_applicable_edit`, `None` for an event with no edit.
+    pub applicable_edits: Arc<Cache<Arc<str>, Option<Arc<str>>>>,
     /// `get_and_clear_connection_positions`: a memo of each connection
     /// position's state, so the transaction that loads it runs once per
     /// position. Python never invalidates it, and a position's stored state
     /// never changes once it is loaded, so this mirrors nothing. Weighed by
     /// rooms, as Python's `iterable=True` cache is.
     pub connection_states: Arc<Cache<ConnectionPositionKey, Arc<StoredConnectionState>>>,
+    /// The `instance_map` table, under its one key. Rows are only ever
+    /// added, so this mirrors nothing: a reader that misses a writer drops
+    /// it and reads again.
+    pub instance_map: Arc<InstanceMapCache>,
 }
 
 /// Room ID to its number of members by membership.
@@ -190,6 +205,15 @@ pub type GlobalAccountDataCache = Cache<(Arc<str>, Arc<str>), Option<Arc<serde_j
 
 /// User ID to the rooms they are joined to.
 pub type RoomsForUserCache = Cache<Arc<str>, Arc<HashSet<Arc<str>>>>;
+
+/// `ignored_users`, by the ignoring user.
+pub type IgnoredUsersCache = Cache<Arc<str>, Arc<HashSet<Arc<str>>>>;
+
+/// The latest threaded reply and the reply count, by thread root.
+pub type ThreadSummaryCache = Cache<Arc<str>, Option<(Arc<str>, i64)>>;
+
+/// The `instance_map` table's `(instance_id, instance_name)` rows.
+pub type InstanceMapCache = Cache<(), Arc<[(i64, Arc<str>)]>>;
 
 /// `(room_id, user_id)` to the user's unread counts in the room.
 pub type UnreadCountsCache = Cache<(Arc<str>, Arc<str>), Arc<RoomNotifCounts>>;
@@ -238,6 +262,7 @@ impl StoreCaches {
             member_counts: registry.new_cache("rust_get_member_counts", 1000),
             global_account_data: registry
                 .new_cache("rust_get_global_account_data_by_type_for_user", 5000),
+            ignored_users: registry.new_cache("rust_ignored_users", 5000),
             tags_for_user: registry.new_cache("rust_get_tags_for_user", 1000),
             room_types: registry.new_cache("rust_get_room_type", 10_000),
             room_version_ids: registry.new_cache("rust_get_room_version_id", 10_000),
@@ -249,6 +274,10 @@ impl StoreCaches {
                 |rooms| rooms.len(),
             ),
             max_event_pos: registry.new_cache("rust_get_max_event_pos", 1000),
+            thread_summaries: registry.new_cache("rust_get_thread_summary", 10_000),
+            references: registry.new_cache("rust_get_references_for_event", 10_000),
+            applicable_edits: registry.new_cache("rust_get_applicable_edit", 10_000),
+            instance_map: registry.new_cache("rust_instance_map", 1),
             connection_states: registry.new_weighted_cache(
                 "rust_get_and_clear_connection_positions",
                 100_000,
@@ -292,6 +321,7 @@ impl StoreCaches {
                 "get_global_account_data_by_type_for_user",
                 &self.global_account_data,
             ),
+            mirror("ignored_users", &self.ignored_users),
             mirror("get_tags_for_user", &self.tags_for_user),
             mirror("get_room_type", &self.room_types),
             mirror("get_room_version_id", &self.room_version_ids),
@@ -301,6 +331,9 @@ impl StoreCaches {
                 &self.sliding_sync_rooms_for_user,
             ),
             mirror("_get_max_event_pos", &self.max_event_pos),
+            mirror("get_thread_summary", &self.thread_summaries),
+            mirror("get_references_for_event", &self.references),
+            mirror("get_applicable_edit", &self.applicable_edits),
         ]
     }
 

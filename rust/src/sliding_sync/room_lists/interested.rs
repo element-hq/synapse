@@ -469,8 +469,12 @@ pub async fn compute_interested_rooms(
     // plus those they left after the `to_token`, which the rewind may
     // bring back.
     let mut rooms = OverlayMap::new(reader.rooms_from_snapshots(user_id).await?);
-    for (_, room) in reader.self_leave_rooms_after(user_id, to_token).await? {
-        rooms.insert(room);
+    // No membership change after the `to_token` means no leave after it.
+    // Python's query carries this shortcut as a TODO.
+    if snapshot.membership_changed_since_to {
+        for (_, room) in reader.self_leave_rooms_after(user_id, to_token).await? {
+            rooms.insert(room);
+        }
     }
 
     // Invites from ignored users. As in Python, the invite rules only

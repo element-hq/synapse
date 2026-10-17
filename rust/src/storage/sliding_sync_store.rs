@@ -966,18 +966,33 @@ impl<'a> SlidingSyncReader<'a> {
     }
 
     /// The `instance_map` table: each writer's instance ID and name, as
-    /// stream tokens name writers by ID.
-    pub async fn instance_map(&self) -> anyhow::Result<Vec<(i64, Arc<str>)>> {
-        let rows = self
-            .query_one_shot("SELECT instance_id, instance_name FROM instance_map", &[])
-            .await?;
-        rows.iter()
-            .map(|row| {
-                let id: i32 = row.try_get(0)?;
-                let name: String = row.try_get(1)?;
-                Ok((i64::from(id), Arc::from(name)))
+    /// stream tokens name writers by ID. Cached: see
+    /// [`Self::forget_instance_map`].
+    pub async fn instance_map(&self) -> anyhow::Result<Arc<[(i64, Arc<str>)]>> {
+        self.store()
+            .caches()
+            .instance_map
+            .get_or_load((), || async {
+                let rows = self
+                    .query_one_shot("SELECT instance_id, instance_name FROM instance_map", &[])
+                    .await?;
+                rows.iter()
+                    .map(|row| {
+                        let id: i32 = row.try_get(0)?;
+                        let name: String = row.try_get(1)?;
+                        Ok((i64::from(id), Arc::from(name)))
+                    })
+                    .collect()
             })
-            .collect()
+            .await
+            .map_err(anyhow::Error::new)
+    }
+
+    /// Drop the cached `instance_map`, for a caller that found a writer
+    /// missing from it. A writer added since the cache was filled is only in
+    /// the table.
+    pub fn forget_instance_map(&self) {
+        drop(self.store().caches().instance_map.invalidate(&()));
     }
 
     /// `get_partial_rooms`: every room the server joined with partial

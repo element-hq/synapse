@@ -398,39 +398,54 @@ impl<'a> SyncReader<'a> {
     }
 
     /// `get_references_for_events`: the `(event_id, sender)` of each event
-    /// that references one of `event_ids`, oldest first.
+    /// that references one of `event_ids`, oldest first. Events with no
+    /// references are left out.
     pub async fn references_for_events(
         &self,
         event_ids: &[Arc<str>],
-    ) -> anyhow::Result<HashMap<Arc<str>, Vec<RelatedEvent>>> {
-        let mut references: HashMap<Arc<str>, Vec<RelatedEvent>> = HashMap::new();
-        if event_ids.is_empty() {
-            return Ok(references);
-        }
-        let borrowed = self.borrow().await?;
-        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
-            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
-            let rows = borrowed
-                .query(
-                    "SELECT relates_to_id, ref.event_id, ref.sender
-                    FROM events AS ref
-                    INNER JOIN event_relations USING (event_id)
-                    INNER JOIN events AS parent ON
-                        parent.event_id = relates_to_id
-                        AND parent.room_id = ref.room_id
-                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.reference'
-                    ORDER BY ref.topological_ordering, ref.stream_ordering",
-                    &[&ids],
-                )
-                .await?;
-            for row in rows {
-                let parent: &str = row.try_get(0)?;
-                references.entry(Arc::from(parent)).or_default().push((
-                    Arc::from(row.try_get::<_, &str>(1)?),
-                    Arc::from(row.try_get::<_, &str>(2)?),
-                ));
-            }
-        }
+    ) -> anyhow::Result<HashMap<Arc<str>, Arc<[RelatedEvent]>>> {
+        let mut references = self
+            .store
+            .caches
+            .references
+            .get_or_load_many(event_ids, |missing| async move {
+                let mut found: HashMap<Arc<str>, Vec<RelatedEvent>> = HashMap::new();
+                let borrowed = self.borrow().await?;
+                for batch in missing.chunks(SELECT_MANY_BATCH_SIZE) {
+                    let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+                    let rows = borrowed
+                        .query(
+                            "SELECT relates_to_id, ref.event_id, ref.sender
+                            FROM events AS ref
+                            INNER JOIN event_relations USING (event_id)
+                            INNER JOIN events AS parent ON
+                                parent.event_id = relates_to_id
+                                AND parent.room_id = ref.room_id
+                            WHERE relates_to_id = ANY($1) AND relation_type = 'm.reference'
+                            ORDER BY ref.topological_ordering, ref.stream_ordering",
+                            &[&ids],
+                        )
+                        .await?;
+                    for row in rows {
+                        let parent: &str = row.try_get(0)?;
+                        found.entry(Arc::from(parent)).or_default().push((
+                            Arc::from(row.try_get::<_, &str>(1)?),
+                            Arc::from(row.try_get::<_, &str>(2)?),
+                        ));
+                    }
+                }
+                // Python caches the empty list for events with none.
+                Ok(missing
+                    .into_iter()
+                    .map(|event_id| {
+                        let refs = found.remove(&event_id).unwrap_or_default();
+                        (event_id, Arc::from(refs))
+                    })
+                    .collect())
+            })
+            .await
+            .map_err(anyhow::Error::new)?;
+        references.retain(|_, refs| !refs.is_empty());
         Ok(references)
     }
 
@@ -440,38 +455,53 @@ impl<'a> SyncReader<'a> {
         &self,
         event_ids: &[Arc<str>],
     ) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
-        let mut edits = HashMap::new();
-        if event_ids.is_empty() {
-            return Ok(edits);
-        }
-        let borrowed = self.borrow().await?;
-        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
-            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
-            // `DISTINCT ON` picks the first row of each original, so the
-            // ordering picks the latest edit.
-            let rows = borrowed
-                .query(
-                    "SELECT DISTINCT ON (original.event_id) original.event_id, edit.event_id
-                    FROM events AS edit
-                    INNER JOIN event_relations USING (event_id)
-                    INNER JOIN events AS original ON
-                        original.event_id = relates_to_id
-                        AND edit.type = original.type
-                        AND edit.sender = original.sender
-                        AND edit.room_id = original.room_id
-                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.replace'
-                    ORDER BY original.event_id DESC, edit.origin_server_ts DESC, edit.event_id DESC",
-                    &[&ids],
-                )
-                .await?;
-            for row in rows {
-                edits.insert(
-                    Arc::from(row.try_get::<_, &str>(0)?),
-                    Arc::from(row.try_get::<_, &str>(1)?),
-                );
-            }
-        }
-        Ok(edits)
+        let edits = self
+            .store
+            .caches
+            .applicable_edits
+            .get_or_load_many(event_ids, |missing| async move {
+                let mut found: HashMap<Arc<str>, Arc<str>> = HashMap::new();
+                let borrowed = self.borrow().await?;
+                for batch in missing.chunks(SELECT_MANY_BATCH_SIZE) {
+                    let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+                    // `DISTINCT ON` picks the first row of each original, so
+                    // the ordering picks the latest edit.
+                    let rows = borrowed
+                        .query(
+                            "SELECT DISTINCT ON (original.event_id) original.event_id, edit.event_id
+                            FROM events AS edit
+                            INNER JOIN event_relations USING (event_id)
+                            INNER JOIN events AS original ON
+                                original.event_id = relates_to_id
+                                AND edit.type = original.type
+                                AND edit.sender = original.sender
+                                AND edit.room_id = original.room_id
+                            WHERE relates_to_id = ANY($1) AND relation_type = 'm.replace'
+                            ORDER BY original.event_id DESC, edit.origin_server_ts DESC, edit.event_id DESC",
+                            &[&ids],
+                        )
+                        .await?;
+                    for row in rows {
+                        found.insert(
+                            Arc::from(row.try_get::<_, &str>(0)?),
+                            Arc::from(row.try_get::<_, &str>(1)?),
+                        );
+                    }
+                }
+                Ok(missing
+                    .into_iter()
+                    .map(|event_id| {
+                        let edit = found.remove(&event_id);
+                        (event_id, edit)
+                    })
+                    .collect())
+            })
+            .await
+            .map_err(anyhow::Error::new)?;
+        Ok(edits
+            .into_iter()
+            .filter_map(|(event_id, edit)| Some((event_id, edit?)))
+            .collect())
     }
 
     /// The IDs and counts of `get_thread_summaries`: for each of
@@ -481,64 +511,55 @@ impl<'a> SyncReader<'a> {
         &self,
         event_ids: &[Arc<str>],
     ) -> anyhow::Result<HashMap<Arc<str>, (Arc<str>, i64)>> {
-        let mut summaries = HashMap::new();
-        if event_ids.is_empty() {
-            return Ok(summaries);
-        }
-        // One snapshot, as Python's one transaction, so that a count never
-        // misses its latest reply.
-        let borrowed = self.begin().await?;
-        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
-            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
-            let rows = borrowed
-                .query(
-                    "SELECT DISTINCT ON (parent.event_id) parent.event_id, child.event_id
-                    FROM events AS child
-                    INNER JOIN event_relations USING (event_id)
-                    INNER JOIN events AS parent ON
-                        parent.event_id = relates_to_id
-                        AND parent.room_id = child.room_id
-                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.thread'
-                    ORDER BY parent.event_id, child.topological_ordering DESC,
-                        child.stream_ordering DESC",
-                    &[&ids],
-                )
-                .await?;
-            let mut latest: HashMap<Arc<str>, Arc<str>> = HashMap::new();
-            for row in rows {
-                latest.insert(
-                    Arc::from(row.try_get::<_, &str>(0)?),
-                    Arc::from(row.try_get::<_, &str>(1)?),
-                );
-            }
-            if latest.is_empty() {
-                continue;
-            }
-            let parents: Vec<&str> = latest.keys().map(|id| &**id).collect();
-            let rows = borrowed
-                .query(
-                    "SELECT parent.event_id, COUNT(child.event_id)
-                    FROM events AS child
-                    INNER JOIN event_relations USING (event_id)
-                    INNER JOIN events AS parent ON
-                        parent.event_id = relates_to_id
-                        AND parent.room_id = child.room_id
-                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.thread'
-                    GROUP BY parent.event_id",
-                    &[&parents],
-                )
-                .await?;
-            let mut counts: HashMap<&str, i64> = HashMap::new();
-            for row in &rows {
-                counts.insert(row.try_get(0)?, row.try_get(1)?);
-            }
-            for (parent, latest_id) in &latest {
-                let count = counts.get(&**parent).copied().unwrap_or(0);
-                summaries.insert(Arc::clone(parent), (Arc::clone(latest_id), count));
-            }
-        }
-        borrowed.commit().await?;
-        Ok(summaries)
+        let summaries = self
+            .store
+            .caches
+            .thread_summaries
+            .get_or_load_many(event_ids, |missing| async move {
+                let mut found: HashMap<Arc<str>, (Arc<str>, i64)> = HashMap::new();
+                let borrowed = self.borrow().await?;
+                for batch in missing.chunks(SELECT_MANY_BATCH_SIZE) {
+                    let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+                    // Python counts in a second statement of the same
+                    // transaction. The window runs before `DISTINCT ON`, so
+                    // it counts every reply, and one statement is one
+                    // snapshot.
+                    let rows = borrowed
+                        .query(
+                            "SELECT DISTINCT ON (parent.event_id) parent.event_id, child.event_id,
+                                COUNT(*) OVER (PARTITION BY parent.event_id)
+                            FROM events AS child
+                            INNER JOIN event_relations USING (event_id)
+                            INNER JOIN events AS parent ON
+                                parent.event_id = relates_to_id
+                                AND parent.room_id = child.room_id
+                            WHERE relates_to_id = ANY($1) AND relation_type = 'm.thread'
+                            ORDER BY parent.event_id, child.topological_ordering DESC,
+                                child.stream_ordering DESC",
+                            &[&ids],
+                        )
+                        .await?;
+                    for row in rows {
+                        found.insert(
+                            Arc::from(row.try_get::<_, &str>(0)?),
+                            (Arc::from(row.try_get::<_, &str>(1)?), row.try_get(2)?),
+                        );
+                    }
+                }
+                Ok(missing
+                    .into_iter()
+                    .map(|event_id| {
+                        let summary = found.remove(&event_id);
+                        (event_id, summary)
+                    })
+                    .collect())
+            })
+            .await
+            .map_err(anyhow::Error::new)?;
+        Ok(summaries
+            .into_iter()
+            .filter_map(|(event_id, summary)| Some((event_id, summary?)))
+            .collect())
     }
 
     /// `get_threads_participated`: which of the threads of `event_ids` the
@@ -859,19 +880,26 @@ impl<'a> SyncReader<'a> {
     }
 
     /// `ignored_users`: the users the user ignores.
-    pub async fn ignored_users(&self, user_id: &str) -> anyhow::Result<HashSet<Arc<str>>> {
-        let rows = self
-            .query_one_shot(
-                "SELECT ignored_user_id FROM ignored_users WHERE ignorer_user_id = $1",
-                &[&user_id],
-            )
-            .await?;
-        let mut users = HashSet::with_capacity(rows.len());
-        for row in rows {
-            let user_id: String = row.try_get(0)?;
-            users.insert(Arc::from(user_id));
-        }
-        Ok(users)
+    pub async fn ignored_users(&self, user_id: &str) -> anyhow::Result<Arc<HashSet<Arc<str>>>> {
+        self.store
+            .caches
+            .ignored_users
+            .get_or_load(Arc::from(user_id), || async {
+                let rows = self
+                    .query_one_shot(
+                        "SELECT ignored_user_id FROM ignored_users WHERE ignorer_user_id = $1",
+                        &[&user_id],
+                    )
+                    .await?;
+                let mut users = HashSet::with_capacity(rows.len());
+                for row in rows {
+                    let user_id: String = row.try_get(0)?;
+                    users.insert(Arc::from(user_id));
+                }
+                Ok(Arc::new(users))
+            })
+            .await
+            .map_err(anyhow::Error::new)
     }
 
     /// `are_users_erased`: which of the users have asked for their events
@@ -2528,7 +2556,7 @@ impl PySyncStoreForTest {
         self.run(py, |reader| {
             async move { reader.ignored_users(&user_id).await }.boxed()
         })
-        .map(arc_set)
+        .map(|users| users.iter().map(|id| id.to_string()).collect())
     }
 
     fn are_users_erased(

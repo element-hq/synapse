@@ -175,13 +175,16 @@ impl SlidingSyncHandler {
         Ok(Box::pin(async move {
             let reader = store.sliding_sync_reader(pool);
             let result = async {
-                let mut instances = reader.instance_map().await?;
-                instances.extend(
-                    instance_ids
-                        .into_iter()
-                        .map(|(name, id)| (id, Arc::from(name))),
-                );
-                let instances = InstanceMap::new(instances);
+                let instances_of = |table: Arc<[(i64, Arc<str>)]>| {
+                    InstanceMap::new(
+                        table.iter().cloned().chain(
+                            instance_ids
+                                .iter()
+                                .map(|(name, id)| (*id, Arc::from(name.as_str()))),
+                        ),
+                    )
+                };
+                let mut instances = instances_of(reader.instance_map().await?);
                 let stored = match &request.from {
                     Some(from) if from.connection_position != 0 => {
                         let device_id = request
@@ -201,7 +204,16 @@ impl SlidingSyncHandler {
                     }
                     _ => Arc::new(StoredConnectionState::default()),
                 };
-                let data = ConnectionStateData::from_stored(&stored, &instances)?;
+                let data = match ConnectionStateData::from_stored(&stored, &instances) {
+                    Ok(data) => data,
+                    Err(_) => {
+                        // A stored token may name a writer added since the
+                        // table was cached.
+                        reader.forget_instance_map();
+                        instances = instances_of(reader.instance_map().await?);
+                        ConnectionStateData::from_stored(&stored, &instances)?
+                    }
+                };
                 let stats = SlidingSyncStats::from_db(&reader.stats());
                 Ok::<_, anyhow::Error>(ConnectionState::new(data, instances, stats))
             }

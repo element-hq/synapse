@@ -29,11 +29,16 @@ from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EventTypes, JoinRules, RelationTypes
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventTypes,
+    JoinRules,
+    RelationTypes,
+)
 from synapse.events import EventBase, StrippedStateEvent
 from synapse.handlers.sliding_sync import rust_sliding_sync_rooms_counter
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.rest.client import knock, login, room, sync
+from synapse.rest.client import account_data, knock, login, room, sync
 from synapse.server import HomeServer
 from synapse.synapse_rust.sliding_sync import (
     ConnectionState as RustConnectionState,
@@ -189,6 +194,7 @@ class SlidingSyncRustRoomsTestCase(SlidingSyncBase):
 
     servlets = [
         synapse.rest.admin.register_servlets,
+        account_data.register_servlets,
         knock.register_servlets,
         login.register_servlets,
         room.register_servlets,
@@ -576,7 +582,34 @@ class SlidingSyncRustRoomsTestCase(SlidingSyncBase):
         rooms = self._rooms()
         body = self._list(2, [[EventTypes.Name, ""]])
         self._sync_both(body)
+        self._name_other_writer_in_pos()
 
+        # More state for the named room, which has no new events.
+        body = self._list(2, [[EventTypes.Name, ""], [EventTypes.Topic, ""]])
+        response = self._sync_both(body)
+        named = response["rooms"][rooms["named"]]
+        self.assertNotIn("timeline", named)
+        self.assertTrue(named["prev_batch"].startswith("m"), named["prev_batch"])
+
+    def test_writer_added_after_instance_map_cached(self) -> None:
+        """Stored tokens that name a writer added after Rust cached the
+        `instance_map` table."""
+        rooms = self._rooms()
+        body = self._list(2, [[EventTypes.Name, ""]])
+        self._sync_both(body)
+        self._name_other_writer_in_pos()
+
+        # Rooms outside the narrower range go unsent, and are stored with the
+        # from token, which names the writer.
+        for kind in ("named", "unnamed", "empty_name"):
+            self.helper.send(rooms[kind], "again", tok=self.user2_tok)
+        narrow = {"lists": {"all": {**body["lists"]["all"], "ranges": [[0, 0]]}}}
+        self._sync_both(narrow)
+        self._sync_both(body)
+
+    def _name_other_writer_in_pos(self) -> None:
+        """Rewrite both sides' `pos` so that its room key names another
+        writer."""
         # Move the stream on, so that the token's position for the other
         # writer is not in the future.
         self.helper.create_room_as(self.user2_id, tok=self.user2_tok)
@@ -593,12 +626,90 @@ class SlidingSyncRustRoomsTestCase(SlidingSyncBase):
                 f"{connection_position}/m{stream}~{writer_id}.{stream + 1}_{rest}"
             )
 
-        # More state for the named room, which has no new events.
-        body = self._list(2, [[EventTypes.Name, ""], [EventTypes.Topic, ""]])
+    def test_relations_change(self) -> None:
+        """Bundled aggregations after the relations Rust cached change: a
+        second edit, a second threaded reply and a reference."""
+        room_id = self._named_room()
+        # Only a limited timeline gets bundles. Six events reach back to the
+        # thread root.
+        response = self._sync_both(self._list(6, [[EventTypes.Name, ""]]))
+        root = next(
+            event
+            for event in response["rooms"][room_id]["timeline"]
+            if event["content"].get("body") == "root"
+        )
+        root_id = root["event_id"]
+        self.assertEqual(
+            root["unsigned"]["m.relations"][RelationTypes.THREAD]["count"], 1
+        )
+
+        for content in (
+            {
+                "msgtype": "m.text",
+                "body": "* edited again",
+                "m.new_content": {"msgtype": "m.text", "body": "edited again"},
+                "m.relates_to": {
+                    "rel_type": RelationTypes.REPLACE,
+                    "event_id": root_id,
+                },
+            },
+            {
+                "msgtype": "m.text",
+                "body": "in thread again",
+                "m.relates_to": {"rel_type": RelationTypes.THREAD, "event_id": root_id},
+            },
+            {
+                "msgtype": "m.text",
+                "body": "a reference",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.REFERENCE,
+                    "event_id": root_id,
+                },
+            },
+        ):
+            self.helper.send_event(
+                room_id, "m.room.message", content, tok=self.user2_tok
+            )
+
+        self.pos = {"python": None, "rust": None}
+        response = self._sync_both(self._list(9, [[EventTypes.Name, ""]]))
+        root = next(
+            event
+            for event in response["rooms"][room_id]["timeline"]
+            if event["event_id"] == root_id
+        )
+        relations = root["unsigned"]["m.relations"]
+        self.assertEqual(relations[RelationTypes.THREAD]["count"], 2)
+        self.assertEqual(
+            relations[RelationTypes.REPLACE]["content"]["body"], "* edited again"
+        )
+        self.assertEqual(len(relations[RelationTypes.REFERENCE]["chunk"]), 1)
+
+    def test_ignore_after_sync(self) -> None:
+        """Ignoring a user after Rust cached the user's ignore list."""
+        room_id = self._named_room()
+        body = self._list(20, [[EventTypes.Name, ""]])
         response = self._sync_both(body)
-        named = response["rooms"][rooms["named"]]
-        self.assertNotIn("timeline", named)
-        self.assertTrue(named["prev_batch"].startswith("m"), named["prev_batch"])
+        senders = {e["sender"] for e in response["rooms"][room_id]["timeline"]}
+        self.assertIn(self.user2_id, senders)
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.user1_id}/account_data/{AccountDataTypes.IGNORED_USER_LIST}",
+            content={"ignored_users": {self.user2_id: {}}},
+            access_token=self.user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        self.pos = {"python": None, "rust": None}
+        response = self._sync_both(body)
+        # Their state events stay.
+        senders = {
+            e["sender"]
+            for e in response["rooms"][room_id]["timeline"]
+            if "state_key" not in e
+        }
+        self.assertNotIn(self.user2_id, senders)
 
     def test_unsigned_callbacks(self) -> None:
         """Module callbacks add to the unsigned data of Rust rooms' events."""

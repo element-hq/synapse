@@ -211,9 +211,9 @@ pub async fn bundled_aggregations(
     let references = reader.references_for_events(&event_ids).await?;
     for (event_id, refs) in references {
         let refs: Vec<Arc<str>> = refs
-            .into_iter()
+            .iter()
             .filter(|(_, sender)| !ignored_users.contains(sender))
-            .map(|(id, _)| id)
+            .map(|(id, _)| Arc::clone(id))
             .collect();
         if !refs.is_empty() {
             bundles.entry(event_id).or_default().references = Some(refs);

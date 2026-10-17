@@ -254,6 +254,20 @@ async fn state_at(
     state_events(context.reader, timeline, &event_ids).await
 }
 
+/// `filter` with the room name added, as the first send reads it.
+fn with_room_name(filter: StateFilter) -> StateFilter {
+    if filter.matches(M_ROOM_NAME, "") {
+        return filter;
+    }
+    let mut types = filter.types().clone();
+    types
+        .entry(Arc::from(M_ROOM_NAME))
+        .or_insert_with(|| Some(HashSet::new()))
+        .get_or_insert_with(HashSet::new)
+        .insert(Arc::from(""));
+    StateFilter::new(types, filter.include_others())
+}
+
 /// `_stripped_state` of an invite or knock event.
 fn stripped_state_of(event: &Event) -> anyhow::Result<Vec<Value>> {
     let mut unsigned = Map::new();
@@ -569,15 +583,54 @@ pub async fn room_sync_data(
         }
     }
 
+    // The state the request asks for, from the timeline and the deltas
+    // before any are added below.
+    let delta_keys: Vec<(String, String)> = deltas
+        .keys()
+        .map(|key| (key.0.to_string(), key.1.to_string()))
+        .collect();
+    let timeline_members: Vec<TimelineMember<'_>> = timeline
+        .iter()
+        .map(|filtered| TimelineMember {
+            sender: filtered.event.sender(),
+            event_type: filtered.event.type_(),
+            state_key: filtered.event.state_key(),
+        })
+        .collect();
+    let state_request = required_state_request(
+        user_id,
+        membership,
+        &config.required_state_map,
+        &timeline_members,
+        limited,
+        initial,
+        delta_keys.iter().map(|(t, k)| (t.as_str(), k.as_str())),
+    );
+    drop(timeline_members);
+    let required_state_filter = &state_request.required_state_filter;
+    let lazy_load_user_ids = &state_request.lazy_load_user_ids;
+
+    // On the first send, the name and the required state come from one read
+    // of the room's state, split in memory below. Python reads the name and
+    // then the required state, each from its cache of the room's state.
+    let initial_state_ids = if initial {
+        let filter = with_room_name(state_filter_with_meta(required_state_filter, &[], true));
+        Some(state_ids_at(context, &room, &filter).await?)
+    } else {
+        None
+    };
+
     let mut room_name = None;
     if initial || name_changed {
-        let name_state = state_at(
-            context,
-            &room,
-            &held,
-            &StateFilter::from_types([(M_ROOM_NAME, Some(""))]),
-        )
-        .await?;
+        let name_filter = StateFilter::from_types([(M_ROOM_NAME, Some(""))]);
+        let name_state = match &initial_state_ids {
+            Some(state_ids) => {
+                let ids: Vec<Arc<str>> =
+                    name_filter.filter_state(state_ids).into_values().collect();
+                state_events(reader, &held, &ids).await?
+            }
+            None => state_at(context, &room, &held, &name_filter).await?,
+        };
         room_name =
             lookup(&name_state, (M_ROOM_NAME, "")).and_then(|event| content_str(event, "name"));
     }
@@ -615,33 +668,6 @@ pub async fn room_sync_data(
         invited_count = Some(counts.1);
     }
 
-    // The state the request asks for, from the timeline and the deltas
-    // before any are added below.
-    let delta_keys: Vec<(String, String)> = deltas
-        .keys()
-        .map(|key| (key.0.to_string(), key.1.to_string()))
-        .collect();
-    let timeline_members: Vec<TimelineMember<'_>> = timeline
-        .iter()
-        .map(|filtered| TimelineMember {
-            sender: filtered.event.sender(),
-            event_type: filtered.event.type_(),
-            state_key: filtered.event.state_key(),
-        })
-        .collect();
-    let state_request = required_state_request(
-        user_id,
-        membership,
-        &config.required_state_map,
-        &timeline_members,
-        limited,
-        initial,
-        delta_keys.iter().map(|(t, k)| (t.as_str(), k.as_str())),
-    );
-    drop(timeline_members);
-    let required_state_filter = &state_request.required_state_filter;
-    let lazy_load_user_ids = &state_request.lazy_load_user_ids;
-
     let state_filter = state_filter_with_meta(
         required_state_filter,
         &hero_user_ids,
@@ -666,7 +692,15 @@ pub async fn room_sync_data(
     // The heroes' memberships, when not in `room_state`.
     let mut hero_state: Option<HashMap<StateKey, Event>> = None;
     if initial {
-        room_state = state_at(context, &room, &held, &state_filter).await?;
+        room_state = match &initial_state_ids {
+            // The heroes' memberships are outside the first read.
+            Some(state_ids) if hero_user_ids.is_empty() => {
+                let ids: Vec<Arc<str>> =
+                    state_filter.filter_state(state_ids).into_values().collect();
+                state_events(reader, &held, &ids).await?
+            }
+            _ => state_at(context, &room, &held, &state_filter).await?,
+        };
     } else {
         let from = from.with_context(|| format!("{room_id}: incremental with no from token"))?;
         if let Some(prev_config) = prev_config {
@@ -856,7 +890,7 @@ pub async fn generate_room_entries(
         request,
         client_filter: ClientFilterContext {
             user_id: Arc::clone(&request.user_id),
-            ignored_users: Arc::new(ignored_users),
+            ignored_users,
             admin_policy: request.admin_policy,
             msc4354_enabled: request.msc4354_enabled,
         },
