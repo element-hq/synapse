@@ -27,6 +27,7 @@ from twisted.internet import defer
 from synapse.appservice import (
     ApplicationService,
     Namespace,
+    ProxyPrefix,
     Scopes,
 )
 from synapse.types import UserID
@@ -323,7 +324,10 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
             proxy_url="http://proxy.example.com",
             proxy_prefix="rtc/livekit",
         )
-        self.assertEqual(service.proxy_prefix, "rtc/livekit")
+        self.assertEqual(
+            service.proxy_prefix,
+            ProxyPrefix(path_prefix="rtc/livekit", allow_guests=True),
+        )
         self.assertEqual(service.proxy_url, "http://proxy.example.com")
 
     def test_proxy_url_trailing_slash_is_stripped(self) -> None:
@@ -333,17 +337,16 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
         )
         self.assertEqual(service.proxy_url, "http://proxy.example.com")
 
-    def test_nested_proxy_prefix_is_allowed(self) -> None:
-        service = self._make_service(
-            proxy_url="http://proxy.example.com",
-            proxy_prefix="rtc/livekit/foo",
-        )
-        self.assertEqual(service.proxy_prefix, "rtc/livekit/foo")
-
     def test_disallowed_proxy_prefix_raises(self) -> None:
         with self.assertRaises(ValueError):
             self._make_service(
                 proxy_url="http://proxy.example.com", proxy_prefix="not/allowed"
+            )
+
+    def test_nested_proxy_prefix_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self._make_service(
+                proxy_url="http://proxy.example.com", proxy_prefix="rtc/livekit/foo"
             )
 
     def test_no_proxy_prefix_defaults_to_none(self) -> None:
@@ -354,6 +357,7 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
     def test_trailing_slash_on_proxy_prefix_is_stripped(self) -> None:
         service = self._make_service(
             proxy_url="http://proxy.example.com",
-            proxy_prefix="rtc/livekit/foo/",
+            proxy_prefix="rtc/livekit/",
         )
-        self.assertEqual(service.proxy_prefix, "rtc/livekit/foo")
+        assert service.proxy_prefix is not None
+        self.assertEqual(service.proxy_prefix.path_prefix, "rtc/livekit")
