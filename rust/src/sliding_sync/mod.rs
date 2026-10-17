@@ -204,16 +204,13 @@ impl SlidingSyncHandler {
                     }
                     _ => Arc::new(StoredConnectionState::default()),
                 };
-                let data = match ConnectionStateData::from_stored(&stored, &instances) {
-                    Ok(data) => data,
-                    Err(_) => {
-                        // A stored token may name a writer added since the
-                        // table was cached.
-                        reader.forget_instance_map();
-                        instances = instances_of(reader.instance_map().await?);
-                        ConnectionStateData::from_stored(&stored, &instances)?
-                    }
-                };
+                // A stored token may name a writer added since the table
+                // was cached.
+                if stored.names_unknown_writer(&instances) {
+                    reader.forget_instance_map();
+                    instances = instances_of(reader.instance_map().await?);
+                }
+                let data = ConnectionStateData::from_stored(&stored, &instances)?;
                 let stats = SlidingSyncStats::from_db(&reader.stats());
                 Ok::<_, anyhow::Error>(ConnectionState::new(data, instances, stats))
             }

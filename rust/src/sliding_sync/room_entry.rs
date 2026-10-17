@@ -501,7 +501,15 @@ pub async fn room_sync_data(
         limited = Some(page_limited);
 
         let room_key = new_room_key
-            .to_string_with_instances(|name| context.instance_ids.get(name).copied())
+            .to_string_with_instances(|name| {
+                let id = context.instance_ids.get(name).copied();
+                if id.is_none() {
+                    // A writer added since the table was cached. The next
+                    // request reads it again.
+                    reader.forget_instance_map();
+                }
+                id
+            })
             .map_err(|e| anyhow::anyhow!("{room_id}: prev_batch: {e}"))?;
         prev_batch = Some(format!("{room_key}_{}", request.to_suffix));
     }
@@ -613,9 +621,9 @@ pub async fn room_sync_data(
     // On the first send, the name and the required state come from one read
     // of the room's state, split in memory below. Python reads the name and
     // then the required state, each from its cache of the room's state.
+    let initial_filter = with_room_name(state_filter_with_meta(required_state_filter, &[], true));
     let initial_state_ids = if initial {
-        let filter = with_room_name(state_filter_with_meta(required_state_filter, &[], true));
-        Some(state_ids_at(context, &room, &filter).await?)
+        Some(state_ids_at(context, &room, &initial_filter).await?)
     } else {
         None
     };
@@ -692,15 +700,22 @@ pub async fn room_sync_data(
     // The heroes' memberships, when not in `room_state`.
     let mut hero_state: Option<HashMap<StateKey, Event>> = None;
     if initial {
-        room_state = match &initial_state_ids {
-            // The heroes' memberships are outside the first read.
-            Some(state_ids) if hero_user_ids.is_empty() => {
-                let ids: Vec<Arc<str>> =
-                    state_filter.filter_state(state_ids).into_values().collect();
-                state_events(reader, &held, &ids).await?
-            }
-            _ => state_at(context, &room, &held, &state_filter).await?,
+        let Some(state_ids) = &initial_state_ids else {
+            anyhow::bail!("{room_id}: first send without its state read");
         };
+        let mut ids = state_filter.filter_state(state_ids);
+        // The heroes' memberships the first read did not cover.
+        let missing_heroes: Vec<(&str, Option<&str>)> = hero_user_ids
+            .iter()
+            .filter(|user_id| !initial_filter.matches(MEMBER, user_id))
+            .map(|user_id| (MEMBER, Some(&**user_id)))
+            .collect();
+        if !missing_heroes.is_empty() {
+            let heroes = StateFilter::from_types(missing_heroes);
+            ids.extend(state_ids_at(context, &room, &heroes).await?);
+        }
+        let ids: Vec<Arc<str>> = ids.into_values().collect();
+        room_state = state_events(reader, &held, &ids).await?;
     } else {
         let from = from.with_context(|| format!("{room_id}: incremental with no from token"))?;
         if let Some(prev_config) = prev_config {

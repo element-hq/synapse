@@ -83,6 +83,19 @@ impl InstanceMap {
     }
 }
 
+impl StoredConnectionState {
+    /// Whether a stored room token names a writer `instances` lacks.
+    pub fn names_unknown_writer(&self, instances: &InstanceMap) -> bool {
+        self.rooms.values().any(|status| match status {
+            HaveSentRoom::Previously(token) => {
+                RoomStreamToken::parse_with_instances(token, |id| instances.name(id)).is_err()
+                    && RoomStreamToken::parse_with_instances(token, |_| Some(Arc::from(""))).is_ok()
+            }
+            HaveSentRoom::Never | HaveSentRoom::Live => false,
+        })
+    }
+}
+
 /// The streams of a connection state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stream {
@@ -721,6 +734,26 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_writers_in_stored_tokens() {
+        let stored = |token: &str| StoredConnectionState {
+            rooms: HashMap::from([(
+                "!a:x".to_owned(),
+                HaveSentRoom::Previously(token.to_owned()),
+            )]),
+            ..Default::default()
+        };
+        let known = InstanceMap::new([(3, Arc::from("w3"))]);
+        let empty = InstanceMap::default();
+
+        assert!(stored("m5~3.6").names_unknown_writer(&empty));
+        assert!(!stored("m5~3.6").names_unknown_writer(&known));
+        assert!(!stored("s5").names_unknown_writer(&empty));
+        // A token that is broken otherwise is not a missing writer.
+        assert!(!stored("x5").names_unknown_writer(&empty));
+        assert!(!StoredConnectionState::default().names_unknown_writer(&empty));
+    }
 
     #[test]
     fn multi_writer_tokens_parse() {
