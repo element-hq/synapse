@@ -24,6 +24,8 @@
 //! - [`effects`]: the Python cache updates a Rust transaction asks for once
 //!   it commits.
 //! - [`extremities`]: the room's forward extremities after a chunk.
+//! - [`follow_ups`]: what follows writing a chunk: metrics and the MSC4293
+//!   redaction rows.
 //! - [`metrics`]: counts for the Python metrics, flushed when scraped.
 //! - [`prepare`]: everything a chunk needs before its write transaction,
 //!   built from the steps above.
@@ -44,6 +46,7 @@ pub mod chain_cover;
 pub mod context;
 pub mod effects;
 pub mod extremities;
+pub mod follow_ups;
 pub mod metrics;
 pub mod prepare;
 pub mod python;

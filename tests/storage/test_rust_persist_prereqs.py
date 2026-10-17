@@ -1246,47 +1246,103 @@ class RustFullTestCase(unittest.HomeserverTestCase):
             (self.room_id,), frozenset([first[0].event_id, second[0].event_id])
         )
 
-    def test_follow_ups_run_before_orderings_finish(self) -> None:
-        """What follows the write (the MSC4293 redactions among it) runs
-        before the token passes the chunk, as inside `get_next_mult`. If it
-        raises, the orderings are still finished."""
-        persist_events = self.hs.get_datastores().persist_events
-        assert persist_events is not None
-        id_gen = self.store._stream_id_gen
-        original = persist_events._after_persisting_events
-        seen: list[tuple[int, int | None]] = []
+    def _join_bob(self) -> str:
+        bob = self.register_user("bob", "pass")
+        bob_token = self.login("bob", "pass")
+        self.helper.join(self.room_id, bob, tok=bob_token)
+        return bob
 
-        async def after(room_id: str, events_and_contexts: list, **kwargs: Any) -> None:
-            seen.append(
-                (
-                    id_gen.get_current_token(),
-                    events_and_contexts[-1][0].internal_metadata.stream_ordering,
+    def _redaction_rows(self) -> list[tuple[str, str]]:
+        return self.get_success(
+            self.store.db_pool.simple_select_list(
+                "room_ban_redactions", None, ("user_id", "redacting_event_id")
+            )
+        )
+
+    def test_follow_ups_run_before_orderings_finish(self) -> None:
+        """What follows the write, the MSC4293 redactions among it, runs in
+        Rust before Python applies the chunk and the token passes it, as
+        inside `get_next_mult`."""
+        self.hs.config.experimental.msc4293_enabled = True
+        bob = self._join_bob()
+        id_gen = self.store._stream_id_gen
+        seen: list[tuple[int, list[int], list[tuple[str, str]]]] = []
+
+        def applying(
+            store: Any, effects: PersistEffects, *args: Any, **kwargs: Any
+        ) -> None:
+            rows = self.get_success(
+                self.store.db_pool.simple_select_list(
+                    "room_ban_redactions", None, ("user_id", "redacting_event_id")
                 )
             )
-            await original(room_id, events_and_contexts, **kwargs)
+            seen.append((id_gen.get_current_token(), effects.stream_ids, rows))
+            apply_rust_persist_effects(store, effects, *args, **kwargs)
 
-        with patch.object(
-            persist_events, "_after_persisting_events", side_effect=after
+        with patch(
+            "synapse.storage.controllers.persist_events.apply_rust_persist_effects",
+            side_effect=applying,
         ):
-            self.helper.send(self.room_id, "hello", tok=self.token)
-        ((token, stream_ordering),) = seen
-        assert stream_ordering is not None
+            ban_id = self.helper.change_membership(
+                self.room_id,
+                self.user,
+                bob,
+                "ban",
+                {"org.matrix.msc4293.redact_events": True},
+                tok=self.token,
+            )["event_id"]
+        ((token, (stream_ordering,), rows),) = seen
         self.assertLess(token, stream_ordering)
+        self.assertEqual(rows, [(bob, ban_id)])
         self.assertGreaterEqual(id_gen.get_current_token(), stream_ordering)
 
-        class AfterFailed(Exception):
-            pass
-
-        event, context = self._build("fails after")
-        with patch.object(
-            persist_events, "_after_persisting_events", side_effect=AfterFailed()
-        ):
-            self.get_failure(
-                self.persistence.persist_events([(event, context)]), AfterFailed
+    def test_follow_up_failure(self) -> None:
+        """If what follows the write fails, the chunk is written and
+        applied, its orderings finished and its state groups released, and
+        the persist fails, as Python's would."""
+        self.hs.config.experimental.msc4293_enabled = True
+        bob = self._join_bob()
+        # Python indexes the current power levels, so fails without them.
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                "current_state_events",
+                {"room_id": self.room_id, "type": EventTypes.PowerLevels},
+                desc="test",
             )
-        failed = event.internal_metadata.stream_ordering
-        assert failed is not None
-        self.assertGreaterEqual(id_gen.get_current_token(), failed)
+        )
+        event, context = self._build("hello")
+        self.get_success(self.persistence.persist_events([(event, context)]))
+        ban, ban_context = self.get_success(
+            self.hs.get_event_creation_handler().create_event(
+                create_requester(self.user),
+                {
+                    "type": EventTypes.Member,
+                    "state_key": bob,
+                    "content": {
+                        "membership": "ban",
+                        "org.matrix.msc4293.redact_events": True,
+                    },
+                    "room_id": self.room_id,
+                    "sender": self.user,
+                },
+            )
+        )
+        context = self.get_success(ban_context.persist(ban))
+        failure = self.get_failure(
+            self.persistence.persist_events([(ban, context)]), RuntimeError
+        )
+        self.assertIn("power_levels", str(failure.value))
+        stream_ordering = self._event_row(ban.event_id)[0]
+        self.assertGreaterEqual(
+            self.store._stream_id_gen.get_current_token(), stream_ordering
+        )
+        self.assertEqual(self._redaction_rows(), [])
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "state_groups_persisting", None, ("state_group",)
+            )
+        )
+        self.assertEqual(rows, [])
 
     def test_batch_is_one_rust_call(self) -> None:
         """A batch of 150 events is one Rust call, written in two chunks,
@@ -1336,11 +1392,9 @@ class RustFullTestCase(unittest.HomeserverTestCase):
         """The batch's state groups are marked as being persisted while each
         chunk is written, and no longer once it is."""
         held: list[list[tuple[int, str]]] = []
-        persist_events = self.hs.get_datastores().persist_events
-        assert persist_events is not None
-        apply_chunk = persist_events._apply_rust_chunk
+        apply_chunk = self.persistence._apply_rust_batch_chunk
 
-        async def checking(*args: Any, **kwargs: Any) -> None:
+        async def checking(*args: Any) -> None:
             held.append(
                 await self.store.db_pool.simple_select_list(
                     "state_groups_persisting",
@@ -1348,10 +1402,12 @@ class RustFullTestCase(unittest.HomeserverTestCase):
                     ("state_group", "instance_name"),
                 )
             )
-            await apply_chunk(*args, **kwargs)
+            await apply_chunk(*args)
 
         event, context = self._build("hello")
-        with patch.object(persist_events, "_apply_rust_chunk", side_effect=checking):
+        with patch.object(
+            self.persistence, "_apply_rust_batch_chunk", side_effect=checking
+        ):
             self.get_success(self.persistence.persist_events([(event, context)]))
         assert context.state_group is not None
         assert context.state_group_before_event is not None
@@ -1653,6 +1709,226 @@ class RustFullTestCase(unittest.HomeserverTestCase):
         self.assertGreaterEqual(
             self.store._stream_id_gen.get_current_token(), stream_ordering
         )
+
+
+class RustFullRedactionsTestCase(unittest.HomeserverTestCase):
+    """`rust_event_persistence: full` with MSC4293: Rust records the
+    redactions a ban or kick starts, and the joins and leaves that end
+    them, as `_after_persisting_events` does."""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        experimental = config.setdefault("experimental_features", {})
+        experimental["rust_event_persistence"] = "full"
+        experimental["msc4293_enabled"] = True
+        return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        if RUST_PERSIST_FOR_TESTS not in (None, "full"):
+            raise SkipTest("SYNAPSE_TEST_RUST_PERSIST overrides the level")
+        hs = self.setup_test_homeserver()
+        if not isinstance(
+            hs.get_datastores().main.db_pool._db_pool, RustConnectionPool
+        ):
+            raise SkipTest("needs the native Rust Postgres driver")
+        return hs
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        persistence = hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.persistence = persistence
+        self.alice = self.register_user("alice", "pass")
+        self.alice_token = self.login("alice", "pass")
+        self.carol = self.register_user("carol", "pass")
+        self.carol_token = self.login("carol", "pass")
+        self.dave = self.register_user("dave", "pass")
+        self.dave_token = self.login("dave", "pass")
+
+    def _room(self, room_version: str | None = None) -> str:
+        """A room Alice created, which Carol and Dave joined."""
+        room_id = self.helper.create_room_as(
+            self.alice, room_version=room_version, tok=self.alice_token
+        )
+        for user, token in (
+            (self.carol, self.carol_token),
+            (self.dave, self.dave_token),
+        ):
+            self.helper.invite(room_id, self.alice, user, tok=self.alice_token)
+            self.helper.join(room_id, user, tok=token)
+        return room_id
+
+    def _rows(self, room_id: str) -> list[tuple[str, str, int | None]]:
+        return self.get_success(
+            self.store.db_pool.simple_select_list(
+                "room_ban_redactions",
+                {"room_id": room_id},
+                ("user_id", "redacting_event_id", "redact_end_ordering"),
+            )
+        )
+
+    def _membership(
+        self,
+        room_id: str,
+        sender: str,
+        token: str,
+        target: str,
+        membership: str,
+        *,
+        redact: bool = False,
+    ) -> str:
+        return self.helper.change_membership(
+            room_id,
+            sender,
+            target,
+            membership,
+            {"org.matrix.msc4293.redact_events": True} if redact else {},
+            tok=token,
+        )["event_id"]
+
+    def _stream_ordering(self, event_id: str) -> int:
+        return self.get_success(self.store.get_position_for_event(event_id)).stream
+
+    def test_redaction_power(self) -> None:
+        """Whether Carol, not a creator, may start redacting Dave's events
+        follows the power levels as `_can_sender_redact` reads them."""
+        for levels, allowed in (
+            ({"users": {self.carol: 75}, "redact": 50}, True),
+            (
+                {
+                    "users": {self.carol: 75},
+                    "redact": 50,
+                    "events": {"m.room.redaction": 100},
+                },
+                False,
+            ),
+            ({"users": {self.carol: 75}, "events_default": 80}, False),
+            ({"users": {self.dave: 0}, "users_default": 75}, True),
+        ):
+            room_id = self._room()
+            self.helper.send_state(
+                room_id, EventTypes.PowerLevels, levels, tok=self.alice_token
+            )
+            ban = self._membership(
+                room_id, self.carol, self.carol_token, self.dave, "ban", redact=True
+            )
+            self.assertEqual(
+                self._rows(room_id), [(self.dave, ban, None)] if allowed else [], levels
+            )
+
+    def test_redaction_power_before_msc4289(self) -> None:
+        """In a room version without creator power, the power levels name
+        the creator too."""
+        room_id = self._room(room_version="11")
+        self.helper.send_state(
+            room_id,
+            EventTypes.PowerLevels,
+            {"users": {self.alice: 100, self.carol: 75}, "redact": 50},
+            tok=self.alice_token,
+        )
+        ban = self._membership(
+            room_id, self.carol, self.carol_token, self.dave, "ban", redact=True
+        )
+        self.assertEqual(self._rows(room_id), [(self.dave, ban, None)])
+
+    def test_unban_ends_and_ban_starts_again(self) -> None:
+        """An unban ends the redactions at its stream ordering. A ban after
+        starts them again, without an end."""
+        room_id = self._room()
+        self._membership(
+            room_id, self.alice, self.alice_token, self.dave, "ban", redact=True
+        )
+        unban = self._membership(
+            room_id, self.alice, self.alice_token, self.dave, "leave"
+        )
+        ((user, _, end),) = self._rows(room_id)
+        self.assertEqual(end, self._stream_ordering(unban))
+
+        self.helper.invite(room_id, self.alice, self.dave, tok=self.alice_token)
+        self.helper.join(room_id, self.dave, tok=self.dave_token)
+        ban = self._membership(
+            room_id, self.alice, self.alice_token, self.dave, "ban", redact=True
+        )
+        self.assertEqual(self._rows(room_id), [(self.dave, ban, None)])
+
+    def test_self_leave_keeps_redactions(self) -> None:
+        """A user leaving of their own accord, by rejecting an invite after
+        a kick, ends nothing."""
+        room_id = self._room()
+        kick = self._membership(
+            room_id, self.alice, self.alice_token, self.dave, "leave", redact=True
+        )
+        self.helper.invite(room_id, self.alice, self.dave, tok=self.alice_token)
+        self.helper.leave(room_id, self.dave, tok=self.dave_token)
+        self.assertEqual(self._rows(room_id), [(self.dave, kick, None)])
+
+    def test_backfilled_join_ends_at_current_token(self) -> None:
+        """A backfilled join ends the redactions at the events stream's
+        current token, not its negative ordering."""
+        room_id = self._room()
+        self._membership(
+            room_id, self.alice, self.alice_token, self.dave, "ban", redact=True
+        )
+        self._membership(room_id, self.alice, self.alice_token, self.dave, "leave")
+        self.helper.invite(room_id, self.alice, self.dave, tok=self.alice_token)
+        event, unpersisted = self.get_success(
+            self.hs.get_event_creation_handler().create_event(
+                create_requester(self.dave),
+                {
+                    "type": EventTypes.Member,
+                    "state_key": self.dave,
+                    "content": {"membership": "join"},
+                    "room_id": room_id,
+                    "sender": self.dave,
+                },
+            )
+        )
+        context = self.get_success(unpersisted.persist(event))
+        self.get_success(
+            self.persistence.persist_events([(event, context)], backfilled=True)
+        )
+        token = self.store._stream_id_gen.get_current_token()
+        ((_, _, end),) = self._rows(room_id)
+        self.assertEqual(end, token)
+
+    def test_redacted_in_the_same_chunk(self) -> None:
+        """A message and the ban that redacts it, persisted together: the
+        message is dropped from the event cache after the chunk's prefills,
+        so reading it again shows it redacted."""
+        room_id = self._room()
+        pairs = []
+        for event_dict in (
+            {
+                "type": EventTypes.Message,
+                "content": {"msgtype": "m.text", "body": "noise"},
+                "sender": self.dave,
+            },
+            {
+                "type": EventTypes.Member,
+                "state_key": self.dave,
+                "content": {
+                    "membership": "ban",
+                    "org.matrix.msc4293.redact_events": True,
+                },
+                "sender": self.alice,
+            },
+        ):
+            event, unpersisted = self.get_success(
+                self.hs.get_event_creation_handler().create_event(
+                    create_requester(str(event_dict["sender"])),
+                    {**event_dict, "room_id": room_id},
+                )
+            )
+            pairs.append((event, self.get_success(unpersisted.persist(event))))
+        self.get_success(self.persistence.persist_events(pairs))
+        message = self.get_success(self.store.get_event(pairs[0][0].event_id))
+        self.assertEqual(message.content, {})
 
 
 class RustTransactionWorkerTestCase(BaseMultiWorkerStreamTestCase):

@@ -137,6 +137,9 @@ pub struct PersistEffects {
     /// The events to put in `_get_event_cache`, by `_add_to_cache`'s
     /// `local_prefill`. Python holds the events.
     event_cache_prefills: Vec<String>,
+    /// `_invalidate_local_get_event_cache_room_id(room_id)`, after the
+    /// prefills: the room's events, once MSC4293 starts redacting a user's.
+    event_cache_room_invalidations: Vec<String>,
     /// `_get_state_group_for_event.prefill((event_id,), state_group)`.
     state_group_prefills: Vec<(String, i64)>,
     /// `get_latest_event_ids_in_room.prefill((room_id,), extremities)`.
@@ -199,6 +202,12 @@ impl PersistEffects {
         self.event_cache_prefills.push(event_id);
     }
 
+    pub fn add_event_cache_room_invalidation(&mut self, room_id: String) {
+        if !self.event_cache_room_invalidations.contains(&room_id) {
+            self.event_cache_room_invalidations.push(room_id);
+        }
+    }
+
     pub fn add_state_group_prefill(&mut self, event_id: String, state_group: i64) {
         self.state_group_prefills.push((event_id, state_group));
     }
@@ -240,6 +249,7 @@ impl PersistEffects {
         sticky_stream_ids = Vec::new(),
         profile_stream_ids = Vec::new(),
         event_cache_prefills = Vec::new(),
+        event_cache_room_invalidations = Vec::new(),
         state_group_prefills = Vec::new(),
         latest_event_ids = None,
         stream_changes = Vec::new(),
@@ -257,6 +267,7 @@ impl PersistEffects {
         sticky_stream_ids: Vec<i64>,
         profile_stream_ids: Vec<i64>,
         event_cache_prefills: Vec<String>,
+        event_cache_room_invalidations: Vec<String>,
         state_group_prefills: Vec<(String, i64)>,
         latest_event_ids: Option<(String, Vec<String>)>,
         stream_changes: Vec<(String, String, i64)>,
@@ -273,6 +284,7 @@ impl PersistEffects {
             sticky_stream_ids,
             profile_stream_ids,
             event_cache_prefills,
+            event_cache_room_invalidations,
             state_group_prefills,
             latest_event_ids,
             stream_changes: stream_changes
@@ -342,6 +354,11 @@ impl PersistEffects {
     #[getter]
     fn event_cache_prefills(&self) -> Vec<String> {
         self.event_cache_prefills.clone()
+    }
+
+    #[getter]
+    fn event_cache_room_invalidations(&self) -> Vec<String> {
+        self.event_cache_room_invalidations.clone()
     }
 
     #[getter]

@@ -82,7 +82,10 @@ from synapse.storage.databases.main.events import (
     persist_event_counter,
 )
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
-from synapse.storage.databases.main.rust_persist import finish_rust_persist_stream_ids
+from synapse.storage.databases.main.rust_persist import (
+    apply_rust_persist_effects,
+    finish_rust_persist_stream_ids,
+)
 from synapse.synapse_rust.persist import (
     PersistBatch,
     Persister,
@@ -966,7 +969,10 @@ class EventsPersistenceStorageController:
         assert self._rust_persister is not None
         persister = self._rust_persister
         handle = persister.persist_batch(
-            room_id, events_and_contexts, backfilled=backfilled
+            room_id,
+            events_and_contexts,
+            backfilled=backfilled,
+            msc4293_enabled=self.hs.config.experimental.msc4293_enabled,
         )
 
         async def persist() -> dict[str, str]:
@@ -1015,8 +1021,11 @@ class EventsPersistenceStorageController:
         handle: PersistBatch,
     ) -> None:
         """Apply what a chunk of the batch Rust wrote asks for, and finish
-        its stream orderings. If that fails, release the batch."""
+        its stream orderings, as a failure if what Rust ran after writing
+        it failed, as `get_next_mult` exits with an exception. Then raise
+        that error. If anything fails, release the batch."""
         assert self._rust_persister is not None
+        store = self.persist_events_store.store
         effects = step.effects
         try:
             try:
@@ -1028,19 +1037,17 @@ class EventsPersistenceStorageController:
                     self._state_resolution_handler.record_rust_state_res_metrics(
                         room_id, prepared.state_res_stats
                     )
-            except BaseException:
-                # Only the apply finishes the orderings otherwise.
-                finish_rust_persist_stream_ids(
-                    self.persist_events_store.store, effects, succeeded=False
+                apply_rust_persist_effects(
+                    store,
+                    effects,
+                    self.persist_events_store._events_written(chunk),
+                    finish_stream_ids=False,
                 )
+                step.check_follow_ups()
+            except BaseException:
+                finish_rust_persist_stream_ids(store, effects, succeeded=False)
                 raise
-            await self.persist_events_store._apply_rust_chunk(
-                room_id,
-                chunk,
-                effects,
-                backfilled=backfilled,
-                new_forward_extremities=prepared.new_forward_extremities,
-            )
+            finish_rust_persist_stream_ids(store, effects, succeeded=True)
         except BaseException:
             await self._rust_persister.batch_abort(handle)
             raise

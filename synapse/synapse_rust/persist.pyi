@@ -112,12 +112,14 @@ class Persister:
         events_and_contexts: list[tuple[EventBase, EventContext]],
         *,
         backfilled: bool,
+        msc4293_enabled: bool,
     ) -> PersistBatch:
         """`_persist_event_batch` for a queued batch of `room_id`'s events,
         one chunk at a time: await `batch_next` until it resolves with a
         `PersistedBatch`, applying the effects of each `WrittenChunk` before
         the next step, and call `batch_abort` if they cannot be applied.
-        Converts the events, without I/O."""
+        With `msc4293_enabled`, each step records the MSC4293 redactions
+        its chunk starts or ends. Converts the events, without I/O."""
     def batch_next(
         self, batch: PersistBatch
     ) -> Deferred[WrittenChunk | PersistedBatch]:
@@ -154,6 +156,10 @@ class WrittenChunk:
     @property
     def indices(self) -> list[int]:
         """The chunk's positions in the batch."""
+    def check_follow_ups(self) -> None:
+        """Raise the error of what followed the write (the MSC4293
+        redaction rows), if it failed. Call once the effects are applied,
+        as the chunk is written either way."""
 
 class PersistedBatch:
     """What `Persister.persist_batch` did, once the batch is done."""
@@ -229,6 +235,7 @@ class PersistEffects:
         sticky_stream_ids: list[int] = ...,
         profile_stream_ids: list[int] = ...,
         event_cache_prefills: list[str] = ...,
+        event_cache_room_invalidations: list[str] = ...,
         state_group_prefills: list[tuple[str, int]] = ...,
         latest_event_ids: tuple[str, list[str]] | None = None,
         stream_changes: list[tuple[str, str, int]] = ...,
@@ -282,6 +289,10 @@ class PersistEffects:
         """The events to put in the event cache, as `_add_to_cache` does:
         those neither rejected nor redacted. The caller holds the events."""
 
+    @property
+    def event_cache_room_invalidations(self) -> list[str]:
+        """`_invalidate_local_get_event_cache_room_id(room_id)`, after the
+        prefills."""
     @property
     def state_group_prefills(self) -> list[tuple[str, int]]:
         """`(event ID, state group)` for `_get_state_group_for_event`."""

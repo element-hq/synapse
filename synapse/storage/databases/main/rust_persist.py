@@ -120,6 +120,11 @@ def apply_rust_persist_effects(
             assert events is not None
             store._get_event_cache.set_local((event_id,), events[event_id], None)
 
+        # After the prefills, as Python's `_after_persisting_events` drops
+        # the room's events once its transaction's callbacks have run.
+        for room_id in effects.event_cache_room_invalidations:
+            store._invalidate_local_get_event_cache_room_id(room_id)
+
         for event_id, state_group in effects.state_group_prefills:
             store._get_state_group_for_event.prefill((event_id,), state_group)
 

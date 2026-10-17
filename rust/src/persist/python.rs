@@ -30,6 +30,7 @@ use super::{
     context::PersistContext,
     effects::PersistEffects,
     extremities::MissingPrevStateEvents,
+    follow_ups,
     metrics::{PersistCounts, PersistMetrics},
     prepare::{self, PrepareInput, PrepareOptions, Prepared},
     reader::{self, PersistReader, PyDelta, PySlidingSync},
@@ -410,19 +411,21 @@ impl Persister {
     /// [`WrittenChunk`] before the next step, and calls
     /// [`Self::batch_abort`] if it cannot. Converts the events, without
     /// I/O.
-    #[pyo3(signature = (room_id, events_and_contexts, *, backfilled))]
+    #[pyo3(signature = (room_id, events_and_contexts, *, backfilled, msc4293_enabled))]
     fn persist_batch(
         &self,
         py: Python<'_>,
         room_id: String,
         events_and_contexts: Vec<(Py<Event>, PersistContext)>,
         backfilled: bool,
+        msc4293_enabled: bool,
     ) -> PyResult<PersistBatch> {
         let state = BatchState {
             inner: Arc::clone(&self.inner),
             pool: self.inner.pool.get()?,
             room_id,
             backfilled,
+            msc4293_enabled,
             events: shallow_events(py, events_and_contexts),
             deduplicated: None,
             next: 0,
@@ -624,6 +627,9 @@ struct BatchState {
     pool: ConnectionPool,
     room_id: String,
     backfilled: bool,
+    /// `experimental_features.msc4293_enabled`, read per batch as Python
+    /// reads it per chunk.
+    msc4293_enabled: bool,
     events: Vec<(Event, PersistContext)>,
     /// Set by the first step.
     deduplicated: Option<Deduplicated>,
@@ -705,7 +711,7 @@ impl Drop for BatchState {
 /// What one [`batch_next`] step did.
 enum BatchStep {
     /// A chunk was written, and its effects are Python's to apply.
-    Written(WrittenChunk),
+    Written(Box<WrittenChunk>),
     /// The batch is done.
     Done(PersistedBatch),
 }
@@ -717,7 +723,7 @@ impl<'py> IntoPyObject<'py> for BatchStep {
 
     fn into_pyobject(self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         match self {
-            BatchStep::Written(chunk) => Ok(Bound::new(py, chunk)?.into_any()),
+            BatchStep::Written(chunk) => Ok(Bound::new(py, *chunk)?.into_any()),
             BatchStep::Done(batch) => Ok(Bound::new(py, batch)?.into_any()),
         }
     }
@@ -836,6 +842,11 @@ async fn batch_step(state: &mut BatchState) -> PyResult<BatchStep> {
         .map_err(write_error_to_py)?;
         state.guard_held = true;
     }
+    // The follow-ups read the events after the write sets their orderings.
+    let chunk_copy: Vec<(Event, PersistContext)> = chunk
+        .iter()
+        .map(|(event, context)| (event.shallow_clone(), context.clone()))
+        .collect();
     let written = write_chunk(
         inner,
         pool,
@@ -848,7 +859,7 @@ async fn batch_step(state: &mut BatchState) -> PyResult<BatchStep> {
         state.backfilled,
     )
     .await;
-    let effects = match written {
+    let mut effects = match written {
         Ok(effects) => effects,
         Err(e) => {
             // As Python's `finally`, whose error replaces the persist's.
@@ -856,12 +867,62 @@ async fn batch_step(state: &mut BatchState) -> PyResult<BatchStep> {
             return Err(e);
         }
     };
+    // The chunk is written, so its effects go to Python whatever follows.
+    let follow_up_error = follow_ups(state, &chunk_copy, prepared_chunk, &mut effects)
+        .await
+        .err();
     state.next = end;
-    Ok(BatchStep::Written(WrittenChunk {
+    Ok(BatchStep::Written(Box::new(WrittenChunk {
         effects,
         prepared,
         indices,
-    }))
+        follow_up_error: Mutex::new(follow_up_error),
+    })))
+}
+
+/// `_after_persisting_events` for a chunk Rust wrote: count it, record the
+/// MSC4293 redactions it starts or ends, and prefill the room's forward
+/// extremities. Runs before the chunk's stream orderings are finished, as
+/// in Python, so the events are not announced before their redactions are
+/// recorded.
+async fn follow_ups(
+    state: &BatchState,
+    chunk: &[(Event, PersistContext)],
+    prepared: &prepare::PreparedChunk,
+    effects: &mut PersistEffects,
+) -> PyResult<()> {
+    let (inner, pool, room_id) = (&state.inner, &state.pool, state.room_id.as_str());
+    let counts = follow_ups::count_chunk(chunk, &inner.server_name, state.backfilled);
+    inner.metrics.record(|total| total.add(counts));
+    if state.msc4293_enabled {
+        let reader = inner.sync.reader(pool.clone());
+        let mut started = false;
+        let recorded = follow_ups::record_room_ban_redactions(
+            pool,
+            &reader,
+            room_id,
+            chunk,
+            || inner.events_stream.get_persisted_upto_position(),
+            &mut started,
+        )
+        .await;
+        // Even if a later event failed, for those that started.
+        if started {
+            effects.add_event_cache_room_invalidation(room_id.to_owned());
+        }
+        recorded.map_err(persist_error_to_py)?;
+    }
+    if let Some(extremities) = prepared
+        .state
+        .new_forward_extremities
+        .as_ref()
+        .filter(|e| !e.is_empty())
+    {
+        let mut extremities: Vec<String> = extremities.iter().map(|e| e.to_string()).collect();
+        extremities.sort();
+        effects.set_latest_event_ids(room_id.to_owned(), extremities);
+    }
+    Ok(())
 }
 
 /// [`batch_next`]'s chunk, written, whose effects Python must apply.
@@ -870,6 +931,9 @@ pub struct WrittenChunk {
     effects: PersistEffects,
     prepared: Arc<Prepared>,
     indices: Vec<usize>,
+    /// Why what follows the write failed, for Python to raise once it has
+    /// applied the effects.
+    follow_up_error: Mutex<Option<PyErr>>,
 }
 
 #[pymethods]
@@ -895,6 +959,21 @@ impl WrittenChunk {
     #[getter]
     fn indices(&self) -> Vec<usize> {
         self.indices.clone()
+    }
+
+    /// Raise the error of what followed the write, if it failed. Python
+    /// calls this once it has applied the effects, as the chunk is written
+    /// either way.
+    fn check_follow_ups(&self) -> PyResult<()> {
+        match self
+            .follow_up_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 }
 
