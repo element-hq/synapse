@@ -56,6 +56,9 @@ use crate::{
     types::state_filter::state_map_to_py,
 };
 
+/// What [`Persister::persist_events_txn`] resolves with.
+type TxnResult = (PersistEffects, Vec<usize>, HashMap<usize, String>);
+
 /// Persists events in Rust, on the events writer, over the native driver.
 ///
 /// Holds what every level needs: the pool, the shared caches, the stream ID
@@ -161,6 +164,85 @@ impl Persister {
                 enable_ephemeral_messages: config.server.enable_ephemeral_messages,
             }),
         }))
+    }
+
+    /// Convert the chunk while the GIL is held, and return the future that
+    /// runs the write transaction over it without the GIL. See
+    /// [`Self::persist_events_txn`].
+    fn start_persist_events_txn(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        prepared: &PreparedChunk,
+        inhibit_local_membership_updates: bool,
+    ) -> PyResult<BoxFuture<'static, PyResult<TxnResult>>> {
+        let prepared = Arc::clone(&prepared.prepared);
+        if !matches!(&*prepared, Prepared::Chunk(_)) {
+            return Err(PyRuntimeError::new_err("the chunk was prepared in Python"));
+        }
+        let events = events_and_contexts
+            .into_iter()
+            .map(|(event, context)| TxnEvent::new(event.bind(py).get().shallow_clone(), context))
+            .collect::<anyhow::Result<Vec<_>>>()
+            .map_err(persist_error_to_py)?;
+        let pool = self.inner.pool.get()?;
+        let inner = Arc::clone(&self.inner);
+        let future = async move {
+            let Prepared::Chunk(chunk) = &*prepared else {
+                unreachable!("checked above");
+            };
+            let cache_stream = TxnStream::caches(Arc::clone(&inner.cache_stream));
+            let sticky_stream = TxnStream::sticky_events(Arc::clone(&inner.sticky_stream));
+            let input = TxnInput {
+                room_id: &room_id,
+                events: &events,
+                prepared: chunk,
+                instance_name: &inner.instance_name,
+                server_name: &inner.server_name,
+                clock: inner.runtime.clock(),
+                inhibit_local_membership_updates,
+                enable_search: inner.enable_search,
+                enable_ephemeral_messages: inner.enable_ephemeral_messages,
+                msc4354_enabled: inner.msc4354_enabled,
+                cache_stream: &cache_stream,
+                sticky_stream: &sticky_stream,
+            };
+            let position = |event: &TxnEvent| {
+                input
+                    .events
+                    .iter()
+                    .position(|x| std::ptr::eq(x, event))
+                    .expect("an event of the chunk")
+            };
+            let result = run_write_interaction(&pool, "persist_events", |txn, _| {
+                let (input, position) = (&input, &position);
+                async move {
+                    let mut effects = PersistEffects::default();
+                    let events = txn::persist_events_txn(txn, input, &mut effects).await?;
+                    let left = events.iter().map(|e| position(e.source)).collect();
+                    let mut redacted = HashMap::new();
+                    for event in &events {
+                        if let Some(copy) = &event.redacted {
+                            let by = copy
+                                .internal_metadata()
+                                .redacted_by()
+                                .map_err(anyhow::Error::new)?
+                                .context("a redacted copy without redacted_by")?;
+                            redacted.insert(position(event.source), by);
+                        }
+                    }
+                    Ok((effects, left, redacted))
+                }
+                .boxed()
+            })
+            .await
+            .map_err(write_error_to_py)?;
+            cache_stream.hand_over(result.0.cache_stream_ids());
+            sticky_stream.hand_over(result.0.sticky_stream_ids());
+            Ok(result)
+        };
+        Ok(future.boxed())
     }
 
     /// Convert the chunk while the GIL is held, and return the future that
@@ -280,93 +362,55 @@ impl Persister {
     }
 
     /// Run the Rust write transaction over the chunk, whose events must
-    /// have their stream orderings set, and commit it. It leaves two
-    /// steps to Python: `_add_to_cache` and the profile updates.
-    /// `prepared` is what Rust prepared for it. For
-    /// `tests/storage/test_rust_persist_txn.py`.
+    /// have their stream orderings set, and commit it. `prepared` is what
+    /// Rust prepared for it. It leaves the profile updates to Python, so it
+    /// is not for a server that records them.
     ///
-    /// The cache and sticky events stream IDs it took come back unfinished
-    /// in the effects.
-    ///
-    /// Returns what it collected for Python to apply, and for the Python
-    /// steps after it, by position in the chunk: the events left, and the
+    /// Resolves with what Python applies with `apply_rust_persist_effects`,
+    /// in which the cache and sticky events stream IDs it took are still
+    /// unfinished, and, by position in the chunk, the events left and the
     /// events stored redacted with the event that redacts each.
-    #[allow(clippy::type_complexity)]
+    ///
+    /// Python must not cancel the Deferred: the effects of a transaction
+    /// that commits must be applied. If it is cancelled, the transaction
+    /// runs on and its effects are lost.
     #[pyo3(signature = (room_id, events_and_contexts, prepared, *, inhibit_local_membership_updates))]
-    fn persist_events_txn_for_test(
+    fn persist_events_txn<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        prepared: &PreparedChunk,
+        inhibit_local_membership_updates: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let future = self.start_persist_events_txn(
+            py,
+            room_id,
+            events_and_contexts,
+            prepared,
+            inhibit_local_membership_updates,
+        )?;
+        create_deferred_with(py, &self.inner.runtime, future, OnCancel::RunOn)
+    }
+
+    /// As [`Self::persist_events_txn`], but blocks.
+    #[pyo3(signature = (room_id, events_and_contexts, prepared, *, inhibit_local_membership_updates))]
+    fn persist_events_txn_blocking(
         &self,
         py: Python<'_>,
         room_id: String,
         events_and_contexts: Vec<(Py<Event>, PersistContext)>,
         prepared: &PreparedChunk,
         inhibit_local_membership_updates: bool,
-    ) -> PyResult<(PersistEffects, Vec<usize>, HashMap<usize, String>)> {
-        let prepared = Arc::clone(&prepared.prepared);
-        if !matches!(&*prepared, Prepared::Chunk(_)) {
-            return Err(PyRuntimeError::new_err("the chunk was prepared in Python"));
-        }
-        let events = events_and_contexts
-            .into_iter()
-            .map(|(event, context)| TxnEvent::new(event.bind(py).get().shallow_clone(), context))
-            .collect::<anyhow::Result<Vec<_>>>()
-            .map_err(persist_error_to_py)?;
-        let pool = self.inner.pool.get()?;
-        let inner = Arc::clone(&self.inner);
-        let future = async move {
-            let Prepared::Chunk(chunk) = &*prepared else {
-                unreachable!("checked above");
-            };
-            let cache_stream = TxnStream::caches(Arc::clone(&inner.cache_stream));
-            let sticky_stream = TxnStream::sticky_events(Arc::clone(&inner.sticky_stream));
-            let input = TxnInput {
-                room_id: &room_id,
-                events: &events,
-                prepared: chunk,
-                instance_name: &inner.instance_name,
-                server_name: &inner.server_name,
-                clock: inner.runtime.clock(),
-                inhibit_local_membership_updates,
-                enable_search: inner.enable_search,
-                enable_ephemeral_messages: inner.enable_ephemeral_messages,
-                msc4354_enabled: inner.msc4354_enabled,
-                cache_stream: &cache_stream,
-                sticky_stream: &sticky_stream,
-            };
-            let position = |event: &TxnEvent| {
-                input
-                    .events
-                    .iter()
-                    .position(|x| std::ptr::eq(x, event))
-                    .expect("an event of the chunk")
-            };
-            let result = run_write_interaction(&pool, "persist_events", |txn, _| {
-                let (input, position) = (&input, &position);
-                async move {
-                    let mut effects = PersistEffects::default();
-                    let events = txn::persist_events_txn(txn, input, &mut effects).await?;
-                    let left = events.iter().map(|e| position(e.source)).collect();
-                    let mut redacted = HashMap::new();
-                    for event in &events {
-                        if let Some(copy) = &event.redacted {
-                            let by = copy
-                                .internal_metadata()
-                                .redacted_by()
-                                .map_err(anyhow::Error::new)?
-                                .context("a redacted copy without redacted_by")?;
-                            redacted.insert(position(event.source), by);
-                        }
-                    }
-                    Ok((effects, left, redacted))
-                }
-                .boxed()
-            })
-            .await
-            .map_err(write_error_to_py)?;
-            cache_stream.hand_over(result.0.cache_stream_ids());
-            sticky_stream.hand_over(result.0.sticky_stream_ids());
-            Ok(result)
-        };
-        self.block_on(py, future.boxed())
+    ) -> PyResult<TxnResult> {
+        let future = self.start_persist_events_txn(
+            py,
+            room_id,
+            events_and_contexts,
+            prepared,
+            inhibit_local_membership_updates,
+        )?;
+        self.block_on(py, future)
     }
 
     /// As [`Self::prepare_chunk`], but blocks.

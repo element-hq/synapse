@@ -17,7 +17,8 @@
 //! the events themselves are stored. Push actions, redactions, relations
 //! and threads, search, retention, labels, expiry and room members.
 //!
-//! The event cache prefill at its end, `_add_to_cache`, stays in Python.
+//! The event cache prefill at its end, `_add_to_cache`, is chosen here and
+//! done by Python, which holds the events.
 
 use anyhow::anyhow;
 use serde_json::{Map, Value};
@@ -87,7 +88,38 @@ pub async fn update_metadata_tables(
         store_expiry(txn, events).await?;
     }
 
-    store_room_members(txn, input, events).await
+    store_room_members(txn, input, events).await?;
+    add_to_cache(txn, events, effects).await
+}
+
+/// `_add_to_cache`: the events to put in the event cache once the
+/// transaction commits, those neither rejected nor redacted. Python puts
+/// them in, from the events it holds.
+async fn add_to_cache(
+    txn: &WriteTxn,
+    events: &[Persisting<'_>],
+    effects: &mut PersistEffects,
+) -> Result<(), WriteError> {
+    let event_ids: Vec<&str> = events.iter().map(|e| e.event().event_id()).collect();
+    let rows = txn
+        .query(
+            "SELECT e.event_id, r.redacts, rej.event_id
+            FROM events AS e
+            LEFT JOIN rejections AS rej USING (event_id)
+            LEFT JOIN redactions AS r ON e.event_id = r.redacts
+            WHERE e.event_id = ANY($1)",
+            &[&event_ids],
+        )
+        .await?;
+    for row in rows {
+        let event_id: String = row.try_get(0).map_err(anyhow::Error::new)?;
+        let redacts: Option<&str> = row.try_get(1).map_err(anyhow::Error::new)?;
+        let rejects: Option<&str> = row.try_get(2).map_err(anyhow::Error::new)?;
+        if redacts.is_none() && rejects.is_none() {
+            effects.add_event_cache_prefill(event_id);
+        }
+    }
+    Ok(())
 }
 
 /// `_set_push_actions_for_event_and_users_txn`: move the push actions of

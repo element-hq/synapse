@@ -28,6 +28,7 @@ from unittest.mock import Mock, patch
 from immutabledict import immutabledict
 from prometheus_client import REGISTRY
 
+from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
 import synapse.metrics
@@ -38,11 +39,14 @@ from synapse.config.experimental import ExperimentalConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
+from synapse.logging.context import make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL, _PreCollectHooks
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.controllers.persist_events import flush_rust_persist_metrics
+from synapse.storage.databases.main.events import PersistEventsStore
+from synapse.storage.databases.main.rust_persist import apply_rust_persist_effects
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.persist import (
@@ -57,6 +61,8 @@ from synapse.util.clock import Clock
 from synapse.util.json import json_encoder
 
 from tests import unittest
+from tests.replication._base import BaseMultiWorkerStreamTestCase
+from tests.server import make_request
 from tests.test_utils.event_injection import create_event
 from tests.utils import RUST_PERSIST_FOR_TESTS, default_config
 
@@ -369,7 +375,7 @@ class PersistEffectsTestCase(unittest.HomeserverTestCase):
     def _apply(self, effects: PersistEffects) -> set[tuple[Any, ...]]:
         stack, calls = self._record()
         with stack:
-            self.store._apply_rust_persist_effects(effects)
+            apply_rust_persist_effects(self.store, effects)
         return calls
 
     def _create(self, **kwargs: Any) -> tuple[EventBase, EventContext]:
@@ -581,11 +587,12 @@ class PersistEffectsTestCase(unittest.HomeserverTestCase):
             original_finish(ids)
 
         with patch.object(id_gen, "_mark_ids_as_finished", finish):
-            self.store._apply_rust_persist_effects(
+            apply_rust_persist_effects(
+                self.store,
                 PersistEffects(
                     stream_changes=[("events", self.room_id, stream)],
                     stream_ids=[stream],
-                )
+                ),
             )
 
         self.assertEqual(seen_by_cache, [True])
@@ -627,11 +634,12 @@ class PersistEffectsTestCase(unittest.HomeserverTestCase):
             patch.object(self.store, "_attempt_to_invalidate_cache", invalidate),
             patch.object(notifier, "notify_replication", notify),
         ):
-            self.store._apply_rust_persist_effects(
+            apply_rust_persist_effects(
+                self.store,
                 PersistEffects(
                     cache_invalidations=[("get_threads", [self.room_id])],
                     cache_stream_ids=[stream_id],
-                )
+                ),
             )
 
         self.assertEqual(calls, ["invalidate", "finish", "notify"])
@@ -674,11 +682,12 @@ class PersistEffectsTestCase(unittest.HomeserverTestCase):
             patch.object(self.store, "_invalidate_local_get_event_cache", invalidate),
             patch.object(notifier, "notify_replication", notify),
         ):
-            self.store._apply_rust_persist_effects(
+            apply_rust_persist_effects(
+                self.store,
                 PersistEffects(
                     event_cache_invalidations=["$sticky"],
                     sticky_stream_ids=[stream_id],
-                )
+                ),
             )
 
         self.assertEqual(calls, ["invalidate", "finish", "notify"])
@@ -848,6 +857,256 @@ class PersisterTestCase(unittest.HomeserverTestCase):
     def test_gil_stats_are_persist_sites(self) -> None:
         for site in persist_gil_stats():
             self.assertTrue(site.startswith("persist_"), site)
+
+
+class _CountingPersister:
+    """The persister, counting the chunks it prepares and writes, and keeping
+    the effects of the last write."""
+
+    def __init__(self, persister: Any) -> None:
+        self._persister = persister
+        self.prepares = 0
+        self.transactions = 0
+        self.last_effects: PersistEffects | None = None
+
+    def prepare_chunk(self, *args: Any, **kwargs: Any) -> Any:
+        self.prepares += 1
+        return self._persister.prepare_chunk(*args, **kwargs)
+
+    def persist_events_txn(self, *args: Any, **kwargs: Any) -> Any:
+        self.transactions += 1
+
+        def keep(result: Any) -> Any:
+            self.last_effects = result[0]
+            return result
+
+        return self._persister.persist_events_txn(*args, **kwargs).addCallback(keep)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._persister, name)
+
+
+class RustTransactionTestCase(unittest.HomeserverTestCase):
+    """`rust_event_persistence: transaction`: Rust writes the chunks it
+    prepared."""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})["rust_event_persistence"] = (
+            "transaction"
+        )
+        return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        if RUST_PERSIST_FOR_TESTS not in (None, "transaction"):
+            raise SkipTest("SYNAPSE_TEST_RUST_PERSIST overrides the level")
+        hs = self.setup_test_homeserver()
+        if not isinstance(
+            hs.get_datastores().main.db_pool._db_pool, RustConnectionPool
+        ):
+            raise SkipTest("needs the native Rust Postgres driver")
+        return hs
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        persistence = hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.persister = _CountingPersister(persistence._rust_persister)
+        persistence._rust_persister = self.persister  # type: ignore[assignment]
+        self.user = self.register_user("alice", "pass")
+        self.token = self.login("alice", "pass")
+
+    def test_rust_writes_the_chunk(self) -> None:
+        """The event is written by Rust, not Python, and the applier puts it
+        in the event cache, as `_add_to_cache` does."""
+        room_id = self.helper.create_room_as(self.user, tok=self.token)
+        before = self.persister.transactions
+        with (
+            patch.object(
+                PersistEventsStore,
+                "_persist_events_txn",
+                side_effect=AssertionError("Python wrote the chunk"),
+            ),
+            patch.object(
+                self.store,
+                "_get_event_cache",
+                Mock(wraps=self.store._get_event_cache),
+            ) as event_cache,
+        ):
+            event_id = self.helper.send(room_id, "hello", tok=self.token)["event_id"]
+        self.assertEqual(self.persister.transactions, before + 1)
+        assert self.persister.last_effects is not None
+        self.assertIn(event_id, self.persister.last_effects.event_cache_prefills)
+        self.assertIn(
+            (event_id,), [c.args[0] for c in event_cache.set_local.call_args_list]
+        )
+        event = self.get_success(self.store.get_event(event_id))
+        self.assertEqual(event.content["body"], "hello")
+
+    def test_lowered_level_writes_in_python(self) -> None:
+        room_id = self.helper.create_room_as(self.user, tok=self.token)
+        self.hs.config.experimental.rust_event_persistence = "prepare"
+        prepares, transactions = self.persister.prepares, self.persister.transactions
+        self.helper.send(room_id, "hello", tok=self.token)
+        # Rust prepared the chunk, so it is the level that kept Rust out.
+        self.assertEqual(self.persister.prepares, prepares + 1)
+        self.assertEqual(self.persister.transactions, transactions)
+
+    @unittest.override_config({"include_profile_updates_in_sync": True})
+    def test_profile_updates_write_in_python(self) -> None:
+        """The Rust transaction leaves the profile updates to Python, so a
+        server that records them writes in Python."""
+        self.helper.create_room_as(self.user, tok=self.token)
+        self.assertGreater(self.persister.prepares, 0)
+        self.assertEqual(self.persister.transactions, 0)
+
+    def test_gil_count(self) -> None:
+        """Writing a chunk takes the GIL from tokio at no persist site: the
+        events cross at the call and the effects come back in its result."""
+        room_id = self.helper.create_room_as(self.user, tok=self.token)
+        # The first persist opens the pool, at `persist_db_pool`.
+        self.helper.send(room_id, "warm up", tok=self.token)
+        before = persist_gil_stats()
+        transactions = self.persister.transactions
+        self.helper.send(room_id, "hello", tok=self.token)
+        self.assertEqual(self.persister.transactions, transactions + 1)
+        after = persist_gil_stats()
+        changed = {
+            site: after[site][0] - before.get(site, (0, 0.0))[0]
+            for site in after
+            if after[site][0] != before.get(site, (0, 0.0))[0]
+        }
+        self.assertEqual(changed, {})
+
+    def test_cancelled_persist_applies_its_effects(self) -> None:
+        """Cancelling the persist while Rust writes the chunk waits for the
+        write, and the effects are applied, so the cache stream IDs the
+        transaction took are finished and the event cache is filled."""
+        room_id = self.helper.create_room_as(self.user, tok=self.token)
+
+        # Hold the Rust call's Deferred until the persist has been cancelled.
+        gate: list[tuple[Any, Any, defer.Deferred]] = []
+        blocking = self.persister._persister
+
+        class Gated:
+            def persist_events_txn(self, *args: Any, **kwargs: Any) -> Any:
+                d: defer.Deferred = defer.Deferred()
+                gate.append((args, kwargs, d))
+                return d
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(blocking, name)
+
+        self.persister._persister = Gated()
+
+        persist_events = self.hs.get_datastores().persist_events
+        assert persist_events is not None
+        original = persist_events._persist_events_in_rust
+        cancelled = []
+
+        async def cancel_then_wait(*args: Any, **kwargs: Any) -> None:
+            d = defer.ensureDeferred(original(*args, **kwargs))
+            d.cancel()
+            try:
+                await make_deferred_yieldable(d)
+            except defer.CancelledError:
+                cancelled.append(True)
+
+        with patch.object(
+            persist_events, "_persist_events_in_rust", side_effect=cancel_then_wait
+        ):
+            # A state change, so the transaction takes cache stream IDs.
+            channel = make_request(
+                self.reactor,
+                self.site,
+                "PUT",
+                f"/rooms/{room_id}/state/m.room.topic/",
+                {"topic": "hello"},
+                access_token=self.token,
+                await_result=False,
+            )
+            self.pump()
+            self.assertEqual(len(gate), 1)
+            # Cancelled, but waiting for the transaction.
+            self.assertEqual(cancelled, [])
+            args, kwargs, d = gate[0]
+            blocking.persist_events_txn(*args, **kwargs).chainDeferred(d)
+            channel.await_result()
+        self.assertEqual(channel.code, 200, channel.json_body)
+        event_id = channel.json_body["event_id"]
+        self.assertEqual(cancelled, [True])
+
+        effects = self.persister.last_effects
+        assert effects is not None
+        self.assertIn(event_id, effects.event_cache_prefills)
+        self.assertIsNotNone(self.store._get_event_cache.get_local((event_id,)))
+        assert self.store._cache_id_gen is not None
+        self.assertNotEqual(effects.cache_stream_ids, [])
+        self.assertGreaterEqual(
+            self.store._cache_id_gen.get_current_token(),
+            max(effects.cache_stream_ids),
+        )
+
+
+class RustTransactionWorkerTestCase(BaseMultiWorkerStreamTestCase):
+    """`rust_event_persistence: transaction` on a worker event persister:
+    the worker writes in Rust, to the main database."""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})["rust_event_persistence"] = (
+            "transaction"
+        )
+        config["stream_writers"] = {"events": ["worker1"]}
+        config["instance_map"] = {
+            "main": {"host": "testserv", "port": 8765},
+            "worker1": {"host": "testserv", "port": 1001},
+        }
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        if RUST_PERSIST_FOR_TESTS not in (None, "transaction"):
+            raise SkipTest("SYNAPSE_TEST_RUST_PERSIST overrides the level")
+        if not isinstance(
+            hs.get_datastores().main.db_pool._db_pool, RustConnectionPool
+        ):
+            raise SkipTest("needs the native Rust Postgres driver")
+
+    def test_worker_writes_in_rust(self) -> None:
+        worker = self.make_worker_hs(
+            "synapse.app.generic_worker", {"worker_name": "worker1"}
+        )
+        persistence = worker.get_storage_controllers().persistence
+        assert persistence is not None
+        persister = _CountingPersister(persistence._rust_persister)
+        persistence._rust_persister = persister  # type: ignore[assignment]
+
+        user = self.register_user("alice", "pass")
+        token = self.login("alice", "pass")
+        room_id = self.helper.create_room_as(user, tok=token)
+        event_id = self.helper.send(room_id, "hello", tok=token)["event_id"]
+
+        self.assertGreater(persister.transactions, 0)
+        assert persister.last_effects is not None
+        self.assertIn(event_id, persister.last_effects.event_cache_prefills)
+        # The main process reads what the worker's Rust pool wrote.
+        store = self.hs.get_datastores().main
+        position = self.get_success(store.get_position_for_event(event_id))
+        self.assertEqual(position.instance_name, "worker1")
+        event = self.get_success(store.get_event(event_id))
+        self.assertEqual(event.content["body"], "hello")
 
 
 class PersisterOffTestCase(unittest.HomeserverTestCase):

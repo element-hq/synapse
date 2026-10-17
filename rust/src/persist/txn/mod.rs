@@ -20,18 +20,17 @@
 //! writes, in the same order, and collects in a [`PersistEffects`] the
 //! cache updates Python queues with `txn.call_after`.
 //!
-//! It covers the whole of `_persist_events_txn` but for two Python steps:
-//! the event cache prefill (`_add_to_cache`) at the end of
-//! `_update_metadata_tables_txn`, and the profile updates at the end of
-//! `_update_current_state_txn`. The steps are the events themselves
-//! ([`events`]), the room's DAG ([`edges`]), the tables about the events
-//! ([`metadata`]), the room's current state ([`current_state`]), sticky
-//! events ([`sticky`]) and the sliding sync tables ([`sliding_sync`]), with
-//! the rows of the cache stream ([`caches`]) and the IDs of the streams
-//! the transaction takes from ([`streams`]). It returns the events left
-//! for the Python steps, which run only in
-//! `tests/storage/test_rust_persist_txn.py` so far. That test persists
-//! the rest of a chunk in Python and compares the rows with Python's.
+//! It covers the whole of `_persist_events_txn` but for the profile
+//! updates at the end of `_update_current_state_txn`, which stay in Python,
+//! so a server that records them persists in Python. The steps are the
+//! events themselves ([`events`]), the room's DAG ([`edges`]), the tables
+//! about the events ([`metadata`]), the room's current state
+//! ([`current_state`]), sticky events ([`sticky`]) and the sliding sync
+//! tables ([`sliding_sync`]), with the rows of the cache stream
+//! ([`caches`]) and the IDs of the streams the transaction takes from
+//! ([`streams`]). It returns the events left, which the profile updates
+//! take in `tests/storage/test_rust_persist_txn.py`. That test persists a
+//! chunk through Rust and compares the rows with Python's.
 
 pub mod caches;
 pub mod current_state;

@@ -51,7 +51,30 @@ class Persister:
         shadow: bool,
     ) -> PreparedChunk:
         """As `prepare_chunk`, but blocks. For tests."""
-    def persist_events_txn_for_test(
+    def persist_events_txn(
+        self,
+        room_id: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        prepared: PreparedChunk,
+        *,
+        inhibit_local_membership_updates: bool,
+    ) -> Deferred[tuple[PersistEffects, list[int], dict[int, str]]]:
+        """Run the Rust write transaction over the chunk, whose events have
+        their stream orderings set, and commit it. `prepared` is what Rust
+        prepared for it. It leaves the profile updates to Python, so it is
+        not for a server that records them.
+
+        Resolves with what Python applies with `apply_rust_persist_effects`,
+        in which the cache and sticky events stream IDs it took are still
+        unfinished, and, by position in the chunk, the events left and the
+        events stored redacted with the event that redacts each.
+
+        Must not be cancelled: the effects of a transaction that commits
+        must be applied. If it is cancelled, the transaction runs on and its
+        effects are lost.
+
+        Raises `PartialStateConflictError` as Python's transaction does."""
+    def persist_events_txn_blocking(
         self,
         room_id: str,
         events_and_contexts: list[tuple[EventBase, EventContext]],
@@ -59,15 +82,7 @@ class Persister:
         *,
         inhibit_local_membership_updates: bool,
     ) -> tuple[PersistEffects, list[int], dict[int, str]]:
-        """Run the Rust write transaction over the chunk, whose events have
-        their stream orderings set, and commit it. It leaves two steps to
-        Python: `_add_to_cache` and the profile updates. `prepared` is what
-        Rust prepared for it. The cache and sticky
-        events stream IDs it took come back unfinished in the effects.
-
-        Returns what it collected for Python to apply, and for the Python
-        steps after it, by position in the chunk: the events left, and the
-        events stored redacted with the event that redacts each."""
+        """As `persist_events_txn`, but blocks. For tests."""
 
 class PreparedChunk:
     """What `Persister.prepare_chunk` computed. If `state_res_fallback` is
@@ -110,7 +125,7 @@ class PreparedChunk:
 
 class PersistEffects:
     """The Python cache updates a Rust persist transaction asks for once it
-    has committed, which `DataStore._apply_rust_persist_effects` applies.
+    has committed, which `apply_rust_persist_effects` applies.
     Each attribute matches one kind of `txn.call_after` callback of the
     Python transaction."""
 
@@ -125,6 +140,7 @@ class PersistEffects:
         cache_invalidations: list[tuple[str, list[str]]] = ...,
         cache_stream_ids: list[int] = ...,
         sticky_stream_ids: list[int] = ...,
+        event_cache_prefills: list[str] = ...,
         state_group_prefills: list[tuple[str, int]] = ...,
         latest_event_ids: tuple[str, list[str]] | None = None,
         stream_changes: list[tuple[str, str, int]] = ...,
@@ -167,6 +183,11 @@ class PersistEffects:
         moved, still unfinished. Python finishes them once the caches are
         invalidated, as `get_next_mult_txn` does, and updates
         `stream_positions`."""
+
+    @property
+    def event_cache_prefills(self) -> list[str]:
+        """The events to put in the event cache, as `_add_to_cache` does:
+        those neither rejected nor redacted. The caller holds the events."""
 
     @property
     def state_group_prefills(self) -> list[tuple[str, int]]:

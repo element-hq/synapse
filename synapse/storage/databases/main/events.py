@@ -57,6 +57,7 @@ from synapse.events import (
 )
 from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventPersistencePair
+from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
@@ -67,6 +68,7 @@ from synapse.storage.database import (
     make_tuple_in_list_sql_clause,
 )
 from synapse.storage.databases.main.event_federation import EventFederationStore
+from synapse.storage.databases.main.rust_persist import apply_rust_persist_effects
 from synapse.storage.databases.main.search import SearchEntry
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import AbstractStreamIdGenerator
@@ -84,6 +86,7 @@ from synapse.types import (
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
+from synapse.util.async_helpers import delay_cancellation
 from synapse.util.events import get_plain_text_topic_from_event_content
 from synapse.util.iterutils import batch_iter, sorted_topologically
 from synapse.util.json import json_encoder
@@ -92,6 +95,7 @@ from synapse.util.stringutils import non_null_str_or_none
 if TYPE_CHECKING:
     from synapse.server import HomeServer
     from synapse.storage.databases.main import DataStore
+    from synapse.synapse_rust.persist import Persister, PreparedChunk
 
 
 logger = logging.getLogger(__name__)
@@ -242,6 +246,15 @@ class PreparedTableChanges:
     sticky_events_to_un_soft_fail: set[str]
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class RustTransaction:
+    """Write a chunk in Rust (`rust_event_persistence: transaction`): the
+    persister, and what it prepared for the chunk."""
+
+    persister: "Persister"
+    prepared: "PreparedChunk"
+
+
 @attr.s(slots=True, auto_attribs=True)
 class NewEventChainLinks:
     """Information about new auth chain links that need to be added to the DB.
@@ -366,6 +379,7 @@ class PersistEventsStore:
         inhibit_local_membership_updates: bool = False,
         new_state_dag_forward_extremities: set[str] | None = None,
         table_changes: PreparedTableChanges | None = None,
+        rust_transaction: RustTransaction | None = None,
     ) -> None:
         """Persist a set of events alongside updates to the current state and
                 forward extremities tables.
@@ -391,6 +405,7 @@ class PersistEventsStore:
             table_changes: The sliding sync table changes and sticky events
                 to un-soft-fail, if the caller computed them. Otherwise they
                 are computed here.
+            rust_transaction: Write the chunk in Rust, which prepared it.
 
         Returns:
             Resolves when the events have been persisted
@@ -445,19 +460,27 @@ class PersistEventsStore:
             sliding_sync_table_changes = table_changes.sliding_sync_table_changes
             sticky_events_to_un_soft_fail = table_changes.sticky_events_to_un_soft_fail
 
-            await self.db_pool.runInteraction(
-                "persist_events",
-                self._persist_events_txn,
-                room_id=room_id,
-                events_and_contexts=events_and_contexts,
-                inhibit_local_membership_updates=inhibit_local_membership_updates,
-                state_delta_for_room=state_delta_for_room,
-                new_forward_extremities=new_forward_extremities,
-                new_event_links=new_event_links,
-                sliding_sync_table_changes=sliding_sync_table_changes,
-                new_state_dag_forward_extremities=new_state_dag_forward_extremities,
-                sticky_events_to_un_soft_fail=sticky_events_to_un_soft_fail,
-            )
+            if rust_transaction is not None:
+                await self._persist_events_in_rust(
+                    rust_transaction,
+                    room_id,
+                    events_and_contexts,
+                    inhibit_local_membership_updates=inhibit_local_membership_updates,
+                )
+            else:
+                await self.db_pool.runInteraction(
+                    "persist_events",
+                    self._persist_events_txn,
+                    room_id=room_id,
+                    events_and_contexts=events_and_contexts,
+                    inhibit_local_membership_updates=inhibit_local_membership_updates,
+                    state_delta_for_room=state_delta_for_room,
+                    new_forward_extremities=new_forward_extremities,
+                    new_event_links=new_event_links,
+                    sliding_sync_table_changes=sliding_sync_table_changes,
+                    new_state_dag_forward_extremities=new_state_dag_forward_extremities,
+                    sticky_events_to_un_soft_fail=sticky_events_to_un_soft_fail,
+                )
             persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
                 len(events_and_contexts)
             )
@@ -1107,6 +1130,46 @@ class PersistEventsStore:
             )
 
         return existing_prevs
+
+    async def _persist_events_in_rust(
+        self,
+        rust_transaction: RustTransaction,
+        room_id: str,
+        events_and_contexts: list[EventPersistencePair],
+        *,
+        inhibit_local_membership_updates: bool,
+    ) -> None:
+        """Write the chunk in Rust, as `_persist_events_txn` does, then apply
+        the cache updates its transaction asks for. Called with the chunk's
+        stream orderings allocated, which are finished after.
+
+        Raises:
+            PartialStateConflictError: as `_persist_events_txn`.
+        """
+        # A transaction that commits must have its effects applied, or the
+        # stream IDs it hands over are never finished. So the call and the
+        # apply run together under `delay_cancellation`, and cancelling the
+        # caller waits for both, as Python's transaction cannot be cancelled.
+
+        async def persist_and_apply() -> None:
+            effects, _, _ = await make_deferred_yieldable(
+                rust_transaction.persister.persist_events_txn(
+                    room_id,
+                    events_and_contexts,
+                    rust_transaction.prepared,
+                    inhibit_local_membership_updates=inhibit_local_membership_updates,
+                )
+            )
+            # The copy of a duplicated event that Rust wrote, as Python's
+            # `_add_to_cache` reads the deduplicated chunk.
+            written = self._filter_events_and_contexts_for_duplicates(
+                events_and_contexts
+            )
+            apply_rust_persist_effects(
+                self.store, effects, {event.event_id: event for event, _ in written}
+            )
+
+        await delay_cancellation(persist_and_apply())
 
     def _persist_events_txn(
         self,

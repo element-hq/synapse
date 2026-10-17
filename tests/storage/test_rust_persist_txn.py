@@ -33,7 +33,7 @@ from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from typing import Any
 from unittest import SkipTest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import attr
 from unpaddedbase64 import encode_base64
@@ -45,13 +45,14 @@ from synapse.api.constants import EventTypes, StickyEvent
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.crypto.event_signing import compute_content_hash
-from synapse.events import make_event_from_dict
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main.events import PersistEventsStore
+from synapse.storage.databases.main.rust_persist import apply_rust_persist_effects
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.synapse_rust.events import redact_event
@@ -371,7 +372,7 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             self.persister.last_chunk,
             (room_id, [event.event_id for event, _ in events_and_contexts]),
         )
-        effects, left, redacted = self.persister.persist_events_txn_for_test(
+        effects, left, redacted = self.persister.persist_events_txn_blocking(
             room_id,
             events_and_contexts,
             prepared,
@@ -386,7 +387,17 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         # update started, inside the Python transaction, and a retry of it
         # would apply the effects twice.
         self.assertEqual(effects.stream_ids, [])
-        calls.extend(self._apply_recorded(effects))
+        calls.extend(
+            self._apply_recorded(
+                effects,
+                {
+                    event.event_id: event
+                    for event, _ in PersistEventsStore._filter_events_and_contexts_for_duplicates(
+                        events_and_contexts
+                    )
+                },
+            )
+        )
         # The events left, as the steps after Rust's see them.
         left_events_and_contexts = []
         for i in left:
@@ -407,7 +418,7 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         twin.effects.extend(_merged_effects(calls))
 
     def _apply_recorded(
-        self, effects: PersistEffects
+        self, effects: PersistEffects, events: dict[str, EventBase]
     ) -> list[tuple[str, str | None, tuple, dict[str, Any]]]:
         """Apply Rust's effects, recording the stream IDs finished and the
         notifiers called, as `_python_effects` records Python's."""
@@ -490,7 +501,7 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                     self.hs, "run_as_background_process", run_as_background_process
                 )
             )
-            self.store._apply_rust_persist_effects(effects)
+            apply_rust_persist_effects(self.store, effects, events)
         return calls
 
     def _python_effects(
@@ -523,6 +534,17 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                 # name, and the function and its arguments.
                 owner_name = _background_process_owner(str(args[0]), args[3:])
                 args = ()
+            elif name == "local_prefill":
+                # `_add_to_cache`'s, by the events it puts in the cache.
+                to_prefill = next(
+                    cell.cell_contents
+                    for cell in callback.__closure__ or ()
+                    if isinstance(cell.cell_contents, list)
+                )
+                if not to_prefill:
+                    continue
+                owner_name = "_get_event_cache"
+                args = (frozenset(event.event_id for event in to_prefill),)
             elif name == "<lambda>" and cache is not None:
                 # A single-key cache's `prefill` or `invalidate`, by the
                 # method the lambda calls on the cache.
@@ -919,6 +941,15 @@ def _rust_effects(
                 {},
             )
         )
+    if effects.event_cache_prefills:
+        calls.append(
+            (
+                "local_prefill",
+                "_get_event_cache",
+                (frozenset(effects.event_cache_prefills),),
+                {},
+            )
+        )
     for event_id, state_group in effects.state_group_prefills:
         calls.append(
             ("prefill", "_get_state_group_for_event", ((event_id,), state_group), {})
@@ -950,16 +981,13 @@ def _python_steps_after_rust(
     sticky_events_to_un_soft_fail: Any = frozenset(),
 ) -> None:
     """The steps of `_persist_events_txn` that Rust does not do yet, as it
-    runs them. `events_and_contexts` are the events Rust left.
+    runs them: the profile updates at the end of `_update_current_state_txn`.
+    `events_and_contexts` are the events Rust left.
 
     A copy, so that the production transaction need not be split where the
-    Rust port has got to. Each step ported to Rust leaves this copy, and it
-    goes once Rust runs the whole transaction. A step added to Python's
-    transaction meanwhile runs in room A only, so its rows differ and the
-    comparison fails."""
-    # The end of `_update_metadata_tables_txn`, a Python cache prefill.
-    store._add_to_cache(txn, events_and_contexts)
-    # The end of `_update_current_state_txn`.
+    Rust port has got to. It goes once Rust runs the whole transaction. A
+    step added to Python's transaction meanwhile runs in room A only, so its
+    rows differ and the comparison fails."""
     if state_delta_for_room:
         assert sliding_sync_table_changes is not None
         store._record_profile_updates_for_state_delta_txn(
@@ -1472,6 +1500,30 @@ class PersistTxnTestCase(_TwinTestBase):
 
         self._step(duplicated)
         self._assert_twins_match()
+
+    def test_duplicates_in_chunk_outlier_last(self) -> None:
+        """The event cache gets the copy that was written, the earliest
+        non-outlier, as Python's `_add_to_cache` reads the deduplicated
+        chunk."""
+        event_ids = []
+
+        def duplicated(twin: _Twin) -> list[EventPersistencePair]:
+            pair = self._build(twin, EventTypes.Topic, {"topic": "twice"}, state_key="")
+            event_ids.append(pair[0].event_id)
+            return [pair, self._outlier(pair)]
+
+        # Trial's event cache holds one entry, so watch what goes in.
+        with patch.object(
+            self.store, "_get_event_cache", Mock(wraps=self.store._get_event_cache)
+        ) as event_cache:
+            self._step(duplicated)
+        self._assert_twins_match()
+        cached = {
+            call.args[0][0]: call.args[1].internal_metadata.is_outlier()
+            for call in event_cache.set_local.call_args_list
+            if call.args[0][0] in event_ids
+        }
+        self.assertEqual(cached, dict.fromkeys(event_ids, False))
 
     def test_backfill(self) -> None:
         self._message("now")
@@ -2029,7 +2081,7 @@ class PersistTxnTestCase(_TwinTestBase):
 
     def test_missing_room(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "Room does not exist !nope:test"):
-            self.persister.persist_events_txn_for_test(
+            self.persister.persist_events_txn_blocking(
                 "!nope:test",
                 [],
                 self.persister.last_prepared,

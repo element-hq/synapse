@@ -73,6 +73,7 @@ from synapse.storage.databases.main.events import (
     DeltaState,
     NewEventChainLinks,
     PreparedTableChanges,
+    RustTransaction,
     SlidingSyncMembershipInfo,
     SlidingSyncMembershipSnapshotSharedInsertValues,
     SlidingSyncStateInsertValues,
@@ -181,6 +182,8 @@ class _PreparedChunk:
     new_event_links: dict[str, NewEventChainLinks]
     # `None` to leave them to `_persist_events_and_state_updates`.
     table_changes: PreparedTableChanges | None
+    # What Rust prepared, if Rust prepared the chunk.
+    rust: PreparedChunk | None = None
 
 
 @attr.s(auto_attribs=True, slots=True)
@@ -467,6 +470,7 @@ def _prepared_chunk_from_rust(room_id: str, rust: PreparedChunk) -> _PreparedChu
             sliding_sync_table_changes=sliding_sync_table_changes,
             sticky_events_to_un_soft_fail=rust.sticky_events_to_un_soft_fail,
         ),
+        rust=rust,
     )
 
 
@@ -917,9 +921,25 @@ class EventsPersistenceStorageController:
                     new_event_links=prepared.new_event_links,
                     new_state_dag_forward_extremities=prepared.new_state_dag_extremities,
                     table_changes=prepared.table_changes,
+                    rust_transaction=self._rust_transaction(prepared),
                 )
 
         return replaced_events
+
+    def _rust_transaction(self, prepared: _PreparedChunk) -> RustTransaction | None:
+        """Whether to write the chunk in Rust: at `rust_event_persistence:
+        transaction`, if Rust prepared it. Not on a server that records
+        profile updates, which the Rust transaction leaves to Python."""
+        if (
+            prepared.rust is None
+            or self._rust_persister is None
+            or not self.hs.config.experimental.rust_event_persistence_at_least(
+                "transaction"
+            )
+            or self.hs.config.server.include_profile_updates_in_sync
+        ):
+            return None
+        return RustTransaction(self._rust_persister, prepared.rust)
 
     async def _prepare_chunk(
         self, room_id: str, chunk: list[EventPersistencePair], backfilled: bool

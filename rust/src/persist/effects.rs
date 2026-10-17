@@ -18,7 +18,7 @@
 //!
 //! The Python transaction queues them with `txn.call_after`. The Rust one
 //! collects them in this value instead, and Python applies it in one call to
-//! `DataStore._apply_rust_persist_effects`, so Rust never calls into Python
+//! `apply_rust_persist_effects`, so Rust never calls into Python
 //! per event. On failure nothing is applied, as `call_after` callbacks do not
 //! run then.
 //!
@@ -47,7 +47,7 @@ pub enum StreamChangeCache {
 }
 
 impl StreamChangeCache {
-    /// The name `_apply_rust_persist_effects` knows it by.
+    /// The name `apply_rust_persist_effects` knows it by.
     fn name(self) -> &'static str {
         match self {
             StreamChangeCache::Events => "events",
@@ -131,6 +131,9 @@ pub struct PersistEffects {
     /// moved, to mark finished once the caches are invalidated, as
     /// `get_next_mult_txn` does, with `stream_positions` updated after.
     sticky_stream_ids: Vec<i64>,
+    /// The events to put in `_get_event_cache`, by `_add_to_cache`'s
+    /// `local_prefill`. Python holds the events.
+    event_cache_prefills: Vec<String>,
     /// `_get_state_group_for_event.prefill((event_id,), state_group)`.
     state_group_prefills: Vec<(String, i64)>,
     /// `get_latest_event_ids_in_room.prefill((room_id,), extremities)`.
@@ -181,6 +184,10 @@ impl PersistEffects {
         &self.sticky_stream_ids
     }
 
+    pub fn add_event_cache_prefill(&mut self, event_id: String) {
+        self.event_cache_prefills.push(event_id);
+    }
+
     pub fn add_state_group_prefill(&mut self, event_id: String, state_group: i64) {
         self.state_group_prefills.push((event_id, state_group));
     }
@@ -220,6 +227,7 @@ impl PersistEffects {
         cache_invalidations = Vec::new(),
         cache_stream_ids = Vec::new(),
         sticky_stream_ids = Vec::new(),
+        event_cache_prefills = Vec::new(),
         state_group_prefills = Vec::new(),
         latest_event_ids = None,
         stream_changes = Vec::new(),
@@ -235,6 +243,7 @@ impl PersistEffects {
         cache_invalidations: Vec<(String, Vec<String>)>,
         cache_stream_ids: Vec<i64>,
         sticky_stream_ids: Vec<i64>,
+        event_cache_prefills: Vec<String>,
         state_group_prefills: Vec<(String, i64)>,
         latest_event_ids: Option<(String, Vec<String>)>,
         stream_changes: Vec<(String, String, i64)>,
@@ -249,6 +258,7 @@ impl PersistEffects {
             cache_invalidations,
             cache_stream_ids,
             sticky_stream_ids,
+            event_cache_prefills,
             state_group_prefills,
             latest_event_ids,
             stream_changes: stream_changes
@@ -307,6 +317,11 @@ impl PersistEffects {
     #[pyo3(name = "sticky_stream_ids")]
     fn py_sticky_stream_ids(&self) -> Vec<i64> {
         self.sticky_stream_ids.clone()
+    }
+
+    #[getter]
+    fn event_cache_prefills(&self) -> Vec<String> {
+        self.event_cache_prefills.clone()
     }
 
     #[getter]
