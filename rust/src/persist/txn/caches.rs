@@ -137,6 +137,21 @@ pub async fn invalidate_cache_and_stream(
     cache_name: &str,
     keys: Vec<String>,
 ) -> Result<(), WriteError> {
+    send_invalidation_to_replication(txn, input, effects, cache_name, &keys).await?;
+    effects.add_cache_invalidation(cache_name, keys);
+    Ok(())
+}
+
+/// `_send_invalidation_to_replication`: invalidate `keys` in the named
+/// cache on the other workers, through the cache stream. Nothing is
+/// invalidated locally.
+pub async fn send_invalidation_to_replication(
+    txn: &WriteTxn,
+    input: &TxnInput<'_>,
+    effects: &mut PersistEffects,
+    cache_name: &str,
+    keys: &[String],
+) -> Result<(), WriteError> {
     let stream_id = input.cache_stream.next_id(txn).await?;
     txn.execute(
         "INSERT INTO cache_invalidation_stream_by_instance
@@ -151,7 +166,6 @@ pub async fn invalidate_cache_and_stream(
         ],
     )
     .await?;
-    effects.add_cache_invalidation(cache_name, keys);
     effects.add_cache_stream_id(stream_id);
     effects.set_new_replication_data();
     Ok(())

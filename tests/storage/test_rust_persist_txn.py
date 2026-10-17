@@ -26,6 +26,7 @@ These need the native Rust Postgres driver:
     SYNAPSE_TEST_RUST_DRIVER=1 POSTGRES=1 run-trial.sh tests.storage.test_rust_persist_txn
 """
 
+import hashlib
 import json
 import re
 from collections.abc import Callable, Iterator
@@ -34,6 +35,7 @@ from typing import Any
 from unittest import SkipTest
 
 import attr
+from unpaddedbase64 import encode_base64
 
 from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
@@ -41,6 +43,7 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.constants import EventTypes, StickyEvent
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+from synapse.crypto.event_signing import compute_content_hash
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.rest import admin
@@ -65,6 +68,7 @@ _TABLES = (
     "current_state_delta_stream",
     "current_state_events",
     "destination_rooms_sticky_events_backlog",
+    "device_lists_remote_extremeties",
     "event_auth",
     "event_auth_chain_links",
     "event_auth_chain_to_calculate",
@@ -106,6 +110,10 @@ _TABLES = (
 # Tables with a `room_id` column that is no longer filled in, compared by
 # `event_id` instead.
 _UNFILLED_ROOM_ID = {"event_edges"}
+
+# Tables of remote users, compared on the twin's own remote users, see
+# `_remote_user`.
+_REMOTE_USER_TABLES = {"device_lists_remote_extremeties"}
 
 # Integer columns holding a position on a stream or a state group, by
 # column name or `(table, column)`, and which sequence the value is from.
@@ -218,15 +226,29 @@ class _Normaliser:
             return self.chains.get(value, f"chain?{value}")
         if (table, column) in _JSON_COLUMNS and value is not None:
             parsed = json.loads(value)
+            # The content hash covers the order of the auth events. Where it
+            # holds, each twin's order is the one its event was built with,
+            # so sorting them hides only event creation picking them from a
+            # set. An event stored redacted no longer matches its hash.
+            as_built = False
             if column == "json":
+                _, digest = compute_content_hash(parsed, hashlib.sha256)
+                as_built = parsed.get("hashes", {}).get("sha256") == encode_base64(
+                    digest
+                )
                 parsed.pop("hashes", None)
                 parsed.pop("signatures", None)
-            return json.dumps(self.json(parsed), sort_keys=True)
+            normalised = self.json(parsed)
+            if as_built and isinstance(normalised.get("auth_events"), list):
+                normalised["auth_events"].sort()
+            return json.dumps(normalised, sort_keys=True)
         kind = _STREAM_COLUMNS.get((table, column), _STREAM_COLUMNS.get(column))
         if isinstance(value, int) and not isinstance(value, bool) and kind:
             return self.position(kind, value)
         if isinstance(value, (list, tuple)):
             return tuple(self.value(table, column, v) for v in value)
+        if isinstance(value, (set, frozenset)):
+            return tuple(sorted(self.value(table, column, v) for v in value))
         if isinstance(value, str):
             return self.string(value)
         return value
@@ -359,10 +381,14 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             )
         )
         twin.effects.extend(_rust_effects(effects))
-        # As applying the effects would, so the cache stream moves on.
-        if effects.cache_stream_ids:
-            assert self.store._cache_id_gen is not None
-            self.store._cache_id_gen._mark_ids_as_finished(effects.cache_stream_ids)
+        # As the facade will once Rust commits, so the steps after Rust's,
+        # and the next persist, see the caches Rust invalidated. This also
+        # finishes the cache stream IDs. The test entry allocates no event
+        # stream IDs. Unlike production, the notifiers are called inside
+        # the Python transaction, and a retry of it would apply the effects
+        # twice.
+        self.assertEqual(effects.stream_ids, [])
+        self.store._apply_rust_persist_effects(effects)
         # The events left, as the steps after Rust's see them.
         left_events_and_contexts = []
         for i in left:
@@ -376,7 +402,6 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             self.events_store,
             txn,
             room_id=room_id,
-            all_events_and_contexts=events_and_contexts,
             events_and_contexts=left_events_and_contexts,
             de_outliered=[events_and_contexts[i][0] for i in de_outliered],
             **kwargs,
@@ -558,7 +583,9 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         raw: dict[str, tuple[list[str], list[tuple]]] = {}
         for table in _TABLES:
             columns = self._columns(table)
-            if "room_id" in columns and table not in _UNFILLED_ROOM_ID:
+            if table in _REMOTE_USER_TABLES:
+                where = "user_id LIKE ?"
+            elif "room_id" in columns and table not in _UNFILLED_ROOM_ID:
                 where = "room_id = ?"
             elif table == "event_auth_chain_links":
                 where = """origin_chain_id IN (
@@ -576,7 +603,9 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                 self.store.db_pool.execute(
                     "test",
                     f"SELECT {', '.join(selected)} FROM {table} WHERE {where}",
-                    twin.room_id,
+                    _remote_user(twin, "%")
+                    if table in _REMOTE_USER_TABLES
+                    else twin.room_id,
                 )
             )
             raw[table] = (columns, rows)
@@ -594,11 +623,9 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                 ),
                 key=repr,
             )
-        dump["cache_invalidation_stream_by_instance"] = [
-            # The twins share the clock, so the times compare as they are.
-            (instance_name, cache_func, normaliser.value("", "", keys), ts)
-            for _, instance_name, cache_func, keys, ts in twin.cache_rows
-        ]
+        dump["cache_invalidation_stream_by_instance"] = _cache_rows(
+            normaliser, twin.cache_rows
+        )
         dump["effects"] = sorted(
             (
                 (
@@ -740,6 +767,10 @@ def _rust_effects(
         )
     for event_id in effects.event_cache_invalidations:
         calls.append(("_invalidate_local_get_event_cache", None, (event_id,), {}))
+    for room_id, members_changed in effects.state_caches:
+        calls.append(
+            ("_invalidate_state_caches", None, (room_id, set(members_changed)), {})
+        )
     for cache_name, keys in effects.cache_invalidations:
         calls.append(("invalidate", cache_name, (tuple(keys),), {}))
     # Python's `get_next_txn` queues these per cache stream row. Applying
@@ -770,7 +801,7 @@ def _rust_effects(
 _STREAM_CHANGE_CACHES = {
     "events": "EventsRoomStreamChangeCache",
     "current_state_deltas": "_curr_state_delta_stream_cache",
-    "membership": "_membership_stream_cache",
+    "membership": "MembershipStreamChangeCache",
 }
 
 
@@ -779,7 +810,6 @@ def _python_steps_after_rust(
     txn: LoggingTransaction,
     *,
     room_id: str,
-    all_events_and_contexts: list[EventPersistencePair],
     events_and_contexts: list[EventPersistencePair],
     de_outliered: list[EventBase],
     inhibit_local_membership_updates: bool,
@@ -798,8 +828,6 @@ def _python_steps_after_rust(
     goes once Rust runs the whole transaction. A step added to Python's
     transaction meanwhile runs in room A only, so its rows differ and the
     comparison fails."""
-    min_stream_order = all_events_and_contexts[0][0].internal_metadata.stream_ordering
-
     # Left by `_update_outliers_txn`, until Rust inserts sticky events.
     # Python inserts these before deleting the redacted events' rows, so a
     # chunk that de-outliers a sticky event and redacts it differs here.
@@ -810,15 +838,11 @@ def _python_steps_after_rust(
 
     # The end of `_update_metadata_tables_txn`, a Python cache prefill.
     store._add_to_cache(txn, events_and_contexts)
+    # The end of `_update_current_state_txn`.
     if state_delta_for_room:
         assert sliding_sync_table_changes is not None
-        assert min_stream_order is not None
-        store._update_current_state_txn(
-            txn,
-            room_id,
-            state_delta_for_room,
-            min_stream_order,
-            sliding_sync_table_changes,
+        store._record_profile_updates_for_state_delta_txn(
+            txn, room_id, sliding_sync_table_changes
         )
     if store._msc4354_enabled:
         store.store.insert_sticky_events_txn(txn, [ev for ev, _ in events_and_contexts])
@@ -829,6 +853,61 @@ def _python_steps_after_rust(
     store._update_sliding_sync_tables_with_new_persisted_events_txn(
         txn, room_id, events_and_contexts
     )
+
+
+def _power_levels(user_id: str, level: int) -> dict[str, Any]:
+    """Power levels where `user_id` at `level` can send state if it is 50."""
+    return {
+        "users": {user_id: level},
+        "users_default": 0,
+        "events_default": 0,
+        "state_default": 50,
+        "invite": 50,
+        "ban": 50,
+        "kick": 50,
+        "redact": 50,
+        "events": {},
+    }
+
+
+def _rehash(pdu: dict[str, Any]) -> None:
+    """Give a hand-built event the content hash of its changed content."""
+    _, digest = compute_content_hash(pdu, hashlib.sha256)
+    pdu["hashes"] = {"sha256": encode_base64(digest)}
+
+
+def _remote_user(twin: _Twin, localpart: str = "remote") -> str:
+    """A remote user of the twin's own, on a server named for the twin, as
+    the twins' users are compared by name."""
+    return f"@{localpart}:twin-{twin.name}.example"
+
+
+def _cache_rows(normaliser: _Normaliser, rows: list[tuple]) -> list[tuple]:
+    """The cache stream rows, normalised, in stream order, but for the
+    order Python's sets give. Each run of rows that Python writes from a
+    set is merged: the `cs_cache_fake` rows of a room into its members and
+    the sizes of the rows, and the single-key rows of a cache into their
+    keys. The twins share the clock, so the times compare as they are."""
+    merged: list[tuple] = []
+    for _, instance_name, cache_func, keys, ts in rows:
+        keys = normaliser.value("", "", keys)
+        if cache_func == "cs_cache_fake":
+            group = (instance_name, cache_func, keys[0], ts)
+            members, sizes = tuple(keys[1:]), (len(keys),)
+        elif keys is not None and len(keys) == 1:
+            group = (instance_name, cache_func, None, ts)
+            members, sizes = keys, (1,)
+        else:
+            merged.append(((instance_name, cache_func, keys, ts), (), ()))
+            continue
+        if merged and merged[-1][0] == group:
+            _, run_members, run_sizes = merged.pop()
+            members, sizes = run_members + members, run_sizes + sizes
+        merged.append((group, members, sizes))
+    return [
+        (*group, tuple(sorted(members)), tuple(sorted(sizes)))
+        for group, members, sizes in merged
+    ]
 
 
 class PersistTxnTestCase(_TwinTestBase):
@@ -1275,6 +1354,235 @@ class PersistTxnTestCase(_TwinTestBase):
         )
         self._assert_twins_match()
 
+    def test_sliding_sync_state(self) -> None:
+        """The state columns of `sliding_sync_joined_rooms` and of the
+        membership snapshots."""
+        self._join_bob()
+        self._send(
+            EventTypes.RoomEncryption,
+            {"algorithm": "m.megolm.v1.aes-sha2"},
+            state_key="",
+        )
+        self._send(EventTypes.Name, {"name": "Room"}, state_key="")
+        self._send(
+            EventTypes.Tombstone,
+            {"body": "Moved", "replacement_room": "!new:test"},
+            state_key="",
+        )
+        self._send(
+            EventTypes.Member,
+            {"membership": "leave"},
+            state_key=self.bob,
+            sender=self.bob,
+        )
+        self._assert_twins_match()
+
+    def test_server_leaves(self) -> None:
+        """The last local member leaving takes the room's current state."""
+        self._join_bob()
+        self._send(
+            EventTypes.Member,
+            {"membership": "leave"},
+            state_key=self.bob,
+            sender=self.bob,
+        )
+        self._send(EventTypes.Member, {"membership": "leave"}, state_key=self.alice)
+        self._assert_twins_match()
+        for twin in self.twins:
+            self.assertEqual(
+                self.get_success(
+                    self.store.db_pool.simple_select_onecol(
+                        "current_state_events", {"room_id": twin.room_id}, "event_id"
+                    )
+                ),
+                [],
+            )
+
+    def _remote_membership(
+        self, twin: _Twin, membership: str, localpart: str = "remote"
+    ) -> EventPersistencePair:
+        """A membership event of one of the twin's remote users' own, as it
+        arrives over federation."""
+        remote = _remote_user(twin, localpart)
+        event, _ = self._build(
+            twin, EventTypes.Member, {"membership": "invite"}, state_key=remote
+        )
+        pdu = event.get_pdu_json()
+        pdu["content"] = {"membership": membership}
+        pdu["sender"] = remote
+        _rehash(pdu)
+        copy = make_event_from_dict(pdu, event.room_version, {})
+        twin.events[-1] = copy.event_id
+        context = self.get_success(
+            self.hs.get_state_handler().compute_event_context(copy)
+        )
+        return copy, context
+
+    def _track_device_lists(self, localpart: str = "remote") -> None:
+        """Track the device list of each twin's remote user."""
+        for twin in self.twins:
+            self.get_success(
+                self.store.db_pool.simple_upsert(
+                    "device_lists_remote_extremeties",
+                    {"user_id": _remote_user(twin, localpart)},
+                    {"stream_id": "1"},
+                )
+            )
+
+    def _tracks_device_list(self, twin: _Twin, localpart: str = "remote") -> bool:
+        return bool(
+            self.get_success(
+                self.store.db_pool.simple_select_onecol(
+                    "device_lists_remote_extremeties",
+                    {"user_id": _remote_user(twin, localpart)},
+                    "stream_id",
+                )
+            )
+        )
+
+    def test_remote_members(self) -> None:
+        """A remote user's device list is no longer tracked once the server
+        shares no room with them."""
+        self._skip_hand_built_in_state_dag_rooms()
+        self._track_device_lists()
+        # Invited, so not in a room with the server.
+        self._step(
+            lambda twin: [
+                self._build(
+                    twin,
+                    EventTypes.Member,
+                    {"membership": "invite"},
+                    state_key=_remote_user(twin),
+                )
+            ]
+        )
+        self._assert_twins_match()
+        self.assertFalse(self._tracks_device_list(self.twins[1]))
+
+        self._track_device_lists()
+        self._step(lambda twin: [self._remote_membership(twin, "join")])
+        self._assert_twins_match()
+        self.assertTrue(self._tracks_device_list(self.twins[1]))
+
+        self._step(lambda twin: [self._remote_membership(twin, "leave")])
+        self._assert_twins_match()
+        self.assertFalse(self._tracks_device_list(self.twins[1]))
+
+    def test_server_leaves_remote_member(self) -> None:
+        """When the server leaves, the members still joined have their
+        caches invalidated too, and a remote one's device list is no
+        longer tracked."""
+        self._skip_hand_built_in_state_dag_rooms()
+        self._step(lambda twin: [self._remote_membership(twin, "join")])
+        self._track_device_lists()
+        self._send(EventTypes.Member, {"membership": "leave"}, state_key=self.alice)
+        self._assert_twins_match()
+        self.assertFalse(self._tracks_device_list(self.twins[1]))
+
+    def test_server_leaves_remote_members(self) -> None:
+        """Two remote users unsubscribed by one persist."""
+        self._skip_hand_built_in_state_dag_rooms()
+        for localpart in ("one", "two"):
+            self._step(lambda twin: [self._remote_membership(twin, "join", localpart)])
+            self._track_device_lists(localpart)
+        self._send(EventTypes.Member, {"membership": "leave"}, state_key=self.alice)
+        self._assert_twins_match()
+        for localpart in ("one", "two"):
+            self.assertFalse(self._tracks_device_list(self.twins[1], localpart))
+
+    def test_many_members(self) -> None:
+        """More members change than one `cs_cache_fake` row names."""
+        self._step(
+            lambda twin: [
+                self._build(
+                    twin,
+                    EventTypes.Member,
+                    {"membership": "invite"},
+                    state_key=f"@u{i:03}:test",
+                )
+                for i in range(60)
+            ]
+        )
+        self._assert_twins_match()
+        # The last persist's rows.
+        self.assertEqual(
+            [len(row[3]) for row in self.twins[1].cache_rows[-2:]], [51, 11]
+        )
+
+    def _fork_against_bob(self, build: Callable[[int], int]) -> bool:
+        """Bob, with power, sends `build(base)` on a fork from `base`, and
+        Alice takes his power away on the other fork. State resolution
+        then removes what Bob sent from the current state. Returns whether
+        it does: in a state DAG room, Alice's event follows Bob's on the
+        state DAG, so they do not conflict."""
+        self._join_bob()
+        self._send(EventTypes.PowerLevels, _power_levels(self.bob, 50), state_key="")
+        base = self._message("base")
+        build(base)
+        # Alice's event sorts after Bob's.
+        self.reactor.advance(1)
+        self._send(
+            EventTypes.PowerLevels,
+            _power_levels(self.bob, 0),
+            state_key="",
+            prev=[base],
+        )
+        return not KNOWN_ROOM_VERSIONS[self.room_version].msc4242_state_dags
+
+    def test_state_removed_by_state_res(self) -> None:
+        """A state key that leaves the current state."""
+        removed = self._fork_against_bob(
+            lambda base: self._send(
+                EventTypes.Topic,
+                {"topic": "Bob's"},
+                state_key="",
+                prev=[base],
+                sender=self.bob,
+            )
+        )
+        self._assert_twins_match()
+        self.assertEqual(
+            removed,
+            bool(
+                self.get_success(
+                    self.store.db_pool.execute(
+                        "test",
+                        """SELECT 1 FROM current_state_delta_stream
+                    WHERE room_id = ? AND type = ? AND event_id IS NULL""",
+                        self.twins[1].room_id,
+                        EventTypes.Topic,
+                    )
+                )
+            ),
+        )
+
+    def test_membership_removed_by_state_res(self) -> None:
+        """A local member's membership that leaves the current state, with
+        their membership snapshot."""
+        carol = self.register_user("carol", "pass")
+        removed = self._fork_against_bob(
+            lambda base: self._send(
+                EventTypes.Member,
+                {"membership": "invite"},
+                state_key=carol,
+                prev=[base],
+                sender=self.bob,
+            )
+        )
+        self._assert_twins_match()
+        for table in ("local_current_membership", "sliding_sync_membership_snapshots"):
+            self.assertEqual(
+                self.get_success(
+                    self.store.db_pool.simple_select_onecol(
+                        table,
+                        {"room_id": self.twins[1].room_id, "user_id": carol},
+                        "membership",
+                    )
+                ),
+                [] if removed else ["invite"],
+                table,
+            )
+
     def test_push_actions(self) -> None:
         """Push actions move from the staging table, and a redaction
         removes them."""
@@ -1338,6 +1646,7 @@ class PersistTxnTestCase(_TwinTestBase):
         pdu["unsigned"] = {}
         if stripped_state is not None:
             pdu["unsigned"][f"{membership}_room_state"] = stripped_state
+        _rehash(pdu)
         copy = make_event_from_dict(pdu, event.room_version, {})
         copy.internal_metadata.outlier = True
         copy.internal_metadata.out_of_band_membership = True

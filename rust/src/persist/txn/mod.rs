@@ -21,15 +21,17 @@
 //! cache updates Python queues with `txn.call_after`.
 //!
 //! This is being ported a group of steps at a time, from the start of the
-//! transaction. So far it covers the steps up to `_update_metadata_tables_txn`:
-//! the events themselves ([`events`]), the room's DAG ([`edges`]) and the
-//! tables about the events ([`metadata`]), with the cache stream rows
+//! transaction. So far it covers the steps through
+//! `_update_current_state_txn`, except its profile updates: the events themselves ([`events`]), the
+//! room's DAG ([`edges`]), the tables about the events ([`metadata`]) and
+//! the room's current state ([`current_state`]), with the cache stream rows
 //! ([`caches`]). It returns the events left at that point. The Python steps
 //! after it run only in `tests/storage/test_rust_persist_txn.py`, which
 //! persists the rest of a chunk in Python and compares the rows with
 //! Python's.
 
 pub mod caches;
+pub mod current_state;
 pub mod edges;
 pub mod events;
 pub mod json;
@@ -215,6 +217,7 @@ async fn persist_events_txn_steps<'a>(
     let (Some(first), Some(last)) = (input.events.first(), input.events.last()) else {
         return Err(anyhow!("no events to persist in {room_id}").into());
     };
+    let min_stream_order = first.stream_ordering;
     let max_stream_order = last.stream_ordering;
     // Python takes the first event's room version for the whole chunk.
     let room_version = first.event.room_version();
@@ -272,6 +275,15 @@ async fn persist_events_txn_steps<'a>(
     let events = events::store_rejections(txn, input, events).await?;
 
     metadata::update_metadata_tables(txn, input, &events, effects).await?;
+
+    // Last, as it reads the memberships the metadata step stored.
+    if let Some(delta) = &state.state_delta {
+        let changes = input.prepared.sliding_sync.as_ref().ok_or_else(|| {
+            anyhow!("a state delta for {room_id} without its sliding sync changes")
+        })?;
+        current_state::update_current_state(txn, input, delta, changes, min_stream_order, effects)
+            .await?;
+    }
 
     Ok(TxnPrefix {
         events,

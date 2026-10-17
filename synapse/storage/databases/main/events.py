@@ -2220,6 +2220,20 @@ class PersistEventsStore:
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
 
+        self._record_profile_updates_for_state_delta_txn(
+            txn, room_id, sliding_sync_table_changes
+        )
+
+    def _record_profile_updates_for_state_delta_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        sliding_sync_table_changes: SlidingSyncTableChanges,
+    ) -> None:
+        """The end of `_update_current_state_txn`: record the profile updates
+        for the local members whose membership changed, and for the members
+        whose snapshots were deleted, as they were state reset out of the
+        room."""
         if self._include_profile_updates_in_sync:
             # Handle changes to the profile updates stream.
             # We've already done a bunch of work calculating the changes needed
