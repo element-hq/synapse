@@ -1,0 +1,1 @@
+Write persisted events to the database in Rust, behind `experimental_features.rust_event_persistence`.

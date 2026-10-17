@@ -145,6 +145,15 @@ impl HomeServer {
             .getattr(intern!(py, "db_pool"))
     }
 
+    /// The state database pool (`hs.get_datastores().state.db_pool`).
+    pub fn state_database_pool<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        self.0
+            .bind(py)
+            .call_method0(intern!(py, "get_datastores"))?
+            .getattr(intern!(py, "state"))?
+            .getattr(intern!(py, "db_pool"))
+    }
+
     /// The Rust `Store` (`hs.get_rust_store()`), which the main datastore
     /// builds and owns. See [`crate::storage::python`].
     pub fn get_rust_store(&self, py: Python<'_>) -> PyResult<Arc<Store>> {

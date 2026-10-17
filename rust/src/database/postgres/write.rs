@@ -44,7 +44,7 @@ use super::pool::{ConnectionPool, PooledConnection};
 use crate::storage::events::Querier;
 
 /// Python's `MAX_NUMBER_OF_ATTEMPTS`.
-const MAX_ATTEMPTS: u32 = 5;
+pub const MAX_ATTEMPTS: u32 = 5;
 
 /// Values of [`WriteTxn::failed`].
 const NOT_FAILED: u8 = 0;
@@ -73,24 +73,58 @@ pub enum WriteError {
     Other(anyhow::Error),
 }
 
+/// How [`WriteError::from_pg`] classifies a database error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PgErrorKind {
+    Conflict,
+    Cancelled,
+    Constraint,
+    ConnectionLost,
+    Other,
+}
+
+impl PgErrorKind {
+    fn of(error: &tokio_postgres::Error) -> Self {
+        match error.code().map(|code| code.code()) {
+            Some("40001" | "40P01") => PgErrorKind::Conflict,
+            Some("57014") => PgErrorKind::Cancelled,
+            Some(code) if code.starts_with("23") => PgErrorKind::Constraint,
+            Some(code) if ["08", "57", "58"].iter().any(|c| code.starts_with(c)) => {
+                PgErrorKind::ConnectionLost
+            }
+            None if error.is_closed() => PgErrorKind::ConnectionLost,
+            _ => PgErrorKind::Other,
+        }
+    }
+
+    fn is_retryable(self) -> bool {
+        matches!(
+            self,
+            PgErrorKind::Conflict | PgErrorKind::Cancelled | PgErrorKind::ConnectionLost
+        )
+    }
+}
+
 impl WriteError {
     fn from_pg(context: &str, error: tokio_postgres::Error) -> Self {
         let message = match error.as_db_error() {
             Some(db) => format!("{context}: {} ({})", db.message(), db.code().code()),
             None => format!("{context}: {error}"),
         };
-        match error.code().map(|code| code.code()) {
-            Some("40001" | "40P01") => WriteError::Conflict(message),
-            Some("57014") => WriteError::Cancelled(message),
-            Some(code) if code.starts_with("23") => WriteError::Constraint {
-                sqlstate: code.to_owned(),
+        match PgErrorKind::of(&error) {
+            PgErrorKind::Conflict => WriteError::Conflict(message),
+            PgErrorKind::Cancelled => WriteError::Cancelled(message),
+            PgErrorKind::Constraint => WriteError::Constraint {
+                sqlstate: error
+                    .code()
+                    .map(|code| code.code().to_owned())
+                    .unwrap_or_default(),
                 message,
             },
-            Some(code) if ["08", "57", "58"].iter().any(|c| code.starts_with(c)) => {
-                WriteError::ConnectionLost(message)
+            PgErrorKind::ConnectionLost => WriteError::ConnectionLost(message),
+            PgErrorKind::Other => {
+                WriteError::Other(anyhow::Error::new(error).context(context.to_owned()))
             }
-            None if error.is_closed() => WriteError::ConnectionLost(message),
-            _ => WriteError::Other(anyhow::Error::new(error).context(context.to_owned())),
         }
     }
 
@@ -101,6 +135,28 @@ impl WriteError {
             WriteError::Conflict(_) | WriteError::ConnectionLost(_) | WriteError::Cancelled(_)
         )
     }
+}
+
+/// Whether running again the work that failed with `error` may succeed: a
+/// cause in its chain is a database error of a kind [`run_write_interaction`]
+/// retries, such as a lost connection. For work outside a write transaction,
+/// such as a group of reads, which Python runs in a `runInteraction` that
+/// retries them.
+///
+/// A [`WriteError`] in the chain does not count: it comes from a write
+/// interaction that has already run its own retries.
+pub fn is_retryable_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        if let Some(error) = cause.downcast_ref::<tokio_postgres::Error>() {
+            PgErrorKind::of(error).is_retryable()
+        } else if let Some(deadpool::managed::PoolError::Backend(error)) =
+            cause.downcast_ref::<deadpool::managed::PoolError<tokio_postgres::Error>>()
+        {
+            PgErrorKind::of(error).is_retryable()
+        } else {
+            false
+        }
+    })
 }
 
 impl std::fmt::Display for WriteError {
@@ -841,6 +897,37 @@ mod tests {
             panic!("expected Other");
         };
         assert_eq!(format!("{error:#}"), "reading the chain links: boom");
+    }
+
+    #[test]
+    fn retryable_errors_are_found_in_the_chain() {
+        // A write interaction has already retried its own errors.
+        let wrapped = |error: WriteError| anyhow::Error::new(error).context("reading");
+        assert!(!is_retryable_error(&wrapped(WriteError::Conflict(
+            "x".into()
+        ))));
+        assert!(!is_retryable_error(&wrapped(WriteError::Cancelled(
+            "x".into()
+        ))));
+        assert!(!is_retryable_error(&anyhow::anyhow!("x")));
+
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            let conn = pool.get().await.unwrap();
+            conn.batch_execute("SET statement_timeout = 1")
+                .await
+                .unwrap();
+            let cancelled = conn.query("SELECT pg_sleep(1)", &[]).await.unwrap_err();
+            conn.batch_execute("RESET statement_timeout").await.unwrap();
+            let cancelled = anyhow::Error::new(cancelled).context("running a query");
+            assert!(is_retryable_error(&cancelled), "{cancelled:#}");
+
+            let error = conn.query("SELECT 1/0", &[]).await.unwrap_err();
+            assert!(!is_retryable_error(&anyhow::Error::new(error)));
+        });
+        teardown(&rt, &pool, &table);
     }
 
     #[test]

@@ -51,6 +51,15 @@ class Persister:
         shadow: bool,
     ) -> PreparedChunk:
         """As `prepare_chunk`, but blocks. For tests."""
+    def persist_events_txn_for_test(
+        self,
+        room_id: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+    ) -> tuple[PersistEffects, list[int]]:
+        """Run the part of the write transaction ported to Rust so far over
+        the chunk, whose events have their stream orderings set, and commit
+        it. Returns what it collected for Python to apply and the positions
+        in the chunk of the events left for the Python steps after it."""
 
 class PreparedChunk:
     """What `Persister.prepare_chunk` computed. If `state_res_fallback` is

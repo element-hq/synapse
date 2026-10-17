@@ -37,7 +37,8 @@
 //!   is the lowest group ID. Python takes the first in its set's order.
 //! - [`NativeStateResolver`] reads and bumps the state groups on the main
 //!   database's pool. Python uses the state database. Like the Rust state
-//!   resolution store, this needs the two to be the same database.
+//!   resolution store, this needs the two to be the same database, which
+//!   `Persister::for_homeserver` checks.
 //!
 //! A step can fail with [`StateResFallback`] after it has added to the
 //! caller's [`PersistCounts`] and bumped the input groups. A caller that

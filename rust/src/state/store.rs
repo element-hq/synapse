@@ -137,7 +137,7 @@ impl PostgresStateResStore {
         let conn = pool
             .get()
             .await
-            .map_err(|e| anyhow::anyhow!("checking out a database connection: {e}"))?;
+            .map_err(|e| anyhow::Error::new(e).context("checking out a database connection"))?;
         let store = PostgresStateResStore {
             conn: Some(conn),
             handle,

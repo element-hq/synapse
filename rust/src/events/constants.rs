@@ -102,6 +102,8 @@ pub mod unsigned_field {
 
 /// Relation types (the `rel_type` of an `m.relates_to`).
 pub mod relation_type {
+    /// Relation type: m.annotation
+    pub const ANNOTATION: &str = "m.annotation";
     /// Relation type: m.reference
     pub const REFERENCE: &str = "m.reference";
     /// Relation type: m.replace

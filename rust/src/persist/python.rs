@@ -27,13 +27,16 @@ use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyDict};
 
 use super::{
     context::PersistContext,
+    effects::PersistEffects,
     extremities::MissingPrevStateEvents,
     metrics::{PersistCounts, PersistMetrics},
     prepare::{self, PrepareInput, PrepareOptions, Prepared},
     reader::{self, PersistReader, PyDelta, PySlidingSync},
     state_delta::NativeStateResolver,
+    txn::{self, TxnEvent, TxnInput},
 };
 use crate::{
+    database::postgres::write::{is_retryable_error, run_write_interaction, MAX_ATTEMPTS},
     deferred::{create_deferred_with, OnCancel},
     errors::SynapseError,
     event_auth::AuthFailure,
@@ -86,7 +89,9 @@ pub(super) struct PersisterInner {
 impl Persister {
     /// Build the persister for `homeserver`, whose main database uses the
     /// native driver through `connection_pool` (a `RustConnectionPool`).
-    /// `None` if this instance does not write events.
+    /// `None` if this instance does not write events, or if the state tables
+    /// are in another database: persisting reads and writes them in the
+    /// main database's transactions.
     pub fn for_homeserver(
         py: Python<'_>,
         homeserver: &HomeServer,
@@ -97,6 +102,16 @@ impl Persister {
     ) -> PyResult<Option<Persister>> {
         let instance_name = homeserver.instance_name(py)?;
         if !homeserver.event_writers(py)?.contains(&instance_name) {
+            return Ok(None);
+        }
+
+        if !homeserver
+            .state_database_pool(py)?
+            .is(&homeserver.main_database_pool(py)?)
+        {
+            log::warn!(
+                "The state tables are not in the main database: persisting events in Python"
+            );
             return Ok(None);
         }
 
@@ -165,15 +180,37 @@ impl Persister {
                 sticky: inner.msc4354_enabled,
                 dry_run: shadow,
             };
-            let mut counts = PersistCounts::default();
-            let prepared =
-                prepare::prepare_chunk(&reader, &resolver, &pool, &input, &options, &mut counts)
-                    .await
-                    .map_err(persist_error_to_py)?;
-            Ok(PreparedChunk {
-                prepared,
-                counts: Mutex::new(Some(counts)),
-            })
+            // Python reads in `runInteraction`s, which retry on a lost
+            // connection or a cancelled statement. Here the whole chunk is
+            // prepared again. That is safe as its only write, bumping the
+            // state groups it uses, can be repeated, and runs in a write
+            // interaction with its own retries.
+            let mut attempt = 1;
+            loop {
+                let mut counts = PersistCounts::default();
+                match prepare::prepare_chunk(
+                    &reader,
+                    &resolver,
+                    &pool,
+                    &input,
+                    &options,
+                    &mut counts,
+                )
+                .await
+                {
+                    Ok(prepared) => {
+                        return Ok(PreparedChunk {
+                            prepared,
+                            counts: Mutex::new(Some(counts)),
+                        })
+                    }
+                    Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(&e) => {
+                        log::warn!("[TXN RETRY] {{prepare_chunk}} {e:#} {attempt}/{MAX_ATTEMPTS}");
+                        attempt += 1;
+                    }
+                    Err(e) => return Err(persist_error_to_py(e)),
+                }
+            }
         }
         .boxed())
     }
@@ -229,6 +266,47 @@ impl Persister {
         if let Some(counts) = counts {
             self.inner.metrics.record(|total| total.add(counts));
         }
+    }
+
+    /// Run the part of the write transaction ported so far over the chunk,
+    /// whose events must have their stream orderings set, and commit it.
+    /// Returns what it collected for Python to apply and the positions in
+    /// the chunk of the events left for the Python steps after it. For
+    /// `tests/storage/test_rust_persist_txn.py`.
+    fn persist_events_txn_for_test(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+    ) -> PyResult<(PersistEffects, Vec<usize>)> {
+        let events = events_and_contexts
+            .into_iter()
+            .map(|(event, context)| TxnEvent::new(event.bind(py).get().shallow_clone(), context))
+            .collect::<anyhow::Result<Vec<_>>>()
+            .map_err(persist_error_to_py)?;
+        let pool = self.inner.pool.get()?;
+        let future = async move {
+            let input = TxnInput {
+                room_id: &room_id,
+                events: &events,
+            };
+            run_write_interaction(&pool, "persist_events", |txn, _| {
+                let input = &input;
+                async move {
+                    let mut effects = PersistEffects::default();
+                    let left = txn::persist_events_txn(txn, input, &mut effects).await?;
+                    let left = left
+                        .iter()
+                        .filter_map(|e| input.events.iter().position(|x| std::ptr::eq(x, *e)))
+                        .collect();
+                    Ok((effects, left))
+                }
+                .boxed()
+            })
+            .await
+            .map_err(|e| persist_error_to_py(anyhow::Error::new(e)))
+        };
+        self.block_on(py, future.boxed())
     }
 
     /// As [`Self::prepare_chunk`], but blocks.

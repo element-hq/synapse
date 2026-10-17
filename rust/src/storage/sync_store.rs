@@ -250,7 +250,9 @@ impl<'a> SyncReader<'a> {
             .pool
             .get()
             .await
-            .map_err(|e| anyhow::anyhow!("checking out a database connection: {e}"))?;
+            // Keep the pool's error as the cause, so that a caller can tell
+            // a lost connection, which is worth retrying.
+            .map_err(|e| anyhow::Error::new(e).context("checking out a database connection"))?;
         self.update_stats(|stats| {
             stats.checkouts += 1;
             stats.checkout_time += start.elapsed();

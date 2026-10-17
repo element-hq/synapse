@@ -598,7 +598,8 @@ class EventsPersistenceStorageController:
         self.hs = hs
 
         # The Rust persister, at `rust_event_persistence` levels other than
-        # "off". It needs the native Rust Postgres driver.
+        # "off". It needs the native Rust Postgres driver, with the state
+        # tables in the main database.
         self._rust_persister: Persister | None = None
         rust_level = hs.config.experimental.rust_event_persistence
         # Whether a Rust error, or in shadow mode a mismatch between the two
@@ -609,7 +610,8 @@ class EventsPersistenceStorageController:
             if self._rust_persister is None:
                 logger.warning(
                     "rust_event_persistence is %r but the main database does not "
-                    "use the native Rust driver: persisting events in Python",
+                    "use the native Rust driver or does not hold the state tables: "
+                    "persisting events in Python",
                     rust_level,
                 )
             else:
@@ -924,12 +926,15 @@ class EventsPersistenceStorageController:
     ) -> _PreparedChunk:
         """Compute what persisting the chunk needs, in Python or Rust as
         `rust_event_persistence` says."""
-        if self._rust_persister is None:
+        # Read per chunk, so that it can be lowered at runtime, as tests do.
+        # Raising it from "off" has no effect: the persister only exists if
+        # the level was not "off" at startup.
+        level = self.hs.config.experimental.rust_event_persistence
+        if self._rust_persister is None or level == "off":
             return await self._prepare_chunk_in_python(
                 room_id, chunk, backfilled, table_changes=False
             )
 
-        level = self.hs.config.experimental.rust_event_persistence
         if level == "shadow":
             return await self._prepare_chunk_in_shadow_mode(room_id, chunk, backfilled)
 

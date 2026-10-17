@@ -412,6 +412,15 @@ class PrepareTestCase(_PrepareTestBase):
         assert stream_ordering is not None
         self.assertLess(stream_ordering, 0)
 
+    def test_off_uses_python(self) -> None:
+        """The level is read per chunk, and "off" skips Rust even though
+        the persister exists."""
+        self.hs.config.experimental.rust_event_persistence = "off"
+        persister = Mock()
+        self.persistence._rust_persister = persister
+        self._send("hello")
+        persister.prepare_chunk.assert_not_called()
+
     def test_rejection_is_raised(self) -> None:
         """A chunk Rust rejects is not computed again in Python."""
         self.persistence._rust_persist_strict = False
