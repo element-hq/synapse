@@ -86,6 +86,7 @@ from synapse.storage.databases.main.metrics import ServerMetricsStore
 from synapse.storage.databases.main.monthly_active_users import (
     MonthlyActiveUsersWorkerStore,
 )
+from synapse.storage.databases.main.openid import OpenIdStore
 from synapse.storage.databases.main.presence import PresenceStore
 from synapse.storage.databases.main.profile import ProfileWorkerStore
 from synapse.storage.databases.main.purge_events import PurgeEventsStore
@@ -167,6 +168,7 @@ class GenericWorkerStore(
     TransactionWorkerStore,
     LockStore,
     SessionStore,
+    OpenIdStore,
     TaskSchedulerWorkerStore,
     ExperimentalFeaturesStore,
     SlidingSyncStore,
