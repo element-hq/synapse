@@ -796,6 +796,13 @@ class EventsPersistenceStorageController:
 
         Recalculates the current state for a room, and persists it.
         """
+        if (
+            self._rust_persister is not None
+            and self.hs.config.experimental.rust_event_persistence_at_least("full")
+            and await self._update_current_state_in_rust(room_id)
+        ):
+            return
+
         state = await self._calculate_current_state(room_id)
         delta = await self._calculate_state_delta(room_id, state)
         sliding_sync_table_changes = (
@@ -807,6 +814,50 @@ class EventsPersistenceStorageController:
         await self.persist_events_store.update_current_state(
             room_id, delta, sliding_sync_table_changes
         )
+
+    async def _update_current_state_in_rust(self, room_id: str) -> bool:
+        """`_update_current_state` in Rust, at `rust_event_persistence:
+        full`. False if Rust cannot resolve the room's state, and wrote
+        nothing."""
+        assert self._rust_persister is not None
+        persister = self._rust_persister
+
+        async def update_and_apply() -> bool:
+            # The Deferred follows the logcontext rules already.
+            try:
+                update = await persister.update_current_state(room_id)
+            except BaseException:
+                # Rust finished the stream ID, if it took one. Tell
+                # replication, as `get_next` does when its block raises.
+                self.hs.get_replication_notifier().notify_replication()
+                raise
+            # Recorded first, as Python records them before it writes.
+            if update.state_res_stats is not None:
+                self._state_resolution_handler.record_rust_state_res_metrics(
+                    room_id, update.state_res_stats
+                )
+            effects = update.effects
+            if effects is not None:
+                store = self.persist_events_store.store
+                try:
+                    apply_rust_persist_effects(store, effects, finish_stream_ids=False)
+                except BaseException:
+                    # Whatever failed, the stream ID must not stall the
+                    # stream.
+                    finish_rust_persist_stream_ids(store, effects, succeeded=False)
+                    raise
+                finish_rust_persist_stream_ids(store, effects, succeeded=True)
+            if update.fallback_reason is not None:
+                logger.info(
+                    "Recalculating the current state of %s in Python: %s",
+                    room_id,
+                    update.fallback_reason,
+                )
+                return False
+            return True
+
+        # The effects of a write that commits must be applied.
+        return await delay_cancellation(update_and_apply())
 
     async def _calculate_current_state(self, room_id: str) -> StateMap[str]:
         """Calculate the current state of a room, based on the forward extremities

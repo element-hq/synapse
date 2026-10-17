@@ -1545,6 +1545,223 @@ class RustFullTestCase(unittest.HomeserverTestCase):
         self.get_success(defer.ensureDeferred(persist()))
         self.assertEqual(seen, [True])
 
+    def _current_topic(self) -> list[str]:
+        return self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                "current_state_events",
+                {"room_id": self.room_id, "type": EventTypes.Topic},
+                "event_id",
+            )
+        )
+
+    def test_update_current_state(self) -> None:
+        """Rust recalculates the current state from the extremities, writes
+        the change with a stream ID it takes, and Python applies it."""
+        topic = self.helper.send_state(
+            self.room_id, EventTypes.Topic, {"topic": "hi"}, tok=self.token
+        )["event_id"]
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                "current_state_events",
+                {"room_id": self.room_id, "type": EventTypes.Topic},
+                desc="test",
+            )
+        )
+        before = self.store._stream_id_gen.get_current_token()
+        with patch.object(
+            self.persistence,
+            "_calculate_current_state",
+            side_effect=AssertionError("calculated in Python"),
+        ):
+            self.get_success(self.persistence.update_current_state(self.room_id))
+        self.assertEqual(self._current_topic(), [topic])
+        after = self.store._stream_id_gen.get_current_token()
+        self.assertEqual(after, before + 1)
+        # The delta row is at the stream ID taken.
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "current_state_delta_stream",
+                {"room_id": self.room_id, "stream_id": after},
+                ("type", "event_id", "prev_event_id"),
+            )
+        )
+        # No previous event, as its row was gone.
+        self.assertEqual(rows, [(EventTypes.Topic, topic, None)])
+
+    def test_update_current_state_unchanged(self) -> None:
+        """A room whose current state is right takes no stream ID."""
+        before = self.store._stream_id_gen.get_current_token()
+        with patch.object(
+            self.persistence,
+            "_calculate_current_state",
+            side_effect=AssertionError("calculated in Python"),
+        ):
+            self.get_success(self.persistence.update_current_state(self.room_id))
+        self.assertEqual(self.store._stream_id_gen.get_current_token(), before)
+
+    def test_update_current_state_falls_back(self) -> None:
+        """A room on state resolution v1 whose extremities need resolving
+        is recalculated in Python."""
+        self.room_id = self.helper.create_room_as(
+            self.user, room_version=RoomVersions.V1.identifier, tok=self.token
+        )
+        # Two topics on the same extremity, so the room forks.
+        pairs = []
+        for topic in ("A", "B"):
+            event, unpersisted = self.get_success(
+                self.hs.get_event_creation_handler().create_event(
+                    create_requester(self.user),
+                    {
+                        "type": EventTypes.Topic,
+                        "state_key": "",
+                        "content": {"topic": topic},
+                        "room_id": self.room_id,
+                        "sender": self.user,
+                    },
+                )
+            )
+            pairs.append((event, self.get_success(unpersisted.persist(event))))
+        for pair in pairs:
+            self.get_success(self.persistence.persist_events([pair]))
+        calculate = self.persistence._calculate_current_state
+        id_gen = self.store._stream_id_gen
+        before = id_gen.get_current_token()
+        tokens = []
+
+        async def in_python(room_id: str) -> Any:
+            # Rust took no stream ID before handing back.
+            tokens.append(id_gen.get_current_token())
+            return await calculate(room_id)
+
+        with patch.object(
+            self.persistence, "_calculate_current_state", side_effect=in_python
+        ):
+            self.get_success(self.persistence.update_current_state(self.room_id))
+        self.assertEqual(tokens, [before])
+
+    def _fork_topics(self) -> None:
+        """Two topics on the same extremity, persisted one after the other,
+        so the room has two extremities in two state groups."""
+        pairs = []
+        for topic in ("A", "B"):
+            event, unpersisted = self.get_success(
+                self.hs.get_event_creation_handler().create_event(
+                    create_requester(self.user),
+                    {
+                        "type": EventTypes.Topic,
+                        "state_key": "",
+                        "content": {"topic": topic},
+                        "room_id": self.room_id,
+                        "sender": self.user,
+                    },
+                )
+            )
+            pairs.append((event, self.get_success(unpersisted.persist(event))))
+        for pair in pairs:
+            self.get_success(self.persistence.persist_events([pair]))
+
+    def _delete_current_state(self, event_type: str, state_key: str) -> None:
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                "current_state_events",
+                {"room_id": self.room_id, "type": event_type, "state_key": state_key},
+                desc="test",
+            )
+        )
+
+    def test_update_current_state_resolves(self) -> None:
+        """Extremities in several state groups are resolved in Rust, to the
+        state Python resolves to, and the resolution is recorded."""
+        self._fork_topics()
+        expected = self.get_success(
+            self.persistence._calculate_current_state(self.room_id)
+        )
+        self._delete_current_state(EventTypes.Topic, "")
+        handler = self.hs.get_state_resolution_handler()
+        handler._state_res_metrics.clear()
+        with patch.object(
+            self.persistence,
+            "_calculate_current_state",
+            side_effect=AssertionError("calculated in Python"),
+        ):
+            self.get_success(self.persistence.update_current_state(self.room_id))
+        self.assertEqual(self._current_topic(), [expected[(EventTypes.Topic, "")]])
+        self.assertIn(self.room_id, handler._state_res_metrics)
+
+    def test_update_current_state_membership(self) -> None:
+        """A membership the update restores moves the membership tables on
+        and streams the state caches' invalidation."""
+        bob = self.register_user("bob", "pass")
+        bob_token = self.login("bob", "pass")
+        self.helper.join(self.room_id, bob, tok=bob_token)
+        self._delete_current_state(EventTypes.Member, bob)
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                "sliding_sync_membership_snapshots",
+                {"room_id": self.room_id, "user_id": bob},
+                desc="test",
+            )
+        )
+        cache_position = self.store._cache_id_gen.get_current_token()  # type: ignore[union-attr]
+        self.get_success(self.persistence.update_current_state(self.room_id))
+
+        (membership,) = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                "current_state_events",
+                {"room_id": self.room_id, "type": EventTypes.Member, "state_key": bob},
+                "membership",
+            )
+        )
+        self.assertEqual(membership, "join")
+        (snapshot,) = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                "sliding_sync_membership_snapshots",
+                {"room_id": self.room_id, "user_id": bob},
+                "membership",
+            )
+        )
+        self.assertEqual(snapshot, "join")
+        cache_rows = self.get_success(
+            self.store.db_pool.execute(
+                "test",
+                "SELECT cache_func FROM cache_invalidation_stream_by_instance"
+                " WHERE stream_id > ?",
+                cache_position,
+            )
+        )
+        self.assertIn(("cs_cache_fake",), cache_rows)
+
+    def test_update_current_state_apply_failure(self) -> None:
+        """If applying the update's effects fails, its stream ID is still
+        finished."""
+
+        class ApplyFailed(Exception):
+            pass
+
+        self._delete_current_state(EventTypes.Topic, "")
+        self.helper.send_state(
+            self.room_id, EventTypes.Topic, {"topic": "hi"}, tok=self.token
+        )
+        self._delete_current_state(EventTypes.Topic, "")
+        with patch(
+            "synapse.storage.controllers.persist_events.apply_rust_persist_effects",
+            side_effect=ApplyFailed(),
+        ):
+            self.get_failure(
+                self.persistence.update_current_state(self.room_id), ApplyFailed
+            )
+        (stream_id,) = self.get_success(
+            self.store.db_pool.execute(
+                "test",
+                "SELECT MAX(stream_id) FROM current_state_delta_stream"
+                " WHERE room_id = ?",
+                self.room_id,
+            )
+        )[0]
+        self.assertGreaterEqual(
+            self.store._stream_id_gen.get_current_token(), stream_id
+        )
+
     def test_gil_count(self) -> None:
         """Taking the stream orderings and setting them on the events takes
         the GIL at no persist site."""

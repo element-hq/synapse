@@ -1,0 +1,1 @@
+Persist each queued batch of events in Rust, and recalculate a room's current state there, at `experimental_features.rust_event_persistence: full`.

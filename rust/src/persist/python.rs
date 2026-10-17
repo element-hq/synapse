@@ -34,7 +34,8 @@ use super::{
     metrics::{PersistCounts, PersistMetrics},
     prepare::{self, PrepareInput, PrepareOptions, Prepared},
     reader::{self, PersistReader, PyDelta, PySlidingSync},
-    state_delta::NativeStateResolver,
+    sliding_sync,
+    state_delta::{self, NativeStateResolver, StateResFallback},
     txn::{self, json, streams::TxnStream, PartialStateConflict, TxnEvent, TxnInput},
 };
 use crate::{
@@ -250,6 +251,16 @@ impl Persister {
             state.release_guard(true).await
         }
         .boxed()
+    }
+
+    /// The future of [`Self::update_current_state`].
+    fn start_update_current_state(
+        &self,
+        room_id: String,
+    ) -> PyResult<BoxFuture<'static, PyResult<CurrentStateUpdate>>> {
+        let pool = self.inner.pool.get()?;
+        let inner = Arc::clone(&self.inner);
+        Ok(async move { update_current_state(&inner, &pool, &room_id).await }.boxed())
     }
 
     /// Run `future` to completion on the runtime, releasing the GIL. For the
@@ -472,6 +483,30 @@ impl Persister {
     /// As [`Self::batch_abort`], but blocks.
     fn batch_abort_blocking(&self, py: Python<'_>, batch: &PersistBatch) -> PyResult<()> {
         let future = self.start_batch_abort(batch);
+        self.block_on(py, future)
+    }
+
+    /// `_UpdateCurrentStateTask`: recalculate the room's current state
+    /// from its forward extremities and write the change, taking one
+    /// stream ID from the events stream. Resolves with a
+    /// [`CurrentStateUpdate`], whose effects Python must apply. Must not be
+    /// cancelled, as [`Self::persist_events_txn`].
+    fn update_current_state<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let future = self.start_update_current_state(room_id)?;
+        create_deferred_with(py, &self.inner.runtime, future, OnCancel::RunOn)
+    }
+
+    /// As [`Self::update_current_state`], but blocks.
+    fn update_current_state_blocking(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+    ) -> PyResult<CurrentStateUpdate> {
+        let future = self.start_update_current_state(room_id)?;
         self.block_on(py, future)
     }
 
@@ -974,6 +1009,160 @@ impl WrittenChunk {
             Some(err) => Err(err),
             None => Ok(()),
         }
+    }
+}
+
+/// `_update_current_state`: recalculate `room_id`'s current state and
+/// write the change, if there is one. Reads are retried as Python's
+/// `runInteraction`s are.
+async fn update_current_state(
+    inner: &Arc<PersisterInner>,
+    pool: &ConnectionPool,
+    room_id: &str,
+) -> PyResult<CurrentStateUpdate> {
+    let resolver = NativeStateResolver {
+        pool: pool.clone(),
+        handle: inner.runtime.tokio_handle()?,
+        caches: Arc::clone(&inner.store.caches),
+        conflict_cache: Arc::clone(&inner.conflict_cache),
+    };
+    let reader = PersistReader::new(inner.sync.reader(pool.clone()));
+    let mut attempt = 1;
+    let computed = loop {
+        let result = async {
+            let (state, stats) =
+                state_delta::calculate_current_state(&reader, &resolver, room_id).await?;
+            let delta = state_delta::calculate_state_delta(&reader, room_id, &state).await?;
+            let changes = sliding_sync::calculate_sliding_sync_table_changes(
+                &reader,
+                room_id,
+                &inner.server_name,
+                &[],
+                &delta,
+            )
+            .await?;
+            anyhow::Ok((delta, changes, stats))
+        }
+        .await;
+        match result {
+            Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(&e) => {
+                log::warn!("[TXN RETRY] {{update_current_state}} {e:#} {attempt}/{MAX_ATTEMPTS}");
+                attempt += 1;
+            }
+            result => break result,
+        }
+    };
+    let (delta, changes, stats) = match computed {
+        Ok(computed) => computed,
+        Err(e) => {
+            return match e.downcast::<StateResFallback>() {
+                Ok(fallback) => Ok(CurrentStateUpdate {
+                    effects: None,
+                    state_res_stats: None,
+                    fallback_reason: Some(fallback.0),
+                }),
+                Err(e) => Err(persist_error_to_py(e)),
+            };
+        }
+    };
+    // `DeltaState.is_noop`.
+    if delta.to_delete.is_empty() && delta.to_insert.is_empty() && !delta.no_longer_in_room {
+        return Ok(CurrentStateUpdate {
+            effects: None,
+            state_res_stats: stats,
+            fallback_reason: None,
+        });
+    }
+
+    // `get_next`, as late as can be.
+    let event_stream = TxnStream::events(Arc::clone(&inner.events_stream));
+    let ids = allocate_stream_orderings(pool, &event_stream, 1)
+        .await
+        .map_err(persist_error_to_py)?;
+    let stream_id = *ids
+        .first()
+        .ok_or_else(|| PyRuntimeError::new_err("no stream ID"))?;
+
+    let no_chunk = prepare::PreparedChunk {
+        state: Default::default(),
+        new_event_links: HashMap::new(),
+        sliding_sync: None,
+        sticky_events_to_un_soft_fail: HashSet::new(),
+    };
+    let cache_stream = TxnStream::caches(Arc::clone(&inner.cache_stream));
+    let sticky_stream = TxnStream::sticky_events(Arc::clone(&inner.sticky_stream));
+    let profile_stream = TxnStream::profile_updates(Arc::clone(&inner.profile_stream));
+    let input = TxnInput {
+        room_id,
+        events: &[],
+        prepared: &no_chunk,
+        instance_name: &inner.instance_name,
+        server_name: &inner.server_name,
+        clock: inner.runtime.clock(),
+        inhibit_local_membership_updates: false,
+        enable_search: inner.enable_search,
+        enable_ephemeral_messages: inner.enable_ephemeral_messages,
+        msc4354_enabled: inner.msc4354_enabled,
+        include_profile_updates_in_sync: inner.include_profile_updates_in_sync,
+        cache_stream: &cache_stream,
+        sticky_stream: &sticky_stream,
+        profile_stream: &profile_stream,
+    };
+    let mut effects = run_write_interaction(pool, "update_current_state", |txn, _| {
+        let (input, delta, changes) = (&input, &delta, &changes);
+        async move {
+            let mut effects = PersistEffects::default();
+            txn::update_current_state_txn(txn, input, delta, changes, stream_id, &mut effects)
+                .await?;
+            Ok(effects)
+        }
+        .boxed()
+    })
+    .await
+    .map_err(write_error_to_py)?;
+    cache_stream.hand_over(effects.cache_stream_ids());
+    sticky_stream.hand_over(effects.sticky_stream_ids());
+    profile_stream.hand_over(effects.profile_stream_ids());
+    // Finished on drop if the transaction failed, as `get_next` finishes
+    // it when its block raises.
+    event_stream.hand_over(&ids);
+    effects.add_stream_ids(ids, false);
+    Ok(CurrentStateUpdate {
+        effects: Some(effects),
+        state_res_stats: stats,
+        fallback_reason: None,
+    })
+}
+
+/// What [`Persister::update_current_state`] did.
+#[pyclass(frozen)]
+pub struct CurrentStateUpdate {
+    effects: Option<PersistEffects>,
+    state_res_stats: Option<StateResStats>,
+    fallback_reason: Option<String>,
+}
+
+#[pymethods]
+impl CurrentStateUpdate {
+    /// What Python applies with `apply_rust_persist_effects`, with the
+    /// stream ID unfinished. `None` if the state did not change, or if
+    /// Rust fell back.
+    #[getter]
+    fn effects(&self) -> Option<PersistEffects> {
+        self.effects.clone()
+    }
+
+    /// The stats of the state resolution, if the state was resolved.
+    #[getter]
+    fn state_res_stats(&self) -> Option<StateResStats> {
+        self.state_res_stats.clone()
+    }
+
+    /// Why the Rust state resolution could not resolve the room, in which
+    /// case nothing was written and Python should recalculate the state.
+    #[getter]
+    fn fallback_reason(&self) -> Option<String> {
+        self.fallback_reason.clone()
     }
 }
 

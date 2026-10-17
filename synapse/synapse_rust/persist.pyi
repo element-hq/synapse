@@ -140,6 +140,30 @@ class Persister:
     def batch_abort_blocking(self, batch: PersistBatch) -> None:
         """As `batch_abort`, but blocks. For tests."""
 
+    def update_current_state(self, room_id: str) -> Deferred[CurrentStateUpdate]:
+        """`_UpdateCurrentStateTask`: recalculate the room's current state
+        from its forward extremities and write the change, taking one
+        stream ID from the events stream. Must not be cancelled."""
+    def update_current_state_blocking(self, room_id: str) -> CurrentStateUpdate:
+        """As `update_current_state`, but blocks. For tests."""
+
+class CurrentStateUpdate:
+    """What `Persister.update_current_state` did."""
+
+    @property
+    def effects(self) -> PersistEffects | None:
+        """To apply with `apply_rust_persist_effects`, with the stream ID
+        unfinished. `None` if the state did not change, or if Rust fell
+        back."""
+    @property
+    def state_res_stats(self) -> StateResStats | None:
+        """The stats of the state resolution, if the state was resolved."""
+    @property
+    def fallback_reason(self) -> str | None:
+        """Why the Rust state resolution could not resolve the room, in
+        which case nothing was written and Python should recalculate the
+        state."""
+
 class PersistBatch:
     """A batch being persisted. See `Persister.persist_batch`."""
 

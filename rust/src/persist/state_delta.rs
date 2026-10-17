@@ -551,6 +551,66 @@ pub async fn get_new_state_after_events(
     })
 }
 
+/// `_calculate_current_state`, for `update_current_state`: the room's
+/// current state as its forward extremities imply, its state DAG
+/// extremities in an MSC4242 room. The state of their one state group, or
+/// the resolution of several, with the stats of the resolution. Fails with
+/// [`StateResFallback`] if the Rust state resolution cannot resolve the
+/// room.
+pub async fn calculate_current_state(
+    reads: &dyn StateDeltaReads,
+    resolver: &dyn StateResolver,
+    room_id: &str,
+) -> anyhow::Result<(StateMap, Option<StateResStats>)> {
+    let room_version_id = reads
+        .room_version_id(room_id)
+        .await?
+        .ok_or_else(|| anyhow!("Room {room_id} not found"))?;
+    let room_version: &'static RoomVersion = room_version_id
+        .parse()
+        .map_err(|e| anyhow!("{e}: {room_version_id:?}"))?;
+    let latest_event_ids = if room_version.msc4242_state_dags {
+        reads.state_dag_extremities(room_id).await?
+    } else {
+        reads.latest_event_ids_in_room(room_id).await?
+    };
+    let latest_event_ids: Vec<Arc<str>> = latest_event_ids.into_iter().collect();
+
+    let mut groups: Vec<i64> = reads
+        .state_group_for_events(&latest_event_ids)
+        .await?
+        .into_values()
+        .collect();
+    groups.sort_unstable();
+    groups.dedup();
+    let mut state_groups_map = reads.state_for_groups(&groups).await?;
+
+    if groups.len() == 1 {
+        let state = state_groups_map.remove(&groups[0]).unwrap_or_default();
+        return Ok(((*state).clone(), None));
+    }
+
+    if room_version.state_res == StateResolutionVersions::V1 {
+        return Err(v1_fallback(room_version));
+    }
+    info!("Resolving state for {room_id} with groups {groups:?}");
+    // As `resolve_state_groups` does.
+    let missing_groups = resolver
+        .check_state_groups_and_bump_deletion(&groups)
+        .await?;
+    if !missing_groups.is_empty() {
+        bail!("State groups have been deleted: {missing_groups:?}");
+    }
+    let state_sets: Vec<Arc<StateMap>> = groups
+        .iter()
+        .map(|group| state_groups_map.get(group).cloned().unwrap_or_default())
+        .collect();
+    let (state, stats) = resolver
+        .resolve(room_id, room_version, &state_sets, &EventMap::new())
+        .await?;
+    Ok((state, Some(stats)))
+}
+
 /// `_calculate_state_delta`: the change from the room's current state to
 /// `current_state`.
 pub async fn calculate_state_delta(
@@ -1600,5 +1660,68 @@ mod tests {
         // The state DAG path does not count the state delta metrics.
         assert_eq!(counts.state_delta, 0);
         assert_eq!(counts.state_dag_forward_extremities[&1], 1);
+    }
+
+    fn current_state_reads(latest: &[(&str, i64)]) -> FakeReads {
+        FakeReads {
+            room_version: Some(Arc::from("12")),
+            latest: latest.iter().map(|(id, _)| Arc::from(*id)).collect(),
+            event_groups: latest
+                .iter()
+                .map(|(id, group)| (Arc::from(*id), *group))
+                .collect(),
+            groups: [
+                (5, Arc::new(state(&[("m.room.topic", "", "$a")]))),
+                (6, Arc::new(state(&[("m.room.topic", "", "$b")]))),
+            ]
+            .into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn current_state_of_one_group() {
+        // Two extremities in the same group need no resolution.
+        let reads = current_state_reads(&[("$x", 5), ("$y", 5)]);
+        let resolver = FakeResolver::default();
+        let (current, stats) = block_on(calculate_current_state(&reads, &resolver, ROOM)).unwrap();
+        assert_eq!(current, state(&[("m.room.topic", "", "$a")]));
+        assert!(stats.is_none());
+        assert!(resolver.resolved.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn current_state_of_several_groups_is_resolved() {
+        let reads = current_state_reads(&[("$x", 5), ("$y", 6)]);
+        let resolver = FakeResolver {
+            result: state(&[("m.room.topic", "", "$b")]),
+            ..Default::default()
+        };
+        let (current, stats) = block_on(calculate_current_state(&reads, &resolver, ROOM)).unwrap();
+        assert_eq!(current, state(&[("m.room.topic", "", "$b")]));
+        assert!(stats.is_some());
+        assert_eq!(*resolver.checked.lock().unwrap(), vec![vec![5, 6]]);
+        assert_eq!(*resolver.resolved.lock().unwrap(), vec![("12", 2)]);
+    }
+
+    #[test]
+    fn current_state_falls_back_on_v1_and_fails_on_deleted_groups() {
+        let mut reads = current_state_reads(&[("$x", 5), ("$y", 6)]);
+        reads.room_version = Some(Arc::from("1"));
+        let err = block_on(calculate_current_state(
+            &reads,
+            &FakeResolver::default(),
+            ROOM,
+        ))
+        .unwrap_err();
+        assert!(err.downcast_ref::<StateResFallback>().is_some(), "{err:#}");
+
+        let reads = current_state_reads(&[("$x", 5), ("$y", 6)]);
+        let resolver = FakeResolver {
+            deleted_groups: vec![6],
+            ..Default::default()
+        };
+        let err = block_on(calculate_current_state(&reads, &resolver, ROOM)).unwrap_err();
+        assert!(err.to_string().contains("deleted"), "{err:#}");
     }
 }

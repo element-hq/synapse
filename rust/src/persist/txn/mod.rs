@@ -51,6 +51,8 @@ use super::{
     context::PersistContext,
     effects::{EventInvalidation, PersistEffects},
     prepare::PreparedChunk,
+    sliding_sync::SlidingSyncTableChanges,
+    state_delta::DeltaState,
 };
 use crate::{
     clock::Clock,
@@ -198,6 +200,31 @@ pub async fn persist_events_txn(
     if result.is_err() {
         // The rows are rolled back, so their IDs are done with, as Python's
         // `call_on_exception` has it.
+        for stream in input.streams() {
+            stream.finish_pending();
+        }
+    }
+    result
+}
+
+/// `_update_current_state_txn`, for `update_current_state`: write the
+/// change `delta` to the room's current state, with `stream_id` from the
+/// events stream, adding to `effects` what Python would queue. `input`
+/// has no events. As [`persist_events_txn`], `effects` must start empty.
+pub async fn update_current_state_txn(
+    txn: &WriteTxn,
+    input: &TxnInput<'_>,
+    delta: &DeltaState,
+    changes: &SlidingSyncTableChanges,
+    stream_id: i64,
+    effects: &mut PersistEffects,
+) -> Result<(), WriteError> {
+    for stream in input.streams() {
+        stream.finish_pending();
+    }
+    let result =
+        current_state::update_current_state(txn, input, delta, changes, stream_id, effects).await;
+    if result.is_err() {
         for stream in input.streams() {
             stream.finish_pending();
         }
