@@ -50,6 +50,8 @@ pub struct AuthConfig {
 }
 #[derive(FromPyObject, Clone)]
 pub struct ServerConfig {
+    pub enable_search: bool,
+    pub enable_ephemeral_messages: bool,
     pub msc4140_enabled: bool,
     pub public_baseurl: String,
     pub include_profile_updates_in_sync: bool,

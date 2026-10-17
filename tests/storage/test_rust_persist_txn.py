@@ -60,6 +60,7 @@ from tests import unittest
 
 # The tables `_persist_events_txn` writes. Each is compared on the rows of
 # the room, by its `room_id` column if it has one, else by `event_id`.
+# `event_edges` is also compared by `event_id`, see `_UNFILLED_ROOM_ID`.
 _TABLES = (
     "current_state_delta_stream",
     "current_state_events",
@@ -101,6 +102,10 @@ _TABLES = (
     "threads",
     "timeline_gaps",
 )
+
+# Tables with a `room_id` column that is no longer filled in, compared by
+# `event_id` instead.
+_UNFILLED_ROOM_ID = {"event_edges"}
 
 # Integer columns holding a position on a stream or a state group, by
 # column name or `(table, column)`, and which sequence the value is from.
@@ -245,6 +250,8 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         experimental = config.setdefault("experimental_features", {})
         experimental["rust_event_persistence"] = "prepare"
         experimental["msc4354_enabled"] = True
+        # For `event_expiry`.
+        config["enable_ephemeral_messages"] = True
         return config
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
@@ -343,10 +350,19 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         )
         effects, left, redacted, de_outliered = (
             self.persister.persist_events_txn_for_test(
-                room_id, events_and_contexts, prepared
+                room_id,
+                events_and_contexts,
+                prepared,
+                inhibit_local_membership_updates=kwargs[
+                    "inhibit_local_membership_updates"
+                ],
             )
         )
         twin.effects.extend(_rust_effects(effects))
+        # As applying the effects would, so the cache stream moves on.
+        if effects.cache_stream_ids:
+            assert self.store._cache_id_gen is not None
+            self.store._cache_id_gen._mark_ids_as_finished(effects.cache_stream_ids)
         # The events left, as the steps after Rust's see them.
         left_events_and_contexts = []
         for i in left:
@@ -374,7 +390,8 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         for callback, args, kwargs in (txn.after_callbacks or [])[start:]:
             name = callback.__name__
             owner = getattr(callback, "__self__", None)
-            # A single-key cache's `prefill` is a lambda over the cache.
+            # A single-key cache's `prefill` and `invalidate` are lambdas
+            # over the cache.
             cache = next(
                 (
                     cell.cell_contents
@@ -385,17 +402,31 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             )
             if owner is self.store:
                 owner_name = None
+            elif isinstance(owner, DeferredCache):
+                owner_name = self._cache_names().get(id(owner), "DeferredCache")
             elif isinstance(owner, MultiWriterIdGenerator):
                 owner_name = owner._stream_name
             elif owner is not None:
                 owner_name = getattr(owner, "name", None) or type(owner).__name__
             elif name == "<lambda>" and cache is not None:
-                # The transaction prefills only `_get_state_group_for_event`.
-                name, owner_name = "prefill", "_get_state_group_for_event"
+                # A single-key cache's `prefill` or `invalidate`, by the
+                # method the lambda calls on the cache.
+                code_names = callback.__code__.co_names
+                name = "prefill" if "prefill" in code_names else "invalidate"
+                owner_name = self._cache_names().get(id(cache), "DeferredCache")
             else:
                 owner_name = callback.__qualname__
             effects.append((name, owner_name, args, kwargs))
         return effects
+
+    def _cache_names(self) -> dict[int, str]:
+        """The store's cached functions' names, by the ID of their cache."""
+        names = {}
+        for name in dir(type(self.store)):
+            cache = getattr(getattr(self.store, name, None), "cache", None)
+            if isinstance(cache, DeferredCache):
+                names[id(cache)] = name
+        return names
 
     def _cache_stream_position(self) -> int:
         rows = self.get_success(
@@ -410,7 +441,7 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         return self.get_success(
             self.store.db_pool.execute(
                 "test",
-                """SELECT stream_id, instance_name, cache_func, keys
+                """SELECT stream_id, instance_name, cache_func, keys, invalidation_ts
                 FROM cache_invalidation_stream_by_instance
                 WHERE stream_id > ? ORDER BY stream_id""",
                 after,
@@ -431,10 +462,12 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         sender: str | None = None,
         txn_id: str | None = None,
         sticky_ms: int | None = None,
+        push: bool = False,
     ) -> EventPersistencePair:
         """An event of the twin's, not yet persisted, added to its events.
         `prev` and `redacts` are indices of the twin's events. `content` can
-        be a function of the twin, for content that names its events."""
+        be a function of the twin, for content that names its events. With
+        `push`, its push actions are staged, as sending it would."""
         sender = sender or self.alice
         if callable(content):
             content = content(twin)
@@ -464,6 +497,12 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             )
         )
         context = self.get_success(unpersisted_context.persist(event))
+        if push:
+            self.get_success(
+                self.hs.get_bulk_push_rule_evaluator().action_for_events_by_user(
+                    [(event, context)]
+                )
+            )
         twin.events.append(event.event_id)
         return event, context
 
@@ -519,7 +558,7 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         raw: dict[str, tuple[list[str], list[tuple]]] = {}
         for table in _TABLES:
             columns = self._columns(table)
-            if "room_id" in columns:
+            if "room_id" in columns and table not in _UNFILLED_ROOM_ID:
                 where = "room_id = ?"
             elif table == "event_auth_chain_links":
                 where = """origin_chain_id IN (
@@ -556,8 +595,9 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                 key=repr,
             )
         dump["cache_invalidation_stream_by_instance"] = [
-            (instance_name, cache_func, normaliser.value("", "", keys))
-            for _, instance_name, cache_func, keys in twin.cache_rows
+            # The twins share the clock, so the times compare as they are.
+            (instance_name, cache_func, normaliser.value("", "", keys), ts)
+            for _, instance_name, cache_func, keys, ts in twin.cache_rows
         ]
         dump["effects"] = sorted(
             (
@@ -700,6 +740,15 @@ def _rust_effects(
         )
     for event_id in effects.event_cache_invalidations:
         calls.append(("_invalidate_local_get_event_cache", None, (event_id,), {}))
+    for cache_name, keys in effects.cache_invalidations:
+        calls.append(("invalidate", cache_name, (tuple(keys),), {}))
+    # Python's `get_next_txn` queues these per cache stream row. Applying
+    # the effects finishes the IDs at once, and notifies once.
+    for stream_id in effects.cache_stream_ids:
+        calls.append(("_mark_ids_as_finished", "caches", ([stream_id],), {}))
+        calls.append(("notify_replication", "ReplicationNotifier", (), {}))
+        if effects.new_replication_data:
+            calls.append(("on_new_replication_data", "Notifier", (), {}))
     for cache, entity, stream_id in effects.stream_changes:
         calls.append(
             (
@@ -759,12 +808,8 @@ def _python_steps_after_rust(
             txn, [event for event in de_outliered if event.sticky_duration()]
         )
 
-    store._update_metadata_tables_txn(
-        txn,
-        events_and_contexts=events_and_contexts,
-        all_events_and_contexts=all_events_and_contexts,
-        inhibit_local_membership_updates=inhibit_local_membership_updates,
-    )
+    # The end of `_update_metadata_tables_txn`, a Python cache prefill.
+    store._add_to_cache(txn, events_and_contexts)
     if state_delta_for_room:
         assert sliding_sync_table_changes is not None
         assert min_stream_order is not None
@@ -841,7 +886,17 @@ class PersistTxnTestCase(_TwinTestBase):
 
         self._step(target)
         target_index = len(self.twins[0].events) - 1
-        self._send(EventTypes.Redaction, {}, redacts=target_index, prev=[base])
+
+        def redaction(twin: _Twin) -> list[EventPersistencePair]:
+            event, context = self._build(
+                twin, EventTypes.Redaction, {}, redacts=target_index, prev=[base]
+            )
+            # Without the target, the recheck cannot pass yet, so it is
+            # stored as still needed.
+            event.internal_metadata.recheck_redaction = True
+            return [(event, context)]
+
+        self._step(redaction)
         self._step(lambda twin: [built[twin.name]])
         self._assert_twins_match()
 
@@ -1044,6 +1099,304 @@ class PersistTxnTestCase(_TwinTestBase):
         )
         self._assert_twins_match()
 
+    def _join_bob(self) -> None:
+        self._send(EventTypes.Member, {"membership": "invite"}, state_key=self.bob)
+        self._send(
+            EventTypes.Member,
+            {"membership": "join", "displayname": "Bob", "avatar_url": "mxc://a/b"},
+            state_key=self.bob,
+            sender=self.bob,
+        )
+
+    def test_relations_and_their_redaction(self) -> None:
+        """Each kind of relation, then redactions of them that clear what
+        was computed from them. Redacting the thread's latest reply moves
+        the thread back, and redacting its last reply deletes it."""
+        root = self._message("root")
+
+        def relates(rel_type: str, **extra: Any) -> int:
+            return self._send(
+                EventTypes.Message,
+                lambda twin: {
+                    "msgtype": "m.text",
+                    "body": rel_type,
+                    "m.relates_to": {
+                        "rel_type": rel_type,
+                        "event_id": twin.events[root],
+                        **extra,
+                    },
+                },
+            )
+
+        edit = relates("m.replace")
+        reference = relates("m.reference")
+        annotation = relates("m.annotation", key="\U0001f44d")
+        first_reply = relates("m.thread")
+        second_reply = relates("m.thread")
+        for target in (edit, reference, annotation, second_reply, first_reply):
+            self._send(EventTypes.Redaction, {}, redacts=target)
+        self._assert_twins_match()
+
+    def test_relation_and_redaction_in_one_chunk(self) -> None:
+        """A redaction runs its relation cleanup before the chunk's
+        relations are stored, so the relation it redacts in the same chunk
+        is kept."""
+        root = self._message("root")
+
+        def chunk(twin: _Twin) -> list[EventPersistencePair]:
+            reply = self._build(
+                twin,
+                EventTypes.Message,
+                {
+                    "msgtype": "m.text",
+                    "body": "reply",
+                    "m.relates_to": {
+                        "rel_type": "m.thread",
+                        "event_id": twin.events[root],
+                    },
+                },
+            )
+            redaction = self._build(
+                twin,
+                EventTypes.Redaction,
+                {},
+                redacts=len(twin.events) - 1,
+                prev=[root],
+            )
+            return [reply, redaction]
+
+        self._step(chunk)
+        self._assert_twins_match()
+
+    def test_thread_replies_in_one_chunk(self) -> None:
+        """Each reply compares with the one before, so the thread's latest
+        event is the later reply."""
+        root = self._message("root")
+
+        def replies(twin: _Twin) -> list[EventPersistencePair]:
+            return [
+                self._build(
+                    twin,
+                    EventTypes.Message,
+                    {
+                        "msgtype": "m.text",
+                        "body": body,
+                        "m.relates_to": {
+                            "rel_type": "m.thread",
+                            "event_id": twin.events[root],
+                        },
+                    },
+                    prev=[root],
+                )
+                for body in ("first", "second")
+            ]
+
+        self._step(replies)
+        self._assert_twins_match()
+
+    def test_retention_in_one_chunk(self) -> None:
+        """Two policies, whose cache stream rows keep the events' order."""
+
+        def policies(twin: _Twin) -> list[EventPersistencePair]:
+            # Different state keys, so state resolution has nothing to break
+            # a tie on.
+            return [
+                self._build(
+                    twin,
+                    EventTypes.Retention,
+                    {"max_lifetime": lifetime},
+                    state_key=state_key,
+                    prev=[0],
+                )
+                for state_key, lifetime in (("", 1000), ("other", 2000))
+            ]
+
+        self._message("base")
+        self._step(policies)
+        self._assert_twins_match()
+
+    def test_search(self) -> None:
+        self._send(EventTypes.Name, {"name": "Name"}, state_key="")
+        self._send(
+            EventTypes.Topic,
+            {
+                "topic": "plain",
+                "m.topic": {
+                    "m.text": [
+                        {"mimetype": "text/html", "body": "<b>rich</b>"},
+                        {"body": "from m.topic"},
+                    ]
+                },
+            },
+            state_key="",
+        )
+        self._message("searchable words")
+        self._assert_twins_match()
+
+    def test_retention(self) -> None:
+        self._send(
+            EventTypes.Retention,
+            {"min_lifetime": 1000, "max_lifetime": 86_400_000},
+            state_key="",
+        )
+        # No lifetimes, so no policy.
+        self._send(EventTypes.Retention, {}, state_key="")
+        self._assert_twins_match()
+
+    def test_labels_and_expiry(self) -> None:
+        self._send(
+            EventTypes.Message,
+            {
+                "msgtype": "m.text",
+                "body": "labelled",
+                "org.matrix.labels": ["#fun", "#work"],
+                "org.matrix.self_destruct_after": 2_000_000_000_000,
+            },
+        )
+        # Not an integer, so no expiry.
+        self._send(
+            EventTypes.Message,
+            {
+                "msgtype": "m.text",
+                "body": "x",
+                "org.matrix.self_destruct_after": "1",
+            },
+        )
+        self._assert_twins_match()
+
+    def test_members(self) -> None:
+        self._join_bob()
+        self._send(
+            EventTypes.Member,
+            # A NUL is not allowed in the database, so it is not stored.
+            {"membership": "join", "displayname": "B\u0000b", "avatar_url": 1},
+            state_key=self.bob,
+            sender=self.bob,
+        )
+        self._assert_twins_match()
+
+    def test_push_actions(self) -> None:
+        """Push actions move from the staging table, and a redaction
+        removes them."""
+        self._join_bob()
+        target = self._send(
+            EventTypes.Message,
+            {"msgtype": "m.text", "body": "hello bob"},
+            push=True,
+        )
+        self._assert_twins_match()
+        for twin in self.twins:
+            # Bob is notified.
+            self.assertTrue(
+                self.get_success(
+                    self.store.db_pool.simple_select_onecol(
+                        "event_push_actions",
+                        {"room_id": twin.room_id, "user_id": self.bob},
+                        "event_id",
+                    )
+                )
+            )
+        self._send(EventTypes.Redaction, {}, redacts=target, push=True)
+        self._assert_twins_match()
+        rows = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                "event_push_actions",
+                {"room_id": self.twins[1].room_id},
+                "event_id",
+            )
+        )
+        # The redaction itself does not notify.
+        self.assertEqual(rows, [])
+        self.assertEqual(
+            self.get_success(
+                self.store.db_pool.simple_select_onecol(
+                    "event_push_actions_staging", {}, "event_id"
+                )
+            ),
+            [],
+        )
+
+    def _skip_hand_built_in_state_dag_rooms(self) -> None:
+        if KNOWN_ROOM_VERSIONS[self.room_version].msc4242_state_dags:
+            raise SkipTest("a hand-built event has no state DAG context")
+
+    def _out_of_band(
+        self,
+        twin: _Twin,
+        membership: str,
+        stripped_state: list[dict[str, Any]] | None,
+    ) -> EventPersistencePair:
+        """An out-of-band membership of Bob's, as a remote invite or knock,
+        or its rejection, arrives over federation: an outlier."""
+        event, _ = self._build(
+            twin, EventTypes.Member, {"membership": "invite"}, state_key=self.bob
+        )
+        pdu = event.get_pdu_json()
+        pdu["content"] = {"membership": membership}
+        if membership != "invite":
+            pdu["sender"] = self.bob
+        pdu["unsigned"] = {}
+        if stripped_state is not None:
+            pdu["unsigned"][f"{membership}_room_state"] = stripped_state
+        copy = make_event_from_dict(pdu, event.room_version, {})
+        copy.internal_metadata.outlier = True
+        copy.internal_metadata.out_of_band_membership = True
+        copy.internal_metadata.stream_ordering = None
+        twin.events[-1] = copy.event_id
+        return copy, EventContext.for_outlier(self.hs.get_storage_controllers())
+
+    def test_out_of_band_invite_and_rejection(self) -> None:
+        self._skip_hand_built_in_state_dag_rooms()
+
+        def stripped(event_type: str, content: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "type": event_type,
+                "state_key": "",
+                "sender": "@remote:other",
+                "content": content,
+            }
+
+        state = [
+            stripped(EventTypes.Create, {"type": "m.space"}),
+            stripped(EventTypes.RoomEncryption, {"algorithm": "m.megolm.v1"}),
+            stripped(EventTypes.Name, {"name": "Remote"}),
+            # Malformed, so ignored.
+            {"type": EventTypes.Tombstone, "content": {}},
+        ]
+        self._step(lambda twin: [self._out_of_band(twin, "invite", state)])
+        self._step(lambda twin: [self._out_of_band(twin, "leave", None)])
+        self._assert_twins_match()
+
+    def test_out_of_band_knock(self) -> None:
+        self._skip_hand_built_in_state_dag_rooms()
+        state = [
+            {
+                "type": EventTypes.Create,
+                "state_key": "",
+                "sender": "@remote:other",
+                "content": {},
+            },
+            {
+                "type": EventTypes.Name,
+                "state_key": "",
+                "sender": "@remote:other",
+                # A NUL leaves the column out.
+                "content": {"name": "a\u0000b"},
+            },
+        ]
+        self._step(lambda twin: [self._out_of_band(twin, "knock", state)])
+        # No stripped state.
+        self._step(lambda twin: [self._out_of_band(twin, "invite", None)])
+        self._assert_twins_match()
+
+    def test_out_of_band_backfilled(self) -> None:
+        """A backfilled membership is not current."""
+        self._skip_hand_built_in_state_dag_rooms()
+        self._step(
+            lambda twin: [self._out_of_band(twin, "invite", [])], backfilled=True
+        )
+        self._assert_twins_match()
+
     def test_mismatch_is_found(self) -> None:
         """The comparison sees a row that differs."""
         self._message("hello")
@@ -1061,7 +1414,10 @@ class PersistTxnTestCase(_TwinTestBase):
     def test_missing_room(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "Room does not exist !nope:test"):
             self.persister.persist_events_txn_for_test(
-                "!nope:test", [], self.persister.last_prepared
+                "!nope:test",
+                [],
+                self.persister.last_prepared,
+                inhibit_local_membership_updates=False,
             )
 
 

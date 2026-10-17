@@ -123,6 +123,10 @@ pub struct PersistEffects {
     /// `cache.invalidate(keys)` for the named cache: the local half of
     /// `_invalidate_cache_and_stream`.
     cache_invalidations: Vec<(String, Vec<String>)>,
+    /// The IDs of the cache stream rows the transaction wrote, to mark
+    /// finished once the caches are invalidated, then
+    /// `ReplicationNotifier.notify_replication()`.
+    cache_stream_ids: Vec<i64>,
     /// `_get_state_group_for_event.prefill((event_id,), state_group)`.
     state_group_prefills: Vec<(String, i64)>,
     /// `get_latest_event_ids_in_room.prefill((room_id,), extremities)`.
@@ -155,6 +159,14 @@ impl PersistEffects {
 
     pub fn add_cache_invalidation(&mut self, cache_name: &str, keys: Vec<String>) {
         self.cache_invalidations.push((cache_name.to_owned(), keys));
+    }
+
+    pub fn add_cache_stream_id(&mut self, stream_id: i64) {
+        self.cache_stream_ids.push(stream_id);
+    }
+
+    pub fn cache_stream_ids(&self) -> &[i64] {
+        &self.cache_stream_ids
     }
 
     pub fn add_state_group_prefill(&mut self, event_id: String, state_group: i64) {
@@ -194,6 +206,7 @@ impl PersistEffects {
         event_cache_invalidations = Vec::new(),
         state_caches = Vec::new(),
         cache_invalidations = Vec::new(),
+        cache_stream_ids = Vec::new(),
         state_group_prefills = Vec::new(),
         latest_event_ids = None,
         stream_changes = Vec::new(),
@@ -207,6 +220,7 @@ impl PersistEffects {
         event_cache_invalidations: Vec<String>,
         state_caches: Vec<(String, Vec<String>)>,
         cache_invalidations: Vec<(String, Vec<String>)>,
+        cache_stream_ids: Vec<i64>,
         state_group_prefills: Vec<(String, i64)>,
         latest_event_ids: Option<(String, Vec<String>)>,
         stream_changes: Vec<(String, String, i64)>,
@@ -219,6 +233,7 @@ impl PersistEffects {
             event_cache_invalidations,
             state_caches,
             cache_invalidations,
+            cache_stream_ids,
             state_group_prefills,
             latest_event_ids,
             stream_changes: stream_changes
@@ -265,6 +280,12 @@ impl PersistEffects {
     #[getter]
     fn cache_invalidations(&self) -> Vec<(String, Vec<String>)> {
         self.cache_invalidations.clone()
+    }
+
+    #[getter]
+    #[pyo3(name = "cache_stream_ids")]
+    fn py_cache_stream_ids(&self) -> Vec<i64> {
+        self.cache_stream_ids.clone()
     }
 
     #[getter]

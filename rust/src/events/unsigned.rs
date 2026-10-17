@@ -309,6 +309,18 @@ impl Unsigned {
         Ok(self.py_read()?.persisted_fields.age_ts.clone())
     }
 
+    /// The `invite_room_state` field: the stripped state of the room an
+    /// invite is for.
+    pub fn invite_room_state(&self) -> PyResult<Option<Vec<serde_json::Value>>> {
+        Ok(self.py_read()?.persisted_fields.invite_room_state.clone())
+    }
+
+    /// The `knock_room_state` field: the stripped state of the room a knock
+    /// is for.
+    pub fn knock_room_state(&self) -> PyResult<Option<Vec<serde_json::Value>>> {
+        Ok(self.py_read()?.persisted_fields.knock_room_state.clone())
+    }
+
     /// Get the `prev_content` field: the content of the state this event
     /// replaced, if it is a state event and the content is known.
     pub fn prev_content(&self) -> PyResult<Option<Box<serde_json::Value>>> {

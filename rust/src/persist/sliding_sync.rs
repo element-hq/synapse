@@ -30,8 +30,8 @@
 //! The write transaction treats both as sets.
 //!
 //! `_get_sliding_sync_insert_values_from_stripped_state` belongs to the
-//! write transaction, which calls it for out-of-band memberships, and is
-//! ported with it.
+//! write transaction, which calls it for out-of-band memberships. It is in
+//! [`super::txn::metadata`].
 
 use std::{
     collections::{HashMap, HashSet},

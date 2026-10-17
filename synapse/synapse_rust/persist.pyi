@@ -56,10 +56,13 @@ class Persister:
         room_id: str,
         events_and_contexts: list[tuple[EventBase, EventContext]],
         prepared: PreparedChunk,
+        *,
+        inhibit_local_membership_updates: bool,
     ) -> tuple[PersistEffects, list[int], dict[int, str], list[int]]:
         """Run the part of the write transaction ported to Rust so far over
         the chunk, whose events have their stream orderings set, and commit
-        it. `prepared` is what Rust prepared for it.
+        it. `prepared` is what Rust prepared for it. The cache stream IDs it
+        wrote come back unfinished in the effects.
 
         Returns what it collected for Python to apply, and for the Python
         steps after it, by position in the chunk: the events left, the
@@ -120,6 +123,7 @@ class PersistEffects:
         event_cache_invalidations: list[str] = ...,
         state_caches: list[tuple[str, list[str]]] = ...,
         cache_invalidations: list[tuple[str, list[str]]] = ...,
+        cache_stream_ids: list[int] = ...,
         state_group_prefills: list[tuple[str, int]] = ...,
         latest_event_ids: tuple[str, list[str]] | None = None,
         stream_changes: list[tuple[str, str, int]] = ...,
@@ -149,6 +153,12 @@ class PersistEffects:
     def cache_invalidations(self) -> list[tuple[str, list[str]]]:
         """`(cache name, key)`: the local half of
         `_invalidate_cache_and_stream`."""
+
+    @property
+    def cache_stream_ids(self) -> list[int]:
+        """The IDs of the cache stream rows the transaction wrote, still
+        unfinished. Python marks them finished once the caches are
+        invalidated."""
 
     @property
     def state_group_prefills(self) -> list[tuple[str, int]]:

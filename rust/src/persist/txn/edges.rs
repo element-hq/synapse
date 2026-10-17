@@ -13,14 +13,18 @@
  *
  */
 
-//! The room's extremities: `_update_forward_extremities_txn`,
-//! `_set_state_dag_extremities_txn` and `_update_backward_extremeties`.
+//! The room's DAG: the extremities (`_update_forward_extremities_txn`,
+//! `_set_state_dag_extremities_txn` and `_update_backward_extremeties`) and
+//! the edges (`_handle_mult_prev_events` and `_store_state_dag_edges`).
 
 use std::{collections::HashSet, sync::Arc};
 
+use anyhow::anyhow;
+
+use super::Persisting;
 use crate::{
     database::postgres::write::{Column, WriteError, WriteTxn},
-    events::Event,
+    events::{constants::event_type, Event},
 };
 
 /// `_update_forward_extremities_txn`: replace the room's forward
@@ -191,5 +195,91 @@ pub async fn update_backward_extremities(
         )
         .await?;
     }
+    Ok(())
+}
+
+/// `_handle_mult_prev_events`: the `event_edges` of `events`, then their
+/// backward extremities. `events` must be of one room.
+pub async fn handle_mult_prev_events(
+    txn: &WriteTxn,
+    instance_name: &str,
+    events: &[Persisting<'_>],
+) -> Result<(), WriteError> {
+    let mut event_ids = Vec::new();
+    let mut prev_event_ids = Vec::new();
+    let mut backward = Vec::with_capacity(events.len());
+    for persisting in events {
+        let event = persisting.event();
+        for prev in event.prev_event_ids() {
+            event_ids.push(event.event_id());
+            prev_event_ids.push(prev);
+        }
+        backward.push(BackwardEvent {
+            event,
+            outlier: persisting.source.is_outlier()?,
+            stream_ordering: persisting.stream_ordering(),
+        });
+    }
+    txn.insert_many(
+        "event_edges",
+        &[
+            Column::new("event_id", "text", &event_ids),
+            Column::new("prev_event_id", "text", &prev_event_ids),
+        ],
+        None,
+    )
+    .await?;
+    update_backward_extremities(txn, instance_name, &backward).await
+}
+
+/// `_store_state_dag_edges`: the MSC4242 state DAG edges of the state
+/// events of `events` in a room version with a state DAG.
+pub async fn store_state_dag_edges(
+    txn: &WriteTxn,
+    events: &[Persisting<'_>],
+) -> Result<(), WriteError> {
+    let mut room_ids = Vec::new();
+    let mut event_ids = Vec::new();
+    let mut prev_state_event_ids: Vec<Option<&str>> = Vec::new();
+    for persisting in events {
+        let event = persisting.event();
+        if !event.room_version().msc4242_state_dags || event.state_key().is_none() {
+            continue;
+        }
+        let prevs = event.prev_state_event_ids().unwrap_or_default();
+        if prevs.is_empty() {
+            // `get_state_dag` reads every row, so the create event, which has
+            // no edge, gets one to nothing.
+            if event.type_() != event_type::M_ROOM_CREATE {
+                return Err(anyhow!(
+                    "state DAG event {} has no prev_state_events",
+                    event.event_id()
+                )
+                .into());
+            }
+            room_ids.push(event.room_id());
+            event_ids.push(event.event_id());
+            prev_state_event_ids.push(None);
+            continue;
+        }
+        for prev in prevs {
+            room_ids.push(event.room_id());
+            event_ids.push(event.event_id());
+            prev_state_event_ids.push(Some(prev));
+        }
+    }
+    // Python inserts the create event's row and upserts the rest. Only the
+    // create event has a NULL edge, and the key of a NULL never conflicts,
+    // so one upsert does both.
+    txn.upsert_many(
+        "msc4242_state_dag_edges",
+        &[
+            Column::new("room_id", "text", &room_ids),
+            Column::new("event_id", "text", &event_ids),
+            Column::new("prev_state_event_id", "text", &prev_state_event_ids),
+        ],
+        &[],
+    )
+    .await?;
     Ok(())
 }

@@ -222,6 +222,10 @@ class DataStore(
 
         for cache_name, keys in effects.cache_invalidations:
             self._attempt_to_invalidate_cache(cache_name, tuple(keys))
+        if effects.cache_stream_ids:
+            assert self._cache_id_gen is not None
+            self._cache_id_gen._mark_ids_as_finished(effects.cache_stream_ids)
+            self.hs.get_replication_notifier().notify_replication()
 
         stream_change_caches: dict[str, StreamChangeCache] = {
             "events": self._events_stream_cache,

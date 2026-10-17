@@ -34,7 +34,7 @@ use super::{
     prepare::{self, PrepareInput, PrepareOptions, Prepared},
     reader::{self, PersistReader, PyDelta, PySlidingSync},
     state_delta::NativeStateResolver,
-    txn::{self, json, PartialStateConflict, TxnEvent, TxnInput},
+    txn::{self, caches::CacheStream, json, PartialStateConflict, TxnEvent, TxnInput},
 };
 use crate::{
     database::postgres::write::{
@@ -87,6 +87,10 @@ pub(super) struct PersisterInner {
     pub conflict_cache: Arc<ConflictCache>,
     /// `experimental_features.msc4354_enabled`.
     pub msc4354_enabled: bool,
+    /// `server.enable_search`.
+    pub enable_search: bool,
+    /// `server.enable_ephemeral_messages`.
+    pub enable_ephemeral_messages: bool,
 }
 
 impl Persister {
@@ -151,6 +155,8 @@ impl Persister {
                 metrics: PersistMetrics::default(),
                 conflict_cache,
                 msc4354_enabled: config.experimental.msc4354_enabled,
+                enable_search: config.server.enable_search,
+                enable_ephemeral_messages: config.server.enable_ephemeral_messages,
             }),
         }))
     }
@@ -276,17 +282,21 @@ impl Persister {
     /// `prepared` is what Rust prepared for it. For
     /// `tests/storage/test_rust_persist_txn.py`.
     ///
+    /// The cache stream IDs it wrote come back unfinished in the effects.
+    ///
     /// Returns what it collected for Python to apply, and for the Python
     /// steps after it, by position in the chunk: the events left, the
     /// events stored redacted with the event that redacts each, and the
     /// events that stopped being outliers.
     #[allow(clippy::type_complexity)]
+    #[pyo3(signature = (room_id, events_and_contexts, prepared, *, inhibit_local_membership_updates))]
     fn persist_events_txn_for_test(
         &self,
         py: Python<'_>,
         room_id: String,
         events_and_contexts: Vec<(Py<Event>, PersistContext)>,
         prepared: &PreparedChunk,
+        inhibit_local_membership_updates: bool,
     ) -> PyResult<(
         PersistEffects,
         Vec<usize>,
@@ -308,12 +318,18 @@ impl Persister {
             let Prepared::Chunk(chunk) = &*prepared else {
                 unreachable!("checked above");
             };
+            let cache_stream = CacheStream::new(Arc::clone(&inner.cache_stream));
             let input = TxnInput {
                 room_id: &room_id,
                 events: &events,
                 prepared: chunk,
                 instance_name: &inner.instance_name,
+                server_name: &inner.server_name,
                 clock: inner.runtime.clock(),
+                inhibit_local_membership_updates,
+                enable_search: inner.enable_search,
+                enable_ephemeral_messages: inner.enable_ephemeral_messages,
+                cache_stream: &cache_stream,
             };
             let position = |event: &TxnEvent| {
                 input
@@ -322,7 +338,7 @@ impl Persister {
                     .position(|x| std::ptr::eq(x, event))
                     .expect("an event of the chunk")
             };
-            run_write_interaction(&pool, "persist_events", |txn, _| {
+            let result = run_write_interaction(&pool, "persist_events", |txn, _| {
                 let (input, position) = (&input, &position);
                 async move {
                     let mut effects = PersistEffects::default();
@@ -345,7 +361,9 @@ impl Persister {
                 .boxed()
             })
             .await
-            .map_err(write_error_to_py)
+            .map_err(write_error_to_py)?;
+            cache_stream.hand_over(&result.0);
+            Ok(result)
         };
         self.block_on(py, future.boxed())
     }

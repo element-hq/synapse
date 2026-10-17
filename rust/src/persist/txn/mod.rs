@@ -21,15 +21,19 @@
 //! cache updates Python queues with `txn.call_after`.
 //!
 //! This is being ported a group of steps at a time, from the start of the
-//! transaction. So far it covers the steps up to storing the rejections:
-//! the events themselves ([`events`]) and the room's forward extremities
-//! ([`edges`]). It returns the events left at that point. The Python steps after it run
-//! only in `tests/storage/test_rust_persist_txn.py`, which persists the
-//! rest of a chunk in Python and compares the rows with Python's.
+//! transaction. So far it covers the steps up to `_update_metadata_tables_txn`:
+//! the events themselves ([`events`]), the room's DAG ([`edges`]) and the
+//! tables about the events ([`metadata`]), with the cache stream rows
+//! ([`caches`]). It returns the events left at that point. The Python steps
+//! after it run only in `tests/storage/test_rust_persist_txn.py`, which
+//! persists the rest of a chunk in Python and compares the rows with
+//! Python's.
 
+pub mod caches;
 pub mod edges;
 pub mod events;
 pub mod json;
+pub mod metadata;
 
 use std::collections::HashMap;
 
@@ -37,6 +41,7 @@ use anyhow::anyhow;
 use pyo3::PyErr;
 use serde_json::Value;
 
+use self::caches::CacheStream;
 use super::{
     context::PersistContext,
     effects::{EventInvalidation, PersistEffects},
@@ -118,7 +123,17 @@ pub struct TxnInput<'a> {
     pub prepared: &'a PreparedChunk,
     /// This instance, which writes the events.
     pub instance_name: &'a str,
+    /// This server's name, for which users are ours.
+    pub server_name: &'a str,
     pub clock: &'a Clock,
+    /// The chunk was backfilled, so its memberships are not current.
+    pub inhibit_local_membership_updates: bool,
+    /// `server.enable_search`.
+    pub enable_search: bool,
+    /// `server.enable_ephemeral_messages`.
+    pub enable_ephemeral_messages: bool,
+    /// The cache stream IDs of this persist, over its attempts.
+    pub cache_stream: &'a CacheStream,
 }
 
 impl TxnInput<'_> {
@@ -160,8 +175,25 @@ fn metadata_error(e: PyErr) -> WriteError {
 /// Python would queue with `txn.call_after`. Returns what the steps still
 /// to be ported take.
 ///
-/// `effects` must start empty: a retried transaction starts again.
+/// `effects` must start empty: a retried transaction starts again. Once
+/// it commits, hand `effects` to `input.cache_stream`.
 pub async fn persist_events_txn<'a>(
+    txn: &WriteTxn,
+    input: &TxnInput<'a>,
+    effects: &mut PersistEffects,
+) -> Result<TxnPrefix<'a>, WriteError> {
+    // An earlier attempt whose commit failed left its cache stream IDs.
+    input.cache_stream.finish_pending();
+    let result = persist_events_txn_steps(txn, input, effects).await;
+    if result.is_err() {
+        // The rows are rolled back, so their IDs are done with, as Python's
+        // `call_on_exception` has it.
+        input.cache_stream.finish_pending();
+    }
+    result
+}
+
+async fn persist_events_txn_steps<'a>(
     txn: &WriteTxn,
     input: &TxnInput<'a>,
     effects: &mut PersistEffects,
@@ -238,6 +270,8 @@ pub async fn persist_events_txn<'a>(
 
     // From here on, only events that were not rejected.
     let events = events::store_rejections(txn, input, events).await?;
+
+    metadata::update_metadata_tables(txn, input, &events, effects).await?;
 
     Ok(TxnPrefix {
         events,

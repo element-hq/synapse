@@ -720,7 +720,7 @@ impl EventInternalMetadata {
         Ok(self.read_inner()?.is_redacted())
     }
 
-    fn is_notifiable(&self) -> PyResult<bool> {
+    pub fn is_notifiable(&self) -> PyResult<bool> {
         Ok(self.read_inner()?.is_notifiable())
     }
 

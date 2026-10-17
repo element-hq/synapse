@@ -568,6 +568,54 @@ class PersistEffectsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(seen_by_cache, [True])
         self.assertEqual(id_gen.get_current_token(), stream)
 
+    def test_cache_stream_ids_finish_after_the_caches(self) -> None:
+        """As Python's `get_next_txn`: a cache stream ID is finished once the
+        cache is invalidated locally."""
+        id_gen = self.store._cache_id_gen
+        if id_gen is None:
+            raise SkipTest("the cache stream needs Postgres")
+        allocation = id_gen.get_next()
+        stream_id = self.get_success(allocation.__aenter__())
+        self.assertLess(
+            id_gen.get_current_token_for_writer(id_gen._instance_name), stream_id
+        )
+
+        calls: list[str] = []
+        original_finish = id_gen._mark_ids_as_finished
+        original_invalidate = self.store._attempt_to_invalidate_cache
+
+        def finish(ids: list[int]) -> None:
+            calls.append("finish")
+            original_finish(ids)
+
+        def invalidate(cache_name: str, key: Collection[Any] | None) -> bool:
+            calls.append("invalidate")
+            return original_invalidate(cache_name, key)
+
+        notifier = self.hs.get_replication_notifier()
+        original_notify = notifier.notify_replication
+
+        def notify() -> None:
+            calls.append("notify")
+            original_notify()
+
+        with (
+            patch.object(id_gen, "_mark_ids_as_finished", finish),
+            patch.object(self.store, "_attempt_to_invalidate_cache", invalidate),
+            patch.object(notifier, "notify_replication", notify),
+        ):
+            self.store._apply_rust_persist_effects(
+                PersistEffects(
+                    cache_invalidations=[("get_threads", [self.room_id])],
+                    cache_stream_ids=[stream_id],
+                )
+            )
+
+        self.assertEqual(calls, ["invalidate", "finish", "notify"])
+        self.assertEqual(
+            id_gen.get_current_token_for_writer(id_gen._instance_name), stream_id
+        )
+
 
 class RustPersistConfigTestCase(unittest.TestCase):
     def _parse(self, level: Any) -> ExperimentalConfig:

@@ -21,6 +21,18 @@ pub mod event_type {
     pub const M_ROOM_HISTORY_VISIBILITY: &str = "m.room.history_visibility";
     /// Event type: m.room.redaction
     pub const M_ROOM_REDACTION: &str = "m.room.redaction";
+    /// Event type: m.room.name
+    pub const M_ROOM_NAME: &str = "m.room.name";
+    /// Event type: m.room.topic
+    pub const M_ROOM_TOPIC: &str = "m.room.topic";
+    /// Event type: m.room.message
+    pub const M_ROOM_MESSAGE: &str = "m.room.message";
+    /// Event type: m.room.retention
+    pub const M_ROOM_RETENTION: &str = "m.room.retention";
+    /// Event type: m.room.encryption
+    pub const M_ROOM_ENCRYPTION: &str = "m.room.encryption";
+    /// Event type: m.room.tombstone
+    pub const M_ROOM_TOMBSTONE: &str = "m.room.tombstone";
 }
 
 /// Event Fields
