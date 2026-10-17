@@ -20,15 +20,18 @@
 //! writes, in the same order, and collects in a [`PersistEffects`] the
 //! cache updates Python queues with `txn.call_after`.
 //!
-//! This is being ported a group of steps at a time, from the start of the
-//! transaction. So far it covers the steps through
-//! `_update_current_state_txn`, except its profile updates: the events themselves ([`events`]), the
-//! room's DAG ([`edges`]), the tables about the events ([`metadata`]) and
-//! the room's current state ([`current_state`]), with the cache stream rows
-//! ([`caches`]). It returns the events left at that point. The Python steps
-//! after it run only in `tests/storage/test_rust_persist_txn.py`, which
-//! persists the rest of a chunk in Python and compares the rows with
-//! Python's.
+//! It covers the whole of `_persist_events_txn` but for two Python steps:
+//! the event cache prefill (`_add_to_cache`) at the end of
+//! `_update_metadata_tables_txn`, and the profile updates at the end of
+//! `_update_current_state_txn`. The steps are the events themselves
+//! ([`events`]), the room's DAG ([`edges`]), the tables about the events
+//! ([`metadata`]), the room's current state ([`current_state`]), sticky
+//! events ([`sticky`]) and the sliding sync tables ([`sliding_sync`]), with
+//! the rows of the cache stream ([`caches`]) and the IDs of the streams
+//! the transaction takes from ([`streams`]). It returns the events left
+//! for the Python steps, which run only in
+//! `tests/storage/test_rust_persist_txn.py` so far. That test persists
+//! the rest of a chunk in Python and compares the rows with Python's.
 
 pub mod caches;
 pub mod current_state;
@@ -36,6 +39,9 @@ pub mod edges;
 pub mod events;
 pub mod json;
 pub mod metadata;
+pub mod sliding_sync;
+pub mod sticky;
+pub mod streams;
 
 use std::collections::HashMap;
 
@@ -43,7 +49,7 @@ use anyhow::anyhow;
 use pyo3::PyErr;
 use serde_json::Value;
 
-use self::caches::CacheStream;
+use self::streams::TxnStream;
 use super::{
     context::PersistContext,
     effects::{EventInvalidation, PersistEffects},
@@ -134,8 +140,12 @@ pub struct TxnInput<'a> {
     pub enable_search: bool,
     /// `server.enable_ephemeral_messages`.
     pub enable_ephemeral_messages: bool,
+    /// `experimental_features.msc4354_enabled`: sticky events.
+    pub msc4354_enabled: bool,
     /// The cache stream IDs of this persist, over its attempts.
-    pub cache_stream: &'a CacheStream,
+    pub cache_stream: &'a TxnStream,
+    /// The sticky events stream IDs of this persist, over its attempts.
+    pub sticky_stream: &'a TxnStream,
 }
 
 impl TxnInput<'_> {
@@ -143,15 +153,11 @@ impl TxnInput<'_> {
     fn now_ms(&self) -> Result<i64, WriteError> {
         Ok(i64::try_from(self.clock.now_millis()).map_err(anyhow::Error::new)?)
     }
-}
 
-/// What the steps ported so far leave for the Python steps after them.
-pub struct TxnPrefix<'a> {
-    /// The events left: neither persisted before nor rejected.
-    pub events: Vec<Persisting<'a>>,
-    /// The events that stopped being outliers. Python makes the sticky
-    /// ones sticky.
-    pub de_outliered: Vec<&'a TxnEvent>,
+    /// The streams the transaction takes IDs from.
+    fn streams(&self) -> [&TxnStream; 2] {
+        [self.cache_stream, self.sticky_stream]
+    }
 }
 
 /// The chunk has an event with partial state, but the room no longer has
@@ -174,23 +180,28 @@ fn metadata_error(e: PyErr) -> WriteError {
 }
 
 /// Write the chunk, as `_persist_events_txn` does, adding to `effects` what
-/// Python would queue with `txn.call_after`. Returns what the steps still
-/// to be ported take.
+/// Python would queue with `txn.call_after`. Returns the events left, which
+/// the Python steps take: neither persisted before nor rejected.
 ///
 /// `effects` must start empty: a retried transaction starts again. Once
-/// it commits, hand `effects` to `input.cache_stream`.
+/// it commits, hand the stream IDs in `effects` to `input.cache_stream`
+/// and `input.sticky_stream`.
 pub async fn persist_events_txn<'a>(
     txn: &WriteTxn,
     input: &TxnInput<'a>,
     effects: &mut PersistEffects,
-) -> Result<TxnPrefix<'a>, WriteError> {
-    // An earlier attempt whose commit failed left its cache stream IDs.
-    input.cache_stream.finish_pending();
+) -> Result<Vec<Persisting<'a>>, WriteError> {
+    // An earlier attempt whose commit failed left its stream IDs.
+    for stream in input.streams() {
+        stream.finish_pending();
+    }
     let result = persist_events_txn_steps(txn, input, effects).await;
     if result.is_err() {
         // The rows are rolled back, so their IDs are done with, as Python's
         // `call_on_exception` has it.
-        input.cache_stream.finish_pending();
+        for stream in input.streams() {
+            stream.finish_pending();
+        }
     }
     result
 }
@@ -199,7 +210,7 @@ async fn persist_events_txn_steps<'a>(
     txn: &WriteTxn,
     input: &TxnInput<'a>,
     effects: &mut PersistEffects,
-) -> Result<TxnPrefix<'a>, WriteError> {
+) -> Result<Vec<Persisting<'a>>, WriteError> {
     let room_id = input.room_id;
 
     // Protect against a race with deleting the room: the share lock holds
@@ -237,16 +248,15 @@ async fn persist_events_txn_steps<'a>(
 
     events::update_room_depths(txn, room_id, &events, effects).await?;
 
-    let mut de_outliered = Vec::new();
-    let events = events::update_outliers(txn, input, events, effects, &mut de_outliered).await?;
+    let events = events::update_outliers(txn, input, events, effects).await?;
 
     // From here on, only events we have not seen before.
     let events = events::apply_existing_redactions(txn, room_id, room_version, events).await?;
     let newly_redacted = events::newly_redacted_event_ids(txn, room_id, &events).await?;
-    // Redacted events stop being sticky. Python makes de-outliered events
-    // sticky in `update_outliers`, before this. The sticky port must do so
-    // there too, or a de-outliered event redacted in the same chunk stays
-    // sticky.
+    // Redacted events stop being sticky. A sticky event de-outliered in
+    // this chunk does not: its row has this chunk's stream ordering, but its
+    // `events` row keeps its first one, which the delete looks for. A Python
+    // bug, kept.
     events::delete_sticky_events(txn, &newly_redacted).await?;
 
     events::store_events(txn, input, &events).await?;
@@ -285,10 +295,25 @@ async fn persist_events_txn_steps<'a>(
             .await?;
     }
 
-    Ok(TxnPrefix {
-        events,
-        de_outliered,
-    })
+    if input.msc4354_enabled {
+        let new_events: Vec<(&Event, i64)> = events
+            .iter()
+            .map(|e| (e.event(), e.stream_ordering()))
+            .collect();
+        sticky::insert_sticky_events(txn, input, &new_events, effects).await?;
+        // Those the state delta just applied lets pass auth.
+        let un_soft_fail: Vec<&str> = input
+            .prepared
+            .sticky_events_to_un_soft_fail
+            .iter()
+            .map(|id| &**id)
+            .collect();
+        sticky::un_soft_fail_sticky_events(txn, input, &un_soft_fail, effects).await?;
+    }
+
+    sliding_sync::update_sliding_sync_joined_room(txn, room_id, &events).await?;
+
+    Ok(events)
 }
 
 /// The cache updates Python queues for each event of the chunk at the start

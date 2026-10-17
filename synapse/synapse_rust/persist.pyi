@@ -58,16 +58,16 @@ class Persister:
         prepared: PreparedChunk,
         *,
         inhibit_local_membership_updates: bool,
-    ) -> tuple[PersistEffects, list[int], dict[int, str], list[int]]:
-        """Run the part of the write transaction ported to Rust so far over
-        the chunk, whose events have their stream orderings set, and commit
-        it. `prepared` is what Rust prepared for it. The cache stream IDs it
-        wrote come back unfinished in the effects.
+    ) -> tuple[PersistEffects, list[int], dict[int, str]]:
+        """Run the Rust write transaction over the chunk, whose events have
+        their stream orderings set, and commit it. It leaves two steps to
+        Python: `_add_to_cache` and the profile updates. `prepared` is what
+        Rust prepared for it. The cache and sticky
+        events stream IDs it took come back unfinished in the effects.
 
         Returns what it collected for Python to apply, and for the Python
-        steps after it, by position in the chunk: the events left, the
-        events stored redacted with the event that redacts each, and the
-        events that stopped being outliers."""
+        steps after it, by position in the chunk: the events left, and the
+        events stored redacted with the event that redacts each."""
 
 class PreparedChunk:
     """What `Persister.prepare_chunk` computed. If `state_res_fallback` is
@@ -124,6 +124,7 @@ class PersistEffects:
         state_caches: list[tuple[str, list[str]]] = ...,
         cache_invalidations: list[tuple[str, list[str]]] = ...,
         cache_stream_ids: list[int] = ...,
+        sticky_stream_ids: list[int] = ...,
         state_group_prefills: list[tuple[str, int]] = ...,
         latest_event_ids: tuple[str, list[str]] | None = None,
         stream_changes: list[tuple[str, str, int]] = ...,
@@ -159,6 +160,13 @@ class PersistEffects:
         """The IDs of the cache stream rows the transaction wrote, still
         unfinished. Python marks them finished once the caches are
         invalidated."""
+
+    @property
+    def sticky_stream_ids(self) -> list[int]:
+        """The IDs of the sticky events stream rows the transaction wrote or
+        moved, still unfinished. Python finishes them once the caches are
+        invalidated, as `get_next_mult_txn` does, and updates
+        `stream_positions`."""
 
     @property
     def state_group_prefills(self) -> list[tuple[str, int]]:

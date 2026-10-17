@@ -361,7 +361,7 @@ impl Event {
     /// so we return `None` for those.
     ///
     /// See [`Self::locally_sticky_until_ts`] to get the effective stickiness expiry timestamp.
-    fn sticky_duration(&self) -> PyResult<Option<SynapseDuration>> {
+    pub(crate) fn sticky_duration(&self) -> PyResult<Option<SynapseDuration>> {
         if self.internal_metadata.policy_server_spammy()?
             || self.internal_metadata.spam_checker_spammy()?
             || self.rejected_reason.is_some()

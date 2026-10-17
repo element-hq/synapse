@@ -34,7 +34,7 @@ use super::{
     prepare::{self, PrepareInput, PrepareOptions, Prepared},
     reader::{self, PersistReader, PyDelta, PySlidingSync},
     state_delta::NativeStateResolver,
-    txn::{self, caches::CacheStream, json, PartialStateConflict, TxnEvent, TxnInput},
+    txn::{self, json, streams::TxnStream, PartialStateConflict, TxnEvent, TxnInput},
 };
 use crate::{
     database::postgres::write::{
@@ -59,8 +59,8 @@ use crate::{
 /// Persists events in Rust, on the events writer, over the native driver.
 ///
 /// Holds what every level needs: the pool, the shared caches, the stream ID
-/// trackers of the events, backfill and cache streams (shared with their
-/// Python `MultiWriterIdGenerator`s) and the metrics.
+/// trackers of the events, backfill, cache and sticky events streams
+/// (shared with their Python `MultiWriterIdGenerator`s) and the metrics.
 ///
 /// Each entry point returns a Deferred and has a `_blocking` twin for
 /// tests (see `_BlockingRustCalls`).
@@ -80,6 +80,7 @@ pub(super) struct PersisterInner {
     pub events_stream: Arc<StreamIdTracker>,
     pub backfill_stream: Arc<StreamIdTracker>,
     pub cache_stream: Arc<StreamIdTracker>,
+    pub sticky_stream: Arc<StreamIdTracker>,
     pub server_name: String,
     pub instance_name: String,
     pub metrics: PersistMetrics,
@@ -150,6 +151,7 @@ impl Persister {
                 events_stream: tracker(intern!(py, "_stream_id_gen"))?,
                 backfill_stream: tracker(intern!(py, "_backfill_id_gen"))?,
                 cache_stream: tracker(intern!(py, "_cache_id_gen"))?,
+                sticky_stream: tracker(intern!(py, "_sticky_events_id_gen"))?,
                 server_name: homeserver.hostname(py)?,
                 instance_name,
                 metrics: PersistMetrics::default(),
@@ -277,17 +279,18 @@ impl Persister {
         }
     }
 
-    /// Run the part of the write transaction ported so far over the chunk,
-    /// whose events must have their stream orderings set, and commit it.
+    /// Run the Rust write transaction over the chunk, whose events must
+    /// have their stream orderings set, and commit it. It leaves two
+    /// steps to Python: `_add_to_cache` and the profile updates.
     /// `prepared` is what Rust prepared for it. For
     /// `tests/storage/test_rust_persist_txn.py`.
     ///
-    /// The cache stream IDs it wrote come back unfinished in the effects.
+    /// The cache and sticky events stream IDs it took come back unfinished
+    /// in the effects.
     ///
     /// Returns what it collected for Python to apply, and for the Python
-    /// steps after it, by position in the chunk: the events left, the
-    /// events stored redacted with the event that redacts each, and the
-    /// events that stopped being outliers.
+    /// steps after it, by position in the chunk: the events left, and the
+    /// events stored redacted with the event that redacts each.
     #[allow(clippy::type_complexity)]
     #[pyo3(signature = (room_id, events_and_contexts, prepared, *, inhibit_local_membership_updates))]
     fn persist_events_txn_for_test(
@@ -297,12 +300,7 @@ impl Persister {
         events_and_contexts: Vec<(Py<Event>, PersistContext)>,
         prepared: &PreparedChunk,
         inhibit_local_membership_updates: bool,
-    ) -> PyResult<(
-        PersistEffects,
-        Vec<usize>,
-        HashMap<usize, String>,
-        Vec<usize>,
-    )> {
+    ) -> PyResult<(PersistEffects, Vec<usize>, HashMap<usize, String>)> {
         let prepared = Arc::clone(&prepared.prepared);
         if !matches!(&*prepared, Prepared::Chunk(_)) {
             return Err(PyRuntimeError::new_err("the chunk was prepared in Python"));
@@ -318,7 +316,8 @@ impl Persister {
             let Prepared::Chunk(chunk) = &*prepared else {
                 unreachable!("checked above");
             };
-            let cache_stream = CacheStream::new(Arc::clone(&inner.cache_stream));
+            let cache_stream = TxnStream::caches(Arc::clone(&inner.cache_stream));
+            let sticky_stream = TxnStream::sticky_events(Arc::clone(&inner.sticky_stream));
             let input = TxnInput {
                 room_id: &room_id,
                 events: &events,
@@ -329,7 +328,9 @@ impl Persister {
                 inhibit_local_membership_updates,
                 enable_search: inner.enable_search,
                 enable_ephemeral_messages: inner.enable_ephemeral_messages,
+                msc4354_enabled: inner.msc4354_enabled,
                 cache_stream: &cache_stream,
+                sticky_stream: &sticky_stream,
             };
             let position = |event: &TxnEvent| {
                 input
@@ -342,10 +343,10 @@ impl Persister {
                 let (input, position) = (&input, &position);
                 async move {
                     let mut effects = PersistEffects::default();
-                    let prefix = txn::persist_events_txn(txn, input, &mut effects).await?;
-                    let left = prefix.events.iter().map(|e| position(e.source)).collect();
+                    let events = txn::persist_events_txn(txn, input, &mut effects).await?;
+                    let left = events.iter().map(|e| position(e.source)).collect();
                     let mut redacted = HashMap::new();
-                    for event in &prefix.events {
+                    for event in &events {
                         if let Some(copy) = &event.redacted {
                             let by = copy
                                 .internal_metadata()
@@ -355,14 +356,14 @@ impl Persister {
                             redacted.insert(position(event.source), by);
                         }
                     }
-                    let de_outliered = prefix.de_outliered.iter().map(|e| position(e)).collect();
-                    Ok((effects, left, redacted, de_outliered))
+                    Ok((effects, left, redacted))
                 }
                 .boxed()
             })
             .await
             .map_err(write_error_to_py)?;
-            cache_stream.hand_over(&result.0);
+            cache_stream.hand_over(result.0.cache_stream_ids());
+            sticky_stream.hand_over(result.0.sticky_stream_ids());
             Ok(result)
         };
         self.block_on(py, future.boxed())

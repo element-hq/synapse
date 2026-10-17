@@ -746,6 +746,19 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             "event_id",
             sticky_event_ids,
         )
+
+        # The events keep their order in the stream when they move to its
+        # end. Any without a row, which the update leaves alone, go last.
+        txn.execute(
+            f"""
+            SELECT event_id FROM sticky_events
+            WHERE {event_id_in_list_clause}
+            ORDER BY event_stream_ordering
+            """,
+            event_id_in_list_args,
+        )
+        ordered_event_ids = [event_id for (event_id,) in txn]
+        ordered_event_ids.extend(sorted(sticky_event_ids - set(ordered_event_ids)))
         if isinstance(txn.database_engine, PostgresEngine):
             # It's a bit sad that internal_metadata is TEXT and not JSONB...
             txn.execute(
@@ -781,7 +794,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             txn,
             table="sticky_events",
             key_names=("event_id",),
-            key_values=[(event_id,) for event_id in sticky_event_ids],
+            key_values=[(event_id,) for event_id in ordered_event_ids],
             value_names=(
                 "stream_id",
                 "instance_name",

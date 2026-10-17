@@ -127,6 +127,10 @@ pub struct PersistEffects {
     /// finished once the caches are invalidated, then
     /// `ReplicationNotifier.notify_replication()`.
     cache_stream_ids: Vec<i64>,
+    /// The IDs of the sticky events stream rows the transaction wrote or
+    /// moved, to mark finished once the caches are invalidated, as
+    /// `get_next_mult_txn` does, with `stream_positions` updated after.
+    sticky_stream_ids: Vec<i64>,
     /// `_get_state_group_for_event.prefill((event_id,), state_group)`.
     state_group_prefills: Vec<(String, i64)>,
     /// `get_latest_event_ids_in_room.prefill((room_id,), extremities)`.
@@ -169,6 +173,14 @@ impl PersistEffects {
         &self.cache_stream_ids
     }
 
+    pub fn add_sticky_stream_ids(&mut self, ids: &[i64]) {
+        self.sticky_stream_ids.extend_from_slice(ids);
+    }
+
+    pub fn sticky_stream_ids(&self) -> &[i64] {
+        &self.sticky_stream_ids
+    }
+
     pub fn add_state_group_prefill(&mut self, event_id: String, state_group: i64) {
         self.state_group_prefills.push((event_id, state_group));
     }
@@ -207,6 +219,7 @@ impl PersistEffects {
         state_caches = Vec::new(),
         cache_invalidations = Vec::new(),
         cache_stream_ids = Vec::new(),
+        sticky_stream_ids = Vec::new(),
         state_group_prefills = Vec::new(),
         latest_event_ids = None,
         stream_changes = Vec::new(),
@@ -221,6 +234,7 @@ impl PersistEffects {
         state_caches: Vec<(String, Vec<String>)>,
         cache_invalidations: Vec<(String, Vec<String>)>,
         cache_stream_ids: Vec<i64>,
+        sticky_stream_ids: Vec<i64>,
         state_group_prefills: Vec<(String, i64)>,
         latest_event_ids: Option<(String, Vec<String>)>,
         stream_changes: Vec<(String, String, i64)>,
@@ -234,6 +248,7 @@ impl PersistEffects {
             state_caches,
             cache_invalidations,
             cache_stream_ids,
+            sticky_stream_ids,
             state_group_prefills,
             latest_event_ids,
             stream_changes: stream_changes
@@ -286,6 +301,12 @@ impl PersistEffects {
     #[pyo3(name = "cache_stream_ids")]
     fn py_cache_stream_ids(&self) -> Vec<i64> {
         self.cache_stream_ids.clone()
+    }
+
+    #[getter]
+    #[pyo3(name = "sticky_stream_ids")]
+    fn py_sticky_stream_ids(&self) -> Vec<i64> {
+        self.sticky_stream_ids.clone()
     }
 
     #[getter]

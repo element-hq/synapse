@@ -616,6 +616,66 @@ class PersistEffectsTestCase(unittest.HomeserverTestCase):
             id_gen.get_current_token_for_writer(id_gen._instance_name), stream_id
         )
 
+    def test_sticky_stream_ids_finish_after_the_caches(self) -> None:
+        """As Python's `get_next_mult_txn`: the sticky events stream IDs are
+        finished once the events whose soft failure was lifted are dropped
+        from the event cache, then replication is told, and
+        `stream_positions` moves on."""
+        id_gen = self.store._sticky_events_id_gen
+        allocation = id_gen.get_next()
+        stream_id = self.get_success(allocation.__aenter__())
+        self.assertLess(
+            id_gen.get_current_token_for_writer(id_gen._instance_name), stream_id
+        )
+
+        calls: list[str] = []
+        original_finish = id_gen._mark_ids_as_finished
+        original_invalidate = self.store._invalidate_local_get_event_cache
+        notifier = self.hs.get_replication_notifier()
+        original_notify = notifier.notify_replication
+
+        def finish(ids: list[int]) -> None:
+            calls.append("finish")
+            original_finish(ids)
+
+        def invalidate(event_id: str) -> None:
+            calls.append("invalidate")
+            original_invalidate(event_id)
+
+        def notify() -> None:
+            calls.append("notify")
+            original_notify()
+
+        with (
+            patch.object(id_gen, "_mark_ids_as_finished", finish),
+            patch.object(self.store, "_invalidate_local_get_event_cache", invalidate),
+            patch.object(notifier, "notify_replication", notify),
+        ):
+            self.store._apply_rust_persist_effects(
+                PersistEffects(
+                    event_cache_invalidations=["$sticky"],
+                    sticky_stream_ids=[stream_id],
+                )
+            )
+
+        self.assertEqual(calls, ["invalidate", "finish", "notify"])
+        self.assertEqual(
+            id_gen.get_current_token_for_writer(id_gen._instance_name), stream_id
+        )
+
+        self.pump()
+        positions = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                "stream_positions",
+                {
+                    "stream_name": "sticky_events",
+                    "instance_name": id_gen._instance_name,
+                },
+                "stream_id",
+            )
+        )
+        self.assertEqual(positions, [stream_id])
+
 
 class RustPersistConfigTestCase(unittest.TestCase):
     def _parse(self, level: Any) -> ExperimentalConfig:

@@ -26,7 +26,9 @@ use log::{debug, info};
 
 use super::{
     edges::{update_backward_extremities, BackwardEvent},
-    json, metadata_error, redacts, PartialStateConflict, Persisting, TxnEvent, TxnInput,
+    json, metadata_error, redacts,
+    sticky::insert_sticky_events,
+    PartialStateConflict, Persisting, TxnInput,
 };
 use crate::{
     database::postgres::write::{Column, WriteError, WriteTxn},
@@ -95,14 +97,15 @@ pub async fn update_room_depths(
 /// one: it gets its state group, a row in `ex_outlier_stream`, and its
 /// backward extremities.
 ///
-/// Returns the events left, and adds to `de_outliered` the events that
-/// stopped being outliers.
+/// A de-outliered event that is sticky becomes so now, with this chunk's
+/// stream ordering, before the redactions of the chunk can make it stop.
+///
+/// Returns the events left.
 pub async fn update_outliers<'a>(
     txn: &WriteTxn,
     input: &TxnInput<'_>,
     events: Vec<Persisting<'a>>,
     effects: &mut PersistEffects,
-    de_outliered: &mut Vec<&'a TxnEvent>,
 ) -> Result<Vec<Persisting<'a>>, WriteError> {
     let event_ids: Vec<&str> = events.iter().map(|e| e.event().event_id()).collect();
     let rows = txn
@@ -172,7 +175,21 @@ pub async fn update_outliers<'a>(
             }],
         )
         .await?;
-        de_outliered.push(event.source);
+        // Python tests the duration for truth, so a zero one is not tried.
+        let sticky = event
+            .event()
+            .sticky_duration()
+            .map_err(metadata_error)?
+            .is_some_and(|duration| duration.as_millis() > 0);
+        if input.msc4354_enabled && sticky {
+            insert_sticky_events(
+                txn,
+                input,
+                &[(event.event(), event.stream_ordering())],
+                effects,
+            )
+            .await?;
+        }
     }
     Ok(left)
 }

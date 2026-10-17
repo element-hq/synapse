@@ -30,9 +30,10 @@ import hashlib
 import json
 import re
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from typing import Any
 from unittest import SkipTest
+from unittest.mock import patch
 
 import attr
 from unpaddedbase64 import encode_base64
@@ -44,7 +45,7 @@ from synapse.api.constants import EventTypes, StickyEvent
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.crypto.event_signing import compute_content_hash
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import make_event_from_dict
 from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -337,7 +338,7 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             def txn(t: LoggingTransaction, **kwargs: Any) -> None:
                 start = len(t.after_callbacks or [])
                 python_txn(t, **kwargs)
-                twin.effects.extend(self._python_effects(t, start))
+                twin.effects.extend(_merged_effects(self._python_effects(t, start)))
         else:
 
             def txn(t: LoggingTransaction, **kwargs: Any) -> None:
@@ -370,25 +371,22 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             self.persister.last_chunk,
             (room_id, [event.event_id for event, _ in events_and_contexts]),
         )
-        effects, left, redacted, de_outliered = (
-            self.persister.persist_events_txn_for_test(
-                room_id,
-                events_and_contexts,
-                prepared,
-                inhibit_local_membership_updates=kwargs[
-                    "inhibit_local_membership_updates"
-                ],
-            )
+        effects, left, redacted = self.persister.persist_events_txn_for_test(
+            room_id,
+            events_and_contexts,
+            prepared,
+            inhibit_local_membership_updates=kwargs["inhibit_local_membership_updates"],
         )
-        twin.effects.extend(_rust_effects(effects))
+        calls = _rust_effects(effects)
         # As the facade will once Rust commits, so the steps after Rust's,
         # and the next persist, see the caches Rust invalidated. This also
-        # finishes the cache stream IDs. The test entry allocates no event
-        # stream IDs. Unlike production, the notifiers are called inside
-        # the Python transaction, and a retry of it would apply the effects
-        # twice.
+        # finishes the cache and sticky events stream IDs, which is
+        # recorded. The test entry allocates no event stream IDs. Unlike
+        # production, the notifiers are called, and the `stream_positions`
+        # update started, inside the Python transaction, and a retry of it
+        # would apply the effects twice.
         self.assertEqual(effects.stream_ids, [])
-        self.store._apply_rust_persist_effects(effects)
+        calls.extend(self._apply_recorded(effects))
         # The events left, as the steps after Rust's see them.
         left_events_and_contexts = []
         for i in left:
@@ -403,10 +401,97 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             txn,
             room_id=room_id,
             events_and_contexts=left_events_and_contexts,
-            de_outliered=[events_and_contexts[i][0] for i in de_outliered],
             **kwargs,
         )
-        twin.effects.extend(self._python_effects(txn, start))
+        calls.extend(self._python_effects(txn, start))
+        twin.effects.extend(_merged_effects(calls))
+
+    def _apply_recorded(
+        self, effects: PersistEffects
+    ) -> list[tuple[str, str | None, tuple, dict[str, Any]]]:
+        """Apply Rust's effects, recording the stream IDs finished and the
+        notifiers called, as `_python_effects` records Python's."""
+        calls: list[tuple[str, str | None, tuple, dict[str, Any]]] = []
+        replication_notifier = self.hs.get_replication_notifier()
+        notifier = self.hs.get_notifier()
+
+        # How deep in recorded calls we are. Only the applier's own calls
+        # are recorded, as Python records only its transaction's callbacks:
+        # `on_new_replication_data` notifies replication itself.
+        depth = [0]
+
+        def recording(
+            name: str, owner: str, original: Callable[..., Any]
+        ) -> Callable[..., Any]:
+            def call(*args: Any) -> Any:
+                if not depth[0]:
+                    calls.append((name, owner, tuple(list(a) for a in args), {}))
+                depth[0] += 1
+                try:
+                    return original(*args)
+                finally:
+                    depth[0] -= 1
+
+            return call
+
+        def run_as_background_process(desc: str, func: Any, *args: Any) -> Any:
+            # Only the `stream_positions` updates. The invalidations start
+            # others, which Python runs after its transaction unrecorded.
+            if desc == "MultiWriterIdGenerator._update_table":
+                calls.append(
+                    (
+                        "run_as_background_process",
+                        _background_process_owner(desc, args),
+                        (),
+                        {},
+                    )
+                )
+            return original_run(desc, func, *args)
+
+        original_run = self.hs.run_as_background_process
+        with ExitStack() as stack:
+            for id_gen in (self.store._cache_id_gen, self.store._sticky_events_id_gen):
+                assert id_gen is not None
+                stack.enter_context(
+                    patch.object(
+                        id_gen,
+                        "_mark_ids_as_finished",
+                        recording(
+                            "_mark_ids_as_finished",
+                            id_gen._stream_name,
+                            id_gen._mark_ids_as_finished,
+                        ),
+                    )
+                )
+            stack.enter_context(
+                patch.object(
+                    replication_notifier,
+                    "notify_replication",
+                    recording(
+                        "notify_replication",
+                        "ReplicationNotifier",
+                        replication_notifier.notify_replication,
+                    ),
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    notifier,
+                    "on_new_replication_data",
+                    recording(
+                        "on_new_replication_data",
+                        "Notifier",
+                        notifier.on_new_replication_data,
+                    ),
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    self.hs, "run_as_background_process", run_as_background_process
+                )
+            )
+            self.store._apply_rust_persist_effects(effects)
+        return calls
 
     def _python_effects(
         self, txn: LoggingTransaction, start: int
@@ -433,6 +518,11 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                 owner_name = owner._stream_name
             elif owner is not None:
                 owner_name = getattr(owner, "name", None) or type(owner).__name__
+            elif name == "run_as_background_process":
+                # By what it runs: `args` are its description, the server
+                # name, and the function and its arguments.
+                owner_name = _background_process_owner(str(args[0]), args[3:])
+                args = ()
             elif name == "<lambda>" and cache is not None:
                 # A single-key cache's `prefill` or `invalidate`, by the
                 # method the lambda calls on the cache.
@@ -751,6 +841,51 @@ class _RecordingPersister:
         return getattr(self._persister, name)
 
 
+# Callbacks that only tell others to look, compared by whether they were
+# called.
+_NOTIFIERS = {
+    "notify_replication",
+    "on_new_replication_data",
+    "run_as_background_process",
+}
+
+
+def _background_process_owner(desc: str, args: tuple) -> str:
+    """What a background process of a persist runs: the `stream_positions`
+    update of an ID generator, by its stream, or its description."""
+    if desc == "MultiWriterIdGenerator._update_table":
+        # `runInteraction`'s description and function.
+        assert args[0] == desc, args
+        id_gen = getattr(args[1], "__self__", None)
+        assert isinstance(id_gen, MultiWriterIdGenerator), args
+        return f"stream_positions:{id_gen._stream_name}"
+    return desc
+
+
+def _merged_effects(
+    effects: list[tuple[str, str | None, tuple, dict[str, Any]]],
+) -> list[tuple[str, str | None, tuple, dict[str, Any]]]:
+    """One persist's effects, with each stream's finished IDs in one call,
+    and each notifier called once: Python queues them per allocation of
+    IDs, and applying Rust's effects does each once."""
+    merged = []
+    finished: dict[str | None, list[int]] = {}
+    notified = set()
+    for name, owner, args, kwargs in effects:
+        if name == "_mark_ids_as_finished":
+            finished.setdefault(owner, []).extend(args[0])
+        elif name in _NOTIFIERS:
+            notified.add((name, owner))
+        else:
+            merged.append((name, owner, args, kwargs))
+    merged.extend(
+        ("_mark_ids_as_finished", owner, (sorted(ids),), {})
+        for owner, ids in finished.items()
+    )
+    merged.extend((name, owner, (), {}) for name, owner in notified)
+    return merged
+
+
 def _rust_effects(
     effects: PersistEffects,
 ) -> list[tuple[str, str | None, tuple, dict[str, Any]]]:
@@ -773,13 +908,8 @@ def _rust_effects(
         )
     for cache_name, keys in effects.cache_invalidations:
         calls.append(("invalidate", cache_name, (tuple(keys),), {}))
-    # Python's `get_next_txn` queues these per cache stream row. Applying
-    # the effects finishes the IDs at once, and notifies once.
-    for stream_id in effects.cache_stream_ids:
-        calls.append(("_mark_ids_as_finished", "caches", ([stream_id],), {}))
-        calls.append(("notify_replication", "ReplicationNotifier", (), {}))
-        if effects.new_replication_data:
-            calls.append(("on_new_replication_data", "Notifier", (), {}))
+    # The stream IDs finished and the notifiers called are recorded as
+    # they are applied, by `_apply_recorded`.
     for cache, entity, stream_id in effects.stream_changes:
         calls.append(
             (
@@ -811,7 +941,6 @@ def _python_steps_after_rust(
     *,
     room_id: str,
     events_and_contexts: list[EventPersistencePair],
-    de_outliered: list[EventBase],
     inhibit_local_membership_updates: bool,
     state_delta_for_room: Any,
     new_forward_extremities: set[str] | None,
@@ -828,14 +957,6 @@ def _python_steps_after_rust(
     goes once Rust runs the whole transaction. A step added to Python's
     transaction meanwhile runs in room A only, so its rows differ and the
     comparison fails."""
-    # Left by `_update_outliers_txn`, until Rust inserts sticky events.
-    # Python inserts these before deleting the redacted events' rows, so a
-    # chunk that de-outliers a sticky event and redacts it differs here.
-    if store._msc4354_enabled:
-        store.store.insert_sticky_events_txn(
-            txn, [event for event in de_outliered if event.sticky_duration()]
-        )
-
     # The end of `_update_metadata_tables_txn`, a Python cache prefill.
     store._add_to_cache(txn, events_and_contexts)
     # The end of `_update_current_state_txn`.
@@ -844,15 +965,6 @@ def _python_steps_after_rust(
         store._record_profile_updates_for_state_delta_txn(
             txn, room_id, sliding_sync_table_changes
         )
-    if store._msc4354_enabled:
-        store.store.insert_sticky_events_txn(txn, [ev for ev, _ in events_and_contexts])
-        if sticky_events_to_un_soft_fail:
-            store.store.un_soft_fail_sticky_events_txn(
-                txn, sticky_events_to_un_soft_fail
-            )
-    store._update_sliding_sync_tables_with_new_persisted_events_txn(
-        txn, room_id, events_and_contexts
-    )
 
 
 def _power_levels(user_id: str, level: int) -> dict[str, Any]:
@@ -1098,6 +1210,201 @@ class PersistTxnTestCase(_TwinTestBase):
         self._step(rejected)
         self._message("after")
         self._assert_twins_match()
+
+    def _sticky_event_ids(self, twin: _Twin) -> list[str]:
+        """The twin's sticky events, by scenario index, in stream order."""
+        rows = self.get_success(
+            self.store.db_pool.execute(
+                "test",
+                "SELECT event_id FROM sticky_events WHERE room_id = ? ORDER BY stream_id",
+                twin.room_id,
+            )
+        )
+        return [f"$e{twin.events.index(event_id)}" for (event_id,) in rows]
+
+    def test_sticky_events(self) -> None:
+        """The sticky events of a chunk take sticky stream IDs in one go.
+        An event whose stickiness has run out is not sticky."""
+        self._step(
+            lambda twin: [
+                self._build(
+                    twin,
+                    EventTypes.Message,
+                    {"msgtype": "m.text", "body": body},
+                    sticky_ms=sticky_ms,
+                )
+                for body, sticky_ms in (("one", 60_000), ("over", 0), ("two", 1_000))
+            ]
+        )
+        self._message("not sticky")
+        self._assert_twins_match()
+        self.assertEqual(self._sticky_event_ids(self.twins[1]), ["$e0", "$e2"])
+
+    def _sticky_outlier_step(self) -> dict[str, EventPersistencePair]:
+        """Persist a sticky message as an outlier, and return each twin's
+        event to de-outlier it with."""
+        built: dict[str, EventPersistencePair] = {}
+
+        def outlier(twin: _Twin) -> list[EventPersistencePair]:
+            built[twin.name] = self._build(
+                twin,
+                EventTypes.Message,
+                {"msgtype": "m.text", "body": "sticky"},
+                sticky_ms=60_000,
+            )
+            return [self._outlier(built[twin.name])]
+
+        self._step(outlier, backfilled=True)
+        return built
+
+    def test_sticky_de_outlier(self) -> None:
+        """An outlier is not sticky until it is de-outliered."""
+        built = self._sticky_outlier_step()
+        self.assertEqual(self._sticky_event_ids(self.twins[1]), [])
+        self._step(lambda twin: [built[twin.name]])
+        self._assert_twins_match()
+        self.assertEqual(self._sticky_event_ids(self.twins[1]), ["$e0"])
+
+    def test_sticky_de_outlier_redacted(self) -> None:
+        """A sticky event de-outliered and redacted in one chunk.
+
+        It stays sticky, in Python too: its `sticky_events` row has the
+        chunk's stream ordering, but its `events` row keeps the one it was
+        first persisted with, which `delete_sticky_events_txn` looks for."""
+        built = self._sticky_outlier_step()
+        self._step(
+            lambda twin: [
+                built[twin.name],
+                self._build(twin, EventTypes.Redaction, {}, redacts=0),
+            ]
+        )
+        self._assert_twins_match()
+        self.assertEqual(self._sticky_event_ids(self.twins[1]), ["$e0"])
+
+    def test_sticky_un_soft_failed(self) -> None:
+        """A soft-failed sticky event of Bob's stops being soft failed when
+        he joins, and moves to the end of the sticky stream."""
+
+        def soft_failed(twin: _Twin) -> list[EventPersistencePair]:
+            event, context = self._build(
+                twin,
+                EventTypes.Message,
+                {"msgtype": "m.text", "body": "sticky"},
+                sender=self.bob,
+                sticky_ms=60_000,
+            )
+            event.internal_metadata.soft_failed = True
+            return [(event, context)]
+
+        self._step(soft_failed)
+        self._message("other sticky", sticky_ms=60_000)
+        self.assertEqual(self._sticky_event_ids(self.twins[1]), ["$e0", "$e1"])
+        self._join_bob()
+        self._assert_twins_match()
+        self.assertEqual(self._sticky_event_ids(self.twins[1]), ["$e1", "$e0"])
+        event = self.get_success(self.store.get_event(self.twins[1].events[0]))
+        self.assertFalse(event.internal_metadata.is_soft_failed())
+
+    def test_sticky_un_soft_failed_several(self) -> None:
+        """Several soft-failed sticky events lifted at once keep their order
+        in the stream."""
+
+        def soft_failed(twin: _Twin) -> list[EventPersistencePair]:
+            pairs = []
+            for body in ("one", "two", "three"):
+                event, context = self._build(
+                    twin,
+                    EventTypes.Message,
+                    {"msgtype": "m.text", "body": body},
+                    sender=self.bob,
+                    sticky_ms=60_000,
+                )
+                event.internal_metadata.soft_failed = True
+                pairs.append((event, context))
+            return pairs
+
+        self._step(soft_failed)
+        self._join_bob()
+        self._assert_twins_match()
+        self.assertEqual(self._sticky_event_ids(self.twins[1]), ["$e0", "$e1", "$e2"])
+
+    def test_sticky_rejected(self) -> None:
+        """A rejected event is not sticky, and does not stop the rest of
+        its chunk being so."""
+
+        def chunk(twin: _Twin) -> list[EventPersistencePair]:
+            event, context = self._build(
+                twin,
+                EventTypes.Message,
+                {"msgtype": "m.text", "body": "rejected"},
+                sticky_ms=60_000,
+            )
+            context.rejected = "auth_error"
+            return [
+                (event, context),
+                self._build(
+                    twin,
+                    EventTypes.Message,
+                    {"msgtype": "m.text", "body": "accepted"},
+                    sticky_ms=60_000,
+                ),
+            ]
+
+        self._step(chunk)
+        self._assert_twins_match()
+        self.assertEqual(self._sticky_event_ids(self.twins[1]), ["$e1"])
+
+    def test_sticky_backfilled(self) -> None:
+        """A backfilled sticky event, with a negative stream ordering, which
+        does not bump the room."""
+        self._message("now")
+        self._step(
+            lambda twin: [
+                self._build(
+                    twin,
+                    EventTypes.Message,
+                    {"msgtype": "m.text", "body": "old"},
+                    sticky_ms=60_000,
+                )
+            ],
+            backfilled=True,
+        )
+        self._assert_twins_match()
+
+    def test_sticky_redacted_in_chunk(self) -> None:
+        """A sticky event redacted in its own chunk is stored redacted, and
+        so is not sticky."""
+        self._step(
+            lambda twin: [
+                self._build(
+                    twin,
+                    EventTypes.Message,
+                    {"msgtype": "m.text", "body": "sticky"},
+                    sticky_ms=60_000,
+                ),
+                self._build(twin, EventTypes.Redaction, {}, redacts=0),
+            ]
+        )
+        self._assert_twins_match()
+        self.assertEqual(self._sticky_event_ids(self.twins[1]), [])
+
+    def test_sticky_de_outlier_and_new(self) -> None:
+        """A de-outliered sticky event takes its sticky stream ID before the
+        new sticky events of its chunk."""
+        built = self._sticky_outlier_step()
+        self._step(
+            lambda twin: [
+                built[twin.name],
+                self._build(
+                    twin,
+                    EventTypes.Message,
+                    {"msgtype": "m.text", "body": "new"},
+                    sticky_ms=60_000,
+                ),
+            ]
+        )
+        self._assert_twins_match()
+        self.assertEqual(self._sticky_event_ids(self.twins[1]), ["$e0", "$e1"])
 
     def test_outlier_then_de_outlier(self) -> None:
         built: dict[str, EventPersistencePair] = {}

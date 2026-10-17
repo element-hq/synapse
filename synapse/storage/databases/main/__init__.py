@@ -188,10 +188,13 @@ class DataStore(
         `txn.call_after`. See `synapse_rust.persist.PersistEffects`.
 
         Invalidations come before prefills, so a prefill is not lost to an
-        invalidation of the same key. The stream IDs are finished last, as
-        Python's `get_next_mult` does once the transaction's callbacks have
-        run, so the current token never passes an event before the stream
-        change caches know about it.
+        invalidation of the same key. The cache and sticky events stream IDs
+        are finished once the caches are invalidated, as `get_next_txn` and
+        `get_next_mult_txn` finish them after the transaction's earlier
+        callbacks. The events stream IDs are finished last, as Python's
+        `get_next_mult` does once the transaction's callbacks have run, so
+        the current token never passes an event before the stream change
+        caches know about it.
         """
         for (
             stream_ordering,
@@ -234,6 +237,19 @@ class DataStore(
         }
         for cache, entity, stream_id in effects.stream_changes:
             stream_change_caches[cache].entity_has_changed(entity, stream_id)
+
+        if effects.sticky_stream_ids:
+            # What `get_next_mult_txn` queues once its transaction commits.
+            sticky_id_gen = self._sticky_events_id_gen
+            sticky_id_gen._mark_ids_as_finished(effects.sticky_stream_ids)
+            self.hs.get_replication_notifier().notify_replication()
+            if sticky_id_gen._writers:
+                self.hs.run_as_background_process(
+                    "MultiWriterIdGenerator._update_table",
+                    sticky_id_gen._db.runInteraction,
+                    "MultiWriterIdGenerator._update_table",
+                    sticky_id_gen._update_stream_positions_table_txn,
+                )
 
         for event_id, state_group in effects.state_group_prefills:
             self._get_state_group_for_event.prefill((event_id,), state_group)
