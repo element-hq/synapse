@@ -16,21 +16,31 @@
 //! The Python face of event persistence: the [`Persister`] that
 //! `RustHandlers.persister` hands out, and helpers for tests.
 
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+};
 
+use futures::{future::BoxFuture, FutureExt};
 use http::StatusCode;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyDict};
 
 use super::{
-    context::PersistContext, extremities::MissingPrevStateEvents, metrics::PersistMetrics,
+    context::PersistContext,
+    extremities::MissingPrevStateEvents,
+    metrics::{PersistCounts, PersistMetrics},
+    prepare::{self, PrepareInput, PrepareOptions, Prepared},
+    reader::{self, PersistReader, PyDelta, PySlidingSync},
+    state_delta::NativeStateResolver,
 };
 use crate::{
+    deferred::{create_deferred_with, OnCancel},
     errors::SynapseError,
     event_auth::AuthFailure,
     events::Event,
     homeserver::HomeServer,
     runtime::RustRuntime,
-    state::ConflictCache,
+    state::{ConflictCache, StateResStats},
     storage::{
         native_pool::NativePool,
         store::Store,
@@ -44,11 +54,12 @@ use crate::{
 ///
 /// Holds what every level needs: the pool, the shared caches, the stream ID
 /// trackers of the events, backfill and cache streams (shared with their
-/// Python `MultiWriterIdGenerator`s) and the metrics. The entry points come
-/// with the levels that use them.
+/// Python `MultiWriterIdGenerator`s) and the metrics.
+///
+/// Each entry point returns a Deferred and has a `_blocking` twin for
+/// tests (see `_BlockingRustCalls`).
 #[pyclass(frozen)]
 pub struct Persister {
-    #[allow(dead_code)] // Read by the levels to come.
     pub(super) inner: Arc<PersisterInner>,
 }
 
@@ -68,6 +79,8 @@ pub(super) struct PersisterInner {
     pub metrics: PersistMetrics,
     /// The Rust state resolution handler's conflict cache.
     pub conflict_cache: Arc<ConflictCache>,
+    /// `experimental_features.msc4354_enabled`.
+    pub msc4354_enabled: bool,
 }
 
 impl Persister {
@@ -87,6 +100,7 @@ impl Persister {
             return Ok(None);
         }
 
+        let config = homeserver.config(py)?;
         let main = homeserver.main_datastore(py)?;
         let tracker = |attr: &Bound<'_, pyo3::types::PyString>| -> PyResult<Arc<StreamIdTracker>> {
             let id_gen = main.getattr(attr)?;
@@ -108,7 +122,7 @@ impl Persister {
                 runtime,
                 sync: Arc::new(SyncStore::new(
                     Arc::clone(&store.caches),
-                    SyncStoreConfig::from_config(&homeserver.config(py)?),
+                    SyncStoreConfig::from_config(&config),
                 )),
                 store,
                 events_stream: tracker(intern!(py, "_stream_id_gen"))?,
@@ -118,8 +132,61 @@ impl Persister {
                 instance_name,
                 metrics: PersistMetrics::default(),
                 conflict_cache,
+                msc4354_enabled: config.experimental.msc4354_enabled,
             }),
         }))
+    }
+
+    /// Convert the chunk while the GIL is held, and return the future that
+    /// prepares it without the GIL.
+    fn start_prepare_chunk(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        backfilled: bool,
+        shadow: bool,
+    ) -> PyResult<BoxFuture<'static, PyResult<PreparedChunk>>> {
+        let input = PrepareInput::new(py, room_id, &events_and_contexts, backfilled)?;
+        let pool = self.inner.pool.get()?;
+        let handle = self.inner.runtime.tokio_handle()?;
+        let inner = Arc::clone(&self.inner);
+        Ok(async move {
+            let resolver = NativeStateResolver {
+                pool: pool.clone(),
+                handle,
+                caches: Arc::clone(&inner.store.caches),
+                conflict_cache: Arc::clone(&inner.conflict_cache),
+            };
+            let reader = PersistReader::new(inner.sync.reader(pool.clone()));
+            let options = PrepareOptions {
+                server_name: &inner.server_name,
+                clock: inner.runtime.clock(),
+                sticky: inner.msc4354_enabled,
+                dry_run: shadow,
+            };
+            let mut counts = PersistCounts::default();
+            let prepared =
+                prepare::prepare_chunk(&reader, &resolver, &pool, &input, &options, &mut counts)
+                    .await
+                    .map_err(persist_error_to_py)?;
+            Ok(PreparedChunk {
+                prepared,
+                counts: Mutex::new(Some(counts)),
+            })
+        }
+        .boxed())
+    }
+
+    /// Run `future` to completion on the runtime, releasing the GIL. For the
+    /// `_blocking` entry points.
+    fn block_on<T: Send>(
+        &self,
+        py: Python<'_>,
+        future: BoxFuture<'static, PyResult<T>>,
+    ) -> PyResult<T> {
+        let handle = self.inner.runtime.tokio_handle()?;
+        py.detach(|| handle.block_on(future))
     }
 }
 
@@ -129,6 +196,151 @@ impl Persister {
     /// `flush_rust_persist_metrics`.
     fn take_metrics<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         self.inner.metrics.take().to_py(py)
+    }
+
+    /// What `_persist_event_batch` computes for a chunk of one room's events
+    /// before the write transaction: a Deferred resolving to a
+    /// [`PreparedChunk`]. In `shadow` mode the chain cover step's write is
+    /// rolled back. Nothing is counted until [`Self::record_prepare_counts`].
+    /// Cancelling the Deferred stops the computation.
+    #[pyo3(signature = (room_id, events_and_contexts, backfilled, *, shadow))]
+    fn prepare_chunk<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        backfilled: bool,
+        shadow: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let future =
+            self.start_prepare_chunk(py, room_id, events_and_contexts, backfilled, shadow)?;
+        create_deferred_with(py, &self.inner.runtime, future, OnCancel::Abort)
+    }
+
+    /// Add what preparing `chunk` counted to the metrics, once Python has
+    /// decided to use it. Python counts the chunks it computes itself. Does
+    /// nothing the second time.
+    fn record_prepare_counts(&self, chunk: &PreparedChunk) {
+        let counts = chunk
+            .counts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(counts) = counts {
+            self.inner.metrics.record(|total| total.add(counts));
+        }
+    }
+
+    /// As [`Self::prepare_chunk`], but blocks.
+    #[pyo3(signature = (room_id, events_and_contexts, backfilled, *, shadow))]
+    fn prepare_chunk_blocking(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        backfilled: bool,
+        shadow: bool,
+    ) -> PyResult<PreparedChunk> {
+        let future =
+            self.start_prepare_chunk(py, room_id, events_and_contexts, backfilled, shadow)?;
+        self.block_on(py, future)
+    }
+}
+
+/// What [`Persister::prepare_chunk`] computed, in the shapes Python builds
+/// its own types from. If `state_res_fallback` is set, the rest is empty
+/// and Python should compute the chunk itself.
+#[pyclass(frozen)]
+pub struct PreparedChunk {
+    prepared: Prepared,
+    /// What preparing counted, until it is recorded.
+    counts: Mutex<Option<PersistCounts>>,
+}
+
+impl PreparedChunk {
+    fn chunk(&self) -> Option<&prepare::PreparedChunk> {
+        match &self.prepared {
+            Prepared::Chunk(chunk) => Some(chunk),
+            Prepared::StateResFallback(_) => None,
+        }
+    }
+}
+
+#[pymethods]
+impl PreparedChunk {
+    /// Why the Rust state resolution could not resolve the room.
+    #[getter]
+    fn state_res_fallback(&self) -> Option<&str> {
+        match &self.prepared {
+            Prepared::Chunk(_) => None,
+            Prepared::StateResFallback(reason) => Some(reason),
+        }
+    }
+
+    #[getter]
+    fn new_forward_extremities(&self) -> Option<HashSet<String>> {
+        let ids = self.chunk()?.state.new_forward_extremities.clone()?;
+        Some(reader::strings(ids))
+    }
+
+    /// `(to_delete, to_insert, no_longer_in_room)`.
+    #[getter]
+    fn state_delta<'py>(&self, py: Python<'py>) -> PyResult<Option<PyDelta<'py>>> {
+        self.chunk()
+            .and_then(|chunk| chunk.state.state_delta.as_ref())
+            .map(|delta| reader::delta_to_py(py, delta))
+            .transpose()
+    }
+
+    #[getter]
+    fn new_state_dag_extremities(&self) -> Option<HashSet<String>> {
+        let ids = self.chunk()?.state.new_state_dag_extremities.clone()?;
+        Some(reader::strings(ids))
+    }
+
+    #[getter]
+    fn state_res_stats(&self) -> Option<StateResStats> {
+        self.chunk()?.state.state_res_stats.clone()
+    }
+
+    /// Event ID to `(chain_id, sequence_number, links)`.
+    #[getter]
+    #[allow(clippy::type_complexity)]
+    fn new_event_links(&self) -> HashMap<String, (i64, i64, Vec<(i64, i64)>)> {
+        self.chunk()
+            .map(|chunk| {
+                chunk
+                    .new_event_links
+                    .iter()
+                    .map(|(event_id, links)| {
+                        (
+                            event_id.to_string(),
+                            (links.chain_id, links.sequence_number, links.links.clone()),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// As `PersistReaderForTest.calculate_sliding_sync_table_changes`
+    /// returns it. `None` when the state does not change.
+    #[getter]
+    fn sliding_sync_table_changes<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Option<PySlidingSync<'py>>> {
+        self.chunk()
+            .and_then(|chunk| chunk.sliding_sync.as_ref())
+            .map(|changes| reader::sliding_sync_to_py(py, changes))
+            .transpose()
+    }
+
+    #[getter]
+    fn sticky_events_to_un_soft_fail(&self) -> HashSet<String> {
+        self.chunk()
+            .map(|chunk| reader::strings(chunk.sticky_events_to_un_soft_fail.iter().cloned()))
+            .unwrap_or_default()
     }
 }
 

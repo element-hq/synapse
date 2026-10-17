@@ -410,12 +410,13 @@ class ExperimentalConfig(Config):
         #  - "off": all Python.
         #  - "shadow": Rust also computes what is worked out before the write
         #    transaction (forward extremities, the current state delta, the
-        #    chain cover index), and differences from Python are logged.
+        #    chain cover index, the sliding sync table changes and the sticky
+        #    events to un-soft-fail), and differences from Python are logged.
         #  - "prepare": Rust's results for that are used.
         #  - "transaction": Rust also runs the write transaction.
         #  - "full": Rust persists each queued batch.
-        # The levels are being built up in that order. So far every level
-        # other than "off" only builds the Rust persister.
+        # The levels are being built up in that order. So far "transaction"
+        # and "full" act as "prepare".
         rust_event_persistence = experimental.get("rust_event_persistence", "off")
         # YAML reads an unquoted `off` as a boolean.
         if rust_event_persistence is False:

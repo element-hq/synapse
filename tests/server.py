@@ -130,6 +130,7 @@ from tests.utils import (
     POSTGRES_PORT,
     POSTGRES_USER,
     RUST_PERSIST_FOR_TESTS,
+    RUST_PERSIST_STRICT_FOR_TESTS,
     RUST_STATE_RES_FOR_TESTS,
     RUST_SYNC_FOR_TESTS,
     RUST_SYNC_STRICT_FOR_TESTS,
@@ -1569,6 +1570,7 @@ def setup_test_homeserver(
             persistence._rust_persister = cast(
                 Any, _BlockingRustCalls(persistence._rust_persister)
             )
+            persistence._rust_persist_strict = RUST_PERSIST_STRICT_FOR_TESTS
 
     return hs
 

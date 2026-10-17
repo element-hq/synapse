@@ -36,6 +36,7 @@ from typing import (
     Iterable,
     Sequence,
     TypeVar,
+    cast,
 )
 
 import attr
@@ -70,11 +71,17 @@ from synapse.storage.controllers.state import StateStorageController
 from synapse.storage.databases import Databases
 from synapse.storage.databases.main.events import (
     DeltaState,
+    NewEventChainLinks,
+    PreparedTableChanges,
+    SlidingSyncMembershipInfo,
+    SlidingSyncMembershipSnapshotSharedInsertValues,
+    SlidingSyncStateInsertValues,
+    SlidingSyncTableChanges,
     event_counter,
     persist_event_counter,
 )
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
-from synapse.synapse_rust.persist import Persister
+from synapse.synapse_rust.persist import Persister, PreparedChunk
 from synapse.types import (
     PersistedEventPosition,
     RoomStreamToken,
@@ -153,6 +160,27 @@ times_pruned_extremities = Counter(
     "Number of times we were actually be able to prune extremities",
     labelnames=[SERVER_NAME_LABEL],
 )
+
+rust_prepare_counter = Counter(
+    "synapse_storage_events_rust_prepare",
+    "Chunks of events whose pre-transaction computation ran in Rust, by "
+    "`rust_event_persistence` level and result: `rust` (Rust's result was "
+    "used), `matched` or `mismatch` (shadow mode), `fallback` (Rust cannot "
+    "resolve state in the room) or `error`",
+    labelnames=["level", "result", SERVER_NAME_LABEL],
+)
+
+
+@attr.s(auto_attribs=True, slots=True, frozen=True)
+class _PreparedChunk:
+    """What `_persist_event_batch` computes for a chunk before persisting it."""
+
+    new_forward_extremities: set[str] | None
+    state_delta: DeltaState | None
+    new_state_dag_extremities: set[str] | None
+    new_event_links: dict[str, NewEventChainLinks]
+    # `None` to leave them to `_persist_events_and_state_updates`.
+    table_changes: PreparedTableChanges | None
 
 
 @attr.s(auto_attribs=True, slots=True)
@@ -388,6 +416,153 @@ def flush_rust_persist_metrics(persister: Persister, server_name: str) -> None:
         )
 
 
+def _prepared_chunk_from_rust(room_id: str, rust: PreparedChunk) -> _PreparedChunk:
+    """Build the Python types from what `Persister.prepare_chunk` returned."""
+    state_delta = None
+    if rust.state_delta is not None:
+        to_delete, to_insert, no_longer_in_room = rust.state_delta
+        state_delta = DeltaState(
+            to_delete=to_delete,
+            to_insert=to_insert,
+            no_longer_in_room=no_longer_in_room,
+        )
+
+    sliding_sync_table_changes = None
+    if rust.sliding_sync_table_changes is not None:
+        bump_stamp, joined, shared, inserts, deletes = rust.sliding_sync_table_changes
+        sliding_sync_table_changes = SlidingSyncTableChanges(
+            room_id=room_id,
+            joined_room_bump_stamp_to_fully_insert=bump_stamp,
+            joined_room_updates=cast(SlidingSyncStateInsertValues, joined),
+            membership_snapshot_shared_insert_values=cast(
+                SlidingSyncMembershipSnapshotSharedInsertValues, shared
+            ),
+            to_insert_membership_snapshots=[
+                SlidingSyncMembershipInfo(
+                    user_id=user_id,
+                    sender=sender,
+                    membership_event_id=membership_event_id,
+                    membership=membership,
+                )
+                for user_id, sender, membership_event_id, membership in inserts
+            ],
+            to_delete_membership_snapshots=deletes,
+        )
+
+    return _PreparedChunk(
+        new_forward_extremities=rust.new_forward_extremities,
+        state_delta=state_delta,
+        new_state_dag_extremities=rust.new_state_dag_extremities,
+        new_event_links={
+            event_id: NewEventChainLinks(
+                chain_id=chain_id, sequence_number=sequence_number, links=links
+            )
+            for event_id, (
+                chain_id,
+                sequence_number,
+                links,
+            ) in rust.new_event_links.items()
+        },
+        table_changes=PreparedTableChanges(
+            sliding_sync_table_changes=sliding_sync_table_changes,
+            sticky_events_to_un_soft_fail=rust.sticky_events_to_un_soft_fail,
+        ),
+    )
+
+
+def _prepared_chunk_differences(
+    python: _PreparedChunk, rust: _PreparedChunk
+) -> list[str]:
+    """How Rust's preparation of a chunk differs from Python's, ignoring the
+    orders Python leaves to chance and the IDs of new chains."""
+    differences = []
+
+    def compare(name: str, expected: object, actual: object) -> None:
+        if expected != actual:
+            differences.append(f"{name}: Python {expected!r}, Rust {actual!r}")
+
+    compare(
+        "new_forward_extremities",
+        python.new_forward_extremities,
+        rust.new_forward_extremities,
+    )
+    compare(
+        "new_state_dag_extremities",
+        python.new_state_dag_extremities,
+        rust.new_state_dag_extremities,
+    )
+
+    def delta(
+        delta: DeltaState | None,
+    ) -> tuple[set[tuple[str, str]], dict[tuple[str, str], str], bool] | None:
+        if delta is None:
+            return None
+        return set(delta.to_delete), dict(delta.to_insert), delta.no_longer_in_room
+
+    compare("state_delta", delta(python.state_delta), delta(rust.state_delta))
+    compare(
+        "new_event_links",
+        _normalise_chain_links(python.new_event_links),
+        _normalise_chain_links(rust.new_event_links),
+    )
+
+    assert python.table_changes is not None
+    assert rust.table_changes is not None
+
+    def sliding_sync(changes: SlidingSyncTableChanges | None) -> object:
+        if changes is None:
+            return None
+        return (
+            changes.joined_room_bump_stamp_to_fully_insert,
+            dict(changes.joined_room_updates),
+            dict(changes.membership_snapshot_shared_insert_values),
+            sorted(
+                (i.user_id, i.sender, i.membership_event_id, i.membership)
+                for i in changes.to_insert_membership_snapshots
+            ),
+            sorted(changes.to_delete_membership_snapshots),
+        )
+
+    compare(
+        "sliding_sync_table_changes",
+        sliding_sync(python.table_changes.sliding_sync_table_changes),
+        sliding_sync(rust.table_changes.sliding_sync_table_changes),
+    )
+    compare(
+        "sticky_events_to_un_soft_fail",
+        python.table_changes.sticky_events_to_un_soft_fail,
+        rust.table_changes.sticky_events_to_un_soft_fail,
+    )
+    return differences
+
+
+def _normalise_chain_links(
+    links: dict[str, NewEventChainLinks],
+) -> dict[str, tuple[str, int, list[tuple[str, int]]]]:
+    """The chain links with each new chain named after the lowest event ID
+    on it. Python and Rust take new chain IDs from the sequence separately,
+    so only the shape of the new chains can match. A new chain is one with
+    an event at sequence number 1. Events that extend an existing chain
+    come after its first event, so the IDs of existing chains must match."""
+    names: dict[int, str] = {}
+    new_chains = {link.chain_id for link in links.values() if link.sequence_number == 1}
+    for event_id, link in sorted(links.items()):
+        if link.chain_id in new_chains:
+            names.setdefault(link.chain_id, f"new {event_id}")
+
+    def name(chain_id: int) -> str:
+        return names.get(chain_id, str(chain_id))
+
+    return {
+        event_id: (
+            name(link.chain_id),
+            link.sequence_number,
+            sorted((name(chain_id), seq) for chain_id, seq in link.links),
+        )
+        for event_id, link in links.items()
+    }
+
+
 class EventsPersistenceStorageController:
     """High level interface for handling persisting newly received events.
 
@@ -426,6 +601,9 @@ class EventsPersistenceStorageController:
         # "off". It needs the native Rust Postgres driver.
         self._rust_persister: Persister | None = None
         rust_level = hs.config.experimental.rust_event_persistence
+        # Whether a Rust error, or in shadow mode a mismatch between the two
+        # implementations, raises rather than being logged. Tests set it.
+        self._rust_persist_strict = False
         if rust_level != "off":
             self._rust_persister = hs.get_rust_handlers().persister
             if self._rust_persister is None:
@@ -720,55 +898,7 @@ class EventsPersistenceStorageController:
         for chunk in chunks:
             # We can't easily parallelize these since different chunks
             # might contain the same event. :(
-
-            new_forward_extremities = None
-            state_delta_for_room = None
-            new_state_dag_extrems = None
-
-            if not backfilled:
-                if all_supports_msc4242_state_dag(chunk):
-                    with Measure(
-                        self._clock,
-                        name="_process_state_dag_forward_extremities_and_state_delta",
-                        server_name=self.server_name,
-                    ):
-                        (
-                            new_forward_extremities,  # for prev_events
-                            state_delta_for_room,  # for state groups
-                            new_state_dag_extrems,  # for prev_state_events
-                        ) = await self._process_state_dag_forward_extremities_and_state_delta(
-                            room_id, chunk
-                        )
-                else:
-                    with Measure(
-                        self._clock,
-                        name="_calculate_state_and_extrem",
-                        server_name=self.server_name,
-                    ):
-                        # Work out the new "current state" for the room.
-                        # We do this by working out what the new extremities are and then
-                        # calculating the state from that.
-                        (
-                            new_forward_extremities,
-                            state_delta_for_room,
-                        ) = await self._calculate_new_forward_extremities_and_state_delta(
-                            room_id, chunk
-                        )
-
-            with Measure(
-                self._clock,
-                name="calculate_chain_cover_index_for_events",
-                server_name=self.server_name,
-            ):
-                # We now calculate chain ID/sequence numbers for any state events we're
-                # persisting. We ignore out of band memberships as we're not in the room
-                # and won't have their auth chain (we'll fix it up later if we join the
-                # room).
-                #
-                # See: docs/auth_chain_difference_algorithm.md
-                new_event_links = await self.persist_events_store.calculate_chain_cover_index_for_events(
-                    room_id, [e for e, _ in chunk]
-                )
+            prepared = await self._prepare_chunk(room_id, chunk, backfilled)
 
             # Stop the state groups from being deleted while we're persisting
             # them.
@@ -778,15 +908,243 @@ class EventsPersistenceStorageController:
                 await self.persist_events_store._persist_events_and_state_updates(
                     room_id,
                     chunk,
-                    state_delta_for_room=state_delta_for_room,
-                    new_forward_extremities=new_forward_extremities,
+                    state_delta_for_room=prepared.state_delta,
+                    new_forward_extremities=prepared.new_forward_extremities,
                     use_negative_stream_ordering=backfilled,
                     inhibit_local_membership_updates=backfilled,
-                    new_event_links=new_event_links,
-                    new_state_dag_forward_extremities=new_state_dag_extrems,
+                    new_event_links=prepared.new_event_links,
+                    new_state_dag_forward_extremities=prepared.new_state_dag_extremities,
+                    table_changes=prepared.table_changes,
                 )
 
         return replaced_events
+
+    async def _prepare_chunk(
+        self, room_id: str, chunk: list[EventPersistencePair], backfilled: bool
+    ) -> _PreparedChunk:
+        """Compute what persisting the chunk needs, in Python or Rust as
+        `rust_event_persistence` says."""
+        if self._rust_persister is None:
+            return await self._prepare_chunk_in_python(
+                room_id, chunk, backfilled, table_changes=False
+            )
+
+        level = self.hs.config.experimental.rust_event_persistence
+        if level == "shadow":
+            return await self._prepare_chunk_in_shadow_mode(room_id, chunk, backfilled)
+
+        try:
+            prepared = await self._prepare_chunk_in_rust(
+                room_id, chunk, backfilled, shadow=False
+            )
+        except SynapseError:
+            # The chunk is rejected, as Python would reject it.
+            self._count_rust_prepare(level, "rust")
+            raise
+        except Exception:
+            self._count_rust_prepare(level, "error")
+            if self._rust_persist_strict:
+                raise
+            logger.exception(
+                "Failed to prepare events for %s in Rust: using Python", room_id
+            )
+            prepared = None
+        else:
+            self._count_rust_prepare(level, "rust" if prepared else "fallback")
+        if prepared is None:
+            return await self._prepare_chunk_in_python(
+                room_id, chunk, backfilled, table_changes=False
+            )
+        return prepared
+
+    async def _prepare_chunk_in_shadow_mode(
+        self, room_id: str, chunk: list[EventPersistencePair], backfilled: bool
+    ) -> _PreparedChunk:
+        """Compute the chunk in both Rust and Python, compare the two, and
+        return Python's, or raise Python's error.
+
+        Rust goes first: its chain cover step is a dry run, while Python's
+        writes the events it puts off, which Rust would then read as left
+        from an earlier chunk.
+        """
+        rust_error: Exception | None = None
+        try:
+            rust = await self._prepare_chunk_in_rust(
+                room_id, chunk, backfilled, shadow=True
+            )
+        except Exception as e:
+            rust = None
+            rust_error = e
+
+        try:
+            python = await self._prepare_chunk_in_python(
+                room_id, chunk, backfilled, table_changes=True
+            )
+        except Exception as python_error:
+            # Both rejecting the chunk the same way is a match.
+            if rust is None and rust_error is None:
+                self._count_rust_prepare("shadow", "fallback")
+            elif type(rust_error) is type(python_error):
+                self._count_rust_prepare("shadow", "matched")
+            else:
+                self._report_shadow_mismatch(
+                    room_id, [f"Python raised {python_error!r}, Rust {rust_error!r}"]
+                )
+            raise
+
+        if isinstance(rust_error, SynapseError):
+            self._report_shadow_mismatch(
+                room_id, [f"Rust raised {rust_error!r}, Python succeeded"]
+            )
+        elif rust_error is not None:
+            self._count_rust_prepare("shadow", "error")
+            if self._rust_persist_strict:
+                raise rust_error
+            logger.error(
+                "Failed to prepare events for %s in Rust in shadow mode",
+                room_id,
+                exc_info=(type(rust_error), rust_error, rust_error.__traceback__),
+            )
+        elif rust is None:
+            self._count_rust_prepare("shadow", "fallback")
+        else:
+            differences = _prepared_chunk_differences(python, rust)
+            if differences:
+                self._report_shadow_mismatch(room_id, differences)
+            else:
+                self._count_rust_prepare("shadow", "matched")
+        return python
+
+    def _report_shadow_mismatch(self, room_id: str, differences: list[str]) -> None:
+        """Count a shadow mode mismatch, and log it or, in strict mode, raise."""
+        self._count_rust_prepare("shadow", "mismatch")
+        message = "Rust prepared events for %s differently: %s" % (
+            room_id,
+            "; ".join(differences),
+        )
+        if self._rust_persist_strict:
+            raise AssertionError(message)
+        logger.warning("%s", message)
+
+    async def _prepare_chunk_in_rust(
+        self,
+        room_id: str,
+        chunk: list[EventPersistencePair],
+        backfilled: bool,
+        *,
+        shadow: bool,
+    ) -> _PreparedChunk | None:
+        """Compute the chunk in Rust. `None` if the Rust state resolution
+        cannot resolve state in the room, so Python should compute it.
+        Unless `shadow` is set, what it counted is recorded, as the caller
+        uses the result."""
+        assert self._rust_persister is not None
+        with Measure(
+            self._clock, name="rust_prepare_chunk", server_name=self.server_name
+        ):
+            rust = await make_deferred_yieldable(
+                self._rust_persister.prepare_chunk(
+                    room_id, chunk, backfilled, shadow=shadow
+                )
+            )
+        if rust.state_res_fallback is not None:
+            logger.info(
+                "Preparing events for %s in Python: %s",
+                room_id,
+                rust.state_res_fallback,
+            )
+            return None
+        prepared = _prepared_chunk_from_rust(room_id, rust)
+        if not shadow:
+            self._rust_persister.record_prepare_counts(rust)
+            if rust.state_res_stats is not None:
+                self._state_resolution_handler.record_rust_state_res_metrics(
+                    room_id, rust.state_res_stats
+                )
+        return prepared
+
+    async def _prepare_chunk_in_python(
+        self,
+        room_id: str,
+        chunk: list[EventPersistencePair],
+        backfilled: bool,
+        *,
+        table_changes: bool,
+    ) -> _PreparedChunk:
+        """Compute the chunk in Python. The sliding sync changes and sticky
+        events are left to `_persist_events_and_state_updates` unless
+        `table_changes` is set."""
+        new_forward_extremities = None
+        state_delta_for_room = None
+        new_state_dag_extrems = None
+
+        if not backfilled:
+            if all_supports_msc4242_state_dag(chunk):
+                with Measure(
+                    self._clock,
+                    name="_process_state_dag_forward_extremities_and_state_delta",
+                    server_name=self.server_name,
+                ):
+                    (
+                        new_forward_extremities,  # for prev_events
+                        state_delta_for_room,  # for state groups
+                        new_state_dag_extrems,  # for prev_state_events
+                    ) = await self._process_state_dag_forward_extremities_and_state_delta(
+                        room_id, chunk
+                    )
+            else:
+                with Measure(
+                    self._clock,
+                    name="_calculate_state_and_extrem",
+                    server_name=self.server_name,
+                ):
+                    # Work out the new "current state" for the room.
+                    # We do this by working out what the new extremities are and then
+                    # calculating the state from that.
+                    (
+                        new_forward_extremities,
+                        state_delta_for_room,
+                    ) = await self._calculate_new_forward_extremities_and_state_delta(
+                        room_id, chunk
+                    )
+
+        with Measure(
+            self._clock,
+            name="calculate_chain_cover_index_for_events",
+            server_name=self.server_name,
+        ):
+            # We now calculate chain ID/sequence numbers for any state events we're
+            # persisting. We ignore out of band memberships as we're not in the room
+            # and won't have their auth chain (we'll fix it up later if we join the
+            # room).
+            #
+            # See: docs/auth_chain_difference_algorithm.md
+            new_event_links = (
+                await self.persist_events_store.calculate_chain_cover_index_for_events(
+                    room_id, [e for e, _ in chunk]
+                )
+            )
+
+        prepared_table_changes = None
+        if table_changes:
+            prepared_table_changes = (
+                await self.persist_events_store.calculate_table_changes(
+                    room_id, chunk, state_delta_for_room
+                )
+            )
+
+        return _PreparedChunk(
+            new_forward_extremities=new_forward_extremities,
+            state_delta=state_delta_for_room,
+            new_state_dag_extremities=new_state_dag_extrems,
+            new_event_links=new_event_links,
+            table_changes=prepared_table_changes,
+        )
+
+    def _count_rust_prepare(self, level: str, result: str) -> None:
+        rust_prepare_counter.labels(
+            level=level, result=result, **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
     async def _calculate_new_forward_extremities_and_state_delta(
         self, room_id: str, ev_ctx_rm: list[EventPersistencePair]

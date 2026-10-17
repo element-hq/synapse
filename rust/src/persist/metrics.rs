@@ -79,6 +79,39 @@ impl PersistMetrics {
 }
 
 impl PersistCounts {
+    /// Add `other` to these counts. Its persisted position, if it has one,
+    /// is the newer.
+    pub fn add(&mut self, other: PersistCounts) {
+        self.persisted_events += other.persisted_events;
+        for (key, count) in other.persisted_events_by_type {
+            *self.persisted_events_by_type.entry(key).or_default() += count;
+        }
+        self.state_delta += other.state_delta;
+        self.state_delta_single_event += other.state_delta_single_event;
+        self.state_delta_reuse_delta += other.state_delta_reuse_delta;
+        self.state_resolutions += other.state_resolutions;
+        self.potential_times_prune_extremities += other.potential_times_prune_extremities;
+        self.times_pruned_extremities += other.times_pruned_extremities;
+        for (mine, theirs) in [
+            (&mut self.forward_extremities, other.forward_extremities),
+            (
+                &mut self.stale_forward_extremities,
+                other.stale_forward_extremities,
+            ),
+            (
+                &mut self.state_dag_forward_extremities,
+                other.state_dag_forward_extremities,
+            ),
+        ] {
+            for (value, count) in theirs {
+                *mine.entry(value).or_default() += count;
+            }
+        }
+        if other.persisted_position.is_some() {
+            self.persisted_position = other.persisted_position;
+        }
+    }
+
     /// The counts as the dict `flush_rust_persist_metrics` reads.
     pub fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let dict = PyDict::new(py);
@@ -111,6 +144,34 @@ impl PersistCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn add_sums_counts_and_keeps_the_newer_position() {
+        let mut total = PersistCounts {
+            state_delta: 1,
+            persisted_position: Some(5),
+            ..Default::default()
+        };
+        total.forward_extremities.insert(1, 1);
+        let mut more = PersistCounts {
+            state_delta: 2,
+            times_pruned_extremities: 1,
+            ..Default::default()
+        };
+        more.forward_extremities.insert(1, 2);
+        more.forward_extremities.insert(3, 1);
+
+        total.add(more.clone());
+        assert_eq!(total.state_delta, 3);
+        assert_eq!(total.times_pruned_extremities, 1);
+        assert_eq!(total.forward_extremities, BTreeMap::from([(1, 3), (3, 1)]));
+        // `more` had no position, so the old one stays.
+        assert_eq!(total.persisted_position, Some(5));
+
+        more.persisted_position = Some(7);
+        total.add(more);
+        assert_eq!(total.persisted_position, Some(7));
+    }
 
     #[test]
     fn take_starts_again() {

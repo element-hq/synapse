@@ -1013,6 +1013,12 @@ class StateResolutionHandler:
         ).inc()
         return state
 
+    def record_rust_state_res_metrics(
+        self, room_id: str, rust_stats: StateResStats
+    ) -> None:
+        """Record the work of a resolution the Rust event persister ran."""
+        self._record_state_res_metrics(room_id, ContextResourceUsage(), rust_stats)
+
     def _record_state_res_metrics(
         self,
         room_id: str,

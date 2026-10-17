@@ -57,6 +57,12 @@ class RustStateResHandlerTestCase(unittest.HomeserverTestCase):
         self.user_id = self.register_user("user", "pass")
         self.tok = self.login("user", "pass")
         self.handler = hs.get_state_resolution_handler()
+        # These tests resolve state through the handler as persisting does in
+        # Python. At `rust_event_persistence: prepare` and above the Rust
+        # persister resolves it itself, so turn that off.
+        persistence = hs.get_storage_controllers().persistence
+        assert persistence is not None
+        persistence._rust_persister = None
 
     def _fork(self, room_id: str) -> tuple[str, str]:
         """Send two topics with the same prev events, so persisting the second

@@ -66,6 +66,10 @@ RUST_SYNC_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_SYNC")
 RUST_SYNC_STRICT_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_SYNC_STRICT", "1") != "0"
 # As above, for `experimental_features.rust_event_persistence`.
 RUST_PERSIST_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_PERSIST")
+# As `SYNAPSE_TEST_RUST_SYNC_STRICT`, for the persister.
+RUST_PERSIST_STRICT_FOR_TESTS = (
+    os.environ.get("SYNAPSE_TEST_RUST_PERSIST_STRICT", "1") != "0"
+)
 # At `rust_federation_sending: transactions`, check every transaction body Rust
 # builds against the one Python would build, and fail the test if they differ.
 RUST_FED_STRICT_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_FED_STRICT", "1") != "0"

@@ -51,7 +51,7 @@ use super::reader::{self, AuthEventChain, ChainLink, ChainToCalculate};
 use crate::{
     database::postgres::{
         pool::ConnectionPool,
-        write::{run_write_interaction, WriteTxn},
+        write::{run_rolled_back_interaction, run_write_interaction, WriteTxn},
     },
     events::Event,
 };
@@ -223,10 +223,15 @@ impl ChainCoverStore for WriteTxn {
 /// are left out. The result can also hold events that are not in `events`:
 /// those put off by an earlier chunk, and auth events persisted out of
 /// band, once their auth events are known.
+///
+/// A `dry_run` rolls the transaction back, so that nothing it puts off is
+/// written. Its chain IDs are still used up, as the sequence is not
+/// transactional.
 pub async fn calculate_chain_cover_index_for_events(
     pool: &ConnectionPool,
     room_id: &str,
     events: &[ChainCoverEvent],
+    dry_run: bool,
 ) -> anyhow::Result<HashMap<Arc<str>, NewEventChainLinks>> {
     // Ensure there are no duplicates.
     let mut seen = HashSet::new();
@@ -238,15 +243,26 @@ pub async fn calculate_chain_cover_index_for_events(
         return Ok(HashMap::new());
     }
     let state_events = &state_events;
-    Ok(
-        run_write_interaction(pool, "_calculate_chain_cover_index_for_events", |txn, _| {
+    let name = "_calculate_chain_cover_index_for_events";
+    // The closure is written out twice: bound to a variable, it would lose
+    // the lifetimes the interactions need.
+    Ok(if dry_run {
+        run_rolled_back_interaction(pool, name, |txn, _| {
             async move {
                 Ok(calculate_chain_cover_index_for_events_txn(txn, room_id, state_events).await?)
             }
             .boxed()
         })
-        .await?,
-    )
+        .await?
+    } else {
+        run_write_interaction(pool, name, |txn, _| {
+            async move {
+                Ok(calculate_chain_cover_index_for_events_txn(txn, room_id, state_events).await?)
+            }
+            .boxed()
+        })
+        .await?
+    })
 }
 
 /// `calculate_chain_cover_index_for_events_txn`, over deduplicated state

@@ -232,6 +232,16 @@ class SlidingSyncTableChanges:
     to_delete_membership_snapshots: list[str]
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class PreparedTableChanges:
+    """The sliding sync table changes and sticky events to un-soft-fail of a
+    chunk, computed before `_persist_events_and_state_updates` is called.
+    """
+
+    sliding_sync_table_changes: "SlidingSyncTableChanges | None"
+    sticky_events_to_un_soft_fail: set[str]
+
+
 @attr.s(slots=True, auto_attribs=True)
 class NewEventChainLinks:
     """Information about new auth chain links that need to be added to the DB.
@@ -305,6 +315,45 @@ class PersistEventsStore:
         self._stream_id_gen: AbstractStreamIdGenerator = self.store._stream_id_gen
 
     @trace
+    async def calculate_table_changes(
+        self,
+        room_id: str,
+        events_and_contexts: list[EventPersistencePair],
+        state_delta_for_room: DeltaState | None,
+    ) -> PreparedTableChanges:
+        """The sliding sync table changes and the sticky events to
+        un-soft-fail for persisting the events with `state_delta_for_room`.
+        """
+        sliding_sync_table_changes = None
+        if state_delta_for_room is not None:
+            sliding_sync_table_changes = (
+                await self._calculate_sliding_sync_table_changes(
+                    room_id, events_and_contexts, state_delta_for_room
+                )
+            )
+
+        sticky_events_to_un_soft_fail: set[str] = set()
+        if self._msc4354_enabled and state_delta_for_room is not None:
+            # When we change the room's current state with `state_delta_for_room`,
+            # that might cause some previously soft-failed sticky events to now pass
+            # the state-dependent auth checks.
+            # In other words, the sticky events could have been valid if they had
+            # waited for these state changes.
+            # For that reason, we give sticky events a second chance.
+            # We compute them here and then un-soft-fail them atomically with the
+            # persistence of the events.
+            sticky_events_to_un_soft_fail = (
+                await self.store.compute_sticky_events_to_un_soft_fail(
+                    room_id,
+                    events_and_contexts,
+                    state_delta_for_room,
+                )
+            )
+        return PreparedTableChanges(
+            sliding_sync_table_changes=sliding_sync_table_changes,
+            sticky_events_to_un_soft_fail=sticky_events_to_un_soft_fail,
+        )
+
     async def _persist_events_and_state_updates(
         self,
         room_id: str,
@@ -316,6 +365,7 @@ class PersistEventsStore:
         use_negative_stream_ordering: bool = False,
         inhibit_local_membership_updates: bool = False,
         new_state_dag_forward_extremities: set[str] | None = None,
+        table_changes: PreparedTableChanges | None = None,
     ) -> None:
         """Persist a set of events alongside updates to the current state and
                 forward extremities tables.
@@ -338,6 +388,9 @@ class PersistEventsStore:
                 not affect the current local state.
             new_state_dag_forward_extremities: A set of event IDs that are the new forward
                 extremities for the state DAG for this room. MSC4242 only.
+            table_changes: The sliding sync table changes and sticky events
+                to un-soft-fail, if the caller computed them. Otherwise they
+                are computed here.
 
         Returns:
             Resolves when the events have been persisted
@@ -385,31 +438,12 @@ class PersistEventsStore:
                 event.internal_metadata.received_ts = self._clock.time_msec()
                 event.internal_metadata.instance_name = self._instance_name
 
-            sliding_sync_table_changes = None
-            if state_delta_for_room is not None:
-                sliding_sync_table_changes = (
-                    await self._calculate_sliding_sync_table_changes(
-                        room_id, events_and_contexts, state_delta_for_room
-                    )
+            if table_changes is None:
+                table_changes = await self.calculate_table_changes(
+                    room_id, events_and_contexts, state_delta_for_room
                 )
-
-            sticky_events_to_un_soft_fail: set[str] = set()
-            if self._msc4354_enabled and state_delta_for_room is not None:
-                # When we change the room's current state with `state_delta_for_room`,
-                # that might cause some previously soft-failed sticky events to now pass
-                # the state-dependent auth checks.
-                # In other words, the sticky events could have been valid if they had
-                # waited for these state changes.
-                # For that reason, we give sticky events a second chance.
-                # We compute them here and then un-soft-fail them atomically with the
-                # persistence of the events.
-                sticky_events_to_un_soft_fail = (
-                    await self.store.compute_sticky_events_to_un_soft_fail(
-                        room_id,
-                        events_and_contexts,
-                        state_delta_for_room,
-                    )
-                )
+            sliding_sync_table_changes = table_changes.sliding_sync_table_changes
+            sticky_events_to_un_soft_fail = table_changes.sticky_events_to_un_soft_fail
 
             await self.db_pool.runInteraction(
                 "persist_events",

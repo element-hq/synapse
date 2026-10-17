@@ -872,6 +872,29 @@ class ChainCoverTestCase(PersistReaderTestBase):
             {row[0] for row in self._to_calculate()}, {oob.event_id, after.event_id}
         )
 
+    def test_dry_run(self) -> None:
+        """A dry run returns what a real one does and writes nothing."""
+        carol = "@carol:test"
+        oob, _ = self._new(
+            EventTypes.Member, carol, [self.create, self.power_levels, "$unknown"]
+        )
+        name, _ = self._new(
+            EventTypes.Name, "", [self.create, self.power_levels, self.alice_member]
+        )
+        before = self._to_calculate()
+
+        dry = self.rust.calculate_chain_cover_index_for_events(
+            self.room_id, [oob, name], dry_run=True
+        )
+        self.assertEqual(self._to_calculate(), before)
+
+        actual = self.rust.calculate_chain_cover_index_for_events(
+            self.room_id, [oob, name]
+        )
+        self.assertEqual({row[0] for row in self._to_calculate()}, {oob.event_id})
+        self.assertEqual(set(dry), {name.event_id})
+        self.assertEqual(self._normalise(dry), self._normalise(actual))
+
     def test_auth_event_without_a_chain(self) -> None:
         self._put_off(self.bob_member)
         member, _ = pair = self._new(

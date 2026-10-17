@@ -24,6 +24,8 @@
 //!   it commits.
 //! - [`extremities`]: the room's forward extremities after a chunk.
 //! - [`metrics`]: counts for the Python metrics, flushed when scraped.
+//! - [`prepare`]: everything a chunk needs before its write transaction,
+//!   built from the steps above.
 //! - [`python`]: the [`python::Persister`] and test helpers.
 //! - [`reader`]: what persisting reads before its write transaction.
 //! - [`sliding_sync`]: what a chunk changes in the sliding sync tables.
@@ -40,6 +42,7 @@ pub mod context;
 pub mod effects;
 pub mod extremities;
 pub mod metrics;
+pub mod prepare;
 pub mod python;
 pub mod reader;
 pub mod sliding_sync;
@@ -50,6 +53,7 @@ pub mod sticky;
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "persist")?;
     child_module.add_class::<python::Persister>()?;
+    child_module.add_class::<python::PreparedChunk>()?;
     child_module.add_class::<effects::PersistEffects>()?;
     child_module.add_class::<reader::PyPersistReaderForTest>()?;
     child_module.add_function(wrap_pyfunction!(

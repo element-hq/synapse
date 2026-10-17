@@ -407,6 +407,31 @@ impl Drop for WriteTxn {
 pub async fn run_write_interaction<'env, T, F>(
     pool: &ConnectionPool,
     name: &str,
+    f: F,
+) -> Result<T, WriteError>
+where
+    F: for<'t> FnMut(&'t WriteTxn, &'t &'env ()) -> BoxFuture<'t, Result<T, WriteError>>,
+{
+    run_interaction(pool, name, true, f).await
+}
+
+/// As [`run_write_interaction`], but rolls the transaction back even when
+/// `f` succeeds. For a dry run whose writes must not be seen.
+pub async fn run_rolled_back_interaction<'env, T, F>(
+    pool: &ConnectionPool,
+    name: &str,
+    f: F,
+) -> Result<T, WriteError>
+where
+    F: for<'t> FnMut(&'t WriteTxn, &'t &'env ()) -> BoxFuture<'t, Result<T, WriteError>>,
+{
+    run_interaction(pool, name, false, f).await
+}
+
+async fn run_interaction<'env, T, F>(
+    pool: &ConnectionPool,
+    name: &str,
+    commit: bool,
     mut f: F,
 ) -> Result<T, WriteError>
 where
@@ -414,7 +439,7 @@ where
 {
     let mut attempt = 1;
     loop {
-        let result = run_once(pool, &mut f).await;
+        let result = run_once(pool, commit, &mut f).await;
         match result {
             Err(error) if error.is_retryable() && attempt < MAX_ATTEMPTS => {
                 warn!("[TXN RETRY] {{{name}}} {error} {attempt}/{MAX_ATTEMPTS}");
@@ -425,7 +450,11 @@ where
     }
 }
 
-async fn run_once<'env, T, F>(pool: &ConnectionPool, f: &mut F) -> Result<T, WriteError>
+async fn run_once<'env, T, F>(
+    pool: &ConnectionPool,
+    commit: bool,
+    f: &mut F,
+) -> Result<T, WriteError>
 where
     F: for<'t> FnMut(&'t WriteTxn, &'t &'env ()) -> BoxFuture<'t, Result<T, WriteError>>,
 {
@@ -437,8 +466,12 @@ where
     })?;
     let txn = WriteTxn::begin(conn).await?;
     match f(&txn, &&()).await {
-        Ok(value) => {
+        Ok(value) if commit => {
             txn.commit().await?;
+            Ok(value)
+        }
+        Ok(value) => {
+            txn.rollback().await;
             Ok(value)
         }
         Err(error) => {

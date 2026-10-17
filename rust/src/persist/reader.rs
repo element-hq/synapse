@@ -687,7 +687,7 @@ fn arcs(ids: Vec<String>) -> Vec<Arc<str>> {
     ids.into_iter().map(Arc::from).collect()
 }
 
-fn strings(ids: impl IntoIterator<Item = Arc<str>>) -> HashSet<String> {
+pub(super) fn strings(ids: impl IntoIterator<Item = Arc<str>>) -> HashSet<String> {
     ids.into_iter().map(|id| id.to_string()).collect()
 }
 
@@ -1053,14 +1053,16 @@ impl PyPersistReaderForTest {
         })
     }
 
-    /// The chain cover step, in a write transaction of its own. Event ID to
-    /// `(chain_id, sequence_number, links)`.
+    /// The chain cover step, in a write transaction of its own, rolled back
+    /// for a `dry_run`. Event ID to `(chain_id, sequence_number, links)`.
     #[allow(clippy::type_complexity)]
+    #[pyo3(signature = (room_id, events, *, dry_run = false))]
     fn calculate_chain_cover_index_for_events(
         &self,
         py: Python<'_>,
         room_id: String,
         events: Vec<Py<Event>>,
+        dry_run: bool,
     ) -> PyResult<HashMap<String, (i64, i64, Vec<(i64, i64)>)>> {
         let events: Vec<chain_cover::ChainCoverEvent> = events
             .iter()
@@ -1070,7 +1072,7 @@ impl PyPersistReaderForTest {
             .detach(|| {
                 self.handle
                     .block_on(chain_cover::calculate_chain_cover_index_for_events(
-                        &self.pool, &room_id, &events,
+                        &self.pool, &room_id, &events, dry_run,
                     ))
             })
             .map_err(persist_error_to_py)?;
@@ -1360,13 +1362,7 @@ impl PyPersistReaderForTest {
         to_delete: Vec<(String, String)>,
         to_insert: HashMap<(String, String), String>,
         no_longer_in_room: bool,
-    ) -> PyResult<(
-        Option<i64>,
-        Bound<'py, PyDict>,
-        Bound<'py, PyDict>,
-        Vec<(String, String, String, String)>,
-        Vec<String>,
-    )> {
+    ) -> PyResult<PySlidingSync<'py>> {
         let events: Vec<sliding_sync::SlidingSyncEvent> = events
             .iter()
             .filter_map(|event| sliding_sync::SlidingSyncEvent::new(event.bind(py).get()))
@@ -1392,36 +1388,7 @@ impl PyPersistReaderForTest {
             }
             .boxed()
         })?;
-        let shared =
-            state_values_to_py(py, &changes.membership_snapshot_shared_insert_values.state)?;
-        if let Some(has_known_state) = changes
-            .membership_snapshot_shared_insert_values
-            .has_known_state
-        {
-            shared.set_item("has_known_state", has_known_state)?;
-        }
-        Ok((
-            changes.joined_room_bump_stamp_to_fully_insert,
-            state_values_to_py(py, &changes.joined_room_updates)?,
-            shared,
-            changes
-                .to_insert_membership_snapshots
-                .iter()
-                .map(|info| {
-                    (
-                        info.user_id.to_string(),
-                        info.sender.to_string(),
-                        info.membership_event_id.to_string(),
-                        info.membership.to_string(),
-                    )
-                })
-                .collect(),
-            changes
-                .to_delete_membership_snapshots
-                .iter()
-                .map(|user_id| user_id.to_string())
-                .collect(),
-        ))
+        sliding_sync_to_py(py, &changes)
     }
 
     /// The passing event IDs.
@@ -1482,11 +1449,58 @@ fn state_values_to_py<'py>(
     Ok(dict)
 }
 
+/// Sliding sync table changes as `(bump_stamp_to_fully_insert,
+/// joined_room_updates, membership_snapshot_shared_insert_values,
+/// to_insert_membership_snapshots, to_delete_membership_snapshots)`, each
+/// snapshot as `(user_id, sender, membership_event_id, membership)`.
+pub(super) type PySlidingSync<'py> = (
+    Option<i64>,
+    Bound<'py, PyDict>,
+    Bound<'py, PyDict>,
+    Vec<(String, String, String, String)>,
+    Vec<String>,
+);
+
+pub(super) fn sliding_sync_to_py<'py>(
+    py: Python<'py>,
+    changes: &sliding_sync::SlidingSyncTableChanges,
+) -> PyResult<PySlidingSync<'py>> {
+    let shared = state_values_to_py(py, &changes.membership_snapshot_shared_insert_values.state)?;
+    if let Some(has_known_state) = changes
+        .membership_snapshot_shared_insert_values
+        .has_known_state
+    {
+        shared.set_item("has_known_state", has_known_state)?;
+    }
+    Ok((
+        changes.joined_room_bump_stamp_to_fully_insert,
+        state_values_to_py(py, &changes.joined_room_updates)?,
+        shared,
+        changes
+            .to_insert_membership_snapshots
+            .iter()
+            .map(|info| {
+                (
+                    info.user_id.to_string(),
+                    info.sender.to_string(),
+                    info.membership_event_id.to_string(),
+                    info.membership.to_string(),
+                )
+            })
+            .collect(),
+        changes
+            .to_delete_membership_snapshots
+            .iter()
+            .map(|user_id| user_id.to_string())
+            .collect(),
+    ))
+}
+
 /// A delta as Python's test reads it: `(to_delete, to_insert,
 /// no_longer_in_room)`.
-type PyDelta<'py> = (Vec<(String, String)>, Bound<'py, PyDict>, bool);
+pub(super) type PyDelta<'py> = (Vec<(String, String)>, Bound<'py, PyDict>, bool);
 
-fn delta_to_py<'py>(py: Python<'py>, delta: &DeltaState) -> PyResult<PyDelta<'py>> {
+pub(super) fn delta_to_py<'py>(py: Python<'py>, delta: &DeltaState) -> PyResult<PyDelta<'py>> {
     Ok((
         delta
             .to_delete
@@ -1508,7 +1522,7 @@ fn state_map(map: HashMap<(String, String), String>) -> StateMap {
 
 /// The chunk's events as the computation reads them, and as state
 /// resolution's map of events in flight.
-fn chunk(
+pub(super) fn chunk(
     py: Python<'_>,
     events_and_contexts: &[(Py<Event>, PersistContext)],
 ) -> PyResult<(Vec<NewEvent>, EventMap)> {

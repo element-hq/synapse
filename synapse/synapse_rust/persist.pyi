@@ -13,9 +13,12 @@
 
 from typing import Any
 
+from twisted.internet.defer import Deferred
+
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.synapse_rust.database.postgres import ConnectionPool
+from synapse.synapse_rust.state import StateResStats
 
 class Persister:
     """Persists events in Rust, on the events writer, over the native driver.
@@ -25,6 +28,68 @@ class Persister:
     def take_metrics(self) -> dict[str, Any]:
         """What persisting has counted since the last call. See
         `flush_rust_persist_metrics`."""
+    def prepare_chunk(
+        self,
+        room_id: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        backfilled: bool,
+        *,
+        shadow: bool,
+    ) -> Deferred[PreparedChunk]:
+        """What `_persist_event_batch` computes for a chunk of one room's
+        events before the write transaction. In shadow mode the chain cover
+        step's write is rolled back. Nothing is counted until
+        `record_prepare_counts`."""
+    def record_prepare_counts(self, chunk: PreparedChunk) -> None:
+        """Add what preparing `chunk` counted to the metrics, once."""
+    def prepare_chunk_blocking(
+        self,
+        room_id: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        backfilled: bool,
+        *,
+        shadow: bool,
+    ) -> PreparedChunk:
+        """As `prepare_chunk`, but blocks. For tests."""
+
+class PreparedChunk:
+    """What `Persister.prepare_chunk` computed. If `state_res_fallback` is
+    set, the rest is empty and Python should compute the chunk itself."""
+
+    @property
+    def state_res_fallback(self) -> str | None:
+        """Why the Rust state resolution could not resolve the room."""
+    @property
+    def new_forward_extremities(self) -> set[str] | None: ...
+    @property
+    def state_delta(
+        self,
+    ) -> tuple[list[tuple[str, str]], dict[tuple[str, str], str], bool] | None:
+        """`(to_delete, to_insert, no_longer_in_room)`."""
+    @property
+    def new_state_dag_extremities(self) -> set[str] | None: ...
+    @property
+    def state_res_stats(self) -> StateResStats | None: ...
+    @property
+    def new_event_links(self) -> dict[str, tuple[int, int, list[tuple[int, int]]]]:
+        """Event ID to `(chain_id, sequence_number, links)`."""
+    @property
+    def sliding_sync_table_changes(
+        self,
+    ) -> (
+        tuple[
+            int | None,
+            dict[str, Any],
+            dict[str, Any],
+            list[tuple[str, str, str, str]],
+            list[str],
+        ]
+        | None
+    ):
+        """As `PersistReaderForTest.calculate_sliding_sync_table_changes`
+        returns it. `None` when the state does not change."""
+    @property
+    def sticky_events_to_un_soft_fail(self) -> set[str]: ...
 
 class PersistEffects:
     """The Python cache updates a Rust persist transaction asks for once it
@@ -144,10 +209,10 @@ class PersistReaderForTest:
         target_sequence_number)` rows."""
     def max_sequence_numbers(self, chain_ids: list[int]) -> dict[int, int]: ...
     # The chain cover step (`rust/src/persist/chain_cover.rs`), in a write
-    # transaction of its own. Event ID to `(chain_id, sequence_number,
-    # links)`.
+    # transaction of its own, rolled back for a dry run. Event ID to
+    # `(chain_id, sequence_number, links)`.
     def calculate_chain_cover_index_for_events(
-        self, room_id: str, events: list[EventBase]
+        self, room_id: str, events: list[EventBase], *, dry_run: bool = False
     ) -> dict[str, tuple[int, int, list[tuple[int, int]]]]: ...
     # The extremity calculations (`rust/src/persist/extremities.rs`), each
     # returning its result and what it counted, in the shape
