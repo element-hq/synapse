@@ -20,7 +20,6 @@ native Rust Postgres driver:
     SYNAPSE_TEST_RUST_DRIVER=1 POSTGRES=1 run-trial.sh tests.storage.test_rust_persist_prereqs
 """
 
-import json
 from contextlib import ExitStack
 from typing import Any, Collection
 from unittest import SkipTest
@@ -65,23 +64,19 @@ class PersistenceJsonTestCase(unittest.TestCase):
     """The `event_json` columns Rust writes match what `_store_event_txn`
     writes."""
 
-    def _python_columns(self, event: EventBase) -> tuple[Any, Any]:
+    def _python_columns(self, event: EventBase) -> tuple[str, str]:
         # As `_store_event_txn` builds them.
         d = event.get_dict_for_persistence()
         d.pop("redacted", None)
         d.pop("redacted_because", None)
-        # Compared as stored: JSON has no tuples.
         return (
-            json.loads(json_encoder.encode(event.internal_metadata.get_dict())),
-            json.loads(json_encoder.encode(d)),
+            json_encoder.encode(event.internal_metadata.get_dict()),
+            json_encoder.encode(d),
         )
 
     def _assert_same(self, event: EventBase) -> None:
-        internal_metadata, event_json = persistence_json_for_test(event)
-        self.assertEqual(
-            (json.loads(internal_metadata), json.loads(event_json)),
-            self._python_columns(event),
-        )
+        # The text, byte for byte, key order and escaping included.
+        self.assertEqual(persistence_json_for_test(event), self._python_columns(event))
 
     def test_message(self) -> None:
         self._assert_same(
@@ -100,6 +95,33 @@ class PersistenceJsonTestCase(unittest.TestCase):
                     "unsigned": {"age_ts": 1000},
                 },
                 RoomVersions.V10,
+                {"txn_id": "txn1", "token_id": 5, "device_id": "DEV"},
+            )
+        )
+
+    def test_escapes_and_floats(self) -> None:
+        # Room versions before 6 allow floats.
+        self._assert_same(
+            make_event_from_dict(
+                {
+                    "type": "m.room.message",
+                    "sender": "@alice:test",
+                    "room_id": "!room:test",
+                    "content": {
+                        "body": 'caf\u00e9 \U0001f44d \x01\x7f~ "\\ </',
+                        "f": [1.5, 1e5, 1e16, 1e-7, -0.0],
+                        "big": 12345678901234567890,
+                    },
+                    "depth": 5,
+                    "origin_server_ts": 1234,
+                    "prev_events": [["$prev:test", {}]],
+                    "auth_events": [],
+                    "event_id": "$event:test",
+                    "hashes": {"sha256": "abc"},
+                    "signatures": {"test": {"ed25519:a": "sig"}},
+                    "unsigned": {"age_ts": 1000},
+                },
+                RoomVersions.V1,
                 {"txn_id": "txn1", "token_id": 5, "device_id": "DEV"},
             )
         )

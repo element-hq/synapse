@@ -55,11 +55,16 @@ class Persister:
         self,
         room_id: str,
         events_and_contexts: list[tuple[EventBase, EventContext]],
-    ) -> tuple[PersistEffects, list[int]]:
+        prepared: PreparedChunk,
+    ) -> tuple[PersistEffects, list[int], dict[int, str], list[int]]:
         """Run the part of the write transaction ported to Rust so far over
         the chunk, whose events have their stream orderings set, and commit
-        it. Returns what it collected for Python to apply and the positions
-        in the chunk of the events left for the Python steps after it."""
+        it. `prepared` is what Rust prepared for it.
+
+        Returns what it collected for Python to apply, and for the Python
+        steps after it, by position in the chunk: the events left, the
+        events stored redacted with the event that redacts each, and the
+        events that stopped being outliers."""
 
 class PreparedChunk:
     """What `Persister.prepare_chunk` computed. If `state_res_fallback` is

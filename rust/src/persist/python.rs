@@ -21,6 +21,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use anyhow::Context;
 use futures::{future::BoxFuture, FutureExt};
 use http::StatusCode;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyDict};
@@ -33,10 +34,12 @@ use super::{
     prepare::{self, PrepareInput, PrepareOptions, Prepared},
     reader::{self, PersistReader, PyDelta, PySlidingSync},
     state_delta::NativeStateResolver,
-    txn::{self, TxnEvent, TxnInput},
+    txn::{self, json, PartialStateConflict, TxnEvent, TxnInput},
 };
 use crate::{
-    database::postgres::write::{is_retryable_error, run_write_interaction, MAX_ATTEMPTS},
+    database::postgres::write::{
+        is_retryable_error, run_write_interaction, WriteError, MAX_ATTEMPTS,
+    },
     deferred::{create_deferred_with, OnCancel},
     errors::SynapseError,
     event_auth::AuthFailure,
@@ -200,7 +203,7 @@ impl Persister {
                 {
                     Ok(prepared) => {
                         return Ok(PreparedChunk {
-                            prepared,
+                            prepared: Arc::new(prepared),
                             counts: Mutex::new(Some(counts)),
                         })
                     }
@@ -270,41 +273,79 @@ impl Persister {
 
     /// Run the part of the write transaction ported so far over the chunk,
     /// whose events must have their stream orderings set, and commit it.
-    /// Returns what it collected for Python to apply and the positions in
-    /// the chunk of the events left for the Python steps after it. For
+    /// `prepared` is what Rust prepared for it. For
     /// `tests/storage/test_rust_persist_txn.py`.
+    ///
+    /// Returns what it collected for Python to apply, and for the Python
+    /// steps after it, by position in the chunk: the events left, the
+    /// events stored redacted with the event that redacts each, and the
+    /// events that stopped being outliers.
+    #[allow(clippy::type_complexity)]
     fn persist_events_txn_for_test(
         &self,
         py: Python<'_>,
         room_id: String,
         events_and_contexts: Vec<(Py<Event>, PersistContext)>,
-    ) -> PyResult<(PersistEffects, Vec<usize>)> {
+        prepared: &PreparedChunk,
+    ) -> PyResult<(
+        PersistEffects,
+        Vec<usize>,
+        HashMap<usize, String>,
+        Vec<usize>,
+    )> {
+        let prepared = Arc::clone(&prepared.prepared);
+        if !matches!(&*prepared, Prepared::Chunk(_)) {
+            return Err(PyRuntimeError::new_err("the chunk was prepared in Python"));
+        }
         let events = events_and_contexts
             .into_iter()
             .map(|(event, context)| TxnEvent::new(event.bind(py).get().shallow_clone(), context))
             .collect::<anyhow::Result<Vec<_>>>()
             .map_err(persist_error_to_py)?;
         let pool = self.inner.pool.get()?;
+        let inner = Arc::clone(&self.inner);
         let future = async move {
+            let Prepared::Chunk(chunk) = &*prepared else {
+                unreachable!("checked above");
+            };
             let input = TxnInput {
                 room_id: &room_id,
                 events: &events,
+                prepared: chunk,
+                instance_name: &inner.instance_name,
+                clock: inner.runtime.clock(),
+            };
+            let position = |event: &TxnEvent| {
+                input
+                    .events
+                    .iter()
+                    .position(|x| std::ptr::eq(x, event))
+                    .expect("an event of the chunk")
             };
             run_write_interaction(&pool, "persist_events", |txn, _| {
-                let input = &input;
+                let (input, position) = (&input, &position);
                 async move {
                     let mut effects = PersistEffects::default();
-                    let left = txn::persist_events_txn(txn, input, &mut effects).await?;
-                    let left = left
-                        .iter()
-                        .filter_map(|e| input.events.iter().position(|x| std::ptr::eq(x, *e)))
-                        .collect();
-                    Ok((effects, left))
+                    let prefix = txn::persist_events_txn(txn, input, &mut effects).await?;
+                    let left = prefix.events.iter().map(|e| position(e.source)).collect();
+                    let mut redacted = HashMap::new();
+                    for event in &prefix.events {
+                        if let Some(copy) = &event.redacted {
+                            let by = copy
+                                .internal_metadata()
+                                .redacted_by()
+                                .map_err(anyhow::Error::new)?
+                                .context("a redacted copy without redacted_by")?;
+                            redacted.insert(position(event.source), by);
+                        }
+                    }
+                    let de_outliered = prefix.de_outliered.iter().map(|e| position(e)).collect();
+                    Ok((effects, left, redacted, de_outliered))
                 }
                 .boxed()
             })
             .await
-            .map_err(|e| persist_error_to_py(anyhow::Error::new(e)))
+            .map_err(write_error_to_py)
         };
         self.block_on(py, future.boxed())
     }
@@ -330,14 +371,15 @@ impl Persister {
 /// and Python should compute the chunk itself.
 #[pyclass(frozen)]
 pub struct PreparedChunk {
-    prepared: Prepared,
+    /// Shared with the transaction that writes the chunk.
+    prepared: Arc<Prepared>,
     /// What preparing counted, until it is recorded.
     counts: Mutex<Option<PersistCounts>>,
 }
 
 impl PreparedChunk {
     fn chunk(&self) -> Option<&prepare::PreparedChunk> {
-        match &self.prepared {
+        match &*self.prepared {
             Prepared::Chunk(chunk) => Some(chunk),
             Prepared::StateResFallback(_) => None,
         }
@@ -349,7 +391,7 @@ impl PreparedChunk {
     /// Why the Rust state resolution could not resolve the room.
     #[getter]
     fn state_res_fallback(&self) -> Option<&str> {
-        match &self.prepared {
+        match &*self.prepared {
             Prepared::Chunk(_) => None,
             Prepared::StateResFallback(reason) => Some(reason),
         }
@@ -422,6 +464,15 @@ impl PreparedChunk {
     }
 }
 
+/// Convert an error from a persist transaction to the Python exception the
+/// Python transaction would raise. See [`persist_error_to_py`].
+pub fn write_error_to_py(e: WriteError) -> PyErr {
+    match e {
+        WriteError::Other(e) => persist_error_to_py(e),
+        e => persist_error_to_py(anyhow::Error::new(e)),
+    }
+}
+
 /// Convert an error from persisting to the Python exception the Python
 /// path would raise: a Python exception as it was raised, an auth
 /// failure as the auth rules raise it (from any step, state resolution
@@ -442,6 +493,11 @@ pub fn persist_error_to_py(e: anyhow::Error) -> PyErr {
         Ok(failure) => return failure.into_py_err(),
         Err(e) => e,
     };
+    if e.downcast_ref::<PartialStateConflict>().is_some() {
+        return match py_partial_state_conflict_error() {
+            Ok(err) | Err(err) => err,
+        };
+    }
     if let Some(missing) = e.downcast_ref::<MissingPrevStateEvents>() {
         return SynapseError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -454,14 +510,26 @@ pub fn persist_error_to_py(e: anyhow::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{e:#}"))
 }
 
+/// A `PartialStateConflictError`, as the Python transaction raises.
+fn py_partial_state_conflict_error() -> PyResult<PyErr> {
+    crate::gil::with_gil("persist_partial_state_conflict", |py| {
+        let error = py
+            .import("synapse.api.errors")?
+            .getattr("PartialStateConflictError")?
+            .call0()?;
+        Ok(PyErr::from_value(error))
+    })
+}
+
 /// `(internal_metadata, json)`: the two `event_json` columns as Rust would
 /// write them for `event`, for tests to compare with Python's.
 #[pyfunction]
 pub fn persistence_json_for_test(event: &Bound<'_, Event>) -> PyResult<(String, String)> {
     let event = event.get();
-    let internal_metadata = event.internal_metadata().to_persistence_value()?;
-    let json = event.to_persistence_value()?;
-    Ok((internal_metadata.to_string(), json.to_string()))
+    let internal_metadata = json::encode_object(&event.internal_metadata().to_persistence_pairs()?);
+    let json = event.with_persistence_dict(|dict| json::encode(dict))?;
+    let to_py = |e: serde_json::Error| PyRuntimeError::new_err(format!("encoding: {e}"));
+    Ok((internal_metadata.map_err(to_py)?, json.map_err(to_py)?))
 }
 
 /// The [`PersistContext`] of `context` as a dict, for tests to check the

@@ -35,7 +35,7 @@ pub struct Unsigned {
 /// The fields in the unsigned data of an event that are persisted in the
 /// database.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct PersistedUnsignedFields {
+pub struct PersistedUnsignedFields {
     #[serde(skip_serializing_if = "Option::is_none")]
     age_ts: Option<Number>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -292,11 +292,13 @@ impl Unsigned {
 }
 
 impl Unsigned {
-    /// The fields stored in the database, as [`Unsigned::for_persistence`]
-    /// returns them, built without the GIL.
-    pub fn persistence_value(&self) -> PyResult<serde_json::Value> {
-        serde_json::to_value(&self.py_read()?.persisted_fields)
-            .map_err(|e| PyRuntimeError::new_err(format!("serializing unsigned: {e}")))
+    /// Calls `f` with the fields stored in the database, as
+    /// [`Unsigned::for_persistence`] returns them, without the GIL.
+    pub fn with_persisted_fields<R>(
+        &self,
+        f: impl FnOnce(&PersistedUnsignedFields) -> R,
+    ) -> PyResult<R> {
+        Ok(f(&self.py_read()?.persisted_fields))
     }
 }
 

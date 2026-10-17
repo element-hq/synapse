@@ -52,22 +52,23 @@ use std::{cmp::min, sync::Arc};
 
 use anyhow::Error;
 use pyo3::{
-    exceptions::{PyAttributeError, PyKeyError, PyRuntimeError, PyValueError},
+    exceptions::{PyAttributeError, PyKeyError, PyValueError},
     pyclass, pyfunction, pymethods,
     types::{PyAnyMethods, PyDict, PyDictMethods, PyList, PyMapping, PyModule, PyModuleMethods},
     wrap_pyfunction, Bound, IntoPyObject, PyAny, PyResult, Python,
 };
 use pythonize::{depythonize, pythonize};
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::events::{
     constants::event_type::M_ROOM_MEMBER,
     formats::{
-        EventFormatEnum, EventFormatV1, EventFormatV2V3, EventFormatV4, EventFormatVMSC4242,
-        FormattedEvent,
+        EventCommonFields, EventFormatEnum, EventFormatV1, EventFormatV2V3, EventFormatV4,
+        EventFormatVMSC4242, FormattedEvent,
     },
     signatures::Signatures,
-    unsigned::Unsigned,
+    unsigned::{PersistedUnsignedFields, Unsigned},
     utils::redact,
 };
 use crate::{
@@ -765,24 +766,27 @@ impl Event {
         serde_json::to_value(&self.parsed_event)
     }
 
-    /// The `event_json.json` column: the event as
-    /// `get_dict_for_persistence()` returns it, with `unsigned` holding only
-    /// the fields kept in the database, built without the GIL.
+    /// Calls `f` with the `event_json.json` column: the event as
+    /// `get_dict_for_persistence()` returns it, with its keys in the same
+    /// order and `unsigned` holding only the fields kept in the database,
+    /// built without the GIL.
     ///
     /// The persist transaction drops `redacted` and `redacted_because` from
     /// that dict. Neither is ever in the Rust event, so there is nothing to
     /// drop.
-    pub fn to_persistence_value(&self) -> PyResult<Value> {
-        let mut value = serde_json::to_value(&self.parsed_event)
-            .map_err(|e| PyRuntimeError::new_err(format!("serializing event: {e}")))?;
-        let object = value
-            .as_object_mut()
-            .ok_or_else(|| PyRuntimeError::new_err("event did not serialize to an object"))?;
-        object.insert(
-            UNSIGNED.to_owned(),
-            self.parsed_event.unsigned.persistence_value()?,
-        );
-        Ok(value)
+    pub fn with_persistence_dict<R>(
+        &self,
+        f: impl FnOnce(&PersistenceDict<'_>) -> R,
+    ) -> PyResult<R> {
+        let event = &self.parsed_event;
+        event.unsigned.with_persisted_fields(|unsigned| {
+            f(&PersistenceDict {
+                signatures: &event.signatures,
+                unsigned,
+                specific_fields: &event.specific_fields,
+                common_fields: &event.common_fields,
+            })
+        })
     }
 
     /// Returns the `redacts` field of this event, if it has one.
@@ -795,6 +799,19 @@ impl Event {
         };
         value
     }
+}
+
+/// An event as [`Event::with_persistence_dict`] serializes it. The fields
+/// are in [`FormattedEvent`]'s order, which is the order `get_dict()` gives
+/// them.
+#[derive(Serialize)]
+pub struct PersistenceDict<'a> {
+    signatures: &'a Signatures,
+    unsigned: &'a PersistedUnsignedFields,
+    #[serde(flatten)]
+    specific_fields: &'a EventFormatEnum,
+    #[serde(flatten)]
+    common_fields: &'a EventCommonFields,
 }
 
 /// Parses a JSON string into a [`FormattedEvent`] for the given room version.

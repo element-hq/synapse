@@ -35,11 +35,13 @@ from unittest import SkipTest
 
 import attr
 
+from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes
+from synapse.api.constants import EventTypes, StickyEvent
+from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
-from synapse.events import make_event_from_dict
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -47,6 +49,8 @@ from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main.events import PersistEventsStore
 from synapse.storage.rust_pool import RustConnectionPool
+from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.synapse_rust.events import redact_event
 from synapse.synapse_rust.persist import PersistEffects
 from synapse.types import create_requester
 from synapse.util.caches.deferred_cache import DeferredCache
@@ -128,13 +132,22 @@ _JSON_COLUMNS = {
 }
 
 # Which positional arguments of a `call_after` callback hold a stream
-# position or state group, by callback name.
-_EFFECT_ARGS = {
+# position or state group, by callback name, or by its name and owner.
+_EFFECT_ARGS: dict[str | tuple[str, str | None], tuple[str | None, ...]] = {
     "_invalidate_caches_for_event": ("events",),
     "entity_has_changed": (None, "events"),
     "prefill": (None, "state_groups"),
-    "_mark_ids_as_finished": ("cache",),
+    # An ID generator's stream IDs, by the generator's stream name.
+    ("_mark_ids_as_finished", "caches"): ("cache",),
+    ("_mark_ids_as_finished", "sticky_events"): ("sticky",),
 }
+
+
+def _effect_kinds(name: str, owner: str | None, args: tuple) -> tuple[str | None, ...]:
+    """The kind of each argument of an effect, for `_Normaliser.position`."""
+    kinds = _EFFECT_ARGS.get((name, owner), _EFFECT_ARGS.get(name, ()))
+    return kinds + (None,) * (len(args) - len(kinds))
+
 
 # Marks each twin's create event, so the rooms get different IDs in room
 # versions that derive the room ID from it.
@@ -254,12 +267,15 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         self.persistence._rust_persist_strict = True
         persister = persistence._rust_persister
         assert persister is not None
-        self.persister = persister
+        self.persister = _RecordingPersister(persister)
+        persistence._rust_persister = self.persister  # type: ignore[assignment]
         events_store = hs.get_datastores().persist_events
         assert events_store is not None
         self.events_store = events_store
 
         self.alice = self.register_user("alice", "pass")
+        # A device, for transaction IDs.
+        self.login("alice", "pass", device_id="DEVICE")
         self.bob = self.register_user("bob", "pass")
         self.twins = (_Twin("a"), _Twin("b"))
         for twin in self.twins:
@@ -318,17 +334,35 @@ class _TwinTestBase(unittest.HomeserverTestCase):
     ) -> None:
         """Room B's transaction: the Rust part, committed first, then the
         rest in Python."""
-        effects, left = self.persister.persist_events_txn_for_test(
-            room_id, events_and_contexts
+        prepared = self.persister.last_prepared
+        assert prepared is not None
+        # The transaction must take the chunk prepared for it.
+        self.assertEqual(
+            self.persister.last_chunk,
+            (room_id, [event.event_id for event, _ in events_and_contexts]),
+        )
+        effects, left, redacted, de_outliered = (
+            self.persister.persist_events_txn_for_test(
+                room_id, events_and_contexts, prepared
+            )
         )
         twin.effects.extend(_rust_effects(effects))
+        # The events left, as the steps after Rust's see them.
+        left_events_and_contexts = []
+        for i in left:
+            event, context = events_and_contexts[i]
+            if i in redacted:
+                event = redact_event(event)
+                event.internal_metadata.redacted_by = redacted[i]
+            left_events_and_contexts.append((event, context))
         start = len(txn.after_callbacks or [])
         _python_steps_after_rust(
             self.events_store,
             txn,
             room_id=room_id,
             all_events_and_contexts=events_and_contexts,
-            events_and_contexts=[events_and_contexts[i] for i in left],
+            events_and_contexts=left_events_and_contexts,
+            de_outliered=[events_and_contexts[i][0] for i in de_outliered],
             **kwargs,
         )
         twin.effects.extend(self._python_effects(txn, start))
@@ -351,6 +385,8 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             )
             if owner is self.store:
                 owner_name = None
+            elif isinstance(owner, MultiWriterIdGenerator):
+                owner_name = owner._stream_name
             elif owner is not None:
                 owner_name = getattr(owner, "name", None) or type(owner).__name__
             elif name == "<lambda>" and cache is not None:
@@ -393,6 +429,8 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         prev: list[int] | None = None,
         redacts: int | None = None,
         sender: str | None = None,
+        txn_id: str | None = None,
+        sticky_ms: int | None = None,
     ) -> EventPersistencePair:
         """An event of the twin's, not yet persisted, added to its events.
         `prev` and `redacts` are indices of the twin's events. `content` can
@@ -408,6 +446,8 @@ class _TwinTestBase(unittest.HomeserverTestCase):
         }
         if state_key is not None:
             event_dict["state_key"] = state_key
+        if sticky_ms is not None:
+            event_dict[StickyEvent.EVENT_FIELD_NAME] = {"duration_ms": sticky_ms}
         if redacts is not None:
             redacts_id = twin.events[redacts]
             event_dict["redacts"] = redacts_id
@@ -415,8 +455,9 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                 event_dict["content"]["redacts"] = redacts_id
         event, unpersisted_context = self.get_success(
             self.hs.get_event_creation_handler().create_event(
-                create_requester(sender),
+                create_requester(sender, device_id="DEVICE" if txn_id else None),
                 event_dict,
+                txn_id=txn_id,
                 prev_event_ids=(
                     [twin.events[i] for i in prev] if prev is not None else None
                 ),
@@ -527,9 +568,7 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                         normaliser.position(kind, arg)
                         if kind
                         else normaliser.value("", "", arg)
-                        for kind, arg in zip(
-                            _EFFECT_ARGS.get(name, ()) + (None,) * len(args), args
-                        )
+                        for kind, arg in zip(_effect_kinds(name, owner, args), args)
                     ),
                     tuple(sorted(kwargs.items())),
                 )
@@ -563,6 +602,17 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                     row[i] for row in rows if isinstance(row[i], int)
                 )
         values.setdefault("cache", set()).update(row[0] for row in twin.cache_rows)
+        # Positions that only an effect holds, such as the stream ID of a
+        # sticky event that was redacted.
+        for name, owner, args, _ in twin.effects:
+            for kind, arg in zip(_effect_kinds(name, owner, args), args):
+                if not kind:
+                    continue
+                found = values.setdefault(kind, set())
+                if isinstance(arg, int):
+                    found.add(arg)
+                elif isinstance(arg, (list, tuple)):
+                    found.update(v for v in arg if isinstance(v, int))
         ranks = {
             kind: {value: rank for rank, value in enumerate(sorted(found))}
             for kind, found in values.items()
@@ -602,6 +652,38 @@ class _TwinTestBase(unittest.HomeserverTestCase):
             self.assertEqual(a[table], b[table], f"{table} differs")
 
 
+class _RecordingPersister:
+    """The Rust persister, remembering the last chunk it prepared, which
+    room B's transaction takes."""
+
+    def __init__(self, persister: Any) -> None:
+        self._persister = persister
+        self.last_prepared: Any = None
+        # The room and event IDs `last_prepared` is for.
+        self.last_chunk: tuple[str, list[str]] | None = None
+
+    def prepare_chunk(
+        self,
+        room_id: str,
+        events_and_contexts: list[EventPersistencePair],
+        *args: Any,
+        **kwargs: Any,
+    ) -> "Deferred[Any]":
+        chunk = (room_id, [event.event_id for event, _ in events_and_contexts])
+
+        def record(prepared: Any) -> Any:
+            self.last_prepared = prepared
+            self.last_chunk = chunk
+            return prepared
+
+        return self._persister.prepare_chunk(
+            room_id, events_and_contexts, *args, **kwargs
+        ).addCallback(record)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._persister, name)
+
+
 def _rust_effects(
     effects: PersistEffects,
 ) -> list[tuple[str, str | None, tuple, dict[str, Any]]]:
@@ -618,7 +700,29 @@ def _rust_effects(
         )
     for event_id in effects.event_cache_invalidations:
         calls.append(("_invalidate_local_get_event_cache", None, (event_id,), {}))
+    for cache, entity, stream_id in effects.stream_changes:
+        calls.append(
+            (
+                "entity_has_changed",
+                _STREAM_CHANGE_CACHES[cache],
+                (entity, stream_id),
+                {},
+            )
+        )
+    for event_id, state_group in effects.state_group_prefills:
+        calls.append(
+            ("prefill", "_get_state_group_for_event", ((event_id,), state_group), {})
+        )
     return calls
+
+
+# The names of the stream change caches, by `PersistEffects.stream_changes`
+# key.
+_STREAM_CHANGE_CACHES = {
+    "events": "EventsRoomStreamChangeCache",
+    "current_state_deltas": "_curr_state_delta_stream_cache",
+    "membership": "_membership_stream_cache",
+}
 
 
 def _python_steps_after_rust(
@@ -628,6 +732,7 @@ def _python_steps_after_rust(
     room_id: str,
     all_events_and_contexts: list[EventPersistencePair],
     events_and_contexts: list[EventPersistencePair],
+    de_outliered: list[EventBase],
     inhibit_local_membership_updates: bool,
     state_delta_for_room: Any,
     new_forward_extremities: set[str] | None,
@@ -645,44 +750,15 @@ def _python_steps_after_rust(
     transaction meanwhile runs in room A only, so its rows differ and the
     comparison fails."""
     min_stream_order = all_events_and_contexts[0][0].internal_metadata.stream_ordering
-    room_version = all_events_and_contexts[0][0].room_version
 
-    store._update_room_depths_txn(txn, room_id, events_and_contexts=events_and_contexts)
-    events_and_contexts = store._update_outliers_txn(
-        txn, events_and_contexts=events_and_contexts
-    )
-    events_and_contexts = store._apply_existing_redaction_txn(
-        txn, room_id, room_version, events_and_contexts=events_and_contexts
-    )
-    redacted = store._compute_newly_redacted_event_ids_txn(
-        txn, room_id, room_version, events_and_contexts=events_and_contexts
-    )
-    if redacted:
-        store.store.delete_sticky_events_txn(txn, redacted)
-    store._store_event_txn(txn, events_and_contexts=events_and_contexts)
-    if new_forward_extremities:
-        max_stream_order = all_events_and_contexts[-1][
-            0
-        ].internal_metadata.stream_ordering
-        assert max_stream_order is not None
-        store._update_forward_extremities_txn(
-            txn,
-            room_id,
-            new_forward_extremities=new_forward_extremities,
-            max_stream_order=max_stream_order,
+    # Left by `_update_outliers_txn`, until Rust inserts sticky events.
+    # Python inserts these before deleting the redacted events' rows, so a
+    # chunk that de-outliers a sticky event and redacts it differs here.
+    if store._msc4354_enabled:
+        store.store.insert_sticky_events_txn(
+            txn, [event for event in de_outliered if event.sticky_duration()]
         )
-    if new_state_dag_forward_extremities:
-        store._set_state_dag_extremities_txn(
-            txn, room_id, new_state_dag_forward_extremities
-        )
-    store._persist_transaction_ids_txn(txn, events_and_contexts)
-    store._store_event_state_mappings_txn(txn, events_and_contexts)
-    store._persist_event_auth_chain_txn(
-        txn, [e for e, _ in events_and_contexts], new_event_links
-    )
-    events_and_contexts = store._store_rejected_events_txn(
-        txn, events_and_contexts=events_and_contexts
-    )
+
     store._update_metadata_tables_txn(
         txn,
         events_and_contexts=events_and_contexts,
@@ -739,6 +815,9 @@ class PersistTxnTestCase(_TwinTestBase):
     def test_fork(self) -> None:
         base = self._message("base")
         self._send(EventTypes.Topic, {"topic": "A"}, state_key="", prev=[base])
+        # State resolution orders the topics by timestamp, then by event ID,
+        # which differs between the twins.
+        self.reactor.advance(1)
         self._send(EventTypes.Topic, {"topic": "B"}, state_key="", prev=[base])
         # Joins the two branches, resolving state.
         self._message("merge")
@@ -766,6 +845,34 @@ class PersistTxnTestCase(_TwinTestBase):
         self._step(lambda twin: [built[twin.name]])
         self._assert_twins_match()
 
+    def test_redaction_of_later_redaction(self) -> None:
+        """A redaction is never redacted as it is persisted, so a redaction
+        of it that came first needs censoring again."""
+        message = self._message("secret")
+        built: dict[str, EventPersistencePair] = {}
+
+        def target(twin: _Twin) -> list[EventPersistencePair]:
+            built[twin.name] = self._build(
+                twin, EventTypes.Redaction, {}, redacts=message
+            )
+            return []
+
+        self._step(target)
+        self._send(
+            EventTypes.Redaction,
+            {},
+            redacts=len(self.twins[0].events) - 1,
+            prev=[message],
+        )
+        # As if the censor job had run.
+        self.get_success(
+            self.store.db_pool.simple_update(
+                "redactions", {}, {"have_censored": True}, desc="test"
+            )
+        )
+        self._step(lambda twin: [built[twin.name]])
+        self._assert_twins_match()
+
     def test_relation(self) -> None:
         root = self._message("root")
         self._send(
@@ -776,6 +883,74 @@ class PersistTxnTestCase(_TwinTestBase):
                 "m.relates_to": {"rel_type": "m.thread", "event_id": twin.events[root]},
             },
         )
+        self._assert_twins_match()
+
+    def test_transaction_ids(self) -> None:
+        self._message("hello", txn_id="txn1")
+        self._assert_twins_match()
+
+    def test_url_and_unicode(self) -> None:
+        self._send(
+            EventTypes.Message,
+            {"msgtype": "m.image", "body": "h\u00e9llo \U0001f44d", "url": "mxc://a/b"},
+        )
+        # Not a string, so not a URL.
+        self._send(EventTypes.Message, {"msgtype": "m.text", "body": "x", "url": 1})
+        self._assert_twins_match()
+
+    def test_redaction_recheck(self) -> None:
+        """A redaction that needs a recheck, which passes as Alice redacts
+        her own event, is stored as no longer needing one."""
+        target = self._message("secret")
+
+        def redaction(twin: _Twin) -> list[EventPersistencePair]:
+            event, context = self._build(twin, EventTypes.Redaction, {}, redacts=target)
+            event.internal_metadata.recheck_redaction = True
+            return [(event, context)]
+
+        self._step(redaction)
+        self._assert_twins_match()
+
+    def test_redaction_recheck_in_chunk(self) -> None:
+        """The same, with the redaction and its target in one chunk."""
+        base = self._message("base")
+
+        def chunk(twin: _Twin) -> list[EventPersistencePair]:
+            target = self._build(
+                twin, EventTypes.Message, {"msgtype": "m.text", "body": "secret"}
+            )
+            event, context = self._build(
+                twin,
+                EventTypes.Redaction,
+                {},
+                redacts=len(twin.events) - 1,
+                prev=[base],
+            )
+            event.internal_metadata.recheck_redaction = True
+            return [target, (event, context)]
+
+        self._step(chunk)
+        self._assert_twins_match()
+
+    def test_partial_state_conflict(self) -> None:
+        """An event with partial state in a room without fails, as the room
+        must have been un-partial stated meanwhile."""
+        for twin in self.twins:
+            event, context = self._build(
+                twin, EventTypes.Message, {"msgtype": "m.text", "body": "partial"}
+            )
+            context.partial_state = True
+            with self._persisting(twin):
+                self.get_failure(
+                    self.persistence.persist_events([(event, context)]),
+                    PartialStateConflictError,
+                )
+        self._assert_twins_match()
+
+    def test_sticky_redacted(self) -> None:
+        """Redacting a sticky event makes it stop being sticky."""
+        target = self._message("sticky", sticky_ms=60_000)
+        self._send(EventTypes.Redaction, {}, redacts=target)
         self._assert_twins_match()
 
     def test_rejected(self) -> None:
@@ -803,6 +978,51 @@ class PersistTxnTestCase(_TwinTestBase):
         self._step(outlier, backfilled=True)
         self._step(lambda twin: [built[twin.name]])
         self._assert_twins_match()
+
+    def test_de_outlier_with_gap(self) -> None:
+        """An event de-outliered while its prev event is an outlier: the
+        prev event becomes a backward extremity, with a timeline gap. The
+        event's own extremity and failed pull attempts go."""
+        prev = self._message("prev")
+        built: dict[str, EventPersistencePair] = {}
+
+        def outlier(twin: _Twin) -> list[EventPersistencePair]:
+            built[twin.name] = self._build(
+                twin, EventTypes.Topic, {"topic": "gap"}, state_key=""
+            )
+            return [self._outlier(built[twin.name])]
+
+        self._step(outlier, backfilled=True)
+        for twin in self.twins:
+            # The prev event as if we had only fetched it as an outlier.
+            self.get_success(
+                self.store.db_pool.simple_update_one(
+                    "events", {"event_id": twin.events[prev]}, {"outlier": True}
+                )
+            )
+            event_id = built[twin.name][0].event_id
+            for table, row in (
+                ("event_backward_extremities", {}),
+                (
+                    "event_failed_pull_attempts",
+                    {"num_attempts": 1, "last_attempt_ts": 0, "last_cause": "x"},
+                ),
+            ):
+                self.get_success(
+                    self.store.db_pool.simple_insert(
+                        table,
+                        {"room_id": twin.room_id, "event_id": event_id, **row},
+                        desc="test",
+                    )
+                )
+        self._step(lambda twin: [built[twin.name]])
+        self._assert_twins_match()
+        gaps = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                "timeline_gaps", {"room_id": self.twins[1].room_id}, "stream_ordering"
+            )
+        )
+        self.assertEqual(len(gaps), 1)
 
     def test_duplicates_in_chunk(self) -> None:
         def duplicated(twin: _Twin) -> list[EventPersistencePair]:
@@ -840,7 +1060,9 @@ class PersistTxnTestCase(_TwinTestBase):
 
     def test_missing_room(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "Room does not exist !nope:test"):
-            self.persister.persist_events_txn_for_test("!nope:test", [])
+            self.persister.persist_events_txn_for_test(
+                "!nope:test", [], self.persister.last_prepared
+            )
 
 
 class StateDagPersistTxnTestCase(PersistTxnTestCase):

@@ -606,19 +606,15 @@ impl EventInternalMetadata {
         Ok(())
     }
 
-    /// The `internal_metadata` column, as `get_dict()` returns it, built
-    /// without the GIL.
-    pub fn to_persistence_value(&self) -> PyResult<serde_json::Value> {
-        Ok(serde_json::Value::Object(
-            self.read_inner()?
-                .data
-                .iter()
-                .map(|entry| {
-                    let (key, value) = entry.to_json_pair();
-                    (key.to_owned(), value)
-                })
-                .collect(),
-        ))
+    /// The `internal_metadata` column as key-value pairs, in the order
+    /// `get_dict()` gives them, built without the GIL.
+    pub fn to_persistence_pairs(&self) -> PyResult<Vec<(&'static str, serde_json::Value)>> {
+        Ok(self
+            .read_inner()?
+            .data
+            .iter()
+            .map(|entry| entry.to_json_pair())
+            .collect())
     }
 
     /// The event's stream ordering, if known.

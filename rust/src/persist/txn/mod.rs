@@ -21,18 +21,29 @@
 //! cache updates Python queues with `txn.call_after`.
 //!
 //! This is being ported a group of steps at a time, from the start of the
-//! transaction. So far it covers the steps up to dropping duplicate events,
-//! and returns the events left at that point. The Python steps after it run
+//! transaction. So far it covers the steps up to storing the rejections:
+//! the events themselves ([`events`]) and the room's forward extremities
+//! ([`edges`]). It returns the events left at that point. The Python steps after it run
 //! only in `tests/storage/test_rust_persist_txn.py`, which persists the
 //! rest of a chunk in Python and compares the rows with Python's.
+
+pub mod edges;
+pub mod events;
+pub mod json;
 
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use pyo3::PyErr;
 use serde_json::Value;
 
-use super::{context::PersistContext, effects::EventInvalidation, effects::PersistEffects};
+use super::{
+    context::PersistContext,
+    effects::{EventInvalidation, PersistEffects},
+    prepare::PreparedChunk,
+};
 use crate::{
+    clock::Clock,
     database::postgres::write::{WriteError, WriteTxn},
     events::{
         constants::{event_field::M_RELATES_TO, relation_type},
@@ -75,41 +86,163 @@ impl TxnEvent {
     }
 }
 
+/// An event on its way through the transaction: an event of the chunk, or
+/// its redacted copy once [`events::apply_existing_redactions`] finds it
+/// already redacted.
+pub struct Persisting<'a> {
+    pub source: &'a TxnEvent,
+    /// The event as it is stored, if it is redacted.
+    pub redacted: Option<Event>,
+}
+
+impl Persisting<'_> {
+    pub fn event(&self) -> &Event {
+        self.redacted.as_ref().unwrap_or(&self.source.event)
+    }
+
+    pub fn context(&self) -> &PersistContext {
+        &self.source.context
+    }
+
+    pub fn stream_ordering(&self) -> i64 {
+        self.source.stream_ordering
+    }
+}
+
 /// What the transaction takes besides the chunk.
 pub struct TxnInput<'a> {
     pub room_id: &'a str,
     /// The chunk, in order. It may hold the same event twice.
     pub events: &'a [TxnEvent],
+    /// What [`super::prepare`] computed for the chunk.
+    pub prepared: &'a PreparedChunk,
+    /// This instance, which writes the events.
+    pub instance_name: &'a str,
+    pub clock: &'a Clock,
+}
+
+impl TxnInput<'_> {
+    /// The time, read when a step needs it, as Python reads its clock.
+    fn now_ms(&self) -> Result<i64, WriteError> {
+        Ok(i64::try_from(self.clock.now_millis()).map_err(anyhow::Error::new)?)
+    }
+}
+
+/// What the steps ported so far leave for the Python steps after them.
+pub struct TxnPrefix<'a> {
+    /// The events left: neither persisted before nor rejected.
+    pub events: Vec<Persisting<'a>>,
+    /// The events that stopped being outliers. Python makes the sticky
+    /// ones sticky.
+    pub de_outliered: Vec<&'a TxnEvent>,
+}
+
+/// The chunk has an event with partial state, but the room no longer has
+/// partial state. Python raises `PartialStateConflictError`, and the caller
+/// computes the event's context again.
+#[derive(Debug)]
+pub struct PartialStateConflict;
+
+impl std::fmt::Display for PartialStateConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Cannot persist partial state event in un-partial stated room")
+    }
+}
+
+impl std::error::Error for PartialStateConflict {}
+
+/// An error reading an event's fields through the Python-facing accessors.
+fn metadata_error(e: PyErr) -> WriteError {
+    WriteError::Other(anyhow::Error::new(e))
 }
 
 /// Write the chunk, as `_persist_events_txn` does, adding to `effects` what
-/// Python would queue with `txn.call_after`. Returns the events left once
-/// duplicates are dropped, which the steps still to be ported take.
+/// Python would queue with `txn.call_after`. Returns what the steps still
+/// to be ported take.
 ///
 /// `effects` must start empty: a retried transaction starts again.
 pub async fn persist_events_txn<'a>(
     txn: &WriteTxn,
     input: &TxnInput<'a>,
     effects: &mut PersistEffects,
-) -> Result<Vec<&'a TxnEvent>, WriteError> {
+) -> Result<TxnPrefix<'a>, WriteError> {
+    let room_id = input.room_id;
+
     // Protect against a race with deleting the room: the share lock holds
     // off a delete until we commit.
     let rows = txn
         .query(
             "SELECT room_version FROM rooms WHERE room_id = $1 FOR SHARE",
-            &[&input.room_id],
+            &[&room_id],
         )
         .await?;
     if rows.is_empty() {
-        return Err(anyhow!("Room does not exist {}", input.room_id).into());
+        return Err(anyhow!("Room does not exist {room_id}").into());
     }
+
+    let (Some(first), Some(last)) = (input.events.first(), input.events.last()) else {
+        return Err(anyhow!("no events to persist in {room_id}").into());
+    };
+    let max_stream_order = last.stream_ordering;
+    // Python takes the first event's room version for the whole chunk.
+    let room_version = first.event.room_version();
 
     // Recorded for every event of the chunk, before any are dropped.
     for event in input.events {
         add_event_effects(event, effects);
     }
 
-    filter_duplicates(input.events)
+    let events: Vec<Persisting<'a>> = filter_duplicates(input.events)?
+        .into_iter()
+        .map(|source| Persisting {
+            source,
+            redacted: None,
+        })
+        .collect();
+
+    events::update_room_depths(txn, room_id, &events, effects).await?;
+
+    let mut de_outliered = Vec::new();
+    let events = events::update_outliers(txn, input, events, effects, &mut de_outliered).await?;
+
+    // From here on, only events we have not seen before.
+    let events = events::apply_existing_redactions(txn, room_id, room_version, events).await?;
+    let newly_redacted = events::newly_redacted_event_ids(txn, room_id, &events).await?;
+    // Redacted events stop being sticky. Python makes de-outliered events
+    // sticky in `update_outliers`, before this. The sticky port must do so
+    // there too, or a de-outliered event redacted in the same chunk stays
+    // sticky.
+    events::delete_sticky_events(txn, &newly_redacted).await?;
+
+    events::store_events(txn, input, &events).await?;
+
+    let state = &input.prepared.state;
+    if let Some(extremities) = state
+        .new_forward_extremities
+        .as_ref()
+        .filter(|e| !e.is_empty())
+    {
+        edges::update_forward_extremities(txn, room_id, extremities, max_stream_order).await?;
+    }
+    if let Some(extremities) = state
+        .new_state_dag_extremities
+        .as_ref()
+        .filter(|e| !e.is_empty())
+    {
+        edges::set_state_dag_extremities(txn, room_id, extremities).await?;
+    }
+
+    events::persist_transaction_ids(txn, input, &events).await?;
+    events::store_state_mappings(txn, &events, effects).await?;
+    events::persist_auth_chain(txn, &events, &input.prepared.new_event_links).await?;
+
+    // From here on, only events that were not rejected.
+    let events = events::store_rejections(txn, input, events).await?;
+
+    Ok(TxnPrefix {
+        events,
+        de_outliered,
+    })
 }
 
 /// The cache updates Python queues for each event of the chunk at the start
