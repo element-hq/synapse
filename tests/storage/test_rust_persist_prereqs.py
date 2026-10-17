@@ -33,6 +33,7 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.metrics
 from synapse.api.constants import EventTypes, Membership, RelationTypes
+from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
 from synapse.config import ConfigError
 from synapse.config.experimental import ExperimentalConfig
@@ -55,6 +56,7 @@ from synapse.synapse_rust.persist import (
     persist_gil_stats,
     persistence_json_for_test,
 )
+from synapse.types import create_requester
 from synapse.util.caches.deferred_cache import DeferredCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.clock import Clock
@@ -867,6 +869,8 @@ class _CountingPersister:
         self._persister = persister
         self.prepares = 0
         self.transactions = 0
+        # Chunks written with Rust taking their stream orderings.
+        self.chunks = 0
         self.last_effects: PersistEffects | None = None
 
     def prepare_chunk(self, *args: Any, **kwargs: Any) -> Any:
@@ -881,6 +885,15 @@ class _CountingPersister:
             return result
 
         return self._persister.persist_events_txn(*args, **kwargs).addCallback(keep)
+
+    def persist_chunk(self, *args: Any, **kwargs: Any) -> Any:
+        self.chunks += 1
+
+        def keep(result: Any) -> Any:
+            self.last_effects = result
+            return result
+
+        return self._persister.persist_chunk(*args, **kwargs).addCallback(keep)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._persister, name)
@@ -1074,9 +1087,9 @@ class RustTransactionTestCase(unittest.HomeserverTestCase):
         )
 
 
-class RustTransactionWorkerTestCase(BaseMultiWorkerStreamTestCase):
-    """`rust_event_persistence: transaction` on a worker event persister:
-    the worker writes in Rust, to the main database."""
+class RustFullTestCase(unittest.HomeserverTestCase):
+    """`rust_event_persistence: full`: Rust also takes the chunks' stream
+    orderings."""
 
     servlets = [
         admin.register_servlets,
@@ -1087,7 +1100,345 @@ class RustTransactionWorkerTestCase(BaseMultiWorkerStreamTestCase):
     def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config.setdefault("experimental_features", {})["rust_event_persistence"] = (
-            "transaction"
+            "full"
+        )
+        return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        if RUST_PERSIST_FOR_TESTS not in (None, "full"):
+            raise SkipTest("SYNAPSE_TEST_RUST_PERSIST overrides the level")
+        hs = self.setup_test_homeserver()
+        if not isinstance(
+            hs.get_datastores().main.db_pool._db_pool, RustConnectionPool
+        ):
+            raise SkipTest("needs the native Rust Postgres driver")
+        return hs
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        persistence = hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.persistence = persistence
+        self.persister = _CountingPersister(persistence._rust_persister)
+        persistence._rust_persister = self.persister  # type: ignore[assignment]
+        self.user = self.register_user("alice", "pass")
+        self.token = self.login("alice", "pass")
+        self.room_id = self.helper.create_room_as(self.user, tok=self.token)
+
+    def _build(self, body: str) -> tuple[EventBase, EventContext]:
+        event, unpersisted_context = self.get_success(
+            self.hs.get_event_creation_handler().create_event(
+                create_requester(self.user),
+                {
+                    "type": EventTypes.Message,
+                    "content": {"msgtype": "m.text", "body": body},
+                    "room_id": self.room_id,
+                    "sender": self.user,
+                },
+            )
+        )
+        context = self.get_success(unpersisted_context.persist(event))
+        return event, context
+
+    def _stream_position(self, stream_name: str) -> int | None:
+        rows = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                "stream_positions",
+                {"stream_name": stream_name, "instance_name": "master"},
+                "stream_id",
+            )
+        )
+        return rows[0] if rows else None
+
+    def _event_row(self, event_id: str) -> tuple[int, str, int]:
+        """`(stream_ordering, instance_name, received_ts)` of the event's
+        `events` row."""
+        row = self.get_success(
+            self.store.db_pool.simple_select_one(
+                "events",
+                {"event_id": event_id},
+                ("stream_ordering", "instance_name", "received_ts"),
+            )
+        )
+        return row[0], row[1], row[2]
+
+    def test_rust_takes_stream_orderings(self) -> None:
+        """Rust takes the chunk's stream orderings and sets them on the
+        events, and the applier finishes them and moves `stream_positions`
+        on, as `get_next_mult` does."""
+        id_gen = self.store._stream_id_gen
+        chunks = self.persister.chunks
+        with patch.object(
+            id_gen, "get_next_mult", side_effect=AssertionError("Python allocated")
+        ):
+            event_id = self.helper.send(self.room_id, "hello", tok=self.token)[
+                "event_id"
+            ]
+        self.assertEqual(self.persister.chunks, chunks + 1)
+        effects = self.persister.last_effects
+        assert effects is not None
+        self.assertFalse(effects.backfilled)
+        (stream_ordering,) = effects.stream_ids
+
+        self.assertEqual(
+            self._event_row(event_id),
+            (stream_ordering, "master", self.clock.time_msec()),
+        )
+        self.assertGreaterEqual(id_gen.get_current_token(), stream_ordering)
+        assert id_gen._writers
+        self.assertEqual(self._stream_position("events"), stream_ordering)
+
+    def test_chunk_with_duplicate(self) -> None:
+        """A chunk takes one ordering per entry, in order. An event that
+        appears twice keeps the later one, as in Python, and every ordering
+        is finished. What follows the write sees the last ordering."""
+        first = self._build("one")
+        second = self._build("two")
+        with patch.object(
+            self.store,
+            "get_latest_event_ids_in_room",
+            Mock(wraps=self.store.get_latest_event_ids_in_room),
+        ) as latest:
+            self.get_success(self.persistence.persist_events([first, second, first]))
+        effects = self.persister.last_effects
+        assert effects is not None
+        self.assertEqual(len(effects.stream_ids), 3)
+        self.assertEqual(effects.stream_ids, sorted(effects.stream_ids))
+        _, second_id, last_id = effects.stream_ids
+
+        self.assertEqual(self._event_row(first[0].event_id)[0], last_id)
+        self.assertEqual(self._event_row(second[0].event_id)[0], second_id)
+        self.assertGreaterEqual(self.store._stream_id_gen.get_current_token(), last_id)
+        # `_after_persisting_events` ran with the chunk.
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_event_persisted_position", {SERVER_NAME_LABEL: "test"}
+            ),
+            last_id,
+        )
+        # Both were built on the same extremity.
+        latest.prefill.assert_called_with(
+            (self.room_id,), frozenset([first[0].event_id, second[0].event_id])
+        )
+
+    def test_follow_ups_run_before_orderings_finish(self) -> None:
+        """What follows the write (the MSC4293 redactions among it) runs
+        before the token passes the chunk, as inside `get_next_mult`. If it
+        raises, the orderings are still finished."""
+        persist_events = self.hs.get_datastores().persist_events
+        assert persist_events is not None
+        id_gen = self.store._stream_id_gen
+        original = persist_events._after_persisting_events
+        seen: list[tuple[int, int | None]] = []
+
+        async def after(room_id: str, events_and_contexts: list, **kwargs: Any) -> None:
+            seen.append(
+                (
+                    id_gen.get_current_token(),
+                    events_and_contexts[-1][0].internal_metadata.stream_ordering,
+                )
+            )
+            await original(room_id, events_and_contexts, **kwargs)
+
+        with patch.object(
+            persist_events, "_after_persisting_events", side_effect=after
+        ):
+            self.helper.send(self.room_id, "hello", tok=self.token)
+        ((token, stream_ordering),) = seen
+        assert stream_ordering is not None
+        self.assertLess(token, stream_ordering)
+        self.assertGreaterEqual(id_gen.get_current_token(), stream_ordering)
+
+        class AfterFailed(Exception):
+            pass
+
+        event, context = self._build("fails after")
+        with patch.object(
+            persist_events, "_after_persisting_events", side_effect=AfterFailed()
+        ):
+            self.get_failure(
+                self.persistence.persist_events([(event, context)]), AfterFailed
+            )
+        failed = event.internal_metadata.stream_ordering
+        assert failed is not None
+        self.assertGreaterEqual(id_gen.get_current_token(), failed)
+
+    def test_gil_count(self) -> None:
+        """Taking the stream orderings and setting them on the events takes
+        the GIL at no persist site."""
+        # The first persist opens the pool, at `persist_db_pool`.
+        self.helper.send(self.room_id, "warm up", tok=self.token)
+        before = persist_gil_stats()
+        chunks = self.persister.chunks
+        self.helper.send(self.room_id, "hello", tok=self.token)
+        self.assertEqual(self.persister.chunks, chunks + 1)
+        after = persist_gil_stats()
+        changed = {
+            site: after[site][0] - before.get(site, (0, 0.0))[0]
+            for site in after
+            if after[site][0] != before.get(site, (0, 0.0))[0]
+        }
+        self.assertEqual(changed, {})
+
+    def test_backfill_takes_negative_orderings(self) -> None:
+        """A backfilled chunk takes its stream orderings from the backfill
+        stream, negated on the events."""
+        id_gen = self.store._backfill_id_gen
+        event, context = self._build("old")
+        with patch.object(
+            id_gen, "get_next_mult", side_effect=AssertionError("Python allocated")
+        ):
+            self.get_success(
+                self.persistence.persist_events([(event, context)], backfilled=True)
+            )
+        effects = self.persister.last_effects
+        assert effects is not None
+        self.assertTrue(effects.backfilled)
+        (backfill_id,) = effects.stream_ids
+        self.assertGreater(backfill_id, 0)
+        self.assertEqual(event.internal_metadata.stream_ordering, -backfill_id)
+        self.assertEqual(
+            self._event_row(event.event_id),
+            (-backfill_id, "master", self.clock.time_msec()),
+        )
+        # The backfill token is negated too.
+        self.assertLessEqual(id_gen.get_current_token(), -backfill_id)
+        assert id_gen._writers
+        self.assertEqual(self._stream_position("backfill"), -backfill_id)
+
+    def test_failed_persist_finishes_its_orderings(self) -> None:
+        """A chunk whose transaction fails leaves no stream ordering
+        unfinished, so the stream does not stall, and replication is told."""
+        event, context = self._build("partial")
+        context.partial_state = True
+        notifier = self.hs.get_replication_notifier()
+        with patch.object(
+            notifier, "notify_replication", wraps=notifier.notify_replication
+        ) as notify:
+            self.get_failure(
+                self.persistence.persist_events([(event, context)]),
+                PartialStateConflictError,
+            )
+        notify.assert_called()
+        failed = event.internal_metadata.stream_ordering
+        assert failed is not None
+
+        event_id = self.helper.send(self.room_id, "after", tok=self.token)["event_id"]
+        position = self.get_success(self.store.get_position_for_event(event_id))
+        self.assertGreater(position.stream, failed)
+        # A leaked ordering would hold the token below it.
+        self.assertGreaterEqual(
+            self.store._stream_id_gen.get_current_token(), position.stream
+        )
+
+    def test_applier_failure_finishes_orderings(self) -> None:
+        """If applying the effects raises before the stream orderings are
+        finished, they are still finished, and replication is told."""
+
+        class ApplyFailed(Exception):
+            pass
+
+        event, context = self._build("hello")
+        notifier = self.hs.get_replication_notifier()
+        with (
+            patch.object(
+                self.store._events_stream_cache,
+                "entity_has_changed",
+                side_effect=ApplyFailed(),
+            ),
+            patch.object(
+                notifier, "notify_replication", wraps=notifier.notify_replication
+            ) as notify,
+        ):
+            self.get_failure(
+                self.persistence.persist_events([(event, context)]), ApplyFailed
+            )
+        notify.assert_called()
+        effects = self.persister.last_effects
+        assert effects is not None
+        (stream_ordering,) = effects.stream_ids
+        self.assertGreaterEqual(
+            self.store._stream_id_gen.get_current_token(), stream_ordering
+        )
+
+    def test_cancelled_persist_applies_its_effects(self) -> None:
+        """Cancelling the persist while Rust takes the orderings and writes
+        the chunk waits for both, and the orderings are finished."""
+        gate: list[tuple[Any, Any, defer.Deferred]] = []
+        blocking = self.persister._persister
+
+        class Gated:
+            def persist_chunk(self, *args: Any, **kwargs: Any) -> Any:
+                d: defer.Deferred = defer.Deferred()
+                gate.append((args, kwargs, d))
+                return d
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(blocking, name)
+
+        self.persister._persister = Gated()
+
+        persist_events = self.hs.get_datastores().persist_events
+        assert persist_events is not None
+        original = persist_events._persist_events_in_rust
+        cancelled = []
+
+        async def cancel_then_wait(*args: Any, **kwargs: Any) -> None:
+            d = defer.ensureDeferred(original(*args, **kwargs))
+            d.cancel()
+            try:
+                await make_deferred_yieldable(d)
+            except defer.CancelledError:
+                cancelled.append(True)
+
+        with patch.object(
+            persist_events, "_persist_events_in_rust", side_effect=cancel_then_wait
+        ):
+            channel = make_request(
+                self.reactor,
+                self.site,
+                "PUT",
+                f"/rooms/{self.room_id}/send/m.room.message/txn1",
+                {"msgtype": "m.text", "body": "hello"},
+                access_token=self.token,
+                await_result=False,
+            )
+            self.pump()
+            self.assertEqual(len(gate), 1)
+            # Cancelled, but waiting for the write.
+            self.assertEqual(cancelled, [])
+            args, kwargs, d = gate[0]
+            blocking.persist_chunk(*args, **kwargs).chainDeferred(d)
+            channel.await_result()
+        self.assertEqual(channel.code, 200, channel.json_body)
+        event_id = channel.json_body["event_id"]
+        self.assertEqual(cancelled, [True])
+
+        effects = self.persister.last_effects
+        assert effects is not None
+        (stream_ordering,) = effects.stream_ids
+        self.assertEqual(self._event_row(event_id)[0], stream_ordering)
+        self.assertGreaterEqual(
+            self.store._stream_id_gen.get_current_token(), stream_ordering
+        )
+
+
+class RustTransactionWorkerTestCase(BaseMultiWorkerStreamTestCase):
+    """`rust_event_persistence: transaction` on a worker event persister:
+    the worker writes in Rust, to the main database."""
+
+    level = "transaction"
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})["rust_event_persistence"] = (
+            self.level
         )
         config["stream_writers"] = {"events": ["worker1"]}
         config["instance_map"] = {
@@ -1097,7 +1448,7 @@ class RustTransactionWorkerTestCase(BaseMultiWorkerStreamTestCase):
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        if RUST_PERSIST_FOR_TESTS not in (None, "transaction"):
+        if RUST_PERSIST_FOR_TESTS not in (None, self.level):
             raise SkipTest("SYNAPSE_TEST_RUST_PERSIST overrides the level")
         if not isinstance(
             hs.get_datastores().main.db_pool._db_pool, RustConnectionPool
@@ -1118,7 +1469,10 @@ class RustTransactionWorkerTestCase(BaseMultiWorkerStreamTestCase):
         room_id = self.helper.create_room_as(user, tok=token)
         event_id = self.helper.send(room_id, "hello", tok=token)["event_id"]
 
-        self.assertGreater(persister.transactions, 0)
+        if self.level == "full":
+            self.assertGreater(persister.chunks, 0)
+        else:
+            self.assertGreater(persister.transactions, 0)
         assert persister.last_effects is not None
         self.assertIn(event_id, persister.last_effects.event_cache_prefills)
         # The main process reads what the worker's Rust pool wrote.
@@ -1127,6 +1481,30 @@ class RustTransactionWorkerTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(position.instance_name, "worker1")
         event = self.get_success(store.get_event(event_id))
         self.assertEqual(event.content["body"], "hello")
+        if self.level == "full":
+            # The worker took the ordering, finished it and moved its
+            # `stream_positions` row on.
+            self.assertEqual(persister.last_effects.stream_ids, [position.stream])
+            worker_id_gen = worker.get_datastores().main._stream_id_gen
+            self.assertGreaterEqual(
+                worker_id_gen.get_current_token_for_writer("worker1"),
+                position.stream,
+            )
+            row = self.get_success(
+                store.db_pool.simple_select_one_onecol(
+                    "stream_positions",
+                    {"stream_name": "events", "instance_name": "worker1"},
+                    "stream_id",
+                )
+            )
+            self.assertEqual(row, position.stream)
+
+
+class RustFullWorkerTestCase(RustTransactionWorkerTestCase):
+    """`rust_event_persistence: full` on a worker event persister: the
+    worker takes the stream orderings in Rust."""
+
+    level = "full"
 
 
 class PersisterOffTestCase(unittest.HomeserverTestCase):

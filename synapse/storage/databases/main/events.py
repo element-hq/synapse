@@ -68,7 +68,10 @@ from synapse.storage.database import (
     make_tuple_in_list_sql_clause,
 )
 from synapse.storage.databases.main.event_federation import EventFederationStore
-from synapse.storage.databases.main.rust_persist import apply_rust_persist_effects
+from synapse.storage.databases.main.rust_persist import (
+    apply_rust_persist_effects,
+    finish_rust_persist_stream_ids,
+)
 from synapse.storage.databases.main.search import SearchEntry
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import AbstractStreamIdGenerator
@@ -253,6 +256,8 @@ class RustTransaction:
 
     persister: "Persister"
     prepared: "PreparedChunk"
+    # Rust takes the chunk's stream orderings too (`full`).
+    allocate_stream_orderings: bool = False
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -405,7 +410,8 @@ class PersistEventsStore:
             table_changes: The sliding sync table changes and sticky events
                 to un-soft-fail, if the caller computed them. Otherwise they
                 are computed here.
-            rust_transaction: Write the chunk in Rust, which prepared it.
+            rust_transaction: Write the chunk in Rust, which prepared it, and
+                which may take its stream orderings too.
 
         Returns:
             Resolves when the events have been persisted
@@ -414,6 +420,18 @@ class PersistEventsStore:
             PartialStateConflictError: if attempting to persist a partial state event in
                 a room that has been un-partial stated.
         """
+
+        if rust_transaction is not None and rust_transaction.allocate_stream_orderings:
+            # Rust takes the stream orderings itself, as late as it can.
+            await self._persist_events_in_rust(
+                rust_transaction,
+                room_id,
+                events_and_contexts,
+                backfilled=use_negative_stream_ordering,
+                inhibit_local_membership_updates=inhibit_local_membership_updates,
+                new_forward_extremities=new_forward_extremities,
+            )
+            return
 
         # We want to calculate the stream orderings as late as possible, as
         # we only notify after all events with a lesser stream ordering have
@@ -465,6 +483,7 @@ class PersistEventsStore:
                     rust_transaction,
                     room_id,
                     events_and_contexts,
+                    backfilled=use_negative_stream_ordering,
                     inhibit_local_membership_updates=inhibit_local_membership_updates,
                 )
             else:
@@ -481,115 +500,134 @@ class PersistEventsStore:
                     new_state_dag_forward_extremities=new_state_dag_forward_extremities,
                     sticky_events_to_un_soft_fail=sticky_events_to_un_soft_fail,
                 )
-            persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
-                len(events_and_contexts)
+            await self._after_persisting_events(
+                room_id,
+                events_and_contexts,
+                use_negative_stream_ordering=use_negative_stream_ordering,
+                new_forward_extremities=new_forward_extremities,
             )
 
-            if not use_negative_stream_ordering:
-                # we don't want to set the event_persisted_position to a negative
-                # stream_ordering.
-                synapse.metrics.event_persisted_position.labels(
-                    **{SERVER_NAME_LABEL: self.server_name}
-                ).set(stream)
+    async def _after_persisting_events(
+        self,
+        room_id: str,
+        events_and_contexts: list[EventPersistencePair],
+        *,
+        use_negative_stream_ordering: bool,
+        new_forward_extremities: set[str] | None,
+    ) -> None:
+        """What follows writing a chunk: the metrics, the MSC4293
+        `room_ban_redactions` updates and the forward extremities prefill."""
+        # The chunk's last stream ordering, which its last event took.
+        last_stream_ordering = events_and_contexts[-1][
+            0
+        ].internal_metadata.stream_ordering
+        assert last_stream_ordering is not None
+        persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+            len(events_and_contexts)
+        )
 
-            for event, context in events_and_contexts:
-                if context.app_service:
-                    origin_type = "application_service"
-                elif self.hs.is_mine_id(event.sender):
-                    origin_type = "local"
-                else:
-                    origin_type = "remote"
+        if not use_negative_stream_ordering:
+            # we don't want to set the event_persisted_position to a negative
+            # stream_ordering.
+            synapse.metrics.event_persisted_position.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).set(last_stream_ordering)
 
-                # We only track a subset of event types, to avoid high
-                # cardinality in the metrics.
-                metrics_event_type = (
-                    event.type if event.type in TRACKED_EVENT_TYPES else "*other*"
-                )
+        for event, context in events_and_contexts:
+            if context.app_service:
+                origin_type = "application_service"
+            elif self.hs.is_mine_id(event.sender):
+                origin_type = "local"
+            else:
+                origin_type = "remote"
 
-                event_counter.labels(
-                    type=metrics_event_type,
-                    origin_type=origin_type,
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).inc()
+            # We only track a subset of event types, to avoid high
+            # cardinality in the metrics.
+            metrics_event_type = (
+                event.type if event.type in TRACKED_EVENT_TYPES else "*other*"
+            )
 
+            event_counter.labels(
+                type=metrics_event_type,
+                origin_type=origin_type,
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
+
+            if (
+                not self.hs.config.experimental.msc4293_enabled
+                or event.type != EventTypes.Member
+                or event.state_key is None
+            ):
+                continue
+
+            # check if this is an unban/join that will undo a ban/kick redaction for
+            # a user in the room
+            if event.membership in [Membership.LEAVE, Membership.JOIN]:
                 if (
-                    not self.hs.config.experimental.msc4293_enabled
-                    or event.type != EventTypes.Member
-                    or event.state_key is None
-                ):
-                    continue
-
-                # check if this is an unban/join that will undo a ban/kick redaction for
-                # a user in the room
-                if event.membership in [Membership.LEAVE, Membership.JOIN]:
-                    if (
-                        event.membership == Membership.LEAVE
-                        and event.sender == event.state_key
-                    ):
-                        # self-leave, ignore
-                        continue
-
-                    # if there is an existing ban/leave causing redactions for
-                    # this user/room combination update the entry with the stream
-                    # ordering when the redactions should stop - in the case of a backfilled
-                    # event where the stream ordering is negative, use the current max stream
-                    # ordering
-                    stream_ordering = event.internal_metadata.stream_ordering
-                    assert stream_ordering is not None
-                    if stream_ordering < 0:
-                        stream_ordering = self._stream_id_gen.get_current_token()
-                    await self.db_pool.simple_update(
-                        "room_ban_redactions",
-                        {"room_id": event.room_id, "user_id": event.state_key},
-                        {"redact_end_ordering": stream_ordering},
-                        desc="room_ban_redactions update redact_end_ordering",
-                    )
-
-                # check for msc4293 redact_events flag and apply if found
-                if event.membership not in [Membership.LEAVE, Membership.BAN]:
-                    continue
-                redact = event.content.get("org.matrix.msc4293.redact_events", False)
-                if not redact or not isinstance(redact, bool):
-                    continue
-                # self-bans currently are not authorized so we don't check for that
-                # case
-                if (
-                    event.membership == Membership.BAN
+                    event.membership == Membership.LEAVE
                     and event.sender == event.state_key
                 ):
+                    # self-leave, ignore
                     continue
 
-                # check that sender can redact
-                redact_allowed = await self._can_sender_redact(event)
-
-                # Signal that this user's past events in this room
-                # should be redacted by adding an entry to
-                # `room_ban_redactions`.
-                if redact_allowed:
-                    await self.db_pool.simple_upsert(
-                        "room_ban_redactions",
-                        {"room_id": event.room_id, "user_id": event.state_key},
-                        {
-                            "redacting_event_id": event.event_id,
-                            "redact_end_ordering": None,
-                        },
-                        {
-                            "room_id": event.room_id,
-                            "user_id": event.state_key,
-                            "redacting_event_id": event.event_id,
-                            "redact_end_ordering": None,
-                        },
-                    )
-
-                    # normally the cache entry for a redacted event would be invalidated
-                    # by an arriving redaction event, but since we are not creating redaction
-                    # events we invalidate manually
-                    self.store._invalidate_local_get_event_cache_room_id(event.room_id)
-
-            if new_forward_extremities:
-                self.store.get_latest_event_ids_in_room.prefill(
-                    (room_id,), frozenset(new_forward_extremities)
+                # if there is an existing ban/leave causing redactions for
+                # this user/room combination update the entry with the stream
+                # ordering when the redactions should stop - in the case of a backfilled
+                # event where the stream ordering is negative, use the current max stream
+                # ordering
+                stream_ordering = event.internal_metadata.stream_ordering
+                assert stream_ordering is not None
+                if stream_ordering < 0:
+                    stream_ordering = self._stream_id_gen.get_current_token()
+                await self.db_pool.simple_update(
+                    "room_ban_redactions",
+                    {"room_id": event.room_id, "user_id": event.state_key},
+                    {"redact_end_ordering": stream_ordering},
+                    desc="room_ban_redactions update redact_end_ordering",
                 )
+
+            # check for msc4293 redact_events flag and apply if found
+            if event.membership not in [Membership.LEAVE, Membership.BAN]:
+                continue
+            redact = event.content.get("org.matrix.msc4293.redact_events", False)
+            if not redact or not isinstance(redact, bool):
+                continue
+            # self-bans currently are not authorized so we don't check for that
+            # case
+            if event.membership == Membership.BAN and event.sender == event.state_key:
+                continue
+
+            # check that sender can redact
+            redact_allowed = await self._can_sender_redact(event)
+
+            # Signal that this user's past events in this room
+            # should be redacted by adding an entry to
+            # `room_ban_redactions`.
+            if redact_allowed:
+                await self.db_pool.simple_upsert(
+                    "room_ban_redactions",
+                    {"room_id": event.room_id, "user_id": event.state_key},
+                    {
+                        "redacting_event_id": event.event_id,
+                        "redact_end_ordering": None,
+                    },
+                    {
+                        "room_id": event.room_id,
+                        "user_id": event.state_key,
+                        "redacting_event_id": event.event_id,
+                        "redact_end_ordering": None,
+                    },
+                )
+
+                # normally the cache entry for a redacted event would be invalidated
+                # by an arriving redaction event, but since we are not creating redaction
+                # events we invalidate manually
+                self.store._invalidate_local_get_event_cache_room_id(event.room_id)
+
+        if new_forward_extremities:
+            self.store.get_latest_event_ids_in_room.prefill(
+                (room_id,), frozenset(new_forward_extremities)
+            )
 
     async def _can_sender_redact(self, event: EventBase) -> bool:
         state_filter = StateFilter.from_types(
@@ -1137,11 +1175,16 @@ class PersistEventsStore:
         room_id: str,
         events_and_contexts: list[EventPersistencePair],
         *,
+        backfilled: bool,
         inhibit_local_membership_updates: bool,
+        new_forward_extremities: set[str] | None = None,
     ) -> None:
         """Write the chunk in Rust, as `_persist_events_txn` does, then apply
         the cache updates its transaction asks for. Called with the chunk's
-        stream orderings allocated, which are finished after.
+        stream orderings allocated, which are finished after, unless
+        `rust_transaction` takes them itself, from the backfill stream if
+        `backfilled`. Then this also runs `_after_persisting_events`, with
+        `new_forward_extremities`, before it finishes them.
 
         Raises:
             PartialStateConflictError: as `_persist_events_txn`.
@@ -1152,22 +1195,61 @@ class PersistEventsStore:
         # caller waits for both, as Python's transaction cannot be cancelled.
 
         async def persist_and_apply() -> None:
-            effects = await make_deferred_yieldable(
-                rust_transaction.persister.persist_events_txn(
-                    room_id,
-                    events_and_contexts,
-                    rust_transaction.prepared,
-                    inhibit_local_membership_updates=inhibit_local_membership_updates,
+            persister = rust_transaction.persister
+            allocate = rust_transaction.allocate_stream_orderings
+            if allocate:
+                try:
+                    effects = await make_deferred_yieldable(
+                        persister.persist_chunk(
+                            room_id,
+                            events_and_contexts,
+                            rust_transaction.prepared,
+                            backfilled=backfilled,
+                            inhibit_local_membership_updates=inhibit_local_membership_updates,
+                        )
+                    )
+                except BaseException:
+                    # Rust finished the stream orderings it took. Tell
+                    # replication, as `get_next_mult` does when its block
+                    # raises.
+                    self.hs.get_replication_notifier().notify_replication()
+                    raise
+            else:
+                effects = await make_deferred_yieldable(
+                    persister.persist_events_txn(
+                        room_id,
+                        events_and_contexts,
+                        rust_transaction.prepared,
+                        inhibit_local_membership_updates=inhibit_local_membership_updates,
+                    )
                 )
-            )
             # The copy of a duplicated event that Rust wrote, as Python's
             # `_add_to_cache` reads the deduplicated chunk.
             written = self._filter_events_and_contexts_for_duplicates(
                 events_and_contexts
             )
-            apply_rust_persist_effects(
-                self.store, effects, {event.event_id: event for event, _ in written}
-            )
+            events = {event.event_id: event for event, _ in written}
+            if not allocate:
+                apply_rust_persist_effects(self.store, effects, events)
+                return
+            # What follows the write runs before the stream orderings are
+            # finished, as it runs inside `get_next_mult` in Python: the
+            # events must not be announced before, say, the MSC4293
+            # redactions they start are recorded.
+            try:
+                apply_rust_persist_effects(
+                    self.store, effects, events, finish_stream_ids=False
+                )
+                await self._after_persisting_events(
+                    room_id,
+                    events_and_contexts,
+                    use_negative_stream_ordering=backfilled,
+                    new_forward_extremities=new_forward_extremities,
+                )
+            except BaseException:
+                finish_rust_persist_stream_ids(self.store, effects, succeeded=False)
+                raise
+            finish_rust_persist_stream_ids(self.store, effects, succeeded=True)
 
         await delay_cancellation(persist_and_apply())
 

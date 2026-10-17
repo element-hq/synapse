@@ -36,8 +36,9 @@ use super::{
     txn::{self, json, streams::TxnStream, PartialStateConflict, TxnEvent, TxnInput},
 };
 use crate::{
-    database::postgres::write::{
-        is_retryable_error, run_write_interaction, WriteError, MAX_ATTEMPTS,
+    database::postgres::{
+        pool::ConnectionPool,
+        write::{is_retryable_error, run_write_interaction, WriteError, MAX_ATTEMPTS},
     },
     deferred::{create_deferred_with, OnCancel},
     errors::SynapseError,
@@ -48,6 +49,7 @@ use crate::{
     state::{ConflictCache, StateResStats},
     storage::{
         native_pool::NativePool,
+        pool_querier::PoolQuerier,
         store::Store,
         stream_ids::{PyStreamIdTracker, StreamIdTracker},
         sync_store::{SyncStore, SyncStoreConfig},
@@ -170,30 +172,55 @@ impl Persister {
 
     /// Convert the chunk while the GIL is held, and return the future that
     /// runs the write transaction over it without the GIL. See
-    /// [`Self::persist_events_txn`].
+    /// [`Self::persist_events_txn`] and [`Self::persist_chunk`].
     fn start_persist_events_txn(
         &self,
         py: Python<'_>,
         room_id: String,
         events_and_contexts: Vec<(Py<Event>, PersistContext)>,
         prepared: &PreparedChunk,
+        orderings: StreamOrderings,
         inhibit_local_membership_updates: bool,
     ) -> PyResult<BoxFuture<'static, PyResult<PersistEffects>>> {
         let prepared = Arc::clone(&prepared.prepared);
         if !matches!(&*prepared, Prepared::Chunk(_)) {
             return Err(PyRuntimeError::new_err("the chunk was prepared in Python"));
         }
-        let events = events_and_contexts
+        let events: Vec<(Event, PersistContext)> = events_and_contexts
             .into_iter()
-            .map(|(event, context)| TxnEvent::new(event.bind(py).get().shallow_clone(), context))
-            .collect::<anyhow::Result<Vec<_>>>()
-            .map_err(persist_error_to_py)?;
+            .map(|(event, context)| (event.bind(py).get().shallow_clone(), context))
+            .collect();
         let pool = self.inner.pool.get()?;
         let inner = Arc::clone(&self.inner);
         let future = async move {
             let Prepared::Chunk(chunk) = &*prepared else {
                 unreachable!("checked above");
             };
+            // Taken as late as possible, as Python takes them: until the
+            // chunk is written, no later event on the stream can be
+            // announced.
+            let event_stream = match orderings {
+                StreamOrderings::Set => None,
+                StreamOrderings::Allocate { backfilled } => {
+                    let stream = if backfilled {
+                        TxnStream::backfill(Arc::clone(&inner.backfill_stream))
+                    } else {
+                        TxnStream::events(Arc::clone(&inner.events_stream))
+                    };
+                    let ids = allocate_stream_orderings(&pool, &stream, events.len())
+                        .await
+                        .map_err(persist_error_to_py)?;
+                    set_persisted_positions(&inner, &events, &ids, backfilled)
+                        .map_err(persist_error_to_py)?;
+                    Some((stream, ids, backfilled))
+                }
+            };
+            let events = events
+                .into_iter()
+                .map(|(event, context)| TxnEvent::new(event, context))
+                .collect::<anyhow::Result<Vec<_>>>()
+                .map_err(persist_error_to_py)?;
+
             let cache_stream = TxnStream::caches(Arc::clone(&inner.cache_stream));
             let sticky_stream = TxnStream::sticky_events(Arc::clone(&inner.sticky_stream));
             let profile_stream = TxnStream::profile_updates(Arc::clone(&inner.profile_stream));
@@ -213,7 +240,7 @@ impl Persister {
                 sticky_stream: &sticky_stream,
                 profile_stream: &profile_stream,
             };
-            let effects = run_write_interaction(&pool, "persist_events", |txn, _| {
+            let mut effects = run_write_interaction(&pool, "persist_events", |txn, _| {
                 let input = &input;
                 async move {
                     let mut effects = PersistEffects::default();
@@ -227,6 +254,12 @@ impl Persister {
             cache_stream.hand_over(effects.cache_stream_ids());
             sticky_stream.hand_over(effects.sticky_stream_ids());
             profile_stream.hand_over(effects.profile_stream_ids());
+            // Finished on drop if the transaction failed, as `get_next_mult`
+            // finishes them when its block raises.
+            if let Some((stream, ids, backfilled)) = event_stream {
+                stream.hand_over(&ids);
+                effects.add_stream_ids(ids, backfilled);
+            }
             Ok(effects)
         };
         Ok(future.boxed())
@@ -372,9 +405,59 @@ impl Persister {
             room_id,
             events_and_contexts,
             prepared,
+            StreamOrderings::Set,
             inhibit_local_membership_updates,
         )?;
         create_deferred_with(py, &self.inner.runtime, future, OnCancel::RunOn)
+    }
+
+    /// As [`Self::persist_events_txn`], but Rust takes the chunk's stream
+    /// orderings, from the backfill stream if `backfilled`, and sets them on
+    /// the events with the time and this instance, as
+    /// `_persist_events_and_state_updates` does. They come back in the
+    /// effects' `stream_ids`, unfinished. If the persist fails, Rust
+    /// finishes them.
+    #[pyo3(signature = (room_id, events_and_contexts, prepared, *, backfilled, inhibit_local_membership_updates))]
+    fn persist_chunk<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        prepared: &PreparedChunk,
+        backfilled: bool,
+        inhibit_local_membership_updates: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let future = self.start_persist_events_txn(
+            py,
+            room_id,
+            events_and_contexts,
+            prepared,
+            StreamOrderings::Allocate { backfilled },
+            inhibit_local_membership_updates,
+        )?;
+        create_deferred_with(py, &self.inner.runtime, future, OnCancel::RunOn)
+    }
+
+    /// As [`Self::persist_chunk`], but blocks.
+    #[pyo3(signature = (room_id, events_and_contexts, prepared, *, backfilled, inhibit_local_membership_updates))]
+    fn persist_chunk_blocking(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        events_and_contexts: Vec<(Py<Event>, PersistContext)>,
+        prepared: &PreparedChunk,
+        backfilled: bool,
+        inhibit_local_membership_updates: bool,
+    ) -> PyResult<PersistEffects> {
+        let future = self.start_persist_events_txn(
+            py,
+            room_id,
+            events_and_contexts,
+            prepared,
+            StreamOrderings::Allocate { backfilled },
+            inhibit_local_membership_updates,
+        )?;
+        self.block_on(py, future)
     }
 
     /// As [`Self::persist_events_txn`], but blocks.
@@ -392,6 +475,7 @@ impl Persister {
             room_id,
             events_and_contexts,
             prepared,
+            StreamOrderings::Set,
             inhibit_local_membership_updates,
         )?;
         self.block_on(py, future)
@@ -411,6 +495,69 @@ impl Persister {
             self.start_prepare_chunk(py, room_id, events_and_contexts, backfilled, shadow)?;
         self.block_on(py, future)
     }
+}
+
+/// Where the stream orderings of a chunk come from.
+#[derive(Clone, Copy)]
+enum StreamOrderings {
+    /// Python set them on the events.
+    Set,
+    /// Rust takes them from the events stream, or from the backfill stream
+    /// if the chunk is backfilled.
+    Allocate { backfilled: bool },
+}
+
+/// `n` IDs from `stream`, unfinished, retried as Python's `runInteraction`
+/// retries the fetch.
+async fn allocate_stream_orderings(
+    pool: &ConnectionPool,
+    stream: &TxnStream,
+    n: usize,
+) -> anyhow::Result<Vec<i64>> {
+    let mut attempt = 1;
+    loop {
+        let result = async {
+            let querier = PoolQuerier::checkout(pool).await?;
+            stream.next_ids_outside_txn(&querier, n).await
+        }
+        .await;
+        match result {
+            Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(&e) => {
+                log::warn!("[TXN RETRY] {{_load_next_mult_id}} {e:#} {attempt}/{MAX_ATTEMPTS}");
+                attempt += 1;
+            }
+            result => return result,
+        }
+    }
+}
+
+/// Set each event's stream ordering from `ids`, in order, with the time
+/// and this instance, as `_persist_events_and_state_updates` does once it
+/// has its stream orderings. Backfilled events take theirs negated. An
+/// event that appears twice keeps the later ordering, as in Python.
+fn set_persisted_positions(
+    inner: &PersisterInner,
+    events: &[(Event, PersistContext)],
+    ids: &[i64],
+    backfilled: bool,
+) -> anyhow::Result<()> {
+    if ids.len() != events.len() {
+        anyhow::bail!(
+            "took {} stream orderings for {} events",
+            ids.len(),
+            events.len()
+        );
+    }
+    let received_ts = i64::try_from(inner.runtime.clock().now_millis())?;
+    for ((event, _), &id) in events.iter().zip(ids) {
+        let stream_ordering = if backfilled { -id } else { id };
+        event.internal_metadata().set_persisted_position(
+            Some(stream_ordering),
+            Some(received_ts),
+            Some(inner.instance_name.clone()),
+        )?;
+    }
+    Ok(())
 }
 
 /// What [`Persister::prepare_chunk`] computed, in the shapes Python builds

@@ -80,6 +80,31 @@ class Persister:
         inhibit_local_membership_updates: bool,
     ) -> PersistEffects:
         """As `persist_events_txn`, but blocks. For tests."""
+    def persist_chunk(
+        self,
+        room_id: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        prepared: PreparedChunk,
+        *,
+        backfilled: bool,
+        inhibit_local_membership_updates: bool,
+    ) -> Deferred[PersistEffects]:
+        """As `persist_events_txn`, but Rust takes the chunk's stream
+        orderings, from the backfill stream if `backfilled`, and sets them on
+        the events with the time and this instance, as
+        `_persist_events_and_state_updates` does. They come back in the
+        effects' `stream_ids`, unfinished. If the persist fails, Rust
+        finishes them."""
+    def persist_chunk_blocking(
+        self,
+        room_id: str,
+        events_and_contexts: list[tuple[EventBase, EventContext]],
+        prepared: PreparedChunk,
+        *,
+        backfilled: bool,
+        inhibit_local_membership_updates: bool,
+    ) -> PersistEffects:
+        """As `persist_chunk`, but blocks. For tests."""
 
 class PreparedChunk:
     """What `Persister.prepare_chunk` computed. If `state_res_fallback` is

@@ -928,16 +928,22 @@ class EventsPersistenceStorageController:
 
     def _rust_transaction(self, prepared: _PreparedChunk) -> RustTransaction | None:
         """Whether to write the chunk in Rust: at `rust_event_persistence:
-        transaction`, if Rust prepared it."""
+        transaction`, if Rust prepared it. At `full`, Rust takes its stream
+        orderings too."""
+        experimental = self.hs.config.experimental
         if (
             prepared.rust is None
             or self._rust_persister is None
-            or not self.hs.config.experimental.rust_event_persistence_at_least(
-                "transaction"
-            )
+            or not experimental.rust_event_persistence_at_least("transaction")
         ):
             return None
-        return RustTransaction(self._rust_persister, prepared.rust)
+        return RustTransaction(
+            self._rust_persister,
+            prepared.rust,
+            allocate_stream_orderings=experimental.rust_event_persistence_at_least(
+                "full"
+            ),
+        )
 
     async def _prepare_chunk(
         self, room_id: str, chunk: list[EventPersistencePair], backfilled: bool

@@ -13,9 +13,11 @@
  *
  */
 
-//! The streams a persist takes IDs from inside its transaction, as
-//! Python's `get_next_txn` and `get_next_mult_txn` do: the cache stream,
-//! the sticky events stream and the profile updates stream.
+//! The streams a persist takes IDs from: inside its transaction, as
+//! Python's `get_next_txn` and `get_next_mult_txn` do, the cache stream,
+//! the sticky events stream and the profile updates stream. Before its
+//! transaction, as Python's `get_next_mult` does, the events or the
+//! backfill stream, for the chunk's stream orderings.
 //!
 //! The IDs stay unfinished until the transaction has committed and Python
 //! has applied its effects, as Python finishes them only after the
@@ -24,11 +26,15 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
+use tokio_postgres::Row;
 
 use crate::{
     database::postgres::write::{WriteError, WriteTxn},
-    storage::stream_ids::StreamIdTracker,
+    storage::{events::Querier, stream_ids::StreamIdTracker},
 };
+
+/// `_load_next_mult_id_txn`'s statement: `$2` IDs from the sequence `$1`.
+const NEXTVAL_SQL: &str = "SELECT nextval($1::text) FROM generate_series(1, $2::bigint)";
 
 /// A stream's IDs taken by one persist, over all its attempts. An ID the
 /// committed attempt took is handed to Python with the effects. The rest
@@ -66,6 +72,17 @@ impl TxnStream {
         Self::new(tracker, "profile_updates_sequence")
     }
 
+    /// The events stream, `_stream_id_gen`.
+    pub fn events(tracker: Arc<StreamIdTracker>) -> Self {
+        Self::new(tracker, "events_stream_seq")
+    }
+
+    /// The backfill stream, `_backfill_id_gen`. Its IDs are positive, as
+    /// the tracker holds them. The events take them negated.
+    pub fn backfill(tracker: Arc<StreamIdTracker>) -> Self {
+        Self::new(tracker, "events_backfill_stream_seq")
+    }
+
     fn lock_pending(&self) -> std::sync::MutexGuard<'_, Vec<i64>> {
         self.pending.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -81,21 +98,23 @@ impl TxnStream {
     /// `_load_next_mult_id_txn`: the next `n` IDs on the stream,
     /// unfinished.
     pub async fn next_ids(&self, txn: &WriteTxn, n: usize) -> Result<Vec<i64>, WriteError> {
-        let fetch = Fetch::begin(self);
         let n = i64::try_from(n).map_err(anyhow::Error::new)?;
-        let rows = txn
-            .query(
-                "SELECT nextval($1::text) FROM generate_series(1, $2::bigint)",
-                &[&self.sequence, &n],
-            )
-            .await?;
-        let ids = rows
-            .iter()
-            .map(|row| row.try_get(0))
-            .collect::<Result<Vec<i64>, _>>()
-            .map_err(anyhow::Error::new)?;
-        fetch.allocated(&ids);
-        Ok(ids)
+        let fetch = Fetch::begin(self);
+        let rows = txn.query(NEXTVAL_SQL, &[&self.sequence, &n]).await?;
+        Ok(fetch.allocated_rows(&rows)?)
+    }
+
+    /// As [`Self::next_ids`], but outside a transaction, as `get_next_mult`
+    /// fetches its IDs in autocommit. The sequence ignores transactions.
+    pub async fn next_ids_outside_txn(
+        &self,
+        querier: &impl Querier,
+        n: usize,
+    ) -> anyhow::Result<Vec<i64>> {
+        let n = i64::try_from(n)?;
+        let fetch = Fetch::begin(self);
+        let rows = querier.query(NEXTVAL_SQL, &[&self.sequence, &n]).await?;
+        fetch.allocated_rows(&rows)
     }
 
     /// Mark finished the IDs of an attempt that failed, as Python's
@@ -129,6 +148,17 @@ impl<'a> Fetch<'a> {
             stream,
             token: Some(stream.tracker.begin_fetch()),
         }
+    }
+
+    /// The fetch returned `rows` of IDs, which stay unfinished. Ends the
+    /// fetch without allocating if a row cannot be read.
+    fn allocated_rows(self, rows: &[Row]) -> anyhow::Result<Vec<i64>> {
+        let ids = rows
+            .iter()
+            .map(|row| row.try_get(0))
+            .collect::<Result<Vec<i64>, _>>()?;
+        self.allocated(&ids);
+        Ok(ids)
     }
 
     /// The fetch allocated `ids`, which stay unfinished.

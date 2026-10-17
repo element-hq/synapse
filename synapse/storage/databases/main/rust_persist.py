@@ -30,6 +30,8 @@ def apply_rust_persist_effects(
     store: "DataStore",
     effects: PersistEffects,
     events: Mapping[str, "EventBase"] | None = None,
+    *,
+    finish_stream_ids: bool = True,
 ) -> None:
     """Apply what a Rust persist transaction asks for once it has
     committed: the cache updates the Python transaction queues with
@@ -45,13 +47,20 @@ def apply_rust_persist_effects(
     transaction's earlier callbacks. The events stream IDs are finished last, as Python's
     `get_next_mult` does once the transaction's callbacks have run, so
     the current token never passes an event before the stream change
-    caches know about it.
+    caches know about it. Then `stream_positions` moves on, as
+    `get_next_mult` moves it on success.
 
-    If a step raises, the IDs of those three streams are still
-    finished, as `call_on_exception` finishes them in Python, so the
+    If a step raises, the IDs of all four streams are still finished, as
+    `call_on_exception` and `get_next_mult` finish them in Python, so the
     streams do not stall.
+
+    Without `finish_stream_ids`, the events stream IDs are left to the
+    caller, who must call `finish_rust_persist_stream_ids` whatever
+    happens.
     """
     cache_ids_finished = profile_ids_finished = sticky_ids_finished = False
+    # Left unfinished on purpose, without `finish_stream_ids`.
+    event_ids_finished = not finish_stream_ids
     try:
         for (
             stream_ordering,
@@ -120,12 +129,9 @@ def apply_rust_persist_effects(
                 (room_id,), frozenset(extremities)
             )
 
-        if effects.stream_ids:
-            id_gen = (
-                store._backfill_id_gen if effects.backfilled else store._stream_id_gen
-            )
-            id_gen._mark_ids_as_finished(effects.stream_ids)
-            store.hs.get_replication_notifier().notify_replication()
+        if not event_ids_finished:
+            finish_rust_persist_stream_ids(store, effects, succeeded=True)
+            event_ids_finished = True
         if effects.new_replication_data:
             store.hs.get_notifier().on_new_replication_data()
     except BaseException:
@@ -138,7 +144,25 @@ def apply_rust_persist_effects(
             )
         if effects.sticky_stream_ids and not sticky_ids_finished:
             store._sticky_events_id_gen._mark_ids_as_finished(effects.sticky_stream_ids)
+        if not event_ids_finished:
+            finish_rust_persist_stream_ids(store, effects, succeeded=False)
         raise
+
+
+def finish_rust_persist_stream_ids(
+    store: "DataStore", effects: PersistEffects, *, succeeded: bool
+) -> None:
+    """Finish the events or backfill stream IDs a Rust persist took, as
+    `get_next_mult` finishes them when its block exits, and tell
+    replication. Only on success does `stream_positions` move on."""
+    if not effects.stream_ids:
+        return
+    id_gen = store._backfill_id_gen if effects.backfilled else store._stream_id_gen
+    if succeeded:
+        _finish_txn_stream_ids(store, id_gen, effects.stream_ids)
+    else:
+        id_gen._mark_ids_as_finished(effects.stream_ids)
+        store.hs.get_replication_notifier().notify_replication()
 
 
 def _finish_txn_stream_ids(

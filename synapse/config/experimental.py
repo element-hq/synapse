@@ -415,8 +415,8 @@ class ExperimentalConfig(Config):
         #  - "prepare": Rust's results for that are used.
         #  - "transaction": Rust also runs the write transaction.
         #  - "full": Rust persists each queued batch.
-        # The levels are being built up in that order. So far "transaction"
-        # and "full" act as "prepare".
+        # The levels are being built up in that order. So far "full" only
+        # has Rust take the stream orderings of each chunk as well.
         rust_event_persistence = experimental.get("rust_event_persistence", "off")
         # YAML reads an unquoted `off` as a boolean.
         if rust_event_persistence is False:
