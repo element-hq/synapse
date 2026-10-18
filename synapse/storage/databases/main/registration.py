@@ -362,6 +362,10 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 "INSERT INTO profiles(full_user_id, user_id, displayname) VALUES (?,?,?)",
                 (user_id, user_id_obj.localpart, create_profile_with_displayname),
             )
+            # The profile store is not among this store's bases.
+            self._invalidate_cache_and_stream(
+                txn, self.hs.get_datastores().main._get_profileinfo, (user_id,)
+            )
 
         if self.hs.config.stats.stats_enabled:
             # we create a new completed user statistics row

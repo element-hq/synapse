@@ -33,16 +33,18 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes, StoreError
 from synapse.replication.tcp.streams._base import ProfileUpdatesStream
-from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
+from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonValue, UserID
+from synapse.util.caches.descriptors import cached
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -63,7 +65,7 @@ class ProfileUpdate:
     affected_fields: frozenset[str] | None
 
 
-class ProfileWorkerStore(SQLBaseStore):
+class ProfileWorkerStore(CacheInvalidationWorkerStore):
     def __init__(
         self,
         database: DatabasePool,
@@ -213,9 +215,15 @@ class ProfileWorkerStore(SQLBaseStore):
             The user's display name and avatar URL. Values may be null if unset
              or if the user doesn't exist.
         """
+        return await self._get_profileinfo(user_id.to_string())
+
+    @cached(max_entries=10000)
+    async def _get_profileinfo(self, user_id: str) -> ProfileInfo:
+        """`get_profileinfo`, cached by the user's ID as a string, which the
+        cache invalidation stream can carry."""
         profile = await self.db_pool.simple_select_one(
             table="profiles",
-            keyvalues={"full_user_id": user_id.to_string()},
+            keyvalues={"full_user_id": user_id},
             retcols=("displayname", "avatar_url"),
             desc="get_profileinfo",
             allow_none=True,
@@ -800,6 +808,9 @@ class ProfileWorkerStore(SQLBaseStore):
                     "full_user_id": user_id.to_string(),
                 },
             )
+            self._invalidate_cache_and_stream(
+                txn, self._get_profileinfo, (user_id.to_string(),)
+            )
         else:
             # Encode to canonical JSON.
             canonical_value = encode_canonical_json(new_value)
@@ -1175,6 +1186,9 @@ class ProfileWorkerStore(SQLBaseStore):
                 WHERE full_user_id = ?
                 """,
                 (user_id.to_string(),),
+            )
+            self._invalidate_cache_and_stream(
+                txn, self._get_profileinfo, (user_id.to_string(),)
             )
 
         await self.db_pool.runInteraction(

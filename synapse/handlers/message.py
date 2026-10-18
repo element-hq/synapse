@@ -2004,12 +2004,17 @@ class EventCreationHandler:
 
             # run checks/actions on event based on type
             if event.type == EventTypes.Member and event.membership == Membership.JOIN:
-                (
-                    current_membership,
-                    _,
-                ) = await self.store.get_local_current_membership_for_user_in_room(
-                    event.state_key, event.room_id
-                )
+                # A join that replaces no membership in the room state, as in
+                # a new room, cannot be of a user who is already joined.
+                if "replaces_state" not in event.unsigned:
+                    current_membership = None
+                else:
+                    (
+                        current_membership,
+                        _,
+                    ) = await self.store.get_local_current_membership_for_user_in_room(
+                        event.state_key, event.room_id
+                    )
                 if current_membership != Membership.JOIN:
                     self._notifier.notify_user_joined_room(
                         event.event_id, event.room_id

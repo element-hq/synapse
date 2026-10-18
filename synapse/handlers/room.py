@@ -1307,6 +1307,9 @@ class RoomCreationHandler:
                 is_public=is_public,
                 room_version=room_version,
             )
+        # The room is in the database now, so building its events need not
+        # read its version back.
+        self.store.get_room_version_id.prefill((room_id,), room_version.identifier)
 
         # Check whether this visibility value is blocked by a third party module
         allowed_by_third_party_rules = await (

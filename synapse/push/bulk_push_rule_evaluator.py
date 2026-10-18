@@ -169,7 +169,13 @@ class BulkPushRuleEvaluator:
             # We never notify a user about their own actions. This is enforced in
             # `_action_for_event_by_user` in the loop over `rules_by_user`, but we
             # do the same check here to avoid unnecessary DB queries.
-            if event.sender != event.state_key and self.hs.is_mine_id(event.state_key):
+            if (
+                event.sender != event.state_key
+                and self.hs.is_mine_id(event.state_key)
+                # A membership event that replaces none in the room state, as
+                # in a new room, is of a user who is not joined.
+                and "replaces_state" in event.unsigned
+            ):
                 # Check the target is in the room, to avoid notifying them of
                 # e.g. a pre-emptive ban.
                 target_already_in_room = await self.store.check_local_user_in_room(

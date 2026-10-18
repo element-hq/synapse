@@ -26,11 +26,14 @@ Each scenario creates three warm-up rooms, then `SYNAPSE_BENCH_ROOMS` rooms
 - `SYNAPSE_BENCH_PROFILE`: a directory to write one cProfile dump per scenario.
 - `SYNAPSE_BENCH_COUNT`: count database interactions and SQL statements per
   room, and print the most frequent of each.
+- `SYNAPSE_BENCH_TRACE`: with `SYNAPSE_BENCH_COUNT`, print a stack trace for
+  each interaction with this description.
 """
 
 import cProfile
 import os
 import time
+import traceback
 from collections import Counter
 from typing import Any
 from unittest import SkipTest
@@ -108,9 +111,13 @@ class CreateRoomBench(HomeserverTestCase):
         orig_run = database.DatabasePool.runInteraction
         orig_exec = database.LoggingTransaction._do_execute
 
+        trace = os.environ.get("SYNAPSE_BENCH_TRACE")
+
         def run(self: Any, desc: str, *args: Any, **kwargs: Any) -> Any:
             if bench.counting:
                 bench.txn_counts[desc] += 1
+                if desc == trace:
+                    traceback.print_stack(limit=12)
             return orig_run(self, desc, *args, **kwargs)
 
         def do_execute(
