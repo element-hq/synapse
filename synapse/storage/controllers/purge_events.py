@@ -374,6 +374,7 @@ class PurgeEventsStorageController:
                 ) as s
                 LEFT JOIN state_group_edges AS e ON (s.id = e.prev_state_group)
                 LEFT JOIN state_groups_pending_deletion AS d ON (e.state_group = d.state_group)
+                ORDER BY s.id DESC
             """
             txn.execute(state_group_sql, (last_checked_state_group, batch_size))
 

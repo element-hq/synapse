@@ -1,0 +1,1 @@
+Fix unreferenced state groups sometimes not being marked for deletion, depending on the order the database returned rows in.
