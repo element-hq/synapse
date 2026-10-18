@@ -151,75 +151,88 @@ pub async fn prepare_chunk(
 ) -> anyhow::Result<Prepared> {
     let room_id = input.room_id.as_str();
     let now_ms = || i64::try_from(options.clock.now_millis());
-    let state = if input.backfilled {
-        StateAndExtremities::default()
-    } else {
-        let result = if input.state_dag {
-            state_delta::process_state_dag_forward_extremities_and_state_delta(
-                reader,
-                resolver,
-                room_id,
-                options.server_name,
-                &input.events,
-                &input.event_map,
-                now_ms()?,
-                counts,
-            )
-            .await
+
+    // The state and the chain cover index need nothing from each other, so
+    // they are worked out at the same time, on their own connections.
+    let state_part = async {
+        let state = if input.backfilled {
+            StateAndExtremities::default()
         } else {
-            state_delta::calculate_new_forward_extremities_and_state_delta(
-                reader,
-                resolver,
-                room_id,
-                options.server_name,
-                &input.events,
-                &input.event_map,
-                now_ms()?,
-                counts,
-            )
-            .await
+            let result = if input.state_dag {
+                state_delta::process_state_dag_forward_extremities_and_state_delta(
+                    reader,
+                    resolver,
+                    room_id,
+                    options.server_name,
+                    &input.events,
+                    &input.event_map,
+                    now_ms()?,
+                    counts,
+                )
+                .await
+            } else {
+                state_delta::calculate_new_forward_extremities_and_state_delta(
+                    reader,
+                    resolver,
+                    room_id,
+                    options.server_name,
+                    &input.events,
+                    &input.event_map,
+                    now_ms()?,
+                    counts,
+                )
+                .await
+            };
+            match result {
+                Ok(state) => state,
+                Err(e) => match e.downcast::<StateResFallback>() {
+                    Ok(fallback) => return Ok(Err(Prepared::StateResFallback(fallback.0))),
+                    Err(e) => return Err(e),
+                },
+            }
         };
-        match result {
-            Ok(state) => state,
-            Err(e) => match e.downcast::<StateResFallback>() {
-                Ok(fallback) => return Ok(Prepared::StateResFallback(fallback.0)),
-                Err(e) => return Err(e),
-            },
+
+        let mut sliding_sync = None;
+        let mut sticky_events_to_un_soft_fail = HashSet::new();
+        if let Some(delta) = &state.state_delta {
+            sliding_sync = Some(
+                sliding_sync::calculate_sliding_sync_table_changes(
+                    reader,
+                    room_id,
+                    options.server_name,
+                    &input.sliding_sync_events,
+                    delta,
+                )
+                .await?,
+            );
+            if options.sticky {
+                sticky_events_to_un_soft_fail = sticky::compute_sticky_events_to_un_soft_fail(
+                    reader,
+                    room_id,
+                    &input.sticky_events,
+                    delta,
+                    now_ms()?,
+                )
+                .await?;
+            }
         }
+        anyhow::Ok(Ok((state, sliding_sync, sticky_events_to_un_soft_fail)))
     };
 
-    let mut sliding_sync = None;
-    let mut sticky_events_to_un_soft_fail = HashSet::new();
-    if let Some(delta) = &state.state_delta {
-        sliding_sync = Some(
-            sliding_sync::calculate_sliding_sync_table_changes(
-                reader,
-                room_id,
-                options.server_name,
-                &input.sliding_sync_events,
-                delta,
-            )
-            .await?,
-        );
-        if options.sticky {
-            sticky_events_to_un_soft_fail = sticky::compute_sticky_events_to_un_soft_fail(
-                reader,
-                room_id,
-                &input.sticky_events,
-                delta,
-                now_ms()?,
-            )
-            .await?;
-        }
-    }
-
-    let new_event_links = chain_cover::calculate_chain_cover_index_for_events(
+    let chain_cover = chain_cover::calculate_chain_cover_index_for_events(
         pool,
         room_id,
         &input.chain_cover_events,
         options.dry_run,
-    )
-    .await?;
+    );
+
+    let (state_part, new_event_links) = futures::future::join(state_part, chain_cover).await;
+    // The state's outcome first, as when it was worked out first.
+    let (state, sliding_sync, sticky_events_to_un_soft_fail) = match state_part? {
+        Ok(state_part) => state_part,
+        Err(fallback) => return Ok(fallback),
+    };
+    let new_event_links = new_event_links?;
 
     Ok(Prepared::Chunk(Box::new(PreparedChunk {
         state,

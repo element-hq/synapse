@@ -741,6 +741,22 @@ impl BatchState {
 
     /// `_finish_persisting_txn` for the chunk last written, if its state
     /// groups are still marked.
+    /// Release the mark of a chunk handed back to Python after the marking,
+    /// which runs alongside preparing, succeeded. As a failure: that only
+    /// pushes back any pending deletion of the groups, as Python's own
+    /// failure path does, where a success would cancel it before Python has
+    /// persisted anything. A failure to release is logged: Python persists
+    /// the chunk either way.
+    async fn release_early_mark(&mut self) {
+        self.guard_held = true;
+        if let Err(e) = self.release_guard(true).await {
+            log::warn!(
+                "Failed to release the state groups of a chunk of {} handed back to Python: {e}",
+                self.room_id
+            );
+        }
+    }
+
     async fn release_guard(&mut self, error: bool) -> PyResult<()> {
         if !std::mem::take(&mut self.guard_held) {
             return Ok(());
@@ -890,13 +906,36 @@ async fn batch_step(state: &mut BatchState) -> PyResult<BatchStep> {
 
     let inner = &state.inner;
     let pool = &state.pool;
-    let prepared = async {
+    let prepare = async {
         let input = PrepareInput::new(state.room_id.clone(), &chunk, state.backfilled)?;
         prepare_chunk(inner, pool, &input, false).await
-    }
-    .await;
+    };
+    // Marking the state groups needs nothing from preparing, so it runs at
+    // the same time, on its own connection.
+    let guarded = !deduplicated.state_groups.is_empty();
+    let mark = async {
+        if !guarded {
+            return Ok(());
+        }
+        batch::mark_state_groups_as_persisting(
+            pool,
+            inner.runtime.clock(),
+            &inner.instance_name,
+            &deduplicated.state_groups,
+        )
+        .await
+    };
+    let (prepared, marked) = futures::future::join(prepare, mark).await;
+    let marked_ok = guarded && marked.is_ok();
     let (prepared, counts) = match prepared {
-        Ok((Prepared::StateResFallback(reason), _)) => return Ok(hand_back(reason)),
+        Ok((Prepared::StateResFallback(reason), _)) => {
+            // Python persists the chunk, and marks the groups itself.
+            let done = hand_back(reason);
+            if marked_ok {
+                state.release_early_mark().await;
+            }
+            return Ok(done);
+        }
         // The chunk path prepares it again, and raises or falls back to
         // Python as the error and the strictness say.
         Err(e) => {
@@ -904,7 +943,11 @@ async fn batch_step(state: &mut BatchState) -> PyResult<BatchStep> {
                 "Failed to prepare events for {} in Rust, handing them back: {e:#}",
                 state.room_id
             );
-            return Ok(hand_back(format!("{e:#}")));
+            let done = hand_back(format!("{e:#}"));
+            if marked_ok {
+                state.release_early_mark().await;
+            }
+            return Ok(done);
         }
         Ok(prepared) => prepared,
     };
@@ -914,16 +957,8 @@ async fn batch_step(state: &mut BatchState) -> PyResult<BatchStep> {
         unreachable!("handed back above");
     };
 
-    let guarded = !deduplicated.state_groups.is_empty();
+    marked.map_err(write_error_to_py)?;
     if guarded {
-        batch::mark_state_groups_as_persisting(
-            pool,
-            inner.runtime.clock(),
-            &inner.instance_name,
-            &deduplicated.state_groups,
-        )
-        .await
-        .map_err(write_error_to_py)?;
         state.guard_held = true;
     }
     // The follow-ups read the events after the write sets their orderings.
