@@ -1160,6 +1160,7 @@ class EventsWorkerStore(SQLBaseStore):
         self,
         event: EventBase,
         context: EventContext,
+        batched_events: Mapping[str, EventBase] | None = None,
     ) -> list[JsonDict]:
         """
         Retrieve the stripped state from a room, given an event context to retrieve state
@@ -1170,7 +1171,8 @@ class EventsWorkerStore(SQLBaseStore):
 
         Args:
             context: The event context to retrieve state of the room from.
-            state_keys_to_include: The state events to include, for each event type.
+            batched_events: Events persisted in the same batch as `event`, by
+                event ID, which are not in the database yet.
 
         Returns:
             A list of dictionaries, each representing a stripped state event from the room.
@@ -1179,7 +1181,15 @@ class EventsWorkerStore(SQLBaseStore):
             event, context
         )
 
-        state_to_include = await self.get_events(selected_state_ids)
+        batched_events = batched_events or {}
+        state_to_include = await self.get_events(
+            [e_id for e_id in selected_state_ids if e_id not in batched_events]
+        )
+        state_to_include.update(
+            (e_id, batched_events[e_id])
+            for e_id in selected_state_ids
+            if e_id in batched_events
+        )
 
         return [strip_event(e) for e in state_to_include.values()]
 

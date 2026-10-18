@@ -479,6 +479,10 @@ class SpamCheckerModuleApiCallbacks:
         # No spam-checker has rejected the request, let it pass.
         return self.NOT_SPAM
 
+    def has_user_may_invite_callbacks(self) -> bool:
+        """Whether any module checks local invites with `user_may_invite`."""
+        return len(self._user_may_invite_callbacks) > 0
+
     async def user_may_invite(
         self, inviter_userid: str, invitee_userid: str, room_id: str
     ) -> tuple[Codes, dict] | Literal["NOT_SPAM"]:

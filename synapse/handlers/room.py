@@ -28,7 +28,7 @@ import math
 import random
 import string
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -730,7 +730,7 @@ class RoomCreationHandler:
                 additional_fields=spam_check[1],
             )
 
-        _, last_event_id, _ = await self._send_events_for_new_room(
+        _, last_event_id, _, _ = await self._send_events_for_new_room(
             requester,
             new_room_id,
             new_room_version,
@@ -1310,6 +1310,48 @@ class RoomCreationHandler:
                 check_membership=False,
             )
 
+        invite_content: JsonDict = {}
+        is_direct = config.get("is_direct", None)
+        if is_direct:
+            invite_content["is_direct"] = is_direct
+
+        if self.config.experimental.msc4491_enabled:
+            reason = config.get("uk.timedout.msc4491.invite_reason")
+            if reason and isinstance(reason, str):
+                invite_content["reason"] = reason
+
+        # Local invites go into the batch with the room's other initial events,
+        # in order, up to the first one that has to be sent on its own: an
+        # invite to a remote user, which needs a federation request first, or
+        # one that would be refused, which raises once the room exists, as
+        # before. Modules that check invites or events are given the room
+        # state from the database, so with any of those all invites are sent
+        # on their own.
+        batched_invites: list[tuple[str, JsonDict]] = []
+        # The invites to send on their own after the batch.
+        remaining_invites = invite_list
+        if not (
+            self._persist_create_and_join_alone(room_version)
+            or self._spam_checker_module_callbacks.has_user_may_invite_callbacks()
+        ):
+            for index, invitee in enumerate(invite_list):
+                if any(invitee == batched for batched, _ in batched_invites):
+                    # Sending the same invite again would be deduplicated.
+                    continue
+                invitee_id = UserID.from_string(invitee)
+                if not self.hs.is_mine(invitee_id):
+                    remaining_invites = invite_list[index:]
+                    break
+                content = await self.room_member_handler.build_new_room_invite_content(
+                    requester, invitee_id, invite_content
+                )
+                if content is None:
+                    remaining_invites = invite_list[index:]
+                    break
+                batched_invites.append((invitee, content))
+            else:
+                remaining_invites = []
+
         raw_initial_state = config.get("initial_state", [])
 
         initial_state = OrderedDict()
@@ -1320,6 +1362,7 @@ class RoomCreationHandler:
             last_stream_id,
             last_sent_event_id,
             depth,
+            invites_sent,
         ) = await self._send_events_for_new_room(
             requester,
             room_id,
@@ -1333,7 +1376,13 @@ class RoomCreationHandler:
             creator_join_profile=creator_join_profile,
             ignore_forced_encryption=ignore_forced_encryption,
             creation_event_with_context=creation_event_with_context,
+            batched_invites=batched_invites,
         )
+        # Invites the batch could not include, e.g. as they fail the auth
+        # rules, are sent on their own and fail as before.
+        remaining_invites = [
+            invitee for invitee, _ in batched_invites[invites_sent:]
+        ] + remaining_invites
 
         # we avoid dropping the lock between invites, as otherwise joins can
         # start coming in and making the createRoom slow.
@@ -1341,17 +1390,7 @@ class RoomCreationHandler:
         # we also don't need to check the requester's shadow-ban here, as we
         # have already done so above (and potentially emptied invite_list).
         async with self.room_member_handler.member_linearizer.queue((room_id,)):
-            content = {}
-            is_direct = config.get("is_direct", None)
-            if is_direct:
-                content["is_direct"] = is_direct
-
-            if self.config.experimental.msc4491_enabled:
-                reason = config.get("uk.timedout.msc4491.invite_reason")
-                if reason and isinstance(reason, str):
-                    content["reason"] = reason
-
-            for invitee in invite_list:
+            for invitee in remaining_invites:
                 (
                     member_event_id,
                     last_stream_id,
@@ -1361,7 +1400,7 @@ class RoomCreationHandler:
                     room_id,
                     "invite",
                     ratelimit=False,
-                    content=content,
+                    content=invite_content,
                     new_room=True,
                     prev_event_ids=[last_sent_event_id],
                     depth=depth,
@@ -1499,7 +1538,8 @@ class RoomCreationHandler:
             EventBase, synapse.events.snapshot.UnpersistedEventContextBase
         ]
         | None = None,
-    ) -> tuple[int, str, int]:
+        batched_invites: Sequence[tuple[str, JsonDict]] = (),
+    ) -> tuple[int, str, int, int]:
         """Sends the initial events into a new room: the create event, the creator's
         join, the power levels and the rest of the initial state. They are built
         against an in-memory state map and persisted as one batch.
@@ -1545,9 +1585,14 @@ class RoomCreationHandler:
                 Set in MSC4291 rooms where the create event determines the room ID. If provided,
                 does not create an additional create event but instead appends the remaining new
                 events onto the provided create event.
+            batched_invites:
+                Local users to invite, with the content of each invite, sent as
+                the last events of the batch. Must be empty when
+                `_persist_create_and_join_alone` is true for the room version.
+                The batch stops at the first invite that fails the auth rules.
         Returns:
             A tuple containing the stream ID, event ID and depth of the last
-            event sent to the room.
+            event sent to the room, and the number of `batched_invites` sent.
         """
         creator_id = creator.user.to_string()
         event_keys = {"room_id": room_id, "sender": creator_id, "state_key": ""}
@@ -1624,6 +1669,8 @@ class RoomCreationHandler:
         ] = []
         current_state_group: int | None = None
         last_persisted_event: EventBase | None = None
+        # Local users invited in the batch, for the notifier.
+        invited_users: list[UserID] = []
 
         async def persist_batch() -> None:
             nonlocal current_state_group
@@ -1645,21 +1692,15 @@ class RoomCreationHandler:
                     events_and_context,
                     ignore_shadow_ban=True,
                     ratelimit=False,
-                    extra_users=[creator.user],
+                    extra_users=[creator.user] + invited_users,
                 )
             )
             current_state_group = events_and_context[-1][1].state_group
 
-        # Whether to persist the create event and the join on their own, before
-        # building the next event. Events in v1 and v2 rooms refer to their prev
-        # and auth events by hash, which the builder reads from the database.
-        # `check_event_allowed` callbacks are given the room state from the
-        # database, and rebuilding an event they change reads its prev events
-        # from the database too.
-        persist_create_and_join_alone = (
-            room_version.event_format == EventFormatVersions.ROOM_V1_V2
-            or self._third_party_event_rules.has_check_event_allowed_callbacks()
+        persist_create_and_join_alone = self._persist_create_and_join_alone(
+            room_version
         )
+        assert not (persist_create_and_join_alone and batched_invites)
 
         if creation_event_with_context is None:
             # MSC2175 removes the creator field from the create event.
@@ -1853,6 +1894,27 @@ class RoomCreationHandler:
             )
             events_to_send.append((topic_event, topic_context))
 
+        for invitee, invite_content in batched_invites:
+            # Check the invite against the auth rules before it joins the batch:
+            # one that fails would take the whole room down with it. It is left
+            # for the caller to send, and fail, once the room exists.
+            saved = (depth, prev_event, prev_state_events, dict(state_map))
+            try:
+                invite_event, invite_context = await create_event(
+                    EventTypes.Member, invite_content, True, state_key=invitee
+                )
+                validate_event_for_room_version(invite_event)
+                await self._event_auth_handler.check_auth_rules_from_context(
+                    invite_event, {e.event_id: e for e, _ in events_to_send}
+                )
+            except SynapseError:
+                depth, prev_event, prev_state_events = saved[:3]
+                state_map.clear()
+                state_map.update(saved[3])
+                break
+            events_to_send.append((invite_event, invite_context))
+            invited_users.append(UserID.from_string(invitee))
+
         if events_to_send:
             await persist_batch()
 
@@ -1862,6 +1924,21 @@ class RoomCreationHandler:
             last_persisted_event.internal_metadata.stream_ordering,
             last_persisted_event.event_id,
             depth,
+            len(invited_users),
+        )
+
+    def _persist_create_and_join_alone(self, room_version: RoomVersion) -> bool:
+        """Whether a new room's create event and the creator's join must each
+        be persisted on their own, before the next event is built.
+
+        Events in v1 and v2 rooms refer to their prev and auth events by hash,
+        which the builder reads from the database. `check_event_allowed`
+        callbacks are given the room state from the database, and rebuilding an
+        event they change reads its prev events from the database too.
+        """
+        return (
+            room_version.event_format == EventFormatVersions.ROOM_V1_V2
+            or self._third_party_event_rules.has_check_event_allowed_callbacks()
         )
 
     def _validate_room_config(

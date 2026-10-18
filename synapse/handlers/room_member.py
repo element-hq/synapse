@@ -862,6 +862,54 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             content["kind"] = "guest"
         return content
 
+    async def build_new_room_invite_content(
+        self, requester: Requester, invitee: UserID, content: JsonDict
+    ) -> JsonDict | None:
+        """Build the content of an invite sent by a room's creator as part of
+        creating the room.
+
+        Matches what `update_membership` puts in the event for an invite with
+        `new_room=True`, without creating or sending the event. Callers must not
+        use this when a module has a `user_may_invite` callback, as it is not
+        consulted.
+
+        Args:
+            requester: The user creating the room.
+            invitee: The local user to invite.
+            content: The requested content of the invite.
+
+        Returns:
+            The content of the invite event, or None if the invite would be
+            refused. The caller then sends the invite with `update_membership`
+            once the room exists, which raises the error.
+        """
+        target_id = invitee.to_string()
+        if target_id == self._server_notices_mxid:
+            return None
+
+        is_requester_admin = (
+            self._server_notices_mxid is not None
+            and requester.user.to_string() == self._server_notices_mxid
+        ) or await self.auth.is_server_admin(requester)
+        if not is_requester_admin:
+            if self.config.server.block_non_admin_invites:
+                return None
+            invite_config = await self.store.get_invite_config_for_user(target_id)
+            rule = invite_config.get_invite_rule(requester.user.to_string())
+            if rule == InviteRule.BLOCK:
+                return None
+
+        try:
+            _, content = await self._prepare_membership_content(
+                requester, invitee, Membership.INVITE, content
+            )
+        except SynapseError:
+            return None
+        content["membership"] = Membership.INVITE
+        if requester.is_guest:
+            content["kind"] = "guest"
+        return content
+
     async def update_membership_locked(
         self,
         requester: Requester,

@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import patch
 
 from twisted.internet.testing import MemoryReactor
@@ -6,7 +6,7 @@ from twisted.internet.testing import MemoryReactor
 import synapse
 from synapse.api.constants import EventTypes, RoomEncryptionAlgorithms
 from synapse.events import EventBase
-from synapse.rest.client import login, room
+from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, StateMap, UserID, create_requester
 from synapse.util.clock import Clock
@@ -272,6 +272,7 @@ class CreateRoomPersistBatchesTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         synapse.rest.admin.register_servlets_for_client_rest_resource,
         room.register_servlets,
+        sync.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -303,14 +304,25 @@ class CreateRoomPersistBatchesTestCase(unittest.HomeserverTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _create_room(self, room_version: str) -> str:
+    def _create_room(
+        self,
+        room_version: str,
+        invite: list[str] | None = None,
+        expect_code: int = 200,
+    ) -> str:
         self.batches.clear()
-        return self.helper.create_room_as(
+        extra_content: JsonDict = {"name": "A room"}
+        if invite:
+            extra_content["invite"] = invite
+        room_id = self.helper.create_room_as(
             self.user_id,
             tok=self.tok,
             room_version=room_version,
-            extra_content={"name": "A room"},
+            extra_content=extra_content,
+            expect_code=expect_code,
         )
+        # Only set when the request succeeds.
+        return room_id or ""
 
     def _check_room(self, room_id: str) -> None:
         state = self.get_success(
@@ -481,3 +493,126 @@ class CreateRoomPersistBatchesTestCase(unittest.HomeserverTestCase):
             with patch.object(state_store, "_get_state_groups_from_groups", record):
                 self._create_room(room_version)
             self.assertEqual(reads, [])
+
+    def _invite_event(self, room_id: str, invitee: str) -> EventBase:
+        state = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        invite = state[(EventTypes.Member, invitee)]
+        self.assertEqual(invite.membership, "invite")
+        return invite
+
+    def test_local_invites(self) -> None:
+        """Invites to local users are persisted in the batch, with stripped
+        state taken from the batch."""
+        bob = self.register_user("bob", "pass")
+        carol = self.register_user("carol", "pass")
+
+        room_id = self._create_room("12", invite=[bob, carol])
+        self.assertEqual(len(self.batches), 1)
+        self.assertEqual(
+            self.batches[0][-3:],
+            [EventTypes.Name, EventTypes.Member, EventTypes.Member],
+        )
+
+        invite = self._invite_event(room_id, bob)
+        stripped = {
+            (e["type"], e["state_key"]) for e in invite.unsigned["invite_room_state"]
+        }
+        self.assertIn((EventTypes.Create, ""), stripped)
+        self.assertIn((EventTypes.JoinRules, ""), stripped)
+        self.assertIn((EventTypes.Name, ""), stripped)
+        self.assertIn((EventTypes.Member, self.user_id), stripped)
+        self._invite_event(room_id, carol)
+
+        # Bob sees the invite, with the stripped state, in his sync.
+        bob_tok = self.login("bob", "pass")
+        channel = self.make_request("GET", "/sync", access_token=bob_tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        invited = channel.json_body["rooms"]["invite"][room_id]
+        self.assertIn(
+            EventTypes.Name,
+            {e["type"] for e in invited["invite_state"]["events"]},
+        )
+
+    def test_user_may_invite_callback(self) -> None:
+        """With a `user_may_invite` callback, invites are sent on their own
+        after the room is created, so the module sees the room."""
+        bob = self.register_user("bob", "pass")
+        seen_create: list[bool] = []
+
+        async def user_may_invite(
+            inviter: str, invitee: str, room_id: str
+        ) -> Literal["NOT_SPAM"]:
+            create = await self.store.get_create_event_for_room(room_id)
+            seen_create.append(create is not None)
+            return "NOT_SPAM"
+
+        self.hs.get_module_api_callbacks().spam_checker._user_may_invite_callbacks = [
+            user_may_invite
+        ]
+
+        room_id = self._create_room("12", invite=[bob])
+        self.assertEqual(len(self.batches), 2)
+        self.assertEqual(self.batches[1], [EventTypes.Member])
+        self.assertEqual(seen_create, [True])
+        self._invite_event(room_id, bob)
+
+    @override_config({"block_non_admin_invites": True})
+    def test_refused_invite(self) -> None:
+        """An invite that would be refused is sent on its own once the room
+        exists, and fails the request as before."""
+        bob = self.register_user("bob", "pass")
+        self._create_room("12", invite=[bob], expect_code=403)
+
+        # The room was created, without the invite.
+        self.assertEqual(len(self.batches), 1)
+        self.assertNotIn(EventTypes.Member, self.batches[0][2:])
+
+    def test_invites_keep_ops_in_trusted_private_chat(self) -> None:
+        """Batched invitees still get ops from the `trusted_private_chat`
+        preset in rooms without MSC4289 creators."""
+        bob = self.register_user("bob", "pass")
+        room_id = self.helper.create_room_as(
+            self.user_id,
+            tok=self.tok,
+            room_version="11",
+            extra_content={"preset": "trusted_private_chat", "invite": [bob]},
+        )
+        state = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self.assertEqual(state[(EventTypes.PowerLevels, "")].content["users"][bob], 100)
+        self._invite_event(room_id, bob)
+
+    def test_invite_failing_auth(self) -> None:
+        """An invite that fails the auth rules is left out of the batch, so the
+        room is still created before the request fails, as before."""
+        bob = self.register_user("bob", "pass")
+        for invite, extra in (
+            # Alice is already in the room.
+            ([self.user_id], {}),
+            # Alice may not invite.
+            ([bob], {"power_level_content_override": {"invite": 101}}),
+        ):
+            self.batches.clear()
+            channel = self.make_request(
+                "POST",
+                "/createRoom",
+                {"room_version": "10", "invite": invite, **extra},
+                access_token=self.tok,
+            )
+            self.assertEqual(channel.code, 403, channel.json_body)
+            self.assertEqual(len(self.batches), 1)
+            self.assertNotIn(EventTypes.Member, self.batches[0][2:])
+
+        rooms = self.get_success(self.store.get_rooms_for_user(self.user_id))
+        self.assertEqual(len(rooms), 2)
+
+    def test_duplicate_invites(self) -> None:
+        """Inviting the same user twice sends one invite."""
+        bob = self.register_user("bob", "pass")
+        room_id = self._create_room("12", invite=[bob, bob])
+        self.assertEqual(len(self.batches), 1)
+        self.assertEqual(self.batches[0].count(EventTypes.Member), 2)
+        self._invite_event(room_id, bob)

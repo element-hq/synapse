@@ -1980,6 +1980,10 @@ class EventCreationHandler:
         """
         extra_users = extra_users or []
 
+        # Stripped state for invites and knocks may include earlier events of
+        # the batch, which are not in the database yet.
+        batched_events = {event.event_id: event for event, _ in events_and_context}
+
         for event, context in events_and_context:
             assert self._events_shard_config.should_handle(
                 self._instance_name, event.room_id
@@ -2088,6 +2092,7 @@ class EventCreationHandler:
                         await self.store.get_stripped_room_state_from_event_context(
                             event,
                             context,
+                            batched_events,
                         ),
                     )
 
@@ -2112,6 +2117,7 @@ class EventCreationHandler:
                         await self.store.get_stripped_room_state_from_event_context(
                             event,
                             context,
+                            batched_events,
                         ),
                     )
 
