@@ -130,6 +130,12 @@ class EventContext(UnpersistedEventContextBase):
 
         partial_state: if True, we may be storing this event with a temporary,
             incomplete state.
+
+        _state_map_before_event: The state before the event, i.e. the state at
+            ``state_group_before_event``, if it was known when the context was
+            built. ``get_prev_state_ids`` returns it instead of reading the state
+            group. It is not serialized, so a context passed to another worker
+            reads the state group.
     """
 
     _storage: "StorageControllers"
@@ -141,6 +147,7 @@ class EventContext(UnpersistedEventContextBase):
     app_service: ApplicationService | None = None
 
     partial_state: bool = False
+    _state_map_before_event: StateMap[str] | None = None
 
     @staticmethod
     def with_state(
@@ -301,6 +308,10 @@ class EventContext(UnpersistedEventContextBase):
 
         if self.state_group_before_event is None:
             return {}
+        if self._state_map_before_event is not None:
+            if state_filter is None:
+                return self._state_map_before_event
+            return state_filter.filter_state(self._state_map_before_event)
         return await self._storage.state.get_state_ids_for_group(
             self.state_group_before_event, state_filter
         )
@@ -398,6 +409,7 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
                 state_delta_due_to_event=unpersisted_context.state_delta_due_to_event,
                 partial_state=unpersisted_context.partial_state,
                 state_group_deltas=state_group_deltas,
+                state_map_before_event=unpersisted_context.state_map_before_event,
             )
             events_and_persisted_context.append((event, context))
         return events_and_persisted_context

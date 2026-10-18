@@ -443,6 +443,29 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 fetched_keys=non_member_types,
             )
 
+    def _prefill_state_group_caches_txn(
+        self, txn: LoggingTransaction, state_group: int, state: StateMap[str]
+    ) -> None:
+        """Fill the state group caches with the full state of a new group once
+        `txn` commits.
+
+        It's fine to use the sequence like this as the state group map is
+        immutable. (If the map wasn't immutable then this prefill could race with
+        another update.)
+        """
+        txn.call_after(
+            self._state_group_members_cache.update,
+            self._state_group_members_cache.sequence,
+            key=state_group,
+            value={s: ev for (s, ev) in state.items() if s[0] == EventTypes.Member},
+        )
+        txn.call_after(
+            self._state_group_cache.update,
+            self._state_group_cache.sequence,
+            key=state_group,
+            value={s: ev for (s, ev) in state.items() if s[0] != EventTypes.Member},
+        )
+
     @trace
     @tag_args
     async def store_state_deltas_for_batched(
@@ -529,6 +552,11 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
             state_group_iter = iter(state_groups)
             for event, context in events_and_context:
+                if context.state_group_before_event not in (None, sg_before):
+                    # The context came with a state group of its own, which the
+                    # chain replaces, so its state map may not match the new one.
+                    context.state_map_before_event = None
+
                 if not event.is_state():
                     context.state_group_after_event = sg_before
                     context.state_group_before_event = sg_before
@@ -586,6 +614,21 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                     for key, state_id in context.state_delta_due_to_event.items()
                 ],
             )
+
+            # Prefill the state group caches with the state after the last
+            # event, which persisting the batch reads to work out the room's
+            # new current state.
+            last_event, last_context = events_and_context[-1]
+            if last_context.state_map_before_event is not None:
+                last_state = dict(last_context.state_map_before_event)
+                if last_event.is_state():
+                    last_state[(last_event.type, last_event.state_key)] = (
+                        last_event.event_id
+                    )
+                assert last_context.state_group_after_event is not None
+                self._prefill_state_group_caches_txn(
+                    txn, last_context.state_group_after_event, last_state
+                )
 
             return events_and_context
 
@@ -710,34 +753,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 ],
             )
 
-            # Prefill the state group caches with this group.
-            # It's fine to use the sequence like this as the state group map
-            # is immutable. (If the map wasn't immutable then this prefill could
-            # race with another update)
-
-            current_member_state_ids = {
-                s: ev
-                for (s, ev) in current_state_ids.items()
-                if s[0] == EventTypes.Member
-            }
-            txn.call_after(
-                self._state_group_members_cache.update,
-                self._state_group_members_cache.sequence,
-                key=state_group,
-                value=current_member_state_ids,
-            )
-
-            current_non_member_state_ids = {
-                s: ev
-                for (s, ev) in current_state_ids.items()
-                if s[0] != EventTypes.Member
-            }
-            txn.call_after(
-                self._state_group_cache.update,
-                self._state_group_cache.sequence,
-                key=state_group,
-                value=current_non_member_state_ids,
-            )
+            self._prefill_state_group_caches_txn(txn, state_group, current_state_ids)
 
             return state_group
 

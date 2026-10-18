@@ -465,3 +465,19 @@ class CreateRoomPersistBatchesTestCase(unittest.HomeserverTestCase):
                 )
             )
             self.assertEqual(len(groups), len(state) + 1)
+
+    def test_no_state_group_reads(self) -> None:
+        """Creating a room reads no state groups from the database: the batch
+        knows the state before each event and after the last one."""
+        state_store = self.hs.get_datastores().state
+        reads: list[object] = []
+        orig = state_store._get_state_groups_from_groups
+
+        async def record(*args: Any, **kwargs: Any) -> Any:
+            reads.append(args)
+            return await orig(*args, **kwargs)
+
+        for room_version in ("10", "12"):
+            with patch.object(state_store, "_get_state_groups_from_groups", record):
+                self._create_room(room_version)
+            self.assertEqual(reads, [])
