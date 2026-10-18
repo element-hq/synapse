@@ -31,7 +31,7 @@ use crate::{
     clock::Clock,
     database::postgres::{
         pool::ConnectionPool,
-        write::{run_write_interaction, Column, WriteError},
+        write::{run_write_interaction, OwnedColumn, WriteError},
     },
     events::Event,
     storage::events::Querier,
@@ -167,15 +167,15 @@ pub async fn mark_state_groups_as_persisting(
             let now = i64::try_from(clock.now_millis()).map_err(anyhow::Error::new)?;
             let instance_names = vec![instance_name; groups.len()];
             let inserted = vec![now; groups.len()];
-            txn.upsert_many(
+            // Sent with the COMMIT.
+            txn.upsert_many_later(
                 "state_groups_persisting",
-                &[
-                    Column::new("state_group", "bigint", groups),
-                    Column::new("instance_name", "text", &instance_names),
+                vec![
+                    OwnedColumn::copy("state_group", "bigint", groups),
+                    OwnedColumn::copy("instance_name", "text", &instance_names),
                 ],
-                &[Column::new("inserted_ts", "bigint", &inserted)],
-            )
-            .await?;
+                vec![OwnedColumn::new("inserted_ts", "bigint", inserted)],
+            )?;
             Ok(())
         }
         .boxed()
@@ -197,28 +197,26 @@ pub async fn finish_persisting(
     run_write_interaction(pool, "finish_persisting", |txn, _| {
         let groups = &groups;
         async move {
-            txn.execute(
+            // All sent with the BEGIN and COMMIT, in one round trip.
+            txn.execute_later(
                 "DELETE FROM state_groups_persisting
                 WHERE instance_name = $1 AND state_group = ANY($2)",
-                &[&instance_name, groups],
-            )
-            .await?;
+                crate::owned_params![instance_name, groups],
+            );
             if error {
                 // `_bump_deletion_txn`.
                 let now = i64::try_from(clock.now_millis()).map_err(anyhow::Error::new)?;
-                txn.execute(
+                txn.execute_later(
                     "UPDATE state_groups_pending_deletion
                     SET sequence_number = DEFAULT, insertion_ts = $1
                     WHERE state_group = ANY($2)",
-                    &[&now, groups],
-                )
-                .await?;
+                    crate::owned_params![now, groups],
+                );
             } else {
-                txn.execute(
+                txn.execute_later(
                     "DELETE FROM state_groups_pending_deletion WHERE state_group = ANY($1)",
-                    &[groups],
-                )
-                .await?;
+                    crate::owned_params![groups],
+                );
             }
             Ok(())
         }
