@@ -133,6 +133,7 @@ class _PrepareTestBase(unittest.HomeserverTestCase):
                     replaced_events={},
                     remaining=list(range(handle.events)),
                     fallback_reason="mocked",
+                    txn_timings=[],
                 )
             )
 
@@ -348,6 +349,17 @@ class ShadowTestCase(_PrepareTestBase):
             self._send("hello")
         self.assertEqual(self._counted(), {"error": 1})
 
+    def test_txn_timings_not_recorded(self) -> None:
+        """Python's own interactions are the ones used in shadow mode, so
+        Rust's dry run is not recorded beside them."""
+        with patch(
+            "synapse.storage.controllers.persist_events.record_rust_txn_timings"
+        ) as record:
+            self.helper.send_state(
+                self.room_id, EventTypes.Name, {"name": "x"}, tok=self.alice_tok
+            )
+        record.assert_not_called()
+
 
 class PrepareTestCase(_PrepareTestBase):
     level: RustEventPersistenceLevel = "prepare"
@@ -460,7 +472,9 @@ class PrepareTestCase(_PrepareTestBase):
     def test_fallback(self) -> None:
         self.persistence._rust_persister = self._mock_persister(
             prepare_chunk=Mock(
-                return_value=defer.succeed(Mock(state_res_fallback="no index"))
+                return_value=defer.succeed(
+                    Mock(state_res_fallback="no index", txn_timings=[])
+                )
             )
         )
         event_id = self._send("hello")

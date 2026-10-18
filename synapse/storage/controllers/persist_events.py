@@ -68,6 +68,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL, pre_collect_hooks
 from synapse.storage.controllers.state import StateStorageController
+from synapse.storage.database import sql_txn_count, sql_txn_duration
 from synapse.storage.databases import Databases
 from synapse.storage.databases.main.events import (
     DeltaState,
@@ -85,6 +86,7 @@ from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.databases.main.rust_persist import (
     apply_rust_persist_effects,
     finish_rust_persist_stream_ids,
+    record_rust_txn_timings,
 )
 from synapse.synapse_rust.persist import (
     PersistBatch,
@@ -425,6 +427,11 @@ def flush_rust_persist_metrics(persister: Persister, server_name: str) -> None:
         for value, count in counts[key].items():
             for _ in range(count):
                 child.observe(value)
+
+    # Those of failed persists, which no result carried back.
+    for desc, duration in counts["txn_timings"]:
+        sql_txn_count.labels(desc=desc, **labels).inc(1)
+        sql_txn_duration.labels(desc=desc, **labels).inc(duration)
 
     if counts["persisted_position"] is not None:
         synapse.metrics.event_persisted_position.labels(**labels).set(
@@ -831,6 +838,7 @@ class EventsPersistenceStorageController:
                 # replication, as `get_next` does when its block raises.
                 self.hs.get_replication_notifier().notify_replication()
                 raise
+            record_rust_txn_timings(self.persist_events_store.store, update.txn_timings)
             # Recorded first, as Python records them before it writes.
             if update.state_res_stats is not None:
                 self._state_resolution_handler.record_rust_state_res_metrics(
@@ -1038,6 +1046,9 @@ class EventsPersistenceStorageController:
                     self.hs.get_replication_notifier().notify_replication()
                     raise
                 if not isinstance(step, WrittenChunk):
+                    record_rust_txn_timings(
+                        self.persist_events_store.store, step.txn_timings
+                    )
                     break
                 await self._apply_rust_batch_chunk(
                     room_id, events_and_contexts, backfilled, step, handle
@@ -1252,6 +1263,9 @@ class EventsPersistenceStorageController:
             rust = await self._rust_persister.prepare_chunk(
                 room_id, chunk, backfilled, shadow=shadow
             )
+        if not shadow:
+            # In shadow mode, Python's own interactions are the ones used.
+            record_rust_txn_timings(self.persist_events_store.store, rust.txn_timings)
         if rust.state_res_fallback is not None:
             logger.info(
                 "Preparing events for %s in Python: %s",

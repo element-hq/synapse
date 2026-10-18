@@ -14,9 +14,12 @@
 
 """Applying what a Rust persist transaction asks for once it commits."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
+from synapse.logging.context import current_context
+from synapse.metrics import SERVER_NAME_LABEL
+from synapse.storage.database import sql_txn_count, sql_txn_duration
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.synapse_rust.persist import PersistEffects
 from synapse.util.caches.stream_change_cache import StreamChangeCache
@@ -35,7 +38,8 @@ def apply_rust_persist_effects(
 ) -> None:
     """Apply what a Rust persist transaction asks for once it has
     committed: the cache updates the Python transaction queues with
-    `txn.call_after`. See `synapse_rust.persist.PersistEffects`.
+    `txn.call_after`. See `synapse_rust.persist.PersistEffects`. First,
+    record what its write interactions took.
     `store` is the main store of the event persister. On a worker that is a
     `GenericWorkerStore`, which has every attribute used here.
     `events` must hold the events `effects.event_cache_prefills` names.
@@ -58,6 +62,7 @@ def apply_rust_persist_effects(
     caller, who must call `finish_rust_persist_stream_ids` whatever
     happens.
     """
+    record_rust_txn_timings(store, effects.txn_timings)
     cache_ids_finished = profile_ids_finished = sticky_ids_finished = False
     # Left unfinished on purpose, without `finish_stream_ids`.
     event_ids_finished = not finish_stream_ids
@@ -168,6 +173,24 @@ def finish_rust_persist_stream_ids(
     else:
         id_gen._mark_ids_as_finished(effects.stream_ids)
         store.hs.get_replication_notifier().notify_replication()
+
+
+def record_rust_txn_timings(
+    store: "DataStore", timings: Iterable[tuple[str, float]]
+) -> None:
+    """Record what Rust's write interactions took as
+    `DatabasePool.new_transaction` records its own: in the transaction
+    metrics, the pool's perf counters and the current log context, which
+    is the caller's when Python applies what Rust returned."""
+    db_pool = store.db_pool
+    labels = {SERVER_NAME_LABEL: db_pool.server_name}
+    context = current_context()
+    for desc, duration in timings:
+        context.add_database_transaction(duration)
+        db_pool._current_txn_total_time += duration
+        db_pool._txn_perf_counters.update(desc, duration)
+        sql_txn_count.labels(desc=desc, **labels).inc(1)
+        sql_txn_duration.labels(desc=desc, **labels).inc(duration)
 
 
 def _finish_txn_stream_ids(

@@ -765,6 +765,7 @@ class FlushRustPersistMetricsTestCase(unittest.TestCase):
             "stale_forward_extremities": {},
             "state_dag_forward_extremities": {},
             "persisted_position": 42,
+            "txn_timings": [("persist_events", 0.5)],
         }
         persister = Mock(spec=["take_metrics"])
         persister.take_metrics.return_value = counts
@@ -797,6 +798,19 @@ class FlushRustPersistMetricsTestCase(unittest.TestCase):
             5,
         )
         self.assertEqual(self._sample("synapse_event_persisted_position"), 42)
+        # The interactions of failed persists.
+        self.assertEqual(
+            self._sample(
+                "synapse_storage_transaction_time_count_total", desc="persist_events"
+            ),
+            1,
+        )
+        self.assertEqual(
+            self._sample(
+                "synapse_storage_transaction_time_sum_total", desc="persist_events"
+            ),
+            0.5,
+        )
 
         # A position that did not move is not set again, so the Python path
         # can move the gauge on without being pulled back.
@@ -806,6 +820,7 @@ class FlushRustPersistMetricsTestCase(unittest.TestCase):
         persister.take_metrics.return_value = {
             **counts,
             "persisted_position": None,
+            "txn_timings": [],
         }
         flush_rust_persist_metrics(persister, self.server_name)
         self.assertEqual(self._sample("synapse_event_persisted_position"), 50)
@@ -919,6 +934,28 @@ class _CountingPersister:
         return getattr(self._persister, name)
 
 
+def _txn_count(desc: str) -> float:
+    """`synapse_storage_transaction_time_count` for `desc`."""
+    return (
+        REGISTRY.get_sample_value(
+            "synapse_storage_transaction_time_count_total",
+            {"desc": desc, SERVER_NAME_LABEL: "test"},
+        )
+        or 0.0
+    )
+
+
+def _txn_secs(desc: str) -> float:
+    """`synapse_storage_transaction_time_sum` for `desc`."""
+    return (
+        REGISTRY.get_sample_value(
+            "synapse_storage_transaction_time_sum_total",
+            {"desc": desc, SERVER_NAME_LABEL: "test"},
+        )
+        or 0.0
+    )
+
+
 class RustTransactionTestCase(unittest.HomeserverTestCase):
     """`rust_event_persistence: transaction`: Rust writes the chunks it
     prepared."""
@@ -1018,6 +1055,13 @@ class RustTransactionTestCase(unittest.HomeserverTestCase):
             self.store._profile_updates_id_gen.get_current_token(),
             max(effects.profile_stream_ids),
         )
+
+    def test_txn_metrics(self) -> None:
+        """The Rust transaction is counted as Python's would be."""
+        room_id = self.helper.create_room_as(self.user, tok=self.token)
+        before = _txn_count("persist_events")
+        self.helper.send(room_id, "hello", tok=self.token)
+        self.assertEqual(_txn_count("persist_events"), before + 1)
 
     def test_gil_count(self) -> None:
         """Writing a chunk takes the GIL from tokio at no persist site: the
@@ -1761,6 +1805,68 @@ class RustFullTestCase(unittest.HomeserverTestCase):
         self.assertGreaterEqual(
             self.store._stream_id_gen.get_current_token(), stream_id
         )
+
+    def test_txn_metrics(self) -> None:
+        """Each Rust interaction of a batch is counted as Python's would
+        be: the orderings, the state group guard and the write."""
+        names = (
+            "_load_next_mult_id",
+            "mark_state_groups_as_persisting",
+            "persist_events",
+            "finish_persisting",
+        )
+        before = {name: _txn_count(name) for name in names}
+        secs = _txn_secs("persist_events")
+        self.helper.send(self.room_id, "hello", tok=self.token)
+        self.assertEqual(
+            {name: _txn_count(name) - before[name] for name in names},
+            dict.fromkeys(names, 1.0),
+        )
+        self.assertGreater(_txn_secs("persist_events"), secs)
+
+        # A batch of two chunks: two writes, and so on.
+        before = {name: _txn_count(name) for name in names}
+        pairs = [self._build(f"message {i}") for i in range(150)]
+        self.get_success(self.persistence.persist_events(pairs))
+        self.assertEqual(
+            {name: _txn_count(name) - before[name] for name in names},
+            dict.fromkeys(names, 2.0),
+        )
+
+        # The update of a room's current state.
+        before_update = _txn_count("update_current_state")
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                "current_state_events",
+                {"room_id": self.room_id, "type": EventTypes.Name},
+                desc="test",
+            )
+        )
+        self.helper.send_state(
+            self.room_id, EventTypes.Name, {"name": "n"}, tok=self.token
+        )
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                "current_state_events",
+                {"room_id": self.room_id, "type": EventTypes.Name},
+                desc="test",
+            )
+        )
+        self.get_success(self.persistence.update_current_state(self.room_id))
+        self.assertEqual(_txn_count("update_current_state"), before_update + 1)
+
+    def test_failed_txn_metrics(self) -> None:
+        """The interactions of a persist that fails are counted when the
+        metrics are next collected."""
+        event, context = self._build("partial")
+        context.partial_state = True
+        before = _txn_count("persist_events")
+        self.get_failure(
+            self.persistence.persist_events([(event, context)]),
+            PartialStateConflictError,
+        )
+        self.persistence._flush_rust_persist_metrics()
+        self.assertEqual(_txn_count("persist_events"), before + 1)
 
     def test_gil_count(self) -> None:
         """Taking the stream orderings and setting them on the events takes

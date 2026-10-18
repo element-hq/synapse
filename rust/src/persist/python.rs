@@ -41,7 +41,10 @@ use super::{
 use crate::{
     database::postgres::{
         pool::ConnectionPool,
-        write::{is_retryable_error, run_write_interaction, WriteError, MAX_ATTEMPTS},
+        write::{
+            is_retryable_error, record_txn_timing, run_write_interaction, with_txn_timings,
+            TxnTimings, WriteError, MAX_ATTEMPTS,
+        },
     },
     deferred::{create_deferred_with, OnCancel},
     errors::SynapseError,
@@ -196,7 +199,7 @@ impl Persister {
             let Prepared::Chunk(chunk) = &*prepared else {
                 unreachable!("checked above");
             };
-            write_chunk(
+            let (effects, timings) = with_txn_timings(write_chunk(
                 &inner,
                 &pool,
                 &room_id,
@@ -204,8 +207,11 @@ impl Persister {
                 chunk,
                 orderings,
                 inhibit_local_membership_updates,
-            )
-            .await
+            ))
+            .await;
+            let mut effects = reported(&inner, effects, &timings)?;
+            effects.add_txn_timings(timings);
+            Ok(effects)
         }
         .boxed())
     }
@@ -225,12 +231,14 @@ impl Persister {
         let pool = self.inner.pool.get()?;
         let inner = Arc::clone(&self.inner);
         Ok(async move {
-            let (prepared, counts) = prepare_chunk(&inner, &pool, &input, shadow)
-                .await
-                .map_err(persist_error_to_py)?;
+            let (prepared, txn_timings) =
+                with_txn_timings(prepare_chunk(&inner, &pool, &input, shadow)).await;
+            let (prepared, counts) =
+                reported(&inner, prepared.map_err(persist_error_to_py), &txn_timings)?;
             Ok(PreparedChunk {
                 prepared: Arc::new(prepared),
                 counts: Mutex::new(Some(counts)),
+                txn_timings,
             })
         }
         .boxed())
@@ -239,16 +247,37 @@ impl Persister {
     /// The future of the batch's next step. See [`Self::batch_next`].
     fn start_batch_next(&self, batch: &PersistBatch) -> BoxFuture<'static, PyResult<BatchStep>> {
         let state = Arc::clone(&batch.state);
-        async move { batch_next(&mut *state.lock().await).await }.boxed()
+        let inner = Arc::clone(&self.inner);
+        async move {
+            let (step, timings) = with_txn_timings(batch_next(&mut *state.lock().await)).await;
+            Ok(match reported(&inner, step, &timings)? {
+                BatchStep::Written(mut chunk) => {
+                    chunk.effects.add_txn_timings(timings);
+                    BatchStep::Written(chunk)
+                }
+                BatchStep::Done(mut batch) => {
+                    batch.txn_timings = timings;
+                    BatchStep::Done(batch)
+                }
+            })
+        }
+        .boxed()
     }
 
     /// The future that releases the batch. See [`Self::batch_abort`].
     fn start_batch_abort(&self, batch: &PersistBatch) -> BoxFuture<'static, PyResult<()>> {
         let state = Arc::clone(&batch.state);
+        let inner = Arc::clone(&self.inner);
         async move {
-            let mut state = state.lock().await;
-            state.done = true;
-            state.release_guard(true).await
+            let (released, timings) = with_txn_timings(async {
+                let mut state = state.lock().await;
+                state.done = true;
+                state.release_guard(true).await
+            })
+            .await;
+            // Nothing carries them back to Python, which gives up.
+            inner.metrics.record_failed_txn_timings(timings);
+            released
         }
         .boxed()
     }
@@ -260,7 +289,14 @@ impl Persister {
     ) -> PyResult<BoxFuture<'static, PyResult<CurrentStateUpdate>>> {
         let pool = self.inner.pool.get()?;
         let inner = Arc::clone(&self.inner);
-        Ok(async move { update_current_state(&inner, &pool, &room_id).await }.boxed())
+        Ok(async move {
+            let (update, timings) =
+                with_txn_timings(update_current_state(&inner, &pool, &room_id)).await;
+            let mut update = reported(&inner, update, &timings)?;
+            update.txn_timings = timings;
+            Ok(update)
+        }
+        .boxed())
     }
 
     /// Run `future` to completion on the runtime, releasing the GIL. For the
@@ -280,7 +316,9 @@ impl Persister {
     /// What persisting has counted since the last call, for
     /// `flush_rust_persist_metrics`.
     fn take_metrics<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        self.inner.metrics.take().to_py(py)
+        let dict = self.inner.metrics.take().to_py(py)?;
+        dict.set_item("txn_timings", self.inner.metrics.take_failed_txn_timings())?;
+        Ok(dict)
     }
 
     /// What `_persist_event_batch` computes for a chunk of one room's events
@@ -524,6 +562,15 @@ impl Persister {
             self.start_prepare_chunk(py, room_id, events_and_contexts, backfilled, shadow)?;
         self.block_on(py, future)
     }
+}
+
+/// `result`, keeping `timings` for the next metrics scrape if it is an
+/// error, as no result carries them back to Python then.
+fn reported<T>(inner: &PersisterInner, result: PyResult<T>, timings: &TxnTimings) -> PyResult<T> {
+    if result.is_err() {
+        inner.metrics.record_failed_txn_timings(timings.clone());
+    }
+    result
 }
 
 /// The events of `events_and_contexts`, sharing their data, internal
@@ -826,6 +873,7 @@ async fn batch_step(state: &mut BatchState) -> PyResult<BatchStep> {
             replaced_events: deduplicated.replaced_events.clone(),
             remaining: Vec::new(),
             fallback_reason: None,
+            txn_timings: Vec::new(),
         }));
     }
     let end = (start + batch::CHUNK_SIZE).min(deduplicated.kept.len());
@@ -836,6 +884,7 @@ async fn batch_step(state: &mut BatchState) -> PyResult<BatchStep> {
             replaced_events: deduplicated.replaced_events.clone(),
             remaining: deduplicated.kept[start..].to_vec(),
             fallback_reason: Some(reason),
+            txn_timings: Vec::new(),
         })
     };
 
@@ -987,6 +1036,8 @@ impl WrittenChunk {
             prepared: Arc::clone(&self.prepared),
             // Counted when it was prepared.
             counts: Mutex::new(None),
+            // Recorded with the chunk's effects.
+            txn_timings: Vec::new(),
         }
     }
 
@@ -1060,6 +1111,7 @@ async fn update_current_state(
                     effects: None,
                     state_res_stats: None,
                     fallback_reason: Some(fallback.0),
+                    txn_timings: Vec::new(),
                 }),
                 Err(e) => Err(persist_error_to_py(e)),
             };
@@ -1071,6 +1123,7 @@ async fn update_current_state(
             effects: None,
             state_res_stats: stats,
             fallback_reason: None,
+            txn_timings: Vec::new(),
         });
     }
 
@@ -1131,6 +1184,7 @@ async fn update_current_state(
         effects: Some(effects),
         state_res_stats: stats,
         fallback_reason: None,
+        txn_timings: Vec::new(),
     })
 }
 
@@ -1140,6 +1194,8 @@ pub struct CurrentStateUpdate {
     effects: Option<PersistEffects>,
     state_res_stats: Option<StateResStats>,
     fallback_reason: Option<String>,
+    /// What the update's write interactions took.
+    txn_timings: TxnTimings,
 }
 
 #[pymethods]
@@ -1164,6 +1220,12 @@ impl CurrentStateUpdate {
     fn fallback_reason(&self) -> Option<String> {
         self.fallback_reason.clone()
     }
+
+    /// `(name, seconds)` of each write interaction the update ran.
+    #[getter]
+    fn txn_timings(&self) -> TxnTimings {
+        self.txn_timings.clone()
+    }
 }
 
 /// Where the stream orderings of a chunk come from.
@@ -1183,6 +1245,7 @@ async fn allocate_stream_orderings(
     stream: &TxnStream,
     n: usize,
 ) -> anyhow::Result<Vec<i64>> {
+    let start = std::time::Instant::now();
     let mut attempt = 1;
     loop {
         let result = async {
@@ -1190,6 +1253,10 @@ async fn allocate_stream_orderings(
             stream.next_ids_outside_txn(&querier, n).await
         }
         .await;
+        // As Python's `runInteraction`, retries included.
+        if !matches!(&result, Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(e)) {
+            record_txn_timing("_load_next_mult_id", start.elapsed());
+        }
         match result {
             Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(&e) => {
                 log::warn!("[TXN RETRY] {{_load_next_mult_id}} {e:#} {attempt}/{MAX_ATTEMPTS}");
@@ -1241,6 +1308,8 @@ pub struct PersistedBatch {
     replaced_events: HashMap<String, String>,
     remaining: Vec<usize>,
     fallback_reason: Option<String>,
+    /// What the last step's write interactions took.
+    txn_timings: TxnTimings,
 }
 
 #[pymethods]
@@ -1265,6 +1334,12 @@ impl PersistedBatch {
     fn fallback_reason(&self) -> Option<String> {
         self.fallback_reason.clone()
     }
+
+    /// `(name, seconds)` of each write interaction the last step ran.
+    #[getter]
+    fn txn_timings(&self) -> TxnTimings {
+        self.txn_timings.clone()
+    }
 }
 
 /// What [`Persister::prepare_chunk`] computed, in the shapes Python builds
@@ -1276,6 +1351,8 @@ pub struct PreparedChunk {
     prepared: Arc<Prepared>,
     /// What preparing counted, until it is recorded.
     counts: Mutex<Option<PersistCounts>>,
+    /// What preparing's write interactions took.
+    txn_timings: TxnTimings,
 }
 
 impl PreparedChunk {
@@ -1289,6 +1366,12 @@ impl PreparedChunk {
 
 #[pymethods]
 impl PreparedChunk {
+    /// `(name, seconds)` of each write interaction preparing ran.
+    #[getter]
+    fn txn_timings(&self) -> TxnTimings {
+        self.txn_timings.clone()
+    }
+
     /// Why the Rust state resolution could not resolve the room.
     #[getter]
     fn state_res_fallback(&self) -> Option<&str> {

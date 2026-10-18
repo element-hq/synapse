@@ -35,6 +35,8 @@
 
 use pyo3::prelude::*;
 
+use crate::database::postgres::write::TxnTimings;
+
 /// A stream change cache that a persist moves an entity forward in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StreamChangeCache {
@@ -155,6 +157,10 @@ pub struct PersistEffects {
     /// Rows were written to the cache stream:
     /// `Notifier.on_new_replication_data()`.
     new_replication_data: bool,
+    /// What the write interactions behind these effects took, as `(name,
+    /// nanoseconds)`, for Python to record as it records its own. Whole
+    /// nanoseconds, as a float would cost the struct its `Eq`.
+    txn_timings: Vec<(String, u64)>,
 }
 
 impl PersistEffects {
@@ -229,6 +235,16 @@ impl PersistEffects {
         self.new_replication_data = true;
     }
 
+    /// Add what write interactions took, from
+    /// [`crate::database::postgres::write::with_txn_timings`].
+    pub fn add_txn_timings(&mut self, timings: TxnTimings) {
+        self.txn_timings.extend(
+            timings
+                .into_iter()
+                .map(|(name, secs)| (name, (secs * 1e9) as u64)),
+        );
+    }
+
     /// Start again, for a transaction that is retried.
     pub fn clear(&mut self) {
         *self = PersistEffects::default();
@@ -296,6 +312,7 @@ impl PersistEffects {
             stream_ids,
             backfilled,
             new_replication_data,
+            txn_timings: Vec::new(),
         })
     }
 
@@ -392,6 +409,15 @@ impl PersistEffects {
     #[getter]
     fn new_replication_data(&self) -> bool {
         self.new_replication_data
+    }
+
+    /// `(name, seconds)` of each write interaction behind these effects.
+    #[getter]
+    fn txn_timings(&self) -> TxnTimings {
+        self.txn_timings
+            .iter()
+            .map(|(name, nanos)| (name.clone(), *nanos as f64 / 1e9))
+            .collect()
     }
 
     fn __repr__(&self) -> String {

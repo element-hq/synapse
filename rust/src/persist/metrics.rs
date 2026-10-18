@@ -27,6 +27,8 @@ use std::{
 
 use pyo3::{prelude::*, types::PyDict};
 
+use crate::database::postgres::write::TxnTimings;
+
 /// The counts since the last [`PersistMetrics::take`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PersistCounts {
@@ -64,6 +66,9 @@ pub struct PersistCounts {
 #[derive(Default)]
 pub struct PersistMetrics {
     counts: Mutex<PersistCounts>,
+    /// What the write interactions of failed persists took, which no
+    /// result carries back to Python.
+    failed_txn_timings: Mutex<TxnTimings>,
 }
 
 impl PersistMetrics {
@@ -75,6 +80,26 @@ impl PersistMetrics {
     /// The counts since the last call, which start again from zero.
     pub fn take(&self) -> PersistCounts {
         std::mem::take(&mut *self.counts.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// Keep the timings of a failed persist's write interactions until
+    /// the metrics are next scraped.
+    pub fn record_failed_txn_timings(&self, timings: TxnTimings) {
+        self.failed_txn_timings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(timings);
+    }
+
+    /// The timings [`Self::record_failed_txn_timings`] kept since the last
+    /// call.
+    pub fn take_failed_txn_timings(&self) -> TxnTimings {
+        std::mem::take(
+            &mut *self
+                .failed_txn_timings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        )
     }
 }
 

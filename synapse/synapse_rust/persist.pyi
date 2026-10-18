@@ -163,6 +163,9 @@ class CurrentStateUpdate:
         """Why the Rust state resolution could not resolve the room, in
         which case nothing was written and Python should recalculate the
         state."""
+    @property
+    def txn_timings(self) -> list[tuple[str, float]]:
+        """`(name, seconds)` of each write interaction the update ran."""
 
 class PersistBatch:
     """A batch being persisted. See `Persister.persist_batch`."""
@@ -200,11 +203,17 @@ class PersistedBatch:
     @property
     def fallback_reason(self) -> str | None:
         """Why Rust left the `remaining` events."""
+    @property
+    def txn_timings(self) -> list[tuple[str, float]]:
+        """`(name, seconds)` of each write interaction the last step ran."""
 
 class PreparedChunk:
     """What `Persister.prepare_chunk` computed. If `state_res_fallback` is
     set, the rest is empty and Python should compute the chunk itself."""
 
+    @property
+    def txn_timings(self) -> list[tuple[str, float]]:
+        """`(name, seconds)` of each write interaction preparing ran."""
     @property
     def state_res_fallback(self) -> str | None:
         """Why the Rust state resolution could not resolve the room."""
@@ -342,6 +351,10 @@ class PersistEffects:
     def backfilled(self) -> bool:
         """Whether `stream_ids` are on the backfill stream."""
 
+    @property
+    def txn_timings(self) -> list[tuple[str, float]]:
+        """`(name, seconds)` of each write interaction behind these effects,
+        to record as `DatabasePool.new_transaction` records its own."""
     @property
     def new_replication_data(self) -> bool:
         """Whether rows were written to the cache invalidation stream."""

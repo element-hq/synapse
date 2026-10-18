@@ -30,8 +30,11 @@
 //! pipelines them on the connection.
 
 use std::{
+    cell::RefCell,
     fmt::Write as _,
+    future::Future,
     sync::atomic::{AtomicU8, Ordering},
+    time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
@@ -493,23 +496,66 @@ async fn run_interaction<'env, T, F>(
 where
     F: for<'t> FnMut(&'t WriteTxn, &'t &'env ()) -> BoxFuture<'t, Result<T, WriteError>>,
 {
+    // As `new_transaction`, from when each attempt has its connection: the
+    // wait for one is not the transaction's.
+    let mut elapsed = Duration::ZERO;
     let mut attempt = 1;
-    loop {
-        let result = run_once(pool, commit, &mut f).await;
+    let result = loop {
+        let result = run_once(pool, commit, &mut f, &mut elapsed).await;
         match result {
             Err(error) if error.is_retryable() && attempt < MAX_ATTEMPTS => {
                 warn!("[TXN RETRY] {{{name}}} {error} {attempt}/{MAX_ATTEMPTS}");
                 attempt += 1;
             }
-            result => return result,
+            result => break result,
         }
-    }
+    };
+    record_txn_timing(name, elapsed);
+    result
 }
 
+/// What each write interaction run in a [`with_txn_timings`] scope took,
+/// as `(name, seconds)`, in the order they finished.
+pub type TxnTimings = Vec<(String, f64)>;
+
+tokio::task_local! {
+    static TXN_TIMINGS: RefCell<TxnTimings>;
+}
+
+/// Run `future`, and return with its output what each write interaction
+/// it ran took, whether it succeeded or not, retries included and the wait
+/// for a connection left out, as `DatabasePool.new_transaction` times
+/// them. A caller whose future fails must still report them. Python records them where it
+/// records its own (`sql_txn_count`, `sql_txn_duration` and the log
+/// context's transaction counts), which Rust cannot reach without the GIL.
+/// Interactions run on other tasks are not seen.
+pub async fn with_txn_timings<F: Future>(future: F) -> (F::Output, TxnTimings) {
+    TXN_TIMINGS
+        .scope(RefCell::new(Vec::new()), async {
+            let output = future.await;
+            let timings = TXN_TIMINGS.with(|timings| timings.take());
+            (output, timings)
+        })
+        .await
+}
+
+/// Record that an interaction run outside [`run_write_interaction`] took
+/// `elapsed`, if a [`with_txn_timings`] scope is listening.
+pub fn record_txn_timing(name: &str, elapsed: Duration) {
+    let _ = TXN_TIMINGS.try_with(|timings| {
+        timings
+            .borrow_mut()
+            .push((name.to_owned(), elapsed.as_secs_f64()))
+    });
+}
+
+/// One attempt, adding its time from when it has a connection to
+/// `elapsed`.
 async fn run_once<'env, T, F>(
     pool: &ConnectionPool,
     commit: bool,
     f: &mut F,
+    elapsed: &mut Duration,
 ) -> Result<T, WriteError>
 where
     F: for<'t> FnMut(&'t WriteTxn, &'t &'env ()) -> BoxFuture<'t, Result<T, WriteError>>,
@@ -520,6 +566,20 @@ where
         }
         e => WriteError::Other(anyhow::anyhow!("checking out a database connection: {e}")),
     })?;
+    let start = Instant::now();
+    let result = attempt(conn, commit, f).await;
+    *elapsed += start.elapsed();
+    result
+}
+
+async fn attempt<'env, T, F>(
+    conn: PooledConnection,
+    commit: bool,
+    f: &mut F,
+) -> Result<T, WriteError>
+where
+    F: for<'t> FnMut(&'t WriteTxn, &'t &'env ()) -> BoxFuture<'t, Result<T, WriteError>>,
+{
     let txn = WriteTxn::begin(conn).await?;
     match f(&txn, &&()).await {
         Ok(value) if commit => {
