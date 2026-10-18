@@ -1320,6 +1320,12 @@ class RoomCreationHandler:
             if reason and isinstance(reason, str):
                 invite_content["reason"] = reason
 
+        raw_initial_state = config.get("initial_state", [])
+
+        initial_state = OrderedDict()
+        for val in raw_initial_state:
+            initial_state[(val["type"], val.get("state_key", ""))] = val["content"]
+
         # Local invites go into the batch with the room's other initial events,
         # in order, up to the first one that has to be sent on its own: an
         # invite to a remote user, which needs a federation request first, or
@@ -1331,7 +1337,7 @@ class RoomCreationHandler:
         # The invites to send on their own after the batch.
         remaining_invites = invite_list
         if not (
-            self._persist_create_and_join_alone(room_version)
+            self._persist_create_and_join_alone(room_version, initial_state)
             or self._spam_checker_module_callbacks.has_user_may_invite_callbacks()
         ):
             for index, invitee in enumerate(invite_list):
@@ -1351,12 +1357,6 @@ class RoomCreationHandler:
                 batched_invites.append((invitee, content))
             else:
                 remaining_invites = []
-
-        raw_initial_state = config.get("initial_state", [])
-
-        initial_state = OrderedDict()
-        for val in raw_initial_state:
-            initial_state[(val["type"], val.get("state_key", ""))] = val["content"]
 
         (
             last_stream_id,
@@ -1698,7 +1698,7 @@ class RoomCreationHandler:
             current_state_group = events_and_context[-1][1].state_group
 
         persist_create_and_join_alone = self._persist_create_and_join_alone(
-            room_version
+            room_version, initial_state
         )
         assert not (persist_create_and_join_alone and batched_invites)
 
@@ -1927,18 +1927,26 @@ class RoomCreationHandler:
             len(invited_users),
         )
 
-    def _persist_create_and_join_alone(self, room_version: RoomVersion) -> bool:
+    def _persist_create_and_join_alone(
+        self, room_version: RoomVersion, initial_state: StateMap[Any]
+    ) -> bool:
         """Whether a new room's create event and the creator's join must each
         be persisted on their own, before the next event is built.
 
         Events in v1 and v2 rooms refer to their prev and auth events by hash,
         which the builder reads from the database. `check_event_allowed`
         callbacks are given the room state from the database, and rebuilding an
-        event they change reads its prev events from the database too.
+        event they change reads its prev events from the database too. An
+        `m.room.aliases` event in the initial state needs the sender's join in
+        the database when `require_membership_for_aliases` is set.
         """
         return (
             room_version.event_format == EventFormatVersions.ROOM_V1_V2
             or self._third_party_event_rules.has_check_event_allowed_callbacks()
+            or (
+                self.event_creation_handler.require_membership_for_aliases
+                and any(etype == EventTypes.Aliases for etype, _ in initial_state)
+            )
         )
 
     def _validate_room_config(

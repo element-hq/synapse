@@ -427,6 +427,23 @@ class CreateRoomPersistBatchesTestCase(unittest.HomeserverTestCase):
         )
         self._check_room(room_id)
 
+    def test_aliases_in_initial_state(self) -> None:
+        """An `m.room.aliases` event in the initial state needs the creator's
+        join in the database, so the create event and the join go first."""
+        self.batches.clear()
+        self.helper.create_room_as(
+            self.user_id,
+            tok=self.tok,
+            room_version="10",
+            extra_content={
+                "initial_state": [
+                    {"type": EventTypes.Aliases, "state_key": "test", "content": {}}
+                ]
+            },
+        )
+        self.assertEqual(self.batches[:2], [[EventTypes.Create], [EventTypes.Member]])
+        self.assertIn(EventTypes.Aliases, self.batches[2])
+
     def test_check_event_allowed_callback(self) -> None:
         """With a `check_event_allowed` callback, the create event and the join
         are persisted on their own. A callback that rewrites them leaves no
