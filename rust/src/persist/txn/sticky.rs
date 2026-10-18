@@ -19,11 +19,10 @@
 //! redacted events is in [`super::events`].
 
 use log::info;
-use tokio_postgres::types::ToSql;
 
 use super::{metadata_error, TxnInput};
 use crate::{
-    database::postgres::write::{Column, WriteError, WriteTxn},
+    database::postgres::write::{OwnedColumn, OwnedParam, WriteError, WriteTxn},
     events::Event,
     persist::effects::PersistEffects,
 };
@@ -80,20 +79,19 @@ pub async fn insert_sticky_events(
     let expiries: Vec<i64> = sticky.iter().map(|&(_, _, at)| at).collect();
     // `stream_id` and `event_stream_ordering` are `INTEGER`, which a
     // `bigint` casts to on assignment.
-    txn.insert_many(
+    txn.insert_many_later(
         "sticky_events",
-        &[
-            Column::new("instance_name", "text", &instance_names),
-            Column::new("stream_id", "bigint", &stream_ids),
-            Column::new("room_id", "text", &room_ids),
-            Column::new("event_id", "text", &event_ids),
-            Column::new("event_stream_ordering", "bigint", &stream_orderings),
-            Column::new("sender", "text", &senders),
-            Column::new("expires_at", "bigint", &expiries),
+        vec![
+            OwnedColumn::copy("instance_name", "text", &instance_names),
+            OwnedColumn::copy("stream_id", "bigint", &stream_ids),
+            OwnedColumn::copy("room_id", "text", &room_ids),
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("event_stream_ordering", "bigint", &stream_orderings),
+            OwnedColumn::copy("sender", "text", &senders),
+            OwnedColumn::copy("expires_at", "bigint", &expiries),
         ],
         None,
-    )
-    .await?;
+    )?;
     Ok(())
 }
 
@@ -110,15 +108,14 @@ pub async fn un_soft_fail_sticky_events(
     if event_ids.is_empty() {
         return Ok(());
     }
-    txn.execute(
+    txn.execute_later(
         "UPDATE event_json
         SET internal_metadata = (
             jsonb_set(internal_metadata::jsonb, '{soft_failed}', 'false'::jsonb)
         )::text
         WHERE event_id = ANY($1)",
-        &[&event_ids],
-    )
-    .await?;
+        crate::owned_params![event_ids],
+    );
     for event_id in event_ids {
         effects.add_event_cache_invalidation((*event_id).to_owned());
     }
@@ -145,23 +142,16 @@ pub async fn un_soft_fail_sticky_events(
 
     let stream_ids = input.sticky_stream.next_ids(txn, event_ids.len()).await?;
     effects.add_sticky_stream_ids(&stream_ids);
-    let rows: Vec<Vec<&(dyn ToSql + Sync)>> = stream_ids
+    let rows: Vec<Vec<OwnedParam>> = stream_ids
         .iter()
         .zip(&ordered)
-        .map(|(stream_id, event_id)| {
-            vec![
-                stream_id as &(dyn ToSql + Sync),
-                &input.instance_name,
-                event_id,
-            ]
-        })
+        .map(|(stream_id, event_id)| crate::owned_params![stream_id, input.instance_name, event_id])
         .collect();
     // `sticky_events` has no index on `event_id`, as in Python.
-    txn.execute_batch(
+    txn.execute_batch_later(
         "UPDATE sticky_events SET stream_id = $1::bigint, instance_name = $2
         WHERE event_id = $3",
-        &rows,
-    )
-    .await?;
+        rows,
+    );
     Ok(())
 }

@@ -22,7 +22,7 @@ use std::collections::BTreeSet;
 
 use super::TxnInput;
 use crate::{
-    database::postgres::write::{Column, WriteError, WriteTxn},
+    database::postgres::write::{OwnedColumn, WriteError, WriteTxn},
     persist::{
         effects::PersistEffects, extremities::is_mine_id, sliding_sync::SlidingSyncTableChanges,
     },
@@ -129,23 +129,21 @@ async fn record_profile_updates_for_user_left_room(
     }
     let no_longer_sharing_ids: Vec<&str> = no_longer_sharing.iter().map(String::as_str).collect();
 
-    txn.execute(
+    txn.execute_later(
         "DELETE FROM profile_updates_per_user
         WHERE user_id = ANY($1)
             AND stream_id IN (SELECT stream_id FROM profile_updates WHERE user_id = $2)",
-        &[&no_longer_sharing_ids, &user_id],
-    )
-    .await?;
+        crate::owned_params![no_longer_sharing_ids, user_id],
+    );
     let user = BTreeSet::from([user_id]);
     record_profile_updates(txn, input, &user, LEFT_ROOM, &no_longer_sharing, effects).await?;
 
-    txn.execute(
+    txn.execute_later(
         "DELETE FROM profile_updates_per_user
         WHERE user_id = $1
             AND stream_id IN (SELECT stream_id FROM profile_updates WHERE user_id = ANY($2))",
-        &[&user_id, &no_longer_sharing_ids],
-    )
-    .await?;
+        crate::owned_params![user_id, no_longer_sharing_ids],
+    );
     let no_longer_sharing: BTreeSet<&str> = no_longer_sharing_ids.into_iter().collect();
     let target = BTreeSet::from([user_id.to_owned()]);
     record_profile_updates(txn, input, &no_longer_sharing, LEFT_ROOM, &target, effects).await
@@ -184,18 +182,17 @@ async fn record_profile_updates(
     let actions = vec![action; updated.len()];
     // `affected_fields` is left NULL: it is set only for profile changes.
     let inserted = vec![inserted_ts; updated.len()];
-    txn.insert_many(
+    txn.insert_many_later(
         "profile_updates",
-        &[
-            Column::new("stream_id", "bigint", &stream_ids),
-            Column::new("instance_name", "text", &instance_names),
-            Column::new("user_id", "text", &updated),
-            Column::new("action", "text", &actions),
-            Column::new("inserted_ts", "bigint", &inserted),
+        vec![
+            OwnedColumn::copy("stream_id", "bigint", &stream_ids),
+            OwnedColumn::copy("instance_name", "text", &instance_names),
+            OwnedColumn::copy("user_id", "text", &updated),
+            OwnedColumn::copy("action", "text", &actions),
+            OwnedColumn::copy("inserted_ts", "bigint", &inserted),
         ],
         None,
-    )
-    .await?;
+    )?;
 
     let mut per_user_stream_ids = Vec::new();
     let mut per_user_ids = Vec::new();
@@ -208,15 +205,14 @@ async fn record_profile_updates(
         }
     }
     let inserted = vec![inserted_ts; per_user_ids.len()];
-    txn.insert_many(
+    txn.insert_many_later(
         "profile_updates_per_user",
-        &[
-            Column::new("stream_id", "bigint", &per_user_stream_ids),
-            Column::new("user_id", "text", &per_user_ids),
-            Column::new("inserted_ts", "bigint", &inserted),
+        vec![
+            OwnedColumn::copy("stream_id", "bigint", &per_user_stream_ids),
+            OwnedColumn::copy("user_id", "text", &per_user_ids),
+            OwnedColumn::copy("inserted_ts", "bigint", &inserted),
         ],
         None,
-    )
-    .await?;
+    )?;
     Ok(())
 }

@@ -31,7 +31,7 @@ use super::{
     PartialStateConflict, Persisting, TxnInput,
 };
 use crate::{
-    database::postgres::write::{Column, WriteError, WriteTxn},
+    database::postgres::write::{Column, OwnedColumn, WriteError, WriteTxn},
     event_auth::get_domain_from_id,
     events::{constants::event_type, redact_event_py},
     persist::{
@@ -83,12 +83,11 @@ pub async fn update_room_depths(
     if min_depth.is_some_and(|min_depth| depth_update >= min_depth) {
         return Ok(());
     }
-    txn.upsert_many(
+    txn.upsert_many_later(
         "room_depth",
-        &[Column::new("room_id", "text", &vec![room_id])],
-        &[Column::new("min_depth", "bigint", &vec![depth_update])],
-    )
-    .await?;
+        vec![OwnedColumn::copy("room_id", "text", &[room_id])],
+        vec![OwnedColumn::copy("min_depth", "bigint", &[depth_update])],
+    )?;
     Ok(())
 }
 
@@ -145,26 +144,24 @@ pub async fn update_outliers<'a>(
         );
         store_state_mappings(txn, std::slice::from_ref(&event), effects).await?;
 
-        txn.insert_many(
+        txn.insert_many_later(
             "ex_outlier_stream",
-            &[
-                Column::new(
+            vec![
+                OwnedColumn::copy(
                     "event_stream_ordering",
                     "bigint",
-                    &vec![event.stream_ordering()],
+                    &[event.stream_ordering()],
                 ),
-                Column::new("event_id", "text", &vec![event.event().event_id()]),
-                Column::new("state_group", "bigint", &vec![event.context().state_group]),
-                Column::new("instance_name", "text", &vec![input.instance_name]),
+                OwnedColumn::copy("event_id", "text", &[event.event().event_id()]),
+                OwnedColumn::copy("state_group", "bigint", &[event.context().state_group]),
+                OwnedColumn::copy("instance_name", "text", &[input.instance_name]),
             ],
             None,
-        )
-        .await?;
-        txn.execute(
+        )?;
+        txn.execute_later(
             "UPDATE events SET outlier = FALSE WHERE event_id = $1",
-            &[&event.event().event_id()],
-        )
-        .await?;
+            crate::owned_params![event.event().event_id()],
+        );
         update_backward_extremities(
             txn,
             input.instance_name,
@@ -395,13 +392,12 @@ pub async fn delete_sticky_events(
     let event_ids: Vec<&str> = event_ids.iter().map(String::as_str).collect();
     // `sticky_events` has no index on `event_id`, but has one on the
     // stream ordering.
-    txn.execute(
+    txn.execute_later(
         "DELETE FROM sticky_events WHERE event_stream_ordering IN (
             SELECT stream_ordering FROM events WHERE event_id = ANY($1)
         )",
-        &[&event_ids],
-    )
-    .await?;
+        crate::owned_params![event_ids],
+    );
     Ok(())
 }
 
@@ -471,50 +467,47 @@ pub async fn store_events(
         }
     }
 
-    txn.insert_many(
+    txn.insert_many_later(
         "event_json",
-        &[
-            Column::new("event_id", "text", &event_ids),
-            Column::new("room_id", "text", &room_ids),
-            Column::new("internal_metadata", "text", &internal_metadata),
-            Column::new("json", "text", &jsons),
-            Column::new("format_version", "bigint", &format_versions),
+        vec![
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("room_id", "text", &room_ids),
+            OwnedColumn::copy("internal_metadata", "text", &internal_metadata),
+            OwnedColumn::copy("json", "text", &jsons),
+            OwnedColumn::copy("format_version", "bigint", &format_versions),
         ],
         None,
-    )
-    .await?;
+    )?;
 
     let processed = vec![true; n];
-    txn.insert_many(
+    txn.insert_many_later(
         "events",
-        &[
-            Column::new("instance_name", "text", &instance_names),
-            Column::new("stream_ordering", "bigint", &stream_orderings),
-            Column::new("topological_ordering", "bigint", &depths),
-            Column::new("depth", "bigint", &depths),
-            Column::new("event_id", "text", &event_ids),
-            Column::new("room_id", "text", &room_ids),
-            Column::new("type", "text", &types),
-            Column::new("processed", "boolean", &processed),
-            Column::new("outlier", "boolean", &outliers),
-            Column::new("origin_server_ts", "bigint", &origin_server_tss),
-            Column::new("received_ts", "bigint", &received_tss),
-            Column::new("sender", "text", &senders),
-            Column::new("contains_url", "boolean", &contains_urls),
-            Column::new("state_key", "text", &state_keys),
-            Column::new("rejection_reason", "text", &rejection_reasons),
+        vec![
+            OwnedColumn::copy("instance_name", "text", &instance_names),
+            OwnedColumn::copy("stream_ordering", "bigint", &stream_orderings),
+            OwnedColumn::copy("topological_ordering", "bigint", &depths),
+            OwnedColumn::copy("depth", "bigint", &depths),
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("room_id", "text", &room_ids),
+            OwnedColumn::copy("type", "text", &types),
+            OwnedColumn::copy("processed", "boolean", &processed),
+            OwnedColumn::copy("outlier", "boolean", &outliers),
+            OwnedColumn::copy("origin_server_ts", "bigint", &origin_server_tss),
+            OwnedColumn::copy("received_ts", "bigint", &received_tss),
+            OwnedColumn::copy("sender", "text", &senders),
+            OwnedColumn::copy("contains_url", "boolean", &contains_urls),
+            OwnedColumn::copy("state_key", "text", &state_keys),
+            OwnedColumn::copy("rejection_reason", "text", &rejection_reasons),
         ],
         None,
-    )
-    .await?;
+    )?;
 
     // A redaction of an event we now have unredacted needs to censor it.
     if !unredacted.is_empty() {
-        txn.execute(
+        txn.execute_later(
             "UPDATE redactions SET have_censored = FALSE WHERE redacts = ANY($1)",
-            &[&unredacted],
-        )
-        .await?;
+            crate::owned_params![unredacted],
+        );
     }
 
     let state: Vec<_> = events.iter().filter(|e| e.event().is_state()).collect();
@@ -522,17 +515,16 @@ pub async fn store_events(
     let room_ids: Vec<&str> = state.iter().map(|e| e.event().room_id()).collect();
     let types: Vec<&str> = state.iter().map(|e| e.event().type_()).collect();
     let state_keys: Vec<Option<&str>> = state.iter().map(|e| e.event().state_key()).collect();
-    txn.insert_many(
+    txn.insert_many_later(
         "state_events",
-        &[
-            Column::new("event_id", "text", &event_ids),
-            Column::new("room_id", "text", &room_ids),
-            Column::new("type", "text", &types),
-            Column::new("state_key", "text", &state_keys),
+        vec![
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("room_id", "text", &room_ids),
+            OwnedColumn::copy("type", "text", &types),
+            OwnedColumn::copy("state_key", "text", &state_keys),
         ],
         None,
-    )
-    .await?;
+    )?;
     Ok(())
 }
 
@@ -565,19 +557,18 @@ pub async fn persist_transaction_ids(
     let device_ids: Vec<&str> = rows.iter().map(|(_, d, _)| d.as_str()).collect();
     let txn_ids: Vec<&str> = rows.iter().map(|(_, _, t)| t.as_str()).collect();
     let inserted_tss = vec![inserted_ts; rows.len()];
-    txn.insert_many(
+    txn.insert_many_later(
         "event_txn_id_device_id",
-        &[
-            Column::new("event_id", "text", &event_ids),
-            Column::new("room_id", "text", &room_ids),
-            Column::new("user_id", "text", &user_ids),
-            Column::new("device_id", "text", &device_ids),
-            Column::new("txn_id", "text", &txn_ids),
-            Column::new("inserted_ts", "bigint", &inserted_tss),
+        vec![
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("room_id", "text", &room_ids),
+            OwnedColumn::copy("user_id", "text", &user_ids),
+            OwnedColumn::copy("device_id", "text", &device_ids),
+            OwnedColumn::copy("txn_id", "text", &txn_ids),
+            OwnedColumn::copy("inserted_ts", "bigint", &inserted_tss),
         ],
         None,
-    )
-    .await?;
+    )?;
     Ok(())
 }
 
@@ -631,6 +622,11 @@ pub async fn store_state_mappings(
         .collect();
     let event_ids: Vec<&str> = partial.iter().map(|e| e.event().event_id()).collect();
     let room_ids: Vec<&str> = partial.iter().map(|e| e.event().room_id()).collect();
+    if !partial.is_empty() {
+        // Send the queued writes first, so that their failures are not taken
+        // for this insert's constraint violation below.
+        txn.flush().await?;
+    }
     let inserted = txn
         .insert_many(
             "partial_state_events",
@@ -653,16 +649,16 @@ pub async fn store_state_mappings(
 
     let event_ids: Vec<&str> = state_groups.iter().map(|(id, _)| *id).collect();
     let groups: Vec<Option<i64>> = state_groups.iter().map(|(_, group)| *group).collect();
-    txn.upsert_many(
+    txn.upsert_many_later(
         "event_to_state_groups",
-        &[Column::new("event_id", "text", &event_ids)],
-        &[Column::new("state_group", "bigint", &groups)],
-    )
-    .await?;
+        vec![OwnedColumn::copy("event_id", "text", &event_ids)],
+        vec![OwnedColumn::copy("state_group", "bigint", &groups)],
+    )?;
 
     for (event_id, group) in state_groups {
-        // Python would prefill a missing group too, but the insert above
-        // has failed by then.
+        // Python would prefill a missing group too, but the queued insert
+        // above fails when it is sent, and the effects go with the
+        // transaction.
         if let Some(group) = group {
             effects.add_state_group_prefill(event_id.to_owned(), group);
         }
@@ -686,21 +682,19 @@ pub async fn persist_auth_chain(
             .values()
             .map(|l| l.sequence_number)
             .collect();
-        txn.insert_many(
+        txn.insert_many_later(
             "event_auth_chains",
-            &[
-                Column::new("event_id", "text", &event_ids),
-                Column::new("chain_id", "bigint", &chain_ids),
-                Column::new("sequence_number", "bigint", &sequence_numbers),
+            vec![
+                OwnedColumn::copy("event_id", "text", &event_ids),
+                OwnedColumn::copy("chain_id", "bigint", &chain_ids),
+                OwnedColumn::copy("sequence_number", "bigint", &sequence_numbers),
             ],
             None,
-        )
-        .await?;
-        txn.execute(
+        )?;
+        txn.execute_later(
             "DELETE FROM event_auth_chain_to_calculate WHERE event_id = ANY($1)",
-            &[&event_ids],
-        )
-        .await?;
+            crate::owned_params![event_ids],
+        );
 
         let (mut origin_chains, mut origin_seqs) = (Vec::new(), Vec::new());
         let (mut target_chains, mut target_seqs) = (Vec::new(), Vec::new());
@@ -712,17 +706,16 @@ pub async fn persist_auth_chain(
                 target_seqs.push(seq);
             }
         }
-        txn.insert_many(
+        txn.insert_many_later(
             "event_auth_chain_links",
-            &[
-                Column::new("origin_chain_id", "bigint", &origin_chains),
-                Column::new("origin_sequence_number", "bigint", &origin_seqs),
-                Column::new("target_chain_id", "bigint", &target_chains),
-                Column::new("target_sequence_number", "bigint", &target_seqs),
+            vec![
+                OwnedColumn::copy("origin_chain_id", "bigint", &origin_chains),
+                OwnedColumn::copy("origin_sequence_number", "bigint", &origin_seqs),
+                OwnedColumn::copy("target_chain_id", "bigint", &target_chains),
+                OwnedColumn::copy("target_sequence_number", "bigint", &target_seqs),
             ],
             None,
-        )
-        .await?;
+        )?;
     }
 
     let mut event_ids = Vec::new();
@@ -743,16 +736,15 @@ pub async fn persist_auth_chain(
             auth_ids.push(auth_id);
         }
     }
-    txn.insert_many(
+    txn.insert_many_later(
         "event_auth",
-        &[
-            Column::new("event_id", "text", &event_ids),
-            Column::new("room_id", "text", &room_ids),
-            Column::new("auth_id", "text", &auth_ids),
+        vec![
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("room_id", "text", &room_ids),
+            OwnedColumn::copy("auth_id", "text", &auth_ids),
         ],
         None,
-    )
-    .await?;
+    )?;
     Ok(())
 }
 
@@ -775,15 +767,14 @@ pub async fn store_rejections<'a>(
         .collect();
     // `last_check` is a text column.
     let last_checks = vec![input.now_ms()?.to_string(); rejected.len()];
-    txn.insert_many(
+    txn.insert_many_later(
         "rejections",
-        &[
-            Column::new("event_id", "text", &event_ids),
-            Column::new("reason", "text", &reasons),
-            Column::new("last_check", "text", &last_checks),
+        vec![
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("reason", "text", &reasons),
+            OwnedColumn::copy("last_check", "text", &last_checks),
         ],
         None,
-    )
-    .await?;
+    )?;
     Ok(left)
 }

@@ -21,14 +21,13 @@ use std::collections::BTreeSet;
 
 use anyhow::anyhow;
 use serde_json::Value;
-use tokio_postgres::types::ToSql;
 
 use super::{
     caches::{invalidate_cache_and_stream, send_invalidation_to_replication},
     profile, TxnInput,
 };
 use crate::{
-    database::postgres::write::{WriteError, WriteTxn},
+    database::postgres::write::{OwnedParam, WriteError, WriteTxn},
     events::constants::event_type::{M_ROOM_CREATE, M_ROOM_MEMBER},
     persist::{
         effects::{PersistEffects, StreamChangeCache},
@@ -101,15 +100,14 @@ pub async fn update_current_state(
         // room version is recorded first, and the delta stream told what
         // went.
         upsert_room_version(txn, room_id).await?;
-        txn.execute(
+        txn.execute_later(
             "INSERT INTO current_state_delta_stream
                 (stream_id, instance_name, room_id, type, state_key, event_id, prev_event_id)
             SELECT $1, $2, room_id, type, state_key, NULL, event_id
             FROM current_state_events
             WHERE room_id = $3",
-            &[&stream_id, &input.instance_name, &room_id],
-        )
-        .await?;
+            crate::owned_params![stream_id, input.instance_name, room_id],
+        );
 
         let rows = txn
             .query(
@@ -123,73 +121,63 @@ pub async fn update_current_state(
             members.insert(user_id);
         }
 
-        txn.execute(
+        txn.execute_later(
             "DELETE FROM current_state_events WHERE room_id = $1",
-            &[&room_id],
-        )
-        .await?;
-        txn.execute(
+            crate::owned_params![room_id],
+        );
+        txn.execute_later(
             "DELETE FROM sliding_sync_joined_rooms WHERE room_id = $1",
-            &[&room_id],
-        )
-        .await?;
+            crate::owned_params![room_id],
+        );
     } else {
         // The delta stream reads each key's event before it changes.
-        let delta_rows: Vec<Vec<&(dyn ToSql + Sync)>> = changed
+        let delta_rows: Vec<Vec<OwnedParam>> = changed
             .iter()
             .map(|change| {
-                vec![
-                    &stream_id as &(dyn ToSql + Sync),
-                    &input.instance_name,
-                    &room_id,
-                    &change.event_type,
-                    &change.state_key,
-                    &change.event_id,
+                crate::owned_params![
+                    stream_id,
+                    input.instance_name,
+                    room_id,
+                    change.event_type,
+                    change.state_key,
+                    change.event_id,
                 ]
             })
             .collect();
-        txn.execute_batch(
+        txn.execute_batch_later(
             "INSERT INTO current_state_delta_stream
                 (stream_id, instance_name, room_id, type, state_key, event_id, prev_event_id)
             SELECT $1::bigint, $2::text, $3::text, $4::text, $5::text, $6::text, (
                 SELECT event_id FROM current_state_events
                 WHERE room_id = $3::text AND type = $4::text AND state_key = $5::text
             )",
-            &delta_rows,
-        )
-        .await?;
+            delta_rows,
+        );
 
-        let key_rows: Vec<Vec<&(dyn ToSql + Sync)>> = changed
+        let key_rows: Vec<Vec<OwnedParam>> = changed
             .iter()
-            .map(|change| {
-                vec![
-                    &room_id as &(dyn ToSql + Sync),
-                    &change.event_type,
-                    &change.state_key,
-                ]
-            })
+            .map(|change| crate::owned_params![room_id, change.event_type, change.state_key,])
             .collect();
-        txn.execute_batch(
+        txn.execute_batch_later(
             "DELETE FROM current_state_events
             WHERE room_id = $1 AND type = $2 AND state_key = $3",
-            &key_rows,
-        )
-        .await?;
+            key_rows,
+        );
 
         // The membership comes from `room_memberships`, which the members
         // step has filled.
-        let insert_rows: Vec<Vec<&(dyn ToSql + Sync)>> = to_insert
+        let insert_rows: Vec<Vec<OwnedParam>> = to_insert
             .iter()
             .map(|change| {
-                vec![
-                    &room_id as &(dyn ToSql + Sync),
-                    &change.event_type,
-                    &change.state_key,
-                    &change.event_id,
+                crate::owned_params![
+                    room_id,
+                    change.event_type,
+                    change.state_key,
+                    change.event_id,
                 ]
             })
             .collect();
-        txn.execute_batch(
+        txn.execute_batch_later(
             "INSERT INTO current_state_events
                 (room_id, type, state_key, event_id, membership, event_stream_ordering)
             VALUES (
@@ -197,9 +185,8 @@ pub async fn update_current_state(
                 (SELECT membership FROM room_memberships WHERE event_id = $4),
                 (SELECT stream_ordering FROM events WHERE event_id = $4)
             )",
-            &insert_rows,
-        )
-        .await?;
+            insert_rows,
+        );
 
         update_joined_room(txn, room_id, changes).await?;
     }
@@ -217,24 +204,17 @@ pub async fn update_current_state(
             .iter()
             .map(|change| change.state_key)
             .collect();
-        txn.execute(
+        txn.execute_later(
             "DELETE FROM local_current_membership WHERE room_id = $1 AND user_id = ANY($2)",
-            &[&room_id, &user_ids],
-        )
-        .await?;
+            crate::owned_params![room_id, user_ids],
+        );
     }
-    let membership_rows: Vec<Vec<&(dyn ToSql + Sync)>> = local_members
+    let membership_rows: Vec<Vec<OwnedParam>> = local_members
         .iter()
         .filter(|change| change.event_id.is_some())
-        .map(|change| {
-            vec![
-                &room_id as &(dyn ToSql + Sync),
-                &change.state_key,
-                &change.event_id,
-            ]
-        })
+        .map(|change| crate::owned_params![room_id, change.state_key, change.event_id,])
         .collect();
-    txn.execute_batch(
+    txn.execute_batch_later(
         "INSERT INTO local_current_membership
             (room_id, user_id, event_id, membership, event_stream_ordering)
         VALUES (
@@ -242,9 +222,8 @@ pub async fn update_current_state(
             (SELECT membership FROM room_memberships WHERE event_id = $3),
             (SELECT stream_ordering FROM events WHERE event_id = $3)
         )",
-        &membership_rows,
-    )
-    .await?;
+        membership_rows,
+    );
 
     update_membership_snapshots(txn, room_id, changes).await?;
 
@@ -319,13 +298,12 @@ async fn upsert_room_version(txn: &WriteTxn, room_id: &str) -> Result<(), WriteE
     let json: &str = row.try_get(0).map_err(anyhow::Error::new)?;
     let event: Value = serde_json::from_str(json).map_err(anyhow::Error::new)?;
     let (room_version, creator) = room_version_and_creator(&event)?;
-    txn.execute(
+    txn.execute_later(
         "INSERT INTO rooms (room_id, room_version, is_public, creator)
         VALUES ($1, $2, FALSE, $3)
         ON CONFLICT (room_id) DO UPDATE SET room_version = EXCLUDED.room_version",
-        &[&room_id, &room_version, &creator],
-    )
-    .await?;
+        crate::owned_params![room_id, room_version, creator],
+    );
     Ok(())
 }
 
@@ -358,23 +336,27 @@ fn room_version_and_creator(event: &Value) -> anyhow::Result<(&str, Option<&str>
 
 /// The columns of a [`SlidingSyncStateValues`] that are set, as Python's
 /// `SlidingSyncStateInsertValues` dict holds them.
-fn state_value_columns(
-    values: &SlidingSyncStateValues,
-) -> Vec<(&'static str, Box<dyn ToSql + Sync + Send + '_>)> {
-    let mut columns: Vec<(&'static str, Box<dyn ToSql + Sync + Send + '_>)> = Vec::new();
+fn state_value_columns(values: &SlidingSyncStateValues) -> Vec<(&'static str, OwnedParam)> {
+    let mut columns: Vec<(&'static str, OwnedParam)> = Vec::new();
     if let Some(room_type) = &values.room_type {
-        columns.push(("room_type", Box::new(room_type.as_deref())));
+        columns.push((
+            "room_type",
+            Box::new(room_type.as_deref().map(str::to_owned)),
+        ));
     }
     if let Some(is_encrypted) = values.is_encrypted {
         columns.push(("is_encrypted", Box::new(is_encrypted)));
     }
     if let Some(room_name) = &values.room_name {
-        columns.push(("room_name", Box::new(room_name.as_deref())));
+        columns.push((
+            "room_name",
+            Box::new(room_name.as_deref().map(str::to_owned)),
+        ));
     }
     if let Some(successor) = &values.tombstone_successor_room_id {
         columns.push((
             "tombstone_successor_room_id",
-            Box::new(successor.as_deref()),
+            Box::new(successor.as_deref().map(str::to_owned)),
         ));
     }
     columns
@@ -416,14 +398,9 @@ async fn update_joined_room(
         placeholders.join(", "),
         updates.join(", ")
     );
-    let mut params: Vec<&(dyn ToSql + Sync)> =
-        vec![&room_id, &changes.joined_room_bump_stamp_to_fully_insert];
-    params.extend(
-        columns
-            .iter()
-            .map(|(_, value)| &**value as &(dyn ToSql + Sync)),
-    );
-    txn.execute(&sql, &params).await?;
+    let mut params = crate::owned_params![room_id, changes.joined_room_bump_stamp_to_fully_insert];
+    params.extend(columns.into_iter().map(|(_, value)| value));
+    txn.execute_later(sql, params);
     Ok(())
 }
 
@@ -441,12 +418,11 @@ async fn update_membership_snapshots(
             .iter()
             .map(|user_id| &**user_id)
             .collect();
-        txn.execute(
+        txn.execute_later(
             "DELETE FROM sliding_sync_membership_snapshots
             WHERE room_id = $1 AND user_id = ANY($2)",
-            &[&room_id, &user_ids],
-        )
-        .await?;
+            crate::owned_params![room_id, user_ids],
+        );
     }
 
     if changes.to_insert_membership_snapshots.is_empty() {
@@ -487,33 +463,28 @@ async fn update_membership_snapshots(
     );
     // A new membership is not forgotten.
     let forgotten = 0i32;
-    // As `&str`s, which the rows borrow: an `Arc<str>` is not `ToSql`.
-    let snapshots: Vec<[&str; 4]> = changes
+    let rows: Vec<Vec<OwnedParam>> = changes
         .to_insert_membership_snapshots
         .iter()
         .map(|info| {
-            [
-                &*info.user_id,
-                &*info.sender,
-                &*info.membership_event_id,
-                &*info.membership,
-            ]
-        })
-        .collect();
-    let rows: Vec<Vec<&(dyn ToSql + Sync)>> = snapshots
-        .iter()
-        .map(|[user_id, sender, event_id, membership]| {
-            let mut row: Vec<&(dyn ToSql + Sync)> =
-                vec![&room_id, user_id, sender, event_id, membership, &forgotten];
-            row.extend(
-                columns
-                    .iter()
-                    .map(|(_, value)| &**value as &(dyn ToSql + Sync)),
-            );
+            let mut row = crate::owned_params![
+                room_id,
+                *info.user_id,
+                *info.sender,
+                *info.membership_event_id,
+                *info.membership,
+                forgotten,
+            ];
+            // Each row owns its copy of the shared values.
+            let mut shared_columns = state_value_columns(&shared.state);
+            if let Some(has_known_state) = shared.has_known_state {
+                shared_columns.push(("has_known_state", Box::new(has_known_state)));
+            }
+            row.extend(shared_columns.into_iter().map(|(_, value)| value));
             row
         })
         .collect();
-    txn.execute_batch(&sql, &rows).await?;
+    txn.execute_batch_later(&sql, rows);
     Ok(())
 }
 
@@ -548,11 +519,10 @@ async fn handle_potentially_left_users(
             continue;
         }
         // `mark_remote_user_device_list_as_unsubscribed_txn`.
-        txn.execute(
+        txn.execute_later(
             "DELETE FROM device_lists_remote_extremeties WHERE user_id = $1",
-            &[&user_id],
-        )
-        .await?;
+            crate::owned_params![user_id],
+        );
         invalidate_cache_and_stream(
             txn,
             input,

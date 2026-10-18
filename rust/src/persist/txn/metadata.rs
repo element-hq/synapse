@@ -31,7 +31,7 @@ use crate::events::constants::event_type::{
     M_ROOM_TOPIC as TOPIC,
 };
 use crate::{
-    database::postgres::write::{Column, WriteError, WriteTxn},
+    database::postgres::write::{OwnedColumn, OwnedParam, WriteError, WriteTxn},
     events::{
         constants::{event_type, relation_type},
         json_object::JsonObject,
@@ -66,11 +66,10 @@ pub async fn update_metadata_tables(
         let Some(redacted) = redacts(event) else {
             continue;
         };
-        txn.execute(
+        txn.execute_later(
             "DELETE FROM event_push_actions WHERE room_id = $1 AND event_id = $2",
-            &[&event.room_id(), &redacted],
-        )
-        .await?;
+            crate::owned_params![event.room_id(), redacted],
+        );
         handle_redact_relations(txn, input, effects, redacted).await?;
     }
 
@@ -146,7 +145,7 @@ async fn set_push_actions(
         }
     }
     if !event_ids.is_empty() {
-        txn.execute(
+        txn.execute_later(
             "INSERT INTO event_push_actions (
                 room_id, event_id, user_id, actions, stream_ordering,
                 topological_ordering, notif, highlight, unread, thread_id
@@ -156,9 +155,8 @@ async fn set_push_actions(
             FROM unnest($2::text[], $3::bigint[], $4::bigint[])
                 AS e(event_id, stream_ordering, depth)
             INNER JOIN event_push_actions_staging AS s USING (event_id)",
-            &[&input.room_id, &event_ids, &stream_orderings, &depths],
-        )
-        .await?;
+            crate::owned_params![input.room_id, event_ids, stream_orderings, depths],
+        );
     }
 
     let mut staged = Vec::new();
@@ -173,11 +171,10 @@ async fn set_push_actions(
         }
     }
     if !staged.is_empty() {
-        txn.execute(
+        txn.execute_later(
             "DELETE FROM event_push_actions_staging WHERE event_id = ANY($1)",
-            &[&staged],
-        )
-        .await?;
+            crate::owned_params![staged],
+        );
     }
     Ok(())
 }
@@ -203,11 +200,10 @@ async fn handle_redact_relations(
     };
     let relates_to: String = row.try_get(0).map_err(anyhow::Error::new)?;
     let rel_type: String = row.try_get(1).map_err(anyhow::Error::new)?;
-    txn.execute(
+    txn.execute_later(
         "DELETE FROM event_relations WHERE event_id = $1",
-        &[&redacted_event_id],
-    )
-    .await?;
+        crate::owned_params![redacted_event_id],
+    );
 
     // Any relation information for the related event must be cleared.
     let mut invalidations = vec![(
@@ -252,7 +248,7 @@ async fn handle_redact_relations(
         let event_id: String = latest.try_get(0).map_err(anyhow::Error::new)?;
         let topological_ordering: i64 = latest.try_get(1).map_err(anyhow::Error::new)?;
         let stream_ordering: i64 = latest.try_get(2).map_err(anyhow::Error::new)?;
-        txn.execute(
+        txn.execute_later(
             "INSERT INTO threads
                 (room_id, thread_id, latest_event_id, topological_ordering, stream_ordering)
             VALUES ($1, $2, $3, $4, $5)
@@ -260,15 +256,14 @@ async fn handle_redact_relations(
                 latest_event_id = EXCLUDED.latest_event_id,
                 topological_ordering = EXCLUDED.topological_ordering,
                 stream_ordering = EXCLUDED.stream_ordering",
-            &[
-                &room_id,
-                &relates_to,
-                &event_id,
-                &topological_ordering,
-                &stream_ordering,
+            crate::owned_params![
+                room_id,
+                relates_to,
+                event_id,
+                topological_ordering,
+                stream_ordering
             ],
-        )
-        .await?;
+        );
     } else {
         // The thread no longer exists. As in Python's
         // `simple_delete_one_txn`, by thread ID alone, and exactly one row.
@@ -315,23 +310,22 @@ async fn store_search(
     if event_ids.is_empty() {
         return Ok(());
     }
-    txn.execute(
+    txn.execute_later(
         "INSERT INTO event_search
             (event_id, room_id, key, vector, stream_ordering, origin_server_ts)
         SELECT event_id, room_id, key, to_tsvector('english', value),
             stream_ordering, origin_server_ts
         FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::bigint[], $6::bigint[])
             AS t(event_id, room_id, key, value, stream_ordering, origin_server_ts)",
-        &[
-            &event_ids,
-            &room_ids,
-            &keys,
-            &values,
-            &stream_orderings,
-            &origin_server_tss,
+        crate::owned_params![
+            event_ids,
+            room_ids,
+            keys,
+            values,
+            stream_orderings,
+            origin_server_tss
         ],
-    )
-    .await?;
+    );
     Ok(())
 }
 
@@ -416,16 +410,15 @@ async fn store_redactions(
         return Ok(());
     }
     let received_tss = vec![input.now_ms()?; event_ids.len()];
-    txn.upsert_many(
+    txn.upsert_many_later(
         "redactions",
-        &[Column::new("event_id", "text", &event_ids)],
-        &[
-            Column::new("redacts", "text", &redacted),
-            Column::new("received_ts", "bigint", &received_tss),
-            Column::new("recheck", "boolean", &rechecks),
+        vec![OwnedColumn::copy("event_id", "text", &event_ids)],
+        vec![
+            OwnedColumn::copy("redacts", "text", &redacted),
+            OwnedColumn::copy("received_ts", "bigint", &received_tss),
+            OwnedColumn::copy("recheck", "boolean", &rechecks),
         ],
-    )
-    .await?;
+    )?;
     Ok(())
 }
 
@@ -453,17 +446,16 @@ async fn store_retention_policy(
     ) else {
         return Ok(());
     };
-    txn.execute(
+    txn.execute_later(
         "INSERT INTO room_retention (room_id, event_id, min_lifetime, max_lifetime)
         VALUES ($1, $2, $3, $4)",
-        &[
-            &event.room_id(),
-            &event.event_id(),
-            &min_lifetime,
-            &max_lifetime,
+        crate::owned_params![
+            event.room_id(),
+            event.event_id(),
+            min_lifetime,
+            max_lifetime
         ],
-    )
-    .await?;
+    );
     invalidate_cache_and_stream(
         txn,
         input,
@@ -519,34 +511,27 @@ async fn store_relations(txn: &WriteTxn, events: &[Persisting<'_>]) -> Result<()
             ));
         }
     }
-    txn.insert_many(
+    txn.insert_many_later(
         "event_relations",
-        &[
-            Column::new("event_id", "text", &event_ids),
-            Column::new("relates_to_id", "text", &parent_ids),
-            Column::new("relation_type", "text", &rel_types),
-            Column::new("aggregation_key", "text", &aggregation_keys),
+        vec![
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("relates_to_id", "text", &parent_ids),
+            OwnedColumn::copy("relation_type", "text", &rel_types),
+            OwnedColumn::copy("aggregation_key", "text", &aggregation_keys),
         ],
         None,
-    )
-    .await?;
+    )?;
 
     // Only a later event becomes the latest. The stream ordering is always
     // later, unless the event was backfilled. In order, as each reply
     // compares with the one before.
-    let thread_rows: Vec<Vec<&(dyn ToSql + Sync)>> = replies
+    let thread_rows: Vec<Vec<OwnedParam>> = replies
         .iter()
         .map(|(room_id, thread_id, event_id, depth, stream_ordering)| {
-            vec![
-                room_id as &(dyn ToSql + Sync),
-                thread_id,
-                event_id,
-                depth,
-                stream_ordering,
-            ]
+            crate::owned_params![room_id, thread_id, event_id, depth, stream_ordering]
         })
         .collect();
-    txn.execute_batch(
+    txn.execute_batch_later(
         "INSERT INTO threads
             (room_id, thread_id, latest_event_id, topological_ordering, stream_ordering)
         VALUES ($1, $2, $3, $4, $5)
@@ -557,9 +542,8 @@ async fn store_relations(txn: &WriteTxn, events: &[Persisting<'_>]) -> Result<()
         WHERE
             threads.topological_ordering <= EXCLUDED.topological_ordering AND
             threads.stream_ordering < EXCLUDED.stream_ordering",
-        &thread_rows,
-    )
-    .await?;
+        thread_rows,
+    );
     Ok(())
 }
 
@@ -586,17 +570,16 @@ async fn store_labels(txn: &WriteTxn, events: &[Persisting<'_>]) -> Result<(), W
             depths.push(event.depth());
         }
     }
-    txn.insert_many(
+    txn.insert_many_later(
         "event_labels",
-        &[
-            Column::new("event_id", "text", &event_ids),
-            Column::new("label", "text", &labels),
-            Column::new("room_id", "text", &room_ids),
-            Column::new("topological_ordering", "bigint", &depths),
+        vec![
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("label", "text", &labels),
+            OwnedColumn::copy("room_id", "text", &room_ids),
+            OwnedColumn::copy("topological_ordering", "bigint", &depths),
         ],
         None,
-    )
-    .await?;
+    )?;
     Ok(())
 }
 
@@ -622,15 +605,14 @@ async fn store_expiry(txn: &WriteTxn, events: &[Persisting<'_>]) -> Result<(), W
         event_ids.push(event.event_id());
         expiry_tss.push(expiry_ts);
     }
-    txn.insert_many(
+    txn.insert_many_later(
         "event_expiry",
-        &[
-            Column::new("event_id", "text", &event_ids),
-            Column::new("expiry_ts", "bigint", &expiry_tss),
+        vec![
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("expiry_ts", "bigint", &expiry_tss),
         ],
         None,
-    )
-    .await?;
+    )?;
     Ok(())
 }
 
@@ -678,21 +660,20 @@ async fn store_room_members(
         .iter()
         .map(|p| non_null_str(p.event().content().get_field("avatar_url")))
         .collect();
-    txn.insert_many(
+    txn.insert_many_later(
         "room_memberships",
-        &[
-            Column::new("event_id", "text", &event_ids),
-            Column::new("event_stream_ordering", "bigint", &stream_orderings),
-            Column::new("user_id", "text", &user_ids),
-            Column::new("sender", "text", &senders),
-            Column::new("room_id", "text", &room_ids),
-            Column::new("membership", "text", &memberships),
-            Column::new("display_name", "text", &display_names),
-            Column::new("avatar_url", "text", &avatar_urls),
+        vec![
+            OwnedColumn::copy("event_id", "text", &event_ids),
+            OwnedColumn::copy("event_stream_ordering", "bigint", &stream_orderings),
+            OwnedColumn::copy("user_id", "text", &user_ids),
+            OwnedColumn::copy("sender", "text", &senders),
+            OwnedColumn::copy("room_id", "text", &room_ids),
+            OwnedColumn::copy("membership", "text", &memberships),
+            OwnedColumn::copy("display_name", "text", &display_names),
+            OwnedColumn::copy("avatar_url", "text", &avatar_urls),
         ],
         None,
-    )
-    .await?;
+    )?;
 
     if input.inhibit_local_membership_updates {
         return Ok(());
@@ -726,7 +707,7 @@ async fn store_room_members(
             }
         };
 
-        txn.execute(
+        txn.execute_later(
             "INSERT INTO local_current_membership
                 (room_id, user_id, event_id, event_stream_ordering, membership)
             VALUES ($1, $2, $3, $4, $5)
@@ -734,15 +715,14 @@ async fn store_room_members(
                 event_id = EXCLUDED.event_id,
                 event_stream_ordering = EXCLUDED.event_stream_ordering,
                 membership = EXCLUDED.membership",
-            &[
-                &event.room_id(),
-                &user_id,
-                &event.event_id(),
-                &persisting.stream_ordering(),
-                &membership,
+            crate::owned_params![
+                event.room_id(),
+                user_id,
+                event.event_id(),
+                persisting.stream_ordering(),
+                membership
             ],
-        )
-        .await?;
+        );
 
         let snapshot_state = stripped_state
             .map(|state| snapshot_values_from_stripped_state(state.as_deref()))

@@ -41,11 +41,12 @@
 
 use std::{
     cell::RefCell,
+    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     task::Poll,
     time::{Duration, Instant},
@@ -258,13 +259,104 @@ impl OwnedColumn {
     }
 }
 
+impl OwnedColumn {
+    /// A column of copies of `values`, for values borrowed from data that
+    /// does not outlive the call, such as `&str`s of an event.
+    pub fn copy<T: ToOwnedSql>(name: &'static str, sql_type: &'static str, values: &[T]) -> Self
+    where
+        Vec<T::Owned>: ToSql + Sync + Send + 'static,
+    {
+        OwnedColumn::new(name, sql_type, values.iter().map(T::to_owned_sql).collect())
+    }
+}
+
+/// A value that can be copied into one a queued statement can own.
+pub trait ToOwnedSql {
+    type Owned;
+    fn to_owned_sql(&self) -> Self::Owned;
+}
+
+impl ToOwnedSql for str {
+    type Owned = String;
+    fn to_owned_sql(&self) -> String {
+        self.to_owned()
+    }
+}
+
+impl<T: ToOwnedSql + ?Sized> ToOwnedSql for &T {
+    type Owned = T::Owned;
+    fn to_owned_sql(&self) -> T::Owned {
+        (**self).to_owned_sql()
+    }
+}
+
+impl<T: ToOwnedSql> ToOwnedSql for Vec<T> {
+    type Owned = Vec<T::Owned>;
+    fn to_owned_sql(&self) -> Vec<T::Owned> {
+        self.iter().map(T::to_owned_sql).collect()
+    }
+}
+
+impl<T: ToOwnedSql> ToOwnedSql for [T] {
+    type Owned = Vec<T::Owned>;
+    fn to_owned_sql(&self) -> Vec<T::Owned> {
+        self.iter().map(T::to_owned_sql).collect()
+    }
+}
+
+impl ToOwnedSql for Option<&str> {
+    type Owned = Option<String>;
+    fn to_owned_sql(&self) -> Option<String> {
+        self.map(str::to_owned)
+    }
+}
+
+impl ToOwnedSql for String {
+    type Owned = String;
+    fn to_owned_sql(&self) -> String {
+        self.clone()
+    }
+}
+
+impl ToOwnedSql for Option<String> {
+    type Owned = Option<String>;
+    fn to_owned_sql(&self) -> Option<String> {
+        self.clone()
+    }
+}
+
+macro_rules! copy_to_owned_sql {
+    ($($t:ty),*) => {
+        $(impl ToOwnedSql for $t {
+            type Owned = $t;
+            fn to_owned_sql(&self) -> $t {
+                *self
+            }
+        })*
+    };
+}
+
+copy_to_owned_sql!(i32, i64, bool, Option<i32>, Option<i64>, Option<bool>);
+
+/// The parameters of a queued statement, copied from borrowed values: for
+/// [`WriteTxn::execute_later`].
+#[macro_export]
+macro_rules! owned_params {
+    ($($param:expr),* $(,)?) => {
+        vec![$(Box::new(
+            $crate::database::postgres::write::ToOwnedSql::to_owned_sql(&$param),
+        ) as $crate::database::postgres::write::OwnedParam),*]
+    };
+}
+
 /// How to turn the error of a queued statement into the one its caller
 /// wants, e.g. a constraint violation into a domain error.
 pub type MapError = fn(WriteError) -> WriteError;
 
 /// A statement queued by one of the `*_later` methods.
 struct Queued {
-    sql: String,
+    /// Shared by the rows of an [`WriteTxn::execute_batch_later`].
+    sql: Arc<str>,
     params: Vec<OwnedParam>,
     map_error: Option<MapError>,
 }
@@ -379,18 +471,19 @@ impl WriteTxn {
         let queued = self.take_queued();
         let mut begin = self.take_begin();
 
-        let sqls: Vec<&str> = queued.iter().map(|q| q.sql.as_str()).chain(sql).collect();
-        let mut statements: Vec<Option<tokio_postgres::Statement>> =
-            sqls.iter().map(|sql| conn.cached(sql)).collect();
+        let sqls: Vec<&str> = queued.iter().map(|q| &*q.sql).chain(sql).collect();
+        // Each distinct statement once: a batch queues one row per statement.
+        let mut by_sql: HashMap<&str, Option<tokio_postgres::Statement>> = HashMap::new();
+        for sql in &sqls {
+            by_sql.entry(sql).or_insert_with(|| conn.cached(sql));
+        }
 
-        let mut missing: Vec<&str> = sqls
+        let mut missing: Vec<&str> = by_sql
             .iter()
-            .zip(&statements)
             .filter(|(_, statement)| statement.is_none())
             .map(|(sql, _)| *sql)
             .collect();
         missing.sort_unstable();
-        missing.dedup();
         if !missing.is_empty() {
             let prepares = join_in_order(missing.iter().map(|sql| conn.prepare_cached(sql, false)));
             let prepared = match begin.take() {
@@ -408,15 +501,13 @@ impl WriteTxn {
                 let statement = result.map_err(|e| {
                     self.statement_failed(&format!("preparing {}", describe(sql)), e)
                 })?;
-                for (slot, slot_sql) in statements.iter_mut().zip(&sqls) {
-                    if slot_sql == sql {
-                        *slot = Some(statement.clone());
-                    }
-                }
+                by_sql.insert(sql, Some(statement));
             }
         }
 
-        let mut statements = statements.into_iter().map(|s| s.expect("prepared above"));
+        let mut statements = sqls
+            .iter()
+            .map(|sql| by_sql[sql].clone().expect("cached or prepared above"));
         let queued_statements: Vec<tokio_postgres::Statement> =
             statements.by_ref().take(queued.len()).collect();
         let last_statement = statements.next();
@@ -533,8 +624,11 @@ impl WriteTxn {
     /// Queue a write whose result nobody reads. It goes out ahead of the
     /// next statement that is not queued, or of the `COMMIT`, and a failure
     /// surfaces there.
+    ///
+    /// Queued statements are all prepared before the first of them runs, so
+    /// one must not depend on a schema change an earlier queued one makes.
     pub fn execute_later(&self, sql: impl Into<String>, params: Vec<OwnedParam>) {
-        self.queue(sql.into(), params, None);
+        self.queue(Arc::from(sql.into()), params, None);
     }
 
     /// As [`WriteTxn::execute_later`], with `map_error` applied to the
@@ -545,10 +639,19 @@ impl WriteTxn {
         params: Vec<OwnedParam>,
         map_error: MapError,
     ) {
-        self.queue(sql.into(), params, Some(map_error));
+        self.queue(Arc::from(sql.into()), params, Some(map_error));
     }
 
-    fn queue(&self, sql: String, params: Vec<OwnedParam>, map_error: Option<MapError>) {
+    /// As [`WriteTxn::execute_batch`], queued as [`WriteTxn::execute_later`]:
+    /// the statement once per row of parameters.
+    pub fn execute_batch_later(&self, sql: &str, rows: Vec<Vec<OwnedParam>>) {
+        let sql: Arc<str> = Arc::from(sql);
+        for params in rows {
+            self.queue(Arc::clone(&sql), params, None);
+        }
+    }
+
+    fn queue(&self, sql: Arc<str>, params: Vec<OwnedParam>, map_error: Option<MapError>) {
         self.queued.lock().expect("not poisoned").push(Queued {
             sql,
             params,

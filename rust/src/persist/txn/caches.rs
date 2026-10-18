@@ -55,19 +55,18 @@ pub async fn send_invalidation_to_replication(
     keys: &[String],
 ) -> Result<(), WriteError> {
     let stream_id = input.cache_stream.next_id(txn).await?;
-    txn.execute(
+    txn.execute_later(
         "INSERT INTO cache_invalidation_stream_by_instance
             (stream_id, instance_name, cache_func, keys, invalidation_ts)
         VALUES ($1, $2, $3, $4, $5)",
-        &[
-            &stream_id,
-            &input.instance_name,
-            &cache_name,
-            &keys,
-            &input.now_ms()?,
+        crate::owned_params![
+            stream_id,
+            input.instance_name,
+            cache_name,
+            keys,
+            input.now_ms()?
         ],
-    )
-    .await?;
+    );
     effects.add_cache_stream_id(stream_id);
     effects.set_new_replication_data();
     Ok(())

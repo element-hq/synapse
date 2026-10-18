@@ -48,7 +48,7 @@ pub async fn update_sliding_sync_joined_room(
         .find(|e| DEFAULT_BUMP_EVENT_TYPES.contains(&e.event().type_()))
         .map(Persisting::stream_ordering);
 
-    txn.execute(
+    txn.execute_later(
         "UPDATE sliding_sync_joined_rooms
         SET
             event_stream_ordering = CASE
@@ -62,8 +62,7 @@ pub async fn update_sliding_sync_joined_room(
                 ELSE bump_stamp
             END
         WHERE room_id = $3",
-        &[&max_stream_ordering, &max_bump_stamp, &room_id],
-    )
-    .await?;
+        crate::owned_params![max_stream_ordering, max_bump_stamp, room_id],
+    );
     Ok(())
 }
