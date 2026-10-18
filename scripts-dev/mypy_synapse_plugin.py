@@ -151,6 +151,7 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, ArgLocation | None] = 
     "synapse.metrics.jemalloc.JemallocCollector": None,
     "synapse.util.metrics.DynamicCollectorRegistry": None,
     "synapse.metrics.background_process_metrics._Collector": None,
+    "synapse.storage.rust_pool._RustPoolStatsCollector": None,
     #
     # `Metric` subclasses:
     "prometheus_client.metrics_core.Metric": None,

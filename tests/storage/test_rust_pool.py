@@ -23,6 +23,8 @@ import time
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import Mock
 
+from prometheus_client import REGISTRY
+
 # The reactor the trial runner spins up; real, so threads and callFromThread work.
 from twisted.internet import reactor as _reactor
 from twisted.internet.defer import gatherResults
@@ -298,6 +300,45 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         third = await pool.runWithConnection(backend_pid)
         self.assertEqual(first, second)
         self.assertNotEqual(second, third)
+
+    async def test_stats_count_prepares_and_retirements(self) -> None:
+        """A statement is prepared once per connection, then found in the cache.
+        Connections retired by `txn_limit` are counted, the counts reach
+        Prometheus, and closing the pool keeps them."""
+        pool = RustConnectionPool(
+            reactor,
+            _test_runtime(),
+            _build_dsn(),
+            name="test-rust-db-stats",
+            server_name="test",
+            threads=1,
+            txn_limit=2,
+        )
+        pool.start()
+        self.addCleanup(pool.close)
+
+        def query(conn: Any) -> None:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 + $1::int", (1,))
+            cursor.fetchall()
+
+        # Two calls on the first connection, then one on its replacement.
+        for _ in range(3):
+            await pool.runWithConnection(query)
+
+        hits, prepares, clears, opened, retired = pool.stats()
+        self.assertEqual((hits, prepares, clears), (1, 2, 0))
+        self.assertEqual((opened, retired), (2, 1))
+
+        prepares_metric = REGISTRY.get_sample_value(
+            "synapse_rust_db_pool_statement_prepares_total",
+            {"name": "test-rust-db-stats", "server_name": "test"},
+        )
+        self.assertEqual(prepares_metric, 2)
+
+        # Closing the native pool keeps what it counted.
+        pool.close()
+        self.assertEqual(pool.stats(), (1, 2, 0, 2, 1))
 
     def test_status_reports_pool_occupancy(self) -> None:
         # Nothing checked out yet: at most the configured number of

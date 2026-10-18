@@ -32,15 +32,17 @@ configured with ``use_rust_driver``.
 import logging
 import threading
 import weakref
-from typing import TYPE_CHECKING, Any, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Iterable, TypeVar
 
 from prometheus_client import Gauge, Histogram
+from prometheus_client.core import REGISTRY, CounterMetricFamily, Metric
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import threads
 from twisted.python.threadpool import ThreadPool
 
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics._types import Collector
 from synapse.storage.rust_dbapi import Connection as DBAPI2Connection
 from synapse.synapse_rust.database import postgres
 
@@ -88,6 +90,72 @@ rust_pool_checkout_wait_seconds = Histogram(
     "Time spent checking a connection out of the native Rust database pool",
     labelnames=["name", SERVER_NAME_LABEL],
 )
+
+
+# The counters of `ConnectionPool.stats()`, in order.
+_POOL_COUNTERS = (
+    (
+        "synapse_rust_db_pool_statement_cache_hits_total",
+        "Statements found in a native Rust pool connection's prepared-statement cache",
+    ),
+    (
+        "synapse_rust_db_pool_statement_prepares_total",
+        "Statements a native Rust pool connection prepared, each a round trip to the "
+        "database",
+    ),
+    (
+        "synapse_rust_db_pool_statement_cache_clears_total",
+        "Times a native Rust pool connection's prepared-statement cache was emptied "
+        "for being full",
+    ),
+    (
+        "synapse_rust_db_pool_connections_opened_total",
+        "Connections the native Rust database pool opened",
+    ),
+    (
+        "synapse_rust_db_pool_connections_retired_total",
+        "Connections the native Rust database pool closed for reaching `txn_limit`",
+    ),
+)
+
+
+class _RustPoolStatsCollector(Collector):
+    """Reports the counters of every live `RustConnectionPool`, summed over
+    pools with the same labels. Holds the pools weakly."""
+
+    def __init__(self) -> None:
+        self._pools: "weakref.WeakSet[RustConnectionPool]" = weakref.WeakSet()
+        # Pools are added on the reactor thread and read on the metrics
+        # thread.
+        self._lock = threading.Lock()
+
+    def add(self, pool: "RustConnectionPool") -> None:
+        with self._lock:
+            self._pools.add(pool)
+
+    def collect(self) -> "Iterable[Metric]":
+        with self._lock:
+            pools = list(self._pools)
+        totals: dict[tuple[str, str], list[int]] = {}
+        for pool in pools:
+            labels = tuple(pool._metric_labels.values())
+            stats = pool.stats()
+            total = totals.setdefault(labels, [0] * len(stats))  # type: ignore[arg-type]
+            for index, value in enumerate(stats):
+                total[index] += value
+
+        for index, (name, documentation) in enumerate(_POOL_COUNTERS):
+            family = CounterMetricFamily(
+                name, documentation, labels=["name", SERVER_NAME_LABEL]
+            )
+            for labels, total in totals.items():
+                family.add_metric(list(labels), total[index])
+            yield family
+
+
+# Its metrics carry `SERVER_NAME_LABEL`, which the collector adds per pool.
+_pool_stats_collector = _RustPoolStatsCollector()  # type: ignore[missing-server-name-label]
+REGISTRY.register(_pool_stats_collector)
 
 
 class RustConnectionPool:
@@ -185,6 +253,13 @@ class RustConnectionPool:
 
         self._metric_labels = {"name": name, SERVER_NAME_LABEL: server_name}
         self._register_gauges()
+        # What the native pools this replaced did, as `stats()` reports it, so
+        # the counters keep counting up across a `close()`/`start()` cycle.
+        self._closed_pool_stats = (0, 0, 0, 0, 0)
+        # Held while `close()` swaps the native pool for `_closed_pool_stats`,
+        # so a metrics scrape never counts the old pool twice.
+        self._stats_lock = threading.Lock()
+        _pool_stats_collector.add(self)
 
     def _register_gauges(self) -> None:
         """Point the occupancy gauges at this pool.
@@ -204,6 +279,27 @@ class RustConnectionPool:
 
         for gauge, index in _POOL_GAUGES:
             gauge.labels(**self._metric_labels).set_function(status_field(index))
+
+    def stats(self) -> tuple[int, int, int, int, int]:
+        """What this pool's connections have done, counted over every native
+        pool it has opened: ``(statement_cache_hits, statement_prepares,
+        statement_cache_clears, connections_opened, connections_retired)``."""
+        with self._stats_lock:
+            return self._stats_unlocked()
+
+    def _stats_unlocked(self) -> tuple[int, int, int, int, int]:
+        """`stats()`, for a caller holding `_stats_lock`."""
+        closed = self._closed_pool_stats
+        if self._pool is None:
+            return closed
+        current = self._pool.stats()
+        return (
+            closed[0] + current[0],
+            closed[1] + current[1],
+            closed[2] + current[2],
+            closed[3] + current[3],
+            closed[4] + current[4],
+        )
 
     def status(self) -> tuple[int, int, int, int]:
         """The native pool's occupancy: ``(max_size, size, available, waiting)``,
@@ -276,7 +372,9 @@ class RustConnectionPool:
         self._connections.clear()
         if self._pool is not None:
             self._pool.close()
-            self._pool = None
+            with self._stats_lock:
+                self._closed_pool_stats = self._stats_unlocked()
+                self._pool = None
         for gauge, _ in _POOL_GAUGES:
             # Stop reporting a closed pool; `start()` registers afresh.
             try:

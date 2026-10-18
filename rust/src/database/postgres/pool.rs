@@ -16,7 +16,8 @@
 //! could exhaust the server's connection limit between them.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use deadpool::managed::{
@@ -93,6 +94,42 @@ impl SessionConfig {
     }
 }
 
+/// Counts of what a pool's connections did, for metrics. Shared by the
+/// [`ConnectionManager`] and every [`PooledClient`] it creates.
+#[derive(Debug, Default)]
+pub struct PoolStats {
+    /// Statements found in a connection's prepared-statement cache.
+    statement_cache_hits: AtomicU64,
+    /// Statements prepared, each costing a round trip: cache misses and
+    /// refreshes.
+    statement_prepares: AtomicU64,
+    /// Times a connection's cache was emptied for reaching
+    /// [`STATEMENT_CACHE_CAP`].
+    statement_cache_clears: AtomicU64,
+    /// Connections opened.
+    connections_opened: AtomicU64,
+    /// Connections closed for reaching their use limit (`txn_limit`).
+    connections_retired: AtomicU64,
+}
+
+impl PoolStats {
+    fn bump(counter: &AtomicU64) {
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `(statement_cache_hits, statement_prepares, statement_cache_clears,
+    /// connections_opened, connections_retired)`.
+    pub fn snapshot(&self) -> (u64, u64, u64, u64, u64) {
+        (
+            self.statement_cache_hits.load(Ordering::Relaxed),
+            self.statement_prepares.load(Ordering::Relaxed),
+            self.statement_cache_clears.load(Ordering::Relaxed),
+            self.connections_opened.load(Ordering::Relaxed),
+            self.connections_retired.load(Ordering::Relaxed),
+        )
+    }
+}
+
 /// Creates and recycles [`tokio_postgres`] connections for a [`ConnectionPool`].
 pub struct ConnectionManager {
     /// The resolved connection config, parsed once from the DSN (with libpq's
@@ -111,6 +148,8 @@ pub struct ConnectionManager {
     /// If set, a connection is closed rather than reused once it has been
     /// checked out this many times. See [`PoolConfig::max_uses`].
     max_uses: Option<usize>,
+    /// What the pool's connections did, for metrics.
+    stats: Arc<PoolStats>,
 }
 
 impl ConnectionManager {
@@ -131,6 +170,7 @@ impl ConnectionManager {
             session,
             tls: connector,
             max_uses: None,
+            stats: Arc::default(),
         })
     }
 }
@@ -162,6 +202,8 @@ pub struct PooledClient {
     /// Prepared statements keyed by their SQL. Guarded by a plain [`Mutex`]:
     /// the critical sections are lookups/inserts (never awaits).
     statements: Mutex<HashMap<String, Statement>>,
+    /// The pool's counters.
+    stats: Arc<PoolStats>,
 }
 
 /// The cache is cleared once it holds this many statements. Synapse's hot set
@@ -184,13 +226,16 @@ impl PooledClient {
         if refresh {
             self.statements.lock().expect("not poisoned").remove(sql);
         } else if let Some(statement) = self.statements.lock().expect("not poisoned").get(sql) {
+            PoolStats::bump(&self.stats.statement_cache_hits);
             return Ok(statement.clone());
         }
 
+        PoolStats::bump(&self.stats.statement_prepares);
         let statement = self.client.prepare(sql).await?;
 
         let mut statements = self.statements.lock().expect("not poisoned");
         if statements.len() >= STATEMENT_CACHE_CAP {
+            PoolStats::bump(&self.stats.statement_cache_clears);
             statements.clear();
         }
         statements.insert(sql.to_owned(), statement.clone());
@@ -242,9 +287,11 @@ impl Manager for ConnectionManager {
             client.batch_execute(&setup).await?;
         }
 
+        PoolStats::bump(&self.stats.connections_opened);
         Ok(PooledClient {
             client,
             statements: Mutex::new(HashMap::new()),
+            stats: Arc::clone(&self.stats),
         })
     }
 
@@ -266,6 +313,7 @@ impl Manager for ConnectionManager {
         // first, so this runs when the `max_uses`th checkout would reuse it.
         if let Some(max_uses) = self.max_uses {
             if metrics.recycle_count + 1 >= max_uses {
+                PoolStats::bump(&self.stats.connections_retired);
                 return Err(RecycleError::message("connection reached its use limit"));
             }
         }
@@ -432,6 +480,13 @@ impl PyConnectionPool {
     /// than waiting for garbage collection.
     fn close(&self) {
         self.pool.close();
+    }
+
+    /// What the pool's connections have done since it was built, for
+    /// metrics: `(statement_cache_hits, statement_prepares,
+    /// statement_cache_clears, connections_opened, connections_retired)`.
+    fn stats(&self) -> (u64, u64, u64, u64, u64) {
+        self.pool.manager().stats.snapshot()
     }
 
     /// The pool's occupancy, for metrics: `(max_size, size, available,
