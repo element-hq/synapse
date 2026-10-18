@@ -229,7 +229,7 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
 
         # Synapse refuses to accept new stringy power level events. Bypass this by
         # neutering the validation.
-        with patch("synapse.events.validator.jsonschema.validate"):
+        with patch("synapse.events.validator._validate_against_schema"):
             # Note: https://github.com/matrix-org/matrix-spec/issues/853 plans to forbid
             # string power levels in new rooms. For this test to have a clean
             # conscience, we ought to ensure it's upgrading from a sufficiently old

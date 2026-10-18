@@ -106,25 +106,14 @@ class EventValidator:
                 )
 
         elif event.type == EventTypes.PowerLevels:
-            try:
-                jsonschema.validate(
-                    instance=event.content,
-                    schema=POWER_LEVELS_SCHEMA,
-                    cls=POWER_LEVELS_VALIDATOR,
-                )
-            except jsonschema.ValidationError as e:
-                raise _validation_error_to_api_error(e)
+            _validate_against_schema(_POWER_LEVELS_SCHEMA_VALIDATOR, event.content)
 
         # If the event contains a mentions key, validate it.
         if EventContentFields.MENTIONS in event.content:
-            try:
-                jsonschema.validate(
-                    instance=event.content[EventContentFields.MENTIONS],
-                    schema=MENTIONS_SCHEMA,
-                    cls=MENTIONS_VALIDATOR,
-                )
-            except jsonschema.ValidationError as e:
-                raise _validation_error_to_api_error(e)
+            _validate_against_schema(
+                _MENTIONS_SCHEMA_VALIDATOR,
+                event.content[EventContentFields.MENTIONS],
+            )
 
     def _validate_retention(self, event: EventBase) -> None:
         """Checks that an event that defines the retention policy for a room respects the
@@ -329,3 +318,34 @@ def _validation_error_to_api_error(err: jsonschema.ValidationError) -> SynapseEr
 POWER_LEVELS_VALIDATOR = _create_validator(POWER_LEVELS_SCHEMA)
 
 MENTIONS_VALIDATOR = _create_validator(MENTIONS_SCHEMA)
+
+
+def _compile_validator(
+    cls: type[jsonschema.Draft7Validator], schema: JsonDict
+) -> jsonschema.Draft7Validator:
+    """Check `schema` once and return a validator instance bound to it.
+
+    `jsonschema.validate` checks the schema against the metaschema on every
+    call, which costs more than validating a power levels event.
+    """
+    cls.check_schema(schema)
+    return cls(schema)
+
+
+_POWER_LEVELS_SCHEMA_VALIDATOR = _compile_validator(
+    POWER_LEVELS_VALIDATOR, POWER_LEVELS_SCHEMA
+)
+
+_MENTIONS_SCHEMA_VALIDATOR = _compile_validator(MENTIONS_VALIDATOR, MENTIONS_SCHEMA)
+
+
+def _validate_against_schema(
+    validator: jsonschema.Draft7Validator, instance: object
+) -> None:
+    """Validate `instance`, raising a 400 `SynapseError` if it does not match.
+
+    Reports the same error as `jsonschema.validate` would.
+    """
+    error = jsonschema.exceptions.best_match(validator.iter_errors(instance))
+    if error is not None:
+        raise _validation_error_to_api_error(error)

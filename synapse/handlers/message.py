@@ -800,7 +800,7 @@ class EventCreationHandler:
                     403, "You must be in the room to create an alias for it"
                 )
 
-        self.validator.validate_new(event, self.config)
+        # `create_new_client_event` has already run `validate_new` on the event.
         return event, unpersisted_context
 
     async def _is_exempt_from_privacy_policy(

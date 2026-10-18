@@ -126,7 +126,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         # some of this validation was missing in the past.
         with (
             patch("synapse.events.validator.validate_canonicaljson"),
-            patch("synapse.events.validator.jsonschema.validate"),
+            patch("synapse.events.validator._validate_against_schema"),
             patch("synapse.handlers.event_auth.check_state_dependent_auth_rules"),
         ):
             pl_event_id = self.helper.send_state(
