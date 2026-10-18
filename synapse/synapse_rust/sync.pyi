@@ -374,6 +374,9 @@ class SyncStoreForTest:
     Rust sync handler's caches. For `tests/storage/test_sync_store.py`."""
 
     def __init__(self, pool: ConnectionPool, handler: SyncHandler) -> None: ...
+    def transaction_settings(self) -> list[tuple[str, str]]:
+        """The `(transaction_isolation, transaction_read_only)` the first
+        statement of a read-only and of a writing transaction sees."""
     def filter_events_for_server(
         self,
         target_server_name: str,

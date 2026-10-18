@@ -34,7 +34,10 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 
@@ -229,6 +232,13 @@ pub struct Borrowed<'r, 'a> {
     reader: &'r SyncReader<'a>,
     conn: Option<PooledConnection>,
     in_transaction: bool,
+    /// The `BEGIN` of a transaction no statement has sent yet. The first
+    /// statement sends it in front of its own request, so that they share a
+    /// round trip.
+    pending_begin: Mutex<Option<&'static str>>,
+    /// The `BEGIN` failed, so the statement sent behind it ran outside the
+    /// transaction: the connection is discarded, not reused.
+    begin_failed: AtomicBool,
 }
 
 impl<'a> SyncReader<'a> {
@@ -263,6 +273,8 @@ impl<'a> SyncReader<'a> {
             reader: self,
             conn: Some(conn),
             in_transaction: false,
+            pending_begin: Mutex::new(None),
+            begin_failed: AtomicBool::new(false),
         })
     }
 
@@ -273,13 +285,13 @@ impl<'a> SyncReader<'a> {
     /// [`Borrowed::commit`].
     pub(crate) async fn begin(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
         let mut borrowed = self.borrow().await?;
-        // Set before awaiting: if we are dropped after BEGIN is sent but
-        // before it returns, the transaction is open and must be rolled back
-        // before the connection goes back to the pool.
+        // Set before anything is sent: if we are dropped after the BEGIN goes
+        // out but before it returns, the transaction is open and must be
+        // rolled back before the connection goes back to the pool.
         borrowed.in_transaction = true;
-        borrowed
-            .execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            .await?;
+        // Sent with the first statement.
+        *lock_ignoring_poison(&borrowed.pending_begin) =
+            Some("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
         self.update_stats(|stats| stats.transactions += 1);
         Ok(borrowed)
     }
@@ -291,13 +303,13 @@ impl<'a> SyncReader<'a> {
     /// with [`Borrowed::commit`].
     pub(crate) async fn begin_write(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
         let mut borrowed = self.borrow().await?;
-        // Set before awaiting: if we are dropped after BEGIN is sent but
-        // before it returns, the transaction is open and must be rolled back.
-        // A ROLLBACK outside one only warns.
+        // Set before anything is sent: if we are dropped after the BEGIN goes
+        // out but before it returns, the transaction is open and must be
+        // rolled back. A ROLLBACK outside one only warns.
         borrowed.in_transaction = true;
-        borrowed
-            .execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
-            .await?;
+        // Sent with the first statement.
+        *lock_ignoring_poison(&borrowed.pending_begin) =
+            Some("BEGIN ISOLATION LEVEL REPEATABLE READ");
         self.update_stats(|stats| stats.transactions += 1);
         Ok(borrowed)
     }
@@ -2240,6 +2252,26 @@ impl Borrowed<'_, '_> {
         self.conn.as_ref().expect("held until dropped")
     }
 
+    /// Await `request`, sending the transaction's `BEGIN` in front of it if
+    /// no statement has sent it yet. tokio-postgres sends a request when its
+    /// future is first polled, and `join` polls the `BEGIN` first.
+    async fn after_begin<T>(
+        &self,
+        request: impl std::future::Future<Output = Result<T, tokio_postgres::Error>>,
+    ) -> anyhow::Result<Result<T, tokio_postgres::Error>> {
+        let begin = lock_ignoring_poison(&self.pending_begin).take();
+        let Some(begin) = begin else {
+            return Ok(request.await);
+        };
+        let (begun, result) =
+            futures::future::join(self.conn().batch_execute(begin), request).await;
+        if let Err(e) = begun {
+            self.begin_failed.store(true, Ordering::Relaxed);
+            return Err(anyhow::Error::new(e).context(format!("running {begin}")));
+        }
+        Ok(result)
+    }
+
     /// Run a statement through the connection's prepared statement cache.
     pub async fn query(
         &self,
@@ -2248,14 +2280,19 @@ impl Borrowed<'_, '_> {
     ) -> anyhow::Result<Vec<Row>> {
         let start = Instant::now();
         let conn = self.conn();
-        let statement = conn
-            .prepare_cached(sql, false)
-            .await
-            .with_context(|| format!("preparing {}", sql.trim()))?;
-        let rows = conn
-            .query(&statement, params)
-            .await
-            .with_context(|| format!("running {}", sql.trim()))?;
+        // A pending `BEGIN` goes with the statement's first request: its
+        // execution if it is cached, otherwise its prepare.
+        let rows = match conn.cached(sql) {
+            Some(statement) => self.after_begin(conn.query(&statement, params)).await?,
+            None => {
+                let statement = self
+                    .after_begin(conn.prepare_cached(sql, false))
+                    .await?
+                    .with_context(|| format!("preparing {}", sql.trim()))?;
+                conn.query(&statement, params).await
+            }
+        }
+        .with_context(|| format!("running {}", sql.trim()))?;
         self.record(start, rows.len());
         if log::log_enabled!(log::Level::Debug) {
             let head: String = sql.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
@@ -2276,9 +2313,8 @@ impl Borrowed<'_, '_> {
     ) -> anyhow::Result<Vec<Vec<tokio_postgres::SimpleQueryRow>>> {
         let start = Instant::now();
         let messages = self
-            .conn()
-            .simple_query(sql)
-            .await
+            .after_begin(self.conn().simple_query(sql))
+            .await?
             .with_context(|| format!("running {}", sql.trim()))?;
         let mut results: Vec<Vec<tokio_postgres::SimpleQueryRow>> = Vec::new();
         let mut current = Vec::new();
@@ -2300,9 +2336,8 @@ impl Borrowed<'_, '_> {
     /// Run statements that return nothing.
     pub(crate) async fn execute(&self, sql: &str) -> anyhow::Result<()> {
         let start = Instant::now();
-        self.conn()
-            .batch_execute(sql)
-            .await
+        self.after_begin(self.conn().batch_execute(sql))
+            .await?
             .with_context(|| format!("running {sql}"))?;
         self.record(start, 0);
         Ok(())
@@ -2319,6 +2354,10 @@ impl Borrowed<'_, '_> {
     /// Commit the transaction opened by [`SyncReader::begin`] and return
     /// the connection to the pool.
     pub async fn commit(mut self) -> anyhow::Result<()> {
+        if lock_ignoring_poison(&self.pending_begin).take().is_some() {
+            // No statement ran, so there is no transaction to commit.
+            self.in_transaction = false;
+        }
         if self.in_transaction {
             self.execute("COMMIT").await?;
             self.in_transaction = false;
@@ -2330,7 +2369,13 @@ impl Borrowed<'_, '_> {
 impl Drop for Borrowed<'_, '_> {
     fn drop(&mut self) {
         let Some(conn) = self.conn.take() else { return };
-        if !self.in_transaction {
+        if self.begin_failed.load(Ordering::Relaxed) {
+            // The session state is unknown: discard the connection.
+            drop(PooledConnection::take(conn));
+            return;
+        }
+        if !self.in_transaction || lock_ignoring_poison(&self.pending_begin).is_some() {
+            // No transaction was opened.
             return;
         }
         // Roll back before the connection goes back to the pool, so the next
@@ -2420,6 +2465,36 @@ impl PySyncStoreForTest {
             pool: pool.pool.clone(),
             handle: pool.handle.clone(),
         }
+    }
+
+    /// What the first statement of a [`SyncReader::begin`] and of a
+    /// [`SyncReader::begin_write`] transaction sees: `(isolation level,
+    /// read only)` of each. A transaction that runs nothing also commits.
+    fn transaction_settings(&self, py: Python<'_>) -> PyResult<Vec<(String, String)>> {
+        self.run(py, |reader| {
+            async move {
+                let mut settings = Vec::new();
+                for write in [false, true] {
+                    let txn = if write {
+                        reader.begin_write().await?
+                    } else {
+                        reader.begin().await?
+                    };
+                    let rows = txn
+                        .query(
+                            "SELECT current_setting('transaction_isolation'),
+                                current_setting('transaction_read_only')",
+                            &[],
+                        )
+                        .await?;
+                    settings.push((rows[0].try_get(0)?, rows[0].try_get(1)?));
+                    txn.commit().await?;
+                }
+                reader.begin().await?.commit().await?;
+                Ok(settings)
+            }
+            .boxed()
+        })
     }
 
     /// [`crate::visibility::filter_events_for_server`]. `None` where Python

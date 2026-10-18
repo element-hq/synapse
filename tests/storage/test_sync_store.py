@@ -101,6 +101,14 @@ class SyncStoreTestCase(unittest.HomeserverTestCase):
         self.room_id = self.helper.create_room_as(self.alice, tok=self.alice_tok)
         self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
 
+    def test_transactions_begin_with_their_first_statement(self) -> None:
+        """A transaction's `BEGIN` goes out with its first statement, which runs
+        inside the transaction."""
+        self.assertEqual(
+            self.rust.transaction_settings(),
+            [("repeatable read", "on"), ("repeatable read", "off")],
+        )
+
     def test_rooms_for_user(self) -> None:
         other = self.helper.create_room_as(self.bob, tok=self.bob_tok)
         self.helper.invite(other, self.bob, self.alice, tok=self.bob_tok)
