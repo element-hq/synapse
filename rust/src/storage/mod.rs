@@ -21,6 +21,7 @@ pub mod native_pool;
 pub mod pool_querier;
 pub mod python;
 pub mod sliding_sync_store;
+pub mod state_groups;
 pub mod store;
 pub mod stream_ids;
 pub mod sync_store;

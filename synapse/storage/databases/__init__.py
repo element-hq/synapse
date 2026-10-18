@@ -168,6 +168,16 @@ class Databases(Generic[DataStoreT]):
         if not state or not state_deletion:
             raise Exception("No 'state' database configured")
 
+        # The Rust store writes state groups when they share the main database
+        # and that runs on the native driver.
+        rust_store = getattr(main, "rust_store", None)
+        if (
+            rust_store is not None
+            and state.db_pool is main.db_pool
+            and rust_store.loads_events
+        ):
+            state._rust_state_group_writer = rust_store
+
         # We use local variables here to ensure that the databases do not have
         # optional types.
         self.main = main  # type: ignore[assignment]

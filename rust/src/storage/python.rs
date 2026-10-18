@@ -71,6 +71,7 @@ use crate::{
         db::python_db_pool::PythonDatabasePoolWrapper,
         events::{CachedEvent, EventLoadStats, EventLoader, UnusableEvent},
         pool_querier::PoolQuerier,
+        state_groups::{store_state_group_chain, StateGroupChain, StateRow},
         store::{IsFeatureEnabledKey, PerUserExperimentalFeature, Store},
     },
 };
@@ -144,7 +145,7 @@ impl RustStore {
     fn pool(&self, py: Python<'_>) -> PyResult<ConnectionPool> {
         let Some(db_pool) = &self.native_db_pool else {
             return Err(PyRuntimeError::new_err(
-                "loading events in Rust needs the native Postgres driver",
+                "this needs the native Postgres driver",
             ));
         };
         let db_pool = db_pool
@@ -158,6 +159,22 @@ impl RustStore {
             return Err(PyRuntimeError::new_err("the database pool is closed"));
         }
         Ok(pool.cast::<PyConnectionPool>()?.get().pool.clone())
+    }
+
+    /// The future that stores `chain`, to run on the tokio runtime.
+    fn state_group_chain_future(
+        &self,
+        py: Python<'_>,
+        chain: StateGroupChain,
+        now_ms: i64,
+    ) -> PyResult<impl Future<Output = PyResult<(i64, Vec<i64>)>> + Send + 'static> {
+        let pool = self.pool(py)?;
+        Ok(async move {
+            let stored = store_state_group_chain(&pool, &chain, now_ms)
+                .await
+                .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+            Ok((stored.group_before, stored.groups_after))
+        })
     }
 
     fn start_load<'py>(
@@ -374,6 +391,59 @@ impl RustStore {
         event_ids: Vec<String>,
     ) -> PyResult<LoadedEvents> {
         self.load_blocking(py, event_ids, true)
+    }
+
+    /// Store a chain of new state groups for a batch of new events, as
+    /// `store_state_deltas_for_batched` does. A deferred of the group before
+    /// the first event and the group after each of `state_events`. See
+    /// [`store_state_group_chain`].
+    #[pyo3(signature = (room_id, prev_group, full_state_before, state_events, now_ms))]
+    fn store_state_group_chain<'py>(
+        &self,
+        py: Python<'py>,
+        room_id: String,
+        prev_group: Option<i64>,
+        full_state_before: Option<(String, Vec<StateRow>)>,
+        state_events: Vec<StateRow>,
+        now_ms: i64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let store = self.state_group_chain_future(
+            py,
+            StateGroupChain {
+                room_id,
+                prev_group,
+                full_state_before,
+                state_events,
+            },
+            now_ms,
+        )?;
+        create_deferred(py, &self.runtime, store)
+    }
+
+    /// As [`RustStore::store_state_group_chain`], but blocks and returns the
+    /// result. For tests.
+    #[pyo3(signature = (room_id, prev_group, full_state_before, state_events, now_ms))]
+    fn store_state_group_chain_blocking(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        prev_group: Option<i64>,
+        full_state_before: Option<(String, Vec<StateRow>)>,
+        state_events: Vec<StateRow>,
+        now_ms: i64,
+    ) -> PyResult<(i64, Vec<i64>)> {
+        let store = self.state_group_chain_future(
+            py,
+            StateGroupChain {
+                room_id,
+                prev_group,
+                full_state_before,
+                state_events,
+            },
+            now_ms,
+        )?;
+        let handle = self.runtime.tokio_handle()?;
+        py.detach(|| handle.block_on(store))
     }
 
     /// The caches that mirror a Python `@cached` function, each with the

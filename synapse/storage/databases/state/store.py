@@ -55,6 +55,7 @@ from synapse.util.cancellation import cancellable
 if TYPE_CHECKING:
     from synapse.server import HomeServer
     from synapse.storage.databases.state.deletion import StateDeletionDataStore
+    from synapse.synapse_rust.storage import RustStore
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,11 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         def get_max_state_group_txn(txn: Cursor) -> int:
             txn.execute("SELECT COALESCE(max(id), 0) FROM state_groups")
             return txn.fetchone()[0]  # type: ignore
+
+        # The Rust store of the main database, when the state groups live
+        # there and it runs on the native driver. Set by `Databases` once
+        # both stores exist.
+        self._rust_state_group_writer: "RustStore | None" = None
 
         self._state_group_seq_gen = build_sequence_generator(
             db_conn,
@@ -502,12 +508,6 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 A list of state groups
             """
 
-            if prev_group is None:
-                # The first context may already have a stored group for the state
-                # before it, e.g. when a module's `check_event_allowed` callback
-                # had the event rebuilt. Build on that rather than store another.
-                prev_group = events_and_context[0][1].state_group_before_event
-
             num_state_groups = sum(
                 1 for event, _ in events_and_context if event.is_state()
             )
@@ -550,25 +550,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 )
                 sg_before = prev_group
 
-            state_group_iter = iter(state_groups)
-            for event, context in events_and_context:
-                if context.state_group_before_event not in (None, sg_before):
-                    # The context came with a state group of its own, which the
-                    # chain replaces, so its state map may not match the new one.
-                    context.state_map_before_event = None
-
-                if not event.is_state():
-                    context.state_group_after_event = sg_before
-                    context.state_group_before_event = sg_before
-                    continue
-
-                sg_after = next(state_group_iter)
-                context.state_group_after_event = sg_after
-                context.state_group_before_event = sg_before
-                context.state_delta_due_to_event = {
-                    (event.type, event.state_key): event.event_id
-                }
-                sg_before = sg_after
+            _assign_batched_state_groups(events_and_context, sg_before, state_groups)
 
             self.db_pool.simple_insert_many_txn(
                 txn,
@@ -618,26 +600,93 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             # Prefill the state group caches with the state after the last
             # event, which persisting the batch reads to work out the room's
             # new current state.
-            last_event, last_context = events_and_context[-1]
-            if last_context.state_map_before_event is not None:
-                last_state = dict(last_context.state_map_before_event)
-                if last_event.is_state():
-                    last_state[(last_event.type, last_event.state_key)] = (
-                        last_event.event_id
-                    )
-                assert last_context.state_group_after_event is not None
-                self._prefill_state_group_caches_txn(
-                    txn, last_context.state_group_after_event, last_state
-                )
+            last_state = _state_after_batch(events_and_context)
+            if last_state is not None:
+                self._prefill_state_group_caches_txn(txn, *last_state)
 
             return events_and_context
+
+        # The contexts are unpersisted ones, which the caller built.
+        unpersisted = cast(
+            list[tuple[EventBase, UnpersistedEventContext]], events_and_context
+        )
+
+        if prev_group is None:
+            # The first context may already have a stored group for the state
+            # before it, e.g. when a module's `check_event_allowed` callback
+            # had the event rebuilt. Build on that rather than store another.
+            prev_group = unpersisted[0][1].state_group_before_event
+
+        if self._rust_state_group_writer is not None:
+            return await self._store_state_deltas_for_batched_in_rust(
+                unpersisted, room_id, prev_group
+            )
 
         return await self.db_pool.runInteraction(
             "store_state_deltas_for_batched.insert_deltas_group",
             insert_deltas_group_txn,
-            events_and_context,
+            unpersisted,
             prev_group,
         )
+
+    async def _store_state_deltas_for_batched_in_rust(
+        self,
+        events_and_context: list[tuple[EventBase, UnpersistedEventContext]],
+        room_id: str,
+        prev_group: int | None,
+    ) -> list[tuple[EventBase, UnpersistedEventContext]]:
+        """`store_state_deltas_for_batched`, with the state groups written by
+        the native driver's Rust writer."""
+        assert self._rust_state_group_writer is not None
+
+        full_state_before = None
+        if prev_group is None:
+            first_event, first_context = events_and_context[0]
+            state_before = first_context.state_map_before_event
+            assert state_before is not None
+            full_state_before = (
+                first_event.event_id,
+                [(key[0], key[1], event_id) for key, event_id in state_before.items()],
+            )
+
+        # As `call_after` in the Python path does, read the cache sequences
+        # before the write, so a concurrent invalidation wins over the prefill.
+        members_sequence = self._state_group_members_cache.sequence
+        non_members_sequence = self._state_group_cache.sequence
+
+        # The Rust deferred follows the logcontext rules already.
+        (
+            sg_before,
+            state_groups,
+        ) = await self._rust_state_group_writer.store_state_group_chain(
+            room_id,
+            prev_group,
+            full_state_before,
+            [
+                (event.type, event.state_key, event.event_id)
+                for event, _ in events_and_context
+                if event.is_state()
+            ],
+            self.clock.time_msec(),
+        )
+
+        _assign_batched_state_groups(events_and_context, sg_before, state_groups)
+
+        last_state = _state_after_batch(events_and_context)
+        if last_state is not None:
+            group, state = last_state
+            self._state_group_members_cache.update(
+                members_sequence,
+                key=group,
+                value={s: ev for (s, ev) in state.items() if s[0] == EventTypes.Member},
+            )
+            self._state_group_cache.update(
+                non_members_sequence,
+                key=group,
+                value={s: ev for (s, ev) in state.items() if s[0] != EventTypes.Member},
+            )
+
+        return events_and_context
 
     @trace
     @tag_args
@@ -994,3 +1043,48 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             table="state_groups",
             keyvalues={"room_id": room_id},
         )
+
+
+def _assign_batched_state_groups(
+    events_and_context: list[tuple[EventBase, UnpersistedEventContext]],
+    sg_before: int,
+    state_groups: list[int],
+) -> None:
+    """Set the state groups of a batch's contexts: `sg_before` is the group
+    before the first event, and `state_groups` the group after each state
+    event, in order."""
+    state_group_iter = iter(state_groups)
+    for event, context in events_and_context:
+        if context.state_group_before_event not in (None, sg_before):
+            # The context came with a state group of its own, which the
+            # chain replaces, so its state map may not match the new one.
+            context.state_map_before_event = None
+
+        if not event.is_state():
+            context.state_group_after_event = sg_before
+            context.state_group_before_event = sg_before
+            continue
+
+        sg_after = next(state_group_iter)
+        context.state_group_after_event = sg_after
+        context.state_group_before_event = sg_before
+        context.state_delta_due_to_event = {
+            (event.type, event.state_key): event.event_id
+        }
+        sg_before = sg_after
+
+
+def _state_after_batch(
+    events_and_context: list[tuple[EventBase, UnpersistedEventContext]],
+) -> tuple[int, StateMap[str]] | None:
+    """The state group after a batch's last event and its full state, which
+    persisting the batch reads to work out the room's new current state, if
+    the last context knows the state before it."""
+    last_event, last_context = events_and_context[-1]
+    if last_context.state_map_before_event is None:
+        return None
+    last_state = dict(last_context.state_map_before_event)
+    if last_event.is_state():
+        last_state[(last_event.type, last_event.state_key)] = last_event.event_id
+    assert last_context.state_group_after_event is not None
+    return last_context.state_group_after_event, last_state

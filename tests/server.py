@@ -1665,6 +1665,13 @@ def setup_test_homeserver(
                 Any, _BlockingRustCalls(main_store._rust_event_loader)
             )
 
+        # Likewise for the state groups the Rust store writes.
+        state_store = hs.get_datastores().state
+        if state_store._rust_state_group_writer is not None:
+            state_store._rust_state_group_writer = cast(
+                Any, _BlockingRustCalls(state_store._rust_state_group_writer)
+            )
+
         # Likewise for the Rust persister, whose persists would otherwise
         # finish after the test has moved on.
         persistence = hs.get_storage_controllers().persistence

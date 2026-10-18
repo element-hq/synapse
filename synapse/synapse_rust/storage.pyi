@@ -116,6 +116,37 @@ class RustStore:
         self, event_ids: list[str]
     ) -> tuple[dict[str, tuple[Event, Event | None]], int]:
         """`reload_events`, blocking. For tests."""
+
+    def store_state_group_chain(
+        self,
+        room_id: str,
+        prev_group: int | None,
+        full_state_before: tuple[str, list[tuple[str, str, str]]] | None,
+        state_events: list[tuple[str, str, str]],
+        now_ms: int,
+    ) -> "Deferred[tuple[int, list[int]]]":
+        """Store a chain of new state groups for a batch of new events, as
+        `store_state_deltas_for_batched` does, in one transaction.
+
+        The chain follows on from `prev_group`, which is locked against
+        deletion and has any pending deletion pushed back to `now_ms`. With no
+        `prev_group`, `full_state_before` gives the first event's ID and the
+        `(type, state_key, event_id)` state before it, stored as a full group.
+        Each of `state_events`, `(type, state_key, event_id)` in order, gets a
+        group that is a delta from the one before.
+
+        Returns the group before the first event and the group after each state
+        event. Raises `RuntimeError` if `prev_group` no longer exists."""
+
+    def store_state_group_chain_blocking(
+        self,
+        room_id: str,
+        prev_group: int | None,
+        full_state_before: tuple[str, list[tuple[str, str, str]]] | None,
+        state_events: list[tuple[str, str, str]],
+        now_ms: int,
+    ) -> tuple[int, list[int]]:
+        """`store_state_group_chain`, blocking. For tests."""
     @property
     def event_cache(self) -> RustEventCache:
         """The event cache, for `EventsWorkerStore` to bind as

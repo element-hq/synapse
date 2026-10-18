@@ -792,6 +792,13 @@ class RoomsCreateTestCase(RoomBase):
 
     user_id = "@sid1:red"
 
+    def _expected_create_room_txn_count(self) -> int:
+        """The Python transactions a plain room creation runs. The state groups
+        are written in Rust on the native driver, outside them."""
+        if self.hs.get_datastores().state._rust_state_group_writer is not None:
+            return 9
+        return 10
+
     def test_post_room_no_keys(self) -> None:
         # POST with no config keys, expect new room id
         channel = self.make_request("POST", "/createRoom", "{}")
@@ -799,7 +806,9 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(10, channel.resource_usage.db_txn_count)
+        self.assertEqual(
+            self._expected_create_room_txn_count(), channel.resource_usage.db_txn_count
+        )
 
     def test_post_room_initial_state(self) -> None:
         # POST with initial_state config key, expect new room id
@@ -812,7 +821,9 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(10, channel.resource_usage.db_txn_count)
+        self.assertEqual(
+            self._expected_create_room_txn_count(), channel.resource_usage.db_txn_count
+        )
 
     def test_post_room_topic(self) -> None:
         # POST with topic key, expect new room id
