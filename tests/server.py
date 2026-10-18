@@ -95,7 +95,7 @@ from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import ContextResourceUsage
+from synapse.logging.context import ContextResourceUsage, LoggingContext
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
@@ -121,13 +121,14 @@ from synapse.synapse_rust.state import (
 from synapse.synapse_rust.storage import RustStore
 from synapse.synapse_rust.sync import SyncHandler as RustSyncHandler
 from synapse.types import ISynapseReactor, JsonDict
-from synapse.util.clock import Clock
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 from tests.utils import (
     LEAVE_DB,
     POSTGRES_BASE_DB,
+    POSTGRES_DBNAME_FOR_INITIAL_CREATE,
     POSTGRES_HOST,
     POSTGRES_PASSWORD,
     POSTGRES_PORT,
@@ -156,6 +157,11 @@ CustomHeaderType = tuple[str | bytes, str | bytes]
 # A pre-prepared SQLite DB that is used as a template when creating new SQLite
 # DB each test run. This dramatically speeds up test set up when using SQLite.
 PREPPED_SQLITE_DB_CONN: LoggingDatabaseConnection | None = None
+
+# Whether the background updates have been applied to the template database that each
+# test's database is created from. Done once per process by
+# `_apply_background_updates_to_template_db`.
+TEMPLATE_DB_HAS_BACKGROUND_UPDATES = False
 
 
 class TimedOutException(Exception):
@@ -1442,6 +1448,12 @@ def setup_test_homeserver(
 
         database_config["_TEST_PREPPED_CONN"] = PREPPED_SQLITE_DB_CONN
 
+    global TEMPLATE_DB_HAS_BACKGROUND_UPDATES
+    if not TEMPLATE_DB_HAS_BACKGROUND_UPDATES:
+        # Set before the call, which creates a homeserver of its own.
+        TEMPLATE_DB_HAS_BACKGROUND_UPDATES = True
+        _apply_background_updates_to_template_db()
+
     if db_txn_limit is not None:
         database_config["txn_limit"] = db_txn_limit
 
@@ -1700,6 +1712,82 @@ class _BlockingRustCalls:
                 return fail()
 
         return call
+
+
+def _apply_background_updates_to_template_db() -> None:
+    """Run the background updates once, on a throwaway homeserver, and copy the
+    result back over the template database that every test database is created
+    from.
+
+    Each test's homeserver still runs the background updates when it starts (see
+    `HomeserverTestCase.setup_test_homeserver`), but with the template up to date
+    there is nothing left for it to do. That saves tens of milliseconds per test on
+    SQLite and about a hundred on Postgres.
+    """
+    cleanups: list[Callable[[], Optional["Deferred[None]"]]] = []
+    reactor = ThreadedMemoryReactorClock()
+    hs = setup_test_homeserver(
+        cleanup_func=cleanups.append,
+        config=default_config(server_name="test", parse=True),
+        reactor=reactor,
+    )
+    db_pool = hs.get_datastores().main.db_pool
+
+    with LoggingContext(name="template_db_bg_updates", server_name=hs.hostname):
+        _run_on_test_reactor(reactor, db_pool.updates.run_background_updates(False))
+
+    if USE_POSTGRES_FOR_TESTS:
+        test_db = hs.config.database.databases[0].config["args"]["dbname"]
+
+        # Neither database may have connections while it is used as a template or
+        # dropped, so close the pool first and connect to the maintenance database.
+        db_pool._db_pool.close()
+        db_engine = db_pool.engine
+        db_conn = db_engine.module.connect(
+            dbname=POSTGRES_DBNAME_FOR_INITIAL_CREATE,
+            user=POSTGRES_USER,
+            host=POSTGRES_HOST,
+            port=POSTGRES_PORT,
+            password=POSTGRES_PASSWORD,
+        )
+        db_engine.attempt_to_set_autocommit(db_conn, True)
+        cur = db_conn.cursor()
+        cur.execute("DROP DATABASE %s;" % (POSTGRES_BASE_DB,))
+        cur.execute(
+            "CREATE DATABASE %s WITH TEMPLATE %s;" % (POSTGRES_BASE_DB, test_db)
+        )
+        cur.close()
+        db_conn.close()
+    else:
+        assert PREPPED_SQLITE_DB_CONN is not None
+        assert isinstance(PREPPED_SQLITE_DB_CONN.conn, sqlite3.Connection)
+        # The threadless pool has exactly one connection, opened on this thread.
+        (raw_conn,) = db_pool._db_pool.connections.values()
+        assert isinstance(raw_conn, sqlite3.Connection)
+        raw_conn.backup(PREPPED_SQLITE_DB_CONN.conn)
+
+    # Tear the throwaway homeserver down the way a test would.
+    for cleanup in reversed(cleanups):
+        result = cleanup()
+        if result is not None:
+            _run_on_test_reactor(reactor, result)
+
+
+def _run_on_test_reactor(
+    reactor: ThreadedMemoryReactorClock, awaitable: Awaitable[R]
+) -> R:
+    """Drive the awaitable to completion on the test reactor and return its
+    result, like `HomeserverTestCase.get_success` does."""
+    d: "Deferred[R]" = defer.ensureDeferred(awaitable)  # type: ignore[arg-type]
+    for _ in range(100):
+        if d.called and not d.paused:
+            break
+        reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
+    else:
+        raise defer.TimeoutError("Timed out waiting for deferred to finish")
+    if isinstance(d.result, Failure):
+        d.result.raiseException()
+    return cast(R, d.result)
 
 
 def start_test_homeserver(
