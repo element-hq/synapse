@@ -221,6 +221,11 @@ class TestCase(unittest.TestCase):
 
         level = getattr(method, "loglevel", getattr(self, "loglevel", None))
 
+        # Everything the test adds to the instance from setUp onwards (the
+        # homeserver, its reactor, stores, helpers, ...) is dropped again in
+        # tearDown, see below.
+        attributes_before_setup: set[str] = set()
+
         @around(self)
         def setUp(orig: Callable[[], R]) -> R:
             # if we're not starting in the sentinel logcontext, then to be honest
@@ -230,6 +235,8 @@ class TestCase(unittest.TestCase):
                     "Test starting with non-sentinel logging context %s"
                     % (current_context(),)
                 )
+
+            attributes_before_setup.update(self.__dict__)
 
             # Disable GC for duration of test. See below for why.
             gc.disable()
@@ -257,13 +264,27 @@ class TestCase(unittest.TestCase):
         # The easiest way to do this would be to do a full GC after each test
         # run, but that is very expensive. Instead, we disable GC (above) for
         # the duration of the test and only run a gen-0 GC, which is a lot
-        # quicker. This doesn't clean up everything, since the TestCase
-        # instance still holds references to objects created during the test,
-        # such as HomeServers, so we do a full GC every so often.
+        # quicker.
+        #
+        # Since GC was disabled, everything the test allocated is still in
+        # generation 0, so that gen-0 GC frees the whole homeserver (a large
+        # reference cycle) provided nothing older still points at it. The
+        # TestCase instance itself is older, and trial keeps it around (for
+        # instance in its list of skipped tests), so we drop every attribute the
+        # test added to it first. Without this the homeserver survives into the
+        # older generations and only a full GC, which we run every so often,
+        # gets rid of it.
+        #
+        # trial records the outcome on the instance while the test runs; those
+        # attributes have to stay.
+        trial_attributes = {"_passed", "_timedOut", "_subtest"}
 
         @around(self)
         def tearDown(orig: Callable[[], R]) -> R:
             ret = orig()
+            for name in list(self.__dict__):
+                if name not in attributes_before_setup and name not in trial_attributes:
+                    del self.__dict__[name]
             gc.collect(0)
             # Run a full GC every 50 gen-0 GCs.
             gen0_stats = gc.get_stats()[0]
@@ -271,6 +292,7 @@ class TestCase(unittest.TestCase):
             if gen0_collections % 50 == 0:
                 gc.collect()
             gc.enable()
+            # Last, since collecting a leaked deferred can restore its logcontext.
             set_current_context(SENTINEL_CONTEXT)
 
             return ret

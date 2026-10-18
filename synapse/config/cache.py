@@ -23,6 +23,8 @@ import logging
 import os
 import re
 import threading
+import types
+import weakref
 from typing import Any, Callable, Mapping
 
 import attr
@@ -38,8 +40,12 @@ logger = logging.getLogger(__name__)
 # The prefix for all cache factor-related environment variables
 _CACHE_PREFIX = "SYNAPSE_CACHE_FACTOR"
 
-# Map from canonicalised cache name to cache.
-_CACHES: dict[str, Callable[[float], None]] = {}
+# Map from canonicalised cache name to the cache's resize callback.
+#
+# Bound methods are held through a `weakref.WeakMethod`, so registering a cache
+# doesn't keep it (or the homeserver it belongs to) alive: a dead entry is
+# skipped and dropped when the caches are next resized.
+_CACHES: dict[str, "Callable[[float], None] | weakref.WeakMethod"] = {}
 
 # a lock on the contents of _CACHES
 _CACHES_LOCK = threading.Lock()
@@ -87,10 +93,14 @@ def add_resizable_cache(
     # Some caches have '*' in them which we strip out.
     cache_name = _canonicalise_cache_name(cache_name)
 
+    entry: Callable[[float], None] | weakref.WeakMethod = cache_resize_callback
+    if isinstance(cache_resize_callback, types.MethodType):
+        entry = weakref.WeakMethod(cache_resize_callback)
+
     # sometimes caches are initialised from background threads, so we need to make
     # sure we don't conflict with another thread running a resize operation
     with _CACHES_LOCK:
-        _CACHES[cache_name] = cache_resize_callback
+        _CACHES[cache_name] = entry
 
     # Ensure all loaded caches are sized appropriately
     #
@@ -231,6 +241,13 @@ class CacheConfig(Config):
 
         # block other threads from modifying _CACHES while we iterate it.
         with _CACHES_LOCK:
-            for cache_name, callback in _CACHES.items():
+            dead = []
+            for cache_name, entry in _CACHES.items():
+                callback = entry() if isinstance(entry, weakref.WeakMethod) else entry
+                if callback is None:
+                    dead.append(cache_name)
+                    continue
                 new_factor = self.cache_factors.get(cache_name, self.global_factor)
                 callback(new_factor)
+            for cache_name in dead:
+                del _CACHES[cache_name]

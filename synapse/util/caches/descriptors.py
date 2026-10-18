@@ -471,8 +471,13 @@ class _CacheContext:
 
     Cache = DeferredCache | LruCache
 
+    # Keyed on the cache's `id()` rather than the cache itself: the values are
+    # weak but the keys are not, so a key holding the cache would keep it (and
+    # whatever it belongs to) alive for as long as any of its contexts exist.
+    # The id can't be reused while an entry exists, since the entry's context
+    # holds the cache.
     _cache_context_objects: """WeakValueDictionary[
-        tuple["_CacheContext.Cache", CacheKey], "_CacheContext"
+        tuple[int, CacheKey], "_CacheContext"
     ]""" = WeakValueDictionary()
 
     def __init__(self, cache: "_CacheContext.Cache", cache_key: CacheKey) -> None:
@@ -496,7 +501,7 @@ class _CacheContext:
         # important in particular to dedupe when we add callbacks to lru cache
         # nodes, otherwise the number of callbacks would grow.
         return cls._cache_context_objects.setdefault(
-            (cache, cache_key), cls(cache, cache_key)
+            (id(cache), cache_key), cls(cache, cache_key)
         )
 
 

@@ -639,11 +639,24 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # on newer Twisted versions to use the test reactor's clock.
         #
         # This is *super* dirty since it is never undone and relies on the next
-        # test to overwrite it.
+        # test to overwrite it. The patch only holds a weak reference to this
+        # reactor, so that it doesn't keep the reactor (and through its
+        # shutdown triggers, the whole homeserver) alive until the next test.
         if twisted.version > Version("Twisted", 23, 8, 0):
             from twisted.protocols import tls
 
-            tls._get_default_clock = lambda: self
+            reactor_ref = weakref.ref(self)
+
+            def get_default_clock() -> IReactorTime:
+                reactor = reactor_ref()
+                if reactor is None:
+                    # Twisted's own default.
+                    from twisted.internet import reactor as global_reactor
+
+                    return cast(IReactorTime, global_reactor)
+                return reactor
+
+            tls._get_default_clock = get_default_clock
 
         super().__init__()
 
@@ -1523,6 +1536,21 @@ def setup_test_homeserver(
         if cleanup_hs is not None:
             deferred = defer.ensureDeferred(cleanup_hs.shutdown())
         return deferred
+
+    if isinstance(reactor, MemoryReactorClock):
+
+        def forget_reactor_hooks() -> None:
+            # The fake reactor never runs, so its `callWhenRunning` and shutdown
+            # hooks never fire and `hs.shutdown()` can't remove the latter (see
+            # `cleanup_test_reactor_system_event_triggers`). They point at the
+            # homeserver's handlers, and the Rust runtime holds the reactor
+            # through a reference the garbage collector can't see, so with the
+            # hooks in place the whole homeserver would leak. Drop them once the
+            # homeserver has shut down (cleanups run in reverse order).
+            reactor.whenRunningHooks.clear()
+            reactor.triggers.clear()
+
+        cleanup_func(forget_reactor_hooks)
 
     # Register the cleanup hook for the homeserver.
     # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
