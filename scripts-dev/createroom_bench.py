@@ -20,9 +20,10 @@ Starts the server the way `persist_bench.py` does, once per
 rooms, then `--rooms` rooms one after another, and reports the mean and median
 request time and the CPU of the reactor thread and of the process per room.
 
-    poetry run python scripts-dev/createroom_bench.py --levels off,full
+    poetry run python scripts-dev/createroom_bench.py --levels off,full,full+rooms
 
-`--psycopg2` runs the server on psycopg2 instead of the native driver.
+A level with `+rooms` also turns on `rust_room_creation`. `--psycopg2` runs
+the server on psycopg2 instead of the native driver.
 """
 
 import argparse
@@ -72,9 +73,17 @@ CREATE_ROOM = "/_matrix/client/v3/createRoom"
 
 
 def bench_level(level: str, rooms: int, rust_driver: bool) -> list[dict[str, Any]]:
+    """Benchmark a server at `level`: a `rust_event_persistence` level,
+    optionally followed by `+rooms` for `rust_room_creation: on`."""
     results = []
-    workdir = tempfile.mkdtemp(prefix=f"createroom-bench-{level}-")
-    server = pb.Server(level, workdir, rust_driver=rust_driver)
+    persist_level, _, extra = level.partition("+")
+    if extra not in ("", "rooms"):
+        raise ValueError(f"unknown level suffix {extra!r} in {level!r}")
+    experimental = {"rust_room_creation": "on"} if extra == "rooms" else {}
+    workdir = tempfile.mkdtemp(prefix=f"createroom-bench-{persist_level}-")
+    server = pb.Server(
+        persist_level, workdir, rust_driver=rust_driver, experimental=experimental
+    )
     try:
         server.start()
         token = pb.register("creator")
@@ -110,7 +119,12 @@ def bench_level(level: str, rooms: int, rust_driver: bool) -> list[dict[str, Any
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--levels", default="off,full")
+    parser.add_argument(
+        "--levels",
+        default="off,full,full+rooms",
+        help="comma-separated `rust_event_persistence` levels; append `+rooms`"
+        " to a level for `rust_room_creation: on`",
+    )
     parser.add_argument("--rooms", type=int, default=40)
     parser.add_argument("--psycopg2", action="store_true")
     parser.add_argument("--json", help="also write the results to this file")

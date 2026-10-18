@@ -120,10 +120,18 @@ def _metrics() -> dict[str, float]:
 class Server:
     """A Synapse process on its own database."""
 
-    def __init__(self, level: str, workdir: str, rust_driver: bool = True) -> None:
+    def __init__(
+        self,
+        level: str,
+        workdir: str,
+        rust_driver: bool = True,
+        experimental: dict[str, Any] | None = None,
+    ) -> None:
         self.level = level
         self.workdir = workdir
         self.rust_driver = rust_driver
+        # Experimental features to set besides `rust_event_persistence`.
+        self.experimental = experimental or {}
         self.database = f"persist_bench_{level}_{secrets.token_hex(3)}"
         self.process: subprocess.Popen | None = None
 
@@ -181,7 +189,10 @@ class Server:
                 "per_room": {"per_second": 100000, "burst_count": 100000},
                 "per_user": {"per_second": 100000, "burst_count": 100000},
             },
-            "experimental_features": {"rust_event_persistence": self.level},
+            "experimental_features": {
+                "rust_event_persistence": self.level,
+                **self.experimental,
+            },
             "log_config": os.path.join(self.workdir, "log.yaml"),
         }
         with open(os.path.join(self.workdir, "log.yaml"), "w") as f:
