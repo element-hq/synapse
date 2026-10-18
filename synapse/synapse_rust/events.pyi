@@ -515,6 +515,32 @@ def redact_event_dict(room_version: RoomVersion, event_dict: JsonMapping) -> Jso
     Returns the redacted event as a dict.
     """
 
+def pdu_json_is_canonical(event: Event) -> bool:
+    """Whether `event.get_pdu_json()` certainly passes `validate_canonicaljson`.
+
+    False means "not sure": run the Python check, which decides the error.
+    """
+
+def pdu_json_size(event: Event) -> int | None:
+    """The length in bytes of `encode_canonical_json(event.get_pdu_json())`, or
+    None if the event holds a number, such as a float, that Python may print
+    differently."""
+
+def power_levels_content_is_valid(content: JsonMapping) -> bool:
+    """Whether power levels `content` certainly matches `POWER_LEVELS_SCHEMA`.
+
+    False means "not sure": validate against the schema, which decides the
+    error.
+    """
+
+def mentions_content_is_valid(content: JsonMapping) -> bool:
+    """Whether the `m.mentions` in `content`, if any, certainly matches
+    `MENTIONS_SCHEMA`.
+
+    False means "not sure": validate against the schema, which decides the
+    error.
+    """
+
 class LocalEventSigner:
     """Signs the events this server creates, as `server_name` with
     `signing_key`."""

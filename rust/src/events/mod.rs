@@ -95,6 +95,7 @@ pub mod serialize;
 pub mod signatures;
 pub mod unsigned;
 pub mod utils;
+pub mod validate;
 
 use json_object::JsonObject;
 
@@ -119,6 +120,13 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<serialize::SerializeEventConfig>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_py, m)?)?;
+    child_module.add_function(wrap_pyfunction!(validate::pdu_json_is_canonical, m)?)?;
+    child_module.add_function(wrap_pyfunction!(validate::pdu_json_size, m)?)?;
+    child_module.add_function(wrap_pyfunction!(
+        validate::power_levels_content_is_valid,
+        m
+    )?)?;
+    child_module.add_function(wrap_pyfunction!(validate::mentions_content_is_valid, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_dict, m)?)?;
     child_module.add_function(wrap_pyfunction!(serialize::serialize_events, m)?)?;
     child_module.add_function(wrap_pyfunction!(serialize::format_event_raw, m)?)?;

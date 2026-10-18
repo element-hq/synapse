@@ -60,6 +60,7 @@ from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.synapse_rust import event_auth as _rust_event_auth
+from synapse.synapse_rust.events import pdu_json_size
 from synapse.types import (
     JsonMapping,
     MutableStateMap,
@@ -390,7 +391,12 @@ def _check_size_limits(event: "EventBase") -> None:
     """
 
     # Whole PDU check
-    if len(encode_canonical_json(event.get_pdu_json())) > MAX_PDU_SIZE:
+    # Rust gives the size unless the event has a number Python may print
+    # differently, such as a float.
+    size = pdu_json_size(event)
+    if size is None:
+        size = len(encode_canonical_json(event.get_pdu_json()))
+    if size > MAX_PDU_SIZE:
         raise EventSizeError("event too large", unpersistable=True)
 
     # Codepoint size check: Synapse always enforced these limits, so apply

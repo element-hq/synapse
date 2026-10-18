@@ -40,6 +40,11 @@ from synapse.events.utils import (
     validate_canonicaljson,
 )
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
+from synapse.synapse_rust.events import (
+    mentions_content_is_valid,
+    pdu_json_is_canonical,
+    power_levels_content_is_valid,
+)
 from synapse.types import EventID, JsonDict, JsonMapping, RoomID, StrCollection, UserID
 
 
@@ -77,7 +82,9 @@ class EventValidator:
                 raise SynapseError(400, "Event does not have key %s" % (k,))
 
         # Depending on the room version, ensure the data is spec compliant JSON.
-        if event.room_version.strict_canonicaljson:
+        # The Rust check only says whether the event is certainly fine. If
+        # not, the Python check finds the problem.
+        if event.room_version.strict_canonicaljson and not pdu_json_is_canonical(event):
             validate_canonicaljson(event.get_pdu_json())
 
         if event.type == EventTypes.Aliases:
@@ -106,10 +113,14 @@ class EventValidator:
                 )
 
         elif event.type == EventTypes.PowerLevels:
-            _validate_against_schema(_POWER_LEVELS_SCHEMA_VALIDATOR, event.content)
+            # The schema decides the error when Rust is not sure.
+            if not power_levels_content_is_valid(event.content):
+                _validate_against_schema(_POWER_LEVELS_SCHEMA_VALIDATOR, event.content)
 
         # If the event contains a mentions key, validate it.
-        if EventContentFields.MENTIONS in event.content:
+        if EventContentFields.MENTIONS in event.content and (
+            not mentions_content_is_valid(event.content)
+        ):
             _validate_against_schema(
                 _MENTIONS_SCHEMA_VALIDATOR,
                 event.content[EventContentFields.MENTIONS],
