@@ -251,6 +251,38 @@ class PostgresConnectionTestCase(unittest.TestCase):
             [(1, "a"), (2, "b"), (3, "c")],
         )
 
+    def test_first_statement_runs_in_the_transaction(self) -> None:
+        """The `BEGIN` goes out with a transaction's first statement, which runs
+        inside the transaction whether it is prepared afresh or cached."""
+
+        def isolation(cursor: Any) -> Any:
+            cursor.execute("SELECT current_setting('transaction_isolation')")
+            return cursor.fetch_one()
+
+        for _ in range(2):
+            self.assertEqual(
+                run_interaction(self.conn, isolation), ("repeatable read",)
+            )
+
+        # The same for `executemany`: rolling back undoes its rows.
+        run_interaction(
+            self.conn, lambda cursor: cursor.execute("CREATE TEMP TABLE first (id int)")
+        )
+
+        def insert_then_fail(cursor: Any) -> None:
+            cursor.executemany("INSERT INTO first VALUES ($1)", [[1], [2]])
+            raise RuntimeError("roll back")
+
+        for _ in range(2):
+            with self.assertRaises(RuntimeError):
+                run_interaction(self.conn, insert_then_fail)
+
+        def count(cursor: Any) -> Any:
+            cursor.execute("SELECT COUNT(*) FROM first")
+            return cursor.fetch_one()
+
+        self.assertEqual(run_interaction(self.conn, count), (0,))
+
     def test_executemany_rowcount_is_total_affected(self) -> None:
         """rowcount after executemany is the sum across all executions."""
 

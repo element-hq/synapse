@@ -242,6 +242,21 @@ impl PooledClient {
         Ok(statement)
     }
 
+    /// The cached [`Statement`] for `sql`, if this connection has prepared
+    /// it, without preparing it otherwise.
+    pub fn cached(&self, sql: &str) -> Option<Statement> {
+        let statement = self
+            .statements
+            .lock()
+            .expect("not poisoned")
+            .get(sql)
+            .cloned();
+        if statement.is_some() {
+            PoolStats::bump(&self.stats.statement_cache_hits);
+        }
+        statement
+    }
+
     /// Drop the cached statement for `sql`, if any. No I/O: used to shed a
     /// stale plan from inside an aborted transaction, where re-preparing is
     /// impossible until the transaction ends.

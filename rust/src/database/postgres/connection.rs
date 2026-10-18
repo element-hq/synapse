@@ -64,10 +64,12 @@
 //! [`Connection::close`], by contrast, returns a clean connection to the pool
 //! (discarding it only if a transaction was left open).
 
+use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError, Weak};
 
 use deadpool::managed::Object;
-use futures::future::try_join_all;
+use futures::future::{join, try_join_all};
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
@@ -276,37 +278,54 @@ impl Connection {
     }
 
     /// Borrow the client just long enough to run `f` (typically starting a
-    /// query), opening an implicit transaction first if one isn't already open.
+    /// query), opening an implicit transaction if one isn't already open.
+    ///
+    /// The transaction's `BEGIN` is not sent here: `f` gets it as a
+    /// [`PendingBegin`] and sends it in front of its statement's first
+    /// request, so that they share a round trip. `f` must do so before
+    /// running anything else.
     ///
     /// The borrow ends as soon as `f` returns; `f` is expected to hand back an
     /// owned, self-contained value (e.g. a `'static` row stream) rather than
     /// anything tied to the client. Errors if the connection is closed.
     fn with_client<R>(
         &self,
-        py: Python<'_>,
-        f: impl FnOnce(&PooledClient) -> PyResult<R>,
+        f: impl FnOnce(&PooledClient, PendingBegin<'_>) -> PyResult<R>,
     ) -> PyResult<R> {
         let mut guard = self.lock()?;
 
         // Lazily open a transaction so statements are transactional by default,
-        // matching psycopg2. We set `in_txn` *after* a successful `BEGIN` but
-        // before running `f`, so that if `f` (the user's statement) fails the
-        // open-but-aborted transaction is still tracked and `rollback()` knows
-        // to clean it up. `batch_execute` uses the simple-query protocol: one
-        // round-trip, no prepare.
-        if !guard.autocommit && !guard.in_txn {
-            {
-                let client = client_ref(&guard)?;
-                // The level is one of `ISOLATION_LEVELS`, never caller text.
-                client
-                    .batch_execute(&format!("BEGIN ISOLATION LEVEL {}", guard.isolation_level))
-                    .block_on_pg_result(py, &self.handle)?;
-            }
+        // matching psycopg2. `in_txn` is set before the `BEGIN` goes out, so
+        // that if the statement behind it fails the open-but-aborted
+        // transaction is tracked and `rollback()` cleans it up. (A `ROLLBACK`
+        // with no transaction open only warns.)
+        let begin = if !guard.autocommit && !guard.in_txn {
             guard.in_txn = true;
-        }
+            // The level is one of `ISOLATION_LEVELS`, never caller text.
+            Some(format!("BEGIN ISOLATION LEVEL {}", guard.isolation_level))
+        } else {
+            None
+        };
 
-        let client = client_ref(&guard)?;
-        f(client)
+        let begin_failed = AtomicBool::new(false);
+        let result = {
+            let client = client_ref(&guard)?;
+            f(
+                client,
+                PendingBegin {
+                    client,
+                    sql: begin,
+                    failed: &begin_failed,
+                },
+            )
+        };
+        if begin_failed.load(Ordering::Relaxed) {
+            // The statement behind the `BEGIN` may have run outside any
+            // transaction, so the session state is unknown: discard the
+            // connection rather than reuse it.
+            guard.discard();
+        }
+        result
     }
 
     /// Issue a transaction-control statement (`COMMIT`/`ROLLBACK`) if a
@@ -354,6 +373,41 @@ impl Connection {
                 Err(err)
             }
         }
+    }
+}
+
+/// A transaction's `BEGIN` that has not been sent yet, to send in front of
+/// the transaction's first statement so that both share one round trip.
+///
+/// `tokio_postgres` queues a request when its future is first polled, and
+/// Postgres runs requests in order, so the statement runs inside the
+/// transaction. If the `BEGIN` fails, the statement may have run without
+/// one, so the connection is discarded (see [`Connection::with_client`]).
+pub(crate) struct PendingBegin<'a> {
+    client: &'a PooledClient,
+    /// The `BEGIN` statement, or `None` if no transaction is to be opened.
+    sql: Option<String>,
+    /// Set if the `BEGIN` failed.
+    failed: &'a AtomicBool,
+}
+
+impl PendingBegin<'_> {
+    /// Await `request`, a statement's first request, sending the `BEGIN`
+    /// first if there is one.
+    pub(crate) async fn then<T>(
+        self,
+        request: impl Future<Output = Result<T, tokio_postgres::Error>>,
+    ) -> Result<T, tokio_postgres::Error> {
+        let Some(sql) = self.sql else {
+            return request.await;
+        };
+        // `join` polls the `BEGIN` first, so it is queued first.
+        let (begun, result) = join(self.client.batch_execute(&sql), request).await;
+        if let Err(err) = begun {
+            self.failed.store(true, Ordering::Relaxed);
+            return Err(err);
+        }
+        result
     }
 }
 
@@ -570,14 +624,27 @@ impl Cursor {
         // the query. `query_raw` returns a `'static` `RowStream`, so the borrow
         // ends here and the cursor owns the stream from now on.
         let handle = &self.connection.handle;
-        let (stream, description) = self.connection.with_client(py, |client| {
-            let statement = client
-                .prepare_cached(query, refresh)
-                .block_on_pg_result(py, handle)?;
-
-            let stream = client
-                .query_raw(&statement, params.iter())
-                .block_on_pg_result(py, handle)?;
+        let (stream, description) = self.connection.with_client(|client, begin| {
+            // A pending `BEGIN` goes with the statement's first request: the
+            // execution if the statement is cached, otherwise the prepare.
+            let cached = if refresh { None } else { client.cached(query) };
+            let (statement, stream) = match cached {
+                Some(statement) => {
+                    let stream = begin
+                        .then(client.query_raw(&statement, params.iter()))
+                        .block_on_pg_result(py, handle)?;
+                    (statement, stream)
+                }
+                None => {
+                    let statement = begin
+                        .then(client.prepare_cached(query, refresh))
+                        .block_on_pg_result(py, handle)?;
+                    let stream = client
+                        .query_raw(&statement, params.iter())
+                        .block_on_pg_result(py, handle)?;
+                    (statement, stream)
+                }
+            };
 
             // The column names back the (future) PEP-249 `Cursor.description`;
             // pull them out of the prepared statement here so `cursor_state`
@@ -647,7 +714,9 @@ impl Cursor {
                     // prepare) can run on it; drop the stale cache entry — no
                     // I/O — and propagate. The caller's next transaction
                     // re-prepares a valid plan.
-                    self.connection.with_client(py, |client| {
+                    self.connection.with_client(|client, begin| {
+                        // Inside a transaction, so there is no `BEGIN` to send.
+                        debug_assert!(begin.sql.is_none());
                         client.invalidate(query);
                         Ok(())
                     })?;
@@ -700,20 +769,30 @@ impl Cursor {
         }
 
         let handle = &self.connection.handle;
-        let total = self.connection.with_client(py, |client| {
+        let total = self.connection.with_client(|client, begin| {
             // Prepare once, then build a future per parameter set. Driving them
             // concurrently is what makes `tokio_postgres` pipeline them onto the
             // connection; blocking on the joined future runs the whole batch.
-            let statement = client
-                .prepare_cached(query, false)
-                .block_on_pg_result(py, handle)?;
+            // A pending `BEGIN` goes in front of the first request.
+            let (statement, begin) = match client.cached(query) {
+                Some(statement) => (statement, Some(begin)),
+                None => {
+                    let statement = begin
+                        .then(client.prepare_cached(query, false))
+                        .block_on_pg_result(py, handle)?;
+                    (statement, None)
+                }
+            };
 
-            let counts = try_join_all(
+            let executions = try_join_all(
                 params_seq
                     .into_iter()
                     .map(|params| client.execute_raw(&statement, params)),
-            )
-            .block_on_pg_result(py, handle)?;
+            );
+            let counts = match begin {
+                Some(begin) => begin.then(executions).block_on_pg_result(py, handle)?,
+                None => executions.block_on_pg_result(py, handle)?,
+            };
 
             Ok(counts.into_iter().sum::<u64>())
         })?;
@@ -746,8 +825,10 @@ impl Cursor {
         self.lock_state()?.new_query();
 
         let handle = &self.connection.handle;
-        self.connection.with_client(py, |client| {
-            client.batch_execute(script).block_on_pg_result(py, handle)
+        self.connection.with_client(|client, begin| {
+            begin
+                .then(client.batch_execute(script))
+                .block_on_pg_result(py, handle)
         })
     }
 

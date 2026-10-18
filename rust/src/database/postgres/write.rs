@@ -33,12 +33,15 @@ use std::{
     cell::RefCell,
     fmt::Write as _,
     future::Future,
-    sync::atomic::{AtomicU8, Ordering},
+    sync::atomic::{AtomicBool, AtomicU8, Ordering},
     time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
-use futures::{future::try_join_all, future::BoxFuture};
+use futures::{
+    future::{join, try_join_all, BoxFuture},
+    FutureExt,
+};
 use log::warn;
 use tokio::runtime::Handle;
 use tokio_postgres::{types::ToSql, Row};
@@ -219,6 +222,12 @@ impl<'a> Column<'a> {
 pub struct WriteTxn {
     conn: Option<PooledConnection>,
     in_transaction: bool,
+    /// The `BEGIN` has not been sent yet. The first statement sends it in
+    /// front of its own first request, so that they share a round trip.
+    begin_pending: AtomicBool,
+    /// The `BEGIN` failed, so the statement sent behind it may have run
+    /// outside a transaction: the connection is discarded, not reused.
+    begin_failed: AtomicBool,
     /// A statement failed, so Postgres has aborted the transaction. A
     /// `COMMIT` would then roll back without an error, so the closure must
     /// not be able to report success after catching the error. Holds one of
@@ -227,19 +236,53 @@ pub struct WriteTxn {
 }
 
 impl WriteTxn {
-    async fn begin(conn: PooledConnection) -> Result<WriteTxn, WriteError> {
-        // Set before awaiting: if we are dropped after BEGIN is sent but
-        // before it returns, the transaction is open and must be rolled back.
-        let txn = WriteTxn {
+    /// Start a transaction on `conn`. Nothing is sent until the first
+    /// statement, which sends the `BEGIN` with it.
+    fn begin(conn: PooledConnection) -> WriteTxn {
+        WriteTxn {
             conn: Some(conn),
+            // Set before anything is sent: if we are dropped after the BEGIN
+            // goes out but before it returns, the transaction is open and
+            // must be rolled back.
             in_transaction: true,
+            begin_pending: AtomicBool::new(true),
+            begin_failed: AtomicBool::new(false),
             failed: AtomicU8::new(NOT_FAILED),
+        }
+    }
+
+    /// The `BEGIN`, if no statement has sent it yet. The caller must send it
+    /// in front of its statement.
+    fn take_begin(&self) -> Option<BoxFuture<'_, Result<(), tokio_postgres::Error>>> {
+        self.begin_pending.swap(false, Ordering::Relaxed).then(|| {
+            self.conn()
+                .batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
+                .boxed()
+        })
+    }
+
+    /// Await `request`, a statement's first request, sending `begin` in front
+    /// of it. `tokio_postgres` queues a request when its future is first
+    /// polled and `join` polls the `BEGIN` first, so Postgres runs the
+    /// statement inside the transaction.
+    async fn after_begin<T>(
+        &self,
+        begin: Option<BoxFuture<'_, Result<(), tokio_postgres::Error>>>,
+        request: impl Future<Output = Result<T, tokio_postgres::Error>>,
+        context: impl FnOnce() -> String,
+    ) -> Result<T, WriteError> {
+        let result = match begin {
+            None => request.await,
+            Some(begin) => {
+                let (begun, result) = join(begin, request).await;
+                if let Err(e) = begun {
+                    self.begin_failed.store(true, Ordering::Relaxed);
+                    return Err(self.statement_failed("opening a transaction", e));
+                }
+                result
+            }
         };
-        txn.conn()
-            .batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
-            .await
-            .map_err(|e| WriteError::from_pg("opening a transaction", e))?;
-        Ok(txn)
+        result.map_err(|e| self.statement_failed(&context(), e))
     }
 
     fn conn(&self) -> &PooledConnection {
@@ -269,11 +312,11 @@ impl WriteTxn {
         sql: &str,
         params: &[&(dyn ToSql + Sync)],
     ) -> Result<Vec<Row>, WriteError> {
-        let statement = self.prepare(sql).await?;
-        self.conn()
-            .query(&statement, params)
-            .await
-            .map_err(|e| self.statement_failed(&describe(sql), e))
+        let (statement, begin) = self.prepare(sql).await?;
+        self.after_begin(begin, self.conn().query(&statement, params), || {
+            describe(sql)
+        })
+        .await
     }
 
     /// Run a statement, returning the number of rows it changed.
@@ -282,11 +325,11 @@ impl WriteTxn {
         sql: &str,
         params: &[&(dyn ToSql + Sync)],
     ) -> Result<u64, WriteError> {
-        let statement = self.prepare(sql).await?;
-        self.conn()
-            .execute(&statement, params)
-            .await
-            .map_err(|e| self.statement_failed(&describe(sql), e))
+        let (statement, begin) = self.prepare(sql).await?;
+        self.after_begin(begin, self.conn().execute(&statement, params), || {
+            describe(sql)
+        })
+        .await
     }
 
     /// Run one statement once per set of parameters, pipelined on the
@@ -301,11 +344,15 @@ impl WriteTxn {
         if rows.is_empty() {
             return Ok(0);
         }
-        let statement = self.prepare(sql).await?;
+        let (statement, begin) = self.prepare(sql).await?;
         let conn = self.conn();
-        let counts = try_join_all(rows.iter().map(|params| conn.execute(&statement, params)))
-            .await
-            .map_err(|e| self.statement_failed(&describe(sql), e))?;
+        let counts = self
+            .after_begin(
+                begin,
+                try_join_all(rows.iter().map(|params| conn.execute(&statement, params))),
+                || describe(sql),
+            )
+            .await?;
         Ok(counts.into_iter().sum())
     }
 
@@ -366,11 +413,29 @@ impl WriteTxn {
         self.execute(&sql, &params).await
     }
 
-    async fn prepare(&self, sql: &str) -> Result<tokio_postgres::Statement, WriteError> {
-        self.conn()
-            .prepare_cached(sql, false)
-            .await
-            .map_err(|e| self.statement_failed(&format!("preparing {}", describe(sql)), e))
+    /// The prepared statement for `sql`, and the transaction's `BEGIN` if
+    /// it is still to be sent in front of the statement's execution. On a
+    /// cache miss the `BEGIN` goes with the prepare instead.
+    async fn prepare(
+        &self,
+        sql: &str,
+    ) -> Result<
+        (
+            tokio_postgres::Statement,
+            Option<BoxFuture<'_, Result<(), tokio_postgres::Error>>>,
+        ),
+        WriteError,
+    > {
+        let begin = self.take_begin();
+        if let Some(statement) = self.conn().cached(sql) {
+            return Ok((statement, begin));
+        }
+        let statement = self
+            .after_begin(begin, self.conn().prepare_cached(sql, false), || {
+                format!("preparing {}", describe(sql))
+            })
+            .await?;
+        Ok((statement, None))
     }
 
     async fn commit(mut self) -> Result<(), WriteError> {
@@ -392,6 +457,11 @@ impl WriteTxn {
                 )));
             }
         }
+        if self.begin_pending.load(Ordering::Relaxed) {
+            // No statement ran, so there is no transaction to commit.
+            self.in_transaction = false;
+            return Ok(());
+        }
         self.conn()
             .batch_execute("COMMIT")
             .await
@@ -403,6 +473,15 @@ impl WriteTxn {
     /// Roll back now, rather than on a background task when dropped, so a
     /// retry does not race the rollback for the rows.
     async fn rollback(mut self) {
+        if self.begin_pending.load(Ordering::Relaxed) {
+            // No statement ran, so there is no transaction to roll back.
+            self.in_transaction = false;
+            return;
+        }
+        if self.begin_failed.load(Ordering::Relaxed) {
+            // Dropping discards the connection.
+            return;
+        }
         if let Err(e) = self.conn().batch_execute("ROLLBACK").await {
             warn!("Failed to roll back a write transaction: {e}");
             // Leave `in_transaction` set: dropping discards the connection
@@ -430,7 +509,12 @@ impl Querier for WriteTxn {
 impl Drop for WriteTxn {
     fn drop(&mut self) {
         let Some(conn) = self.conn.take() else { return };
-        if !self.in_transaction {
+        if self.begin_failed.load(Ordering::Relaxed) {
+            // The session state is unknown: discard the connection.
+            drop(PooledConnection::take(conn));
+            return;
+        }
+        if !self.in_transaction || self.begin_pending.load(Ordering::Relaxed) {
             return;
         }
         // Roll back before the connection goes back to the pool, so the next
@@ -580,7 +664,7 @@ async fn attempt<'env, T, F>(
 where
     F: for<'t> FnMut(&'t WriteTxn, &'t &'env ()) -> BoxFuture<'t, Result<T, WriteError>>,
 {
-    let txn = WriteTxn::begin(conn).await?;
+    let txn = WriteTxn::begin(conn);
     match f(&txn, &&()).await {
         Ok(value) if commit => {
             txn.commit().await?;
@@ -732,6 +816,61 @@ mod tests {
             .iter()
             .map(|row| (row.get(0), row.get(1), row.get(2), row.get(3)))
             .collect()
+    }
+
+    /// The `BEGIN` goes out with the first statement, so that statement
+    /// runs inside the transaction, whether it is prepared afresh or comes
+    /// from the cache.
+    #[test]
+    fn first_statement_runs_in_the_transaction() {
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            for _ in 0..6 {
+                let isolation = run_write_interaction(&pool, "test", |txn, _| {
+                    async move {
+                        let rows = txn
+                            .query("SELECT current_setting('transaction_isolation')", &[])
+                            .await?;
+                        Ok(rows[0].get::<_, String>(0))
+                    }
+                    .boxed()
+                })
+                .await
+                .unwrap();
+                assert_eq!(isolation, "repeatable read");
+            }
+        });
+        teardown(&rt, &pool, &table);
+    }
+
+    /// A transaction that runs no statement sends neither `BEGIN` nor
+    /// `COMMIT`, and leaves the connection usable.
+    #[test]
+    fn empty_transaction_sends_nothing() {
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            run_write_interaction(&pool, "test", |_txn, _| async move { Ok(()) }.boxed())
+                .await
+                .unwrap();
+            let count = run_write_interaction(&pool, "test", |txn, _| {
+                let table = table.clone();
+                async move {
+                    let rows = txn
+                        .query(&format!("SELECT COUNT(*) FROM {table}"), &[])
+                        .await?;
+                    Ok(rows[0].get::<_, i64>(0))
+                }
+                .boxed()
+            })
+            .await
+            .unwrap();
+            assert_eq!(count, 0);
+        });
+        teardown(&rt, &pool, &table);
     }
 
     #[test]
