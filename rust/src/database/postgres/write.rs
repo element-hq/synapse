@@ -28,18 +28,32 @@
 //! column as an array and selecting from `UNNEST` of them. Statements that
 //! need a per-row sub-select go through [`WriteTxn::execute_batch`], which
 //! pipelines them on the connection.
+//!
+//! Round trips are what a write transaction mostly waits on, so it sends as
+//! much as it can together:
+//!
+//! - The `BEGIN` goes out with the first statement.
+//! - A write whose result nobody reads can be queued with one of the
+//!   `*_later` methods. Queued writes go out, in order, in the same round
+//!   trip as the next statement that is not queued, or as the `COMMIT`. A
+//!   failure surfaces there, reported as the queued statement's own.
+//! - Statements not yet prepared on the connection are prepared together.
 
 use std::{
     cell::RefCell,
-    fmt::Write as _,
     future::Future,
-    sync::atomic::{AtomicBool, AtomicU8, Ordering},
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, AtomicU8, Ordering},
+        Mutex,
+    },
+    task::Poll,
     time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
 use futures::{
-    future::{join, try_join_all, BoxFuture},
+    future::{join, maybe_done, poll_fn, BoxFuture},
     FutureExt,
 };
 use log::warn;
@@ -217,8 +231,49 @@ impl<'a> Column<'a> {
     }
 }
 
+/// A parameter of a queued statement, which owns its value.
+pub type OwnedParam = Box<dyn ToSql + Sync + Send>;
+
+/// One column of a batch for [`WriteTxn::insert_many_later`] and
+/// [`WriteTxn::upsert_many_later`]: like [`Column`], but owning its values,
+/// as the statement is sent after the call returns.
+pub struct OwnedColumn {
+    name: &'static str,
+    sql_type: &'static str,
+    values: OwnedParam,
+    rows: usize,
+}
+
+impl OwnedColumn {
+    pub fn new<T>(name: &'static str, sql_type: &'static str, values: Vec<T>) -> Self
+    where
+        Vec<T>: ToSql + Sync + Send + 'static,
+    {
+        OwnedColumn {
+            name,
+            sql_type,
+            rows: values.len(),
+            values: Box::new(values),
+        }
+    }
+}
+
+/// How to turn the error of a queued statement into the one its caller
+/// wants, e.g. a constraint violation into a domain error.
+pub type MapError = fn(WriteError) -> WriteError;
+
+/// A statement queued by one of the `*_later` methods.
+struct Queued {
+    sql: String,
+    params: Vec<OwnedParam>,
+    map_error: Option<MapError>,
+}
+
 /// An open transaction. See the module docs. Rolled back if dropped before
 /// [`WriteTxn::commit`].
+///
+/// Its statement methods must not run concurrently: a statement could then
+/// be sent before writes queued ahead of it.
 pub struct WriteTxn {
     conn: Option<PooledConnection>,
     in_transaction: bool,
@@ -228,6 +283,10 @@ pub struct WriteTxn {
     /// The `BEGIN` failed, so the statement sent behind it may have run
     /// outside a transaction: the connection is discarded, not reused.
     begin_failed: AtomicBool,
+    /// Writes whose results nobody reads, not yet sent. They go out, in
+    /// order, ahead of the next statement that is not queued, or of the
+    /// `COMMIT`, in the same round trip. Never locked across an await.
+    queued: Mutex<Vec<Queued>>,
     /// A statement failed, so Postgres has aborted the transaction. A
     /// `COMMIT` would then roll back without an error, so the closure must
     /// not be able to report success after catching the error. Holds one of
@@ -247,6 +306,7 @@ impl WriteTxn {
             in_transaction: true,
             begin_pending: AtomicBool::new(true),
             begin_failed: AtomicBool::new(false),
+            queued: Mutex::new(Vec::new()),
             failed: AtomicU8::new(NOT_FAILED),
         }
     }
@@ -261,32 +321,22 @@ impl WriteTxn {
         })
     }
 
-    /// Await `request`, a statement's first request, sending `begin` in front
-    /// of it. `tokio_postgres` queues a request when its future is first
-    /// polled and `join` polls the `BEGIN` first, so Postgres runs the
-    /// statement inside the transaction.
-    async fn after_begin<T>(
-        &self,
-        begin: Option<BoxFuture<'_, Result<(), tokio_postgres::Error>>>,
-        request: impl Future<Output = Result<T, tokio_postgres::Error>>,
-        context: impl FnOnce() -> String,
-    ) -> Result<T, WriteError> {
-        let result = match begin {
-            None => request.await,
-            Some(begin) => {
-                let (begun, result) = join(begin, request).await;
-                if let Err(e) = begun {
-                    self.begin_failed.store(true, Ordering::Relaxed);
-                    return Err(self.statement_failed("opening a transaction", e));
-                }
-                result
-            }
-        };
-        result.map_err(|e| self.statement_failed(&context(), e))
-    }
-
     fn conn(&self) -> &PooledConnection {
         self.conn.as_ref().expect("held until dropped")
+    }
+
+    fn take_queued(&self) -> Vec<Queued> {
+        std::mem::take(&mut *self.queued.lock().expect("not poisoned"))
+    }
+
+    /// The error for a statement that could not be sent, such as one whose
+    /// parameters do not encode. The transaction must not be committed after
+    /// it.
+    fn client_failed(&self, context: &str, error: anyhow::Error) -> WriteError {
+        let _ =
+            self.failed
+                .compare_exchange(NOT_FAILED, FAILED, Ordering::Relaxed, Ordering::Relaxed);
+        WriteError::Other(error.context(context.to_owned()))
     }
 
     /// The error for a failed statement, noting that the transaction is now
@@ -306,36 +356,151 @@ impl WriteTxn {
         error
     }
 
-    /// Run a statement that returns rows.
+    /// Send the queued writes, then the request `last` builds for the
+    /// statement `sql` (prepared, if there is one), all in one round trip,
+    /// with the `BEGIN` in front if it is still to be sent. Statements not
+    /// yet prepared on this connection are prepared first, together, in one
+    /// more round trip.
+    ///
+    /// Requests go on the wire in this order, as tokio-postgres sends each
+    /// when its future is first polled and [`join_in_order`] polls them in
+    /// order. A failure is reported as the first one on the wire: the
+    /// requests after it fail only because it aborted the transaction.
+    async fn send<'s, T, F>(
+        &'s self,
+        sql: Option<&str>,
+        last: impl FnOnce(&'s PooledConnection, Option<tokio_postgres::Statement>) -> F,
+        context: impl FnOnce() -> String,
+    ) -> Result<T, WriteError>
+    where
+        F: Future<Output = Result<T, tokio_postgres::Error>> + 's,
+    {
+        let conn = self.conn();
+        let queued = self.take_queued();
+        let mut begin = self.take_begin();
+
+        let sqls: Vec<&str> = queued.iter().map(|q| q.sql.as_str()).chain(sql).collect();
+        let mut statements: Vec<Option<tokio_postgres::Statement>> =
+            sqls.iter().map(|sql| conn.cached(sql)).collect();
+
+        let mut missing: Vec<&str> = sqls
+            .iter()
+            .zip(&statements)
+            .filter(|(_, statement)| statement.is_none())
+            .map(|(sql, _)| *sql)
+            .collect();
+        missing.sort_unstable();
+        missing.dedup();
+        if !missing.is_empty() {
+            let prepares = join_in_order(missing.iter().map(|sql| conn.prepare_cached(sql, false)));
+            let prepared = match begin.take() {
+                None => prepares.await,
+                Some(begin) => {
+                    let (begun, prepared) = join(begin, prepares).await;
+                    if let Err(e) = begun {
+                        self.begin_failed.store(true, Ordering::Relaxed);
+                        return Err(self.statement_failed("opening a transaction", e));
+                    }
+                    prepared
+                }
+            };
+            for (sql, result) in missing.iter().zip(prepared) {
+                let statement = result.map_err(|e| {
+                    self.statement_failed(&format!("preparing {}", describe(sql)), e)
+                })?;
+                for (slot, slot_sql) in statements.iter_mut().zip(&sqls) {
+                    if slot_sql == sql {
+                        *slot = Some(statement.clone());
+                    }
+                }
+            }
+        }
+
+        let mut statements = statements.into_iter().map(|s| s.expect("prepared above"));
+        let queued_statements: Vec<tokio_postgres::Statement> =
+            statements.by_ref().take(queued.len()).collect();
+        let last_statement = statements.next();
+
+        // tokio-postgres encodes a request's parameters when it is first
+        // polled, and if that fails it sends nothing, while the requests
+        // after it still go out, `COMMIT` included. So check that every
+        // queued write's parameters encode before sending any of them.
+        for (q, statement) in queued.iter().zip(&queued_statements) {
+            if let Err(error) = check_params(statement, &q.params) {
+                return Err(self.client_failed(&describe(&q.sql), error));
+            }
+        }
+
+        let writes = join_in_order(queued.iter().zip(&queued_statements).map(|(q, statement)| {
+            conn.execute_raw(
+                statement,
+                q.params.iter().map(|p| p.as_ref() as &(dyn ToSql + Sync)),
+            )
+        }));
+        let requests = join(writes, last(conn, last_statement));
+        let (written, result) = match begin {
+            None => requests.await,
+            Some(begin) => {
+                let (begun, results) = join(begin, requests).await;
+                if let Err(e) = begun {
+                    self.begin_failed.store(true, Ordering::Relaxed);
+                    return Err(self.statement_failed("opening a transaction", e));
+                }
+                results
+            }
+        };
+
+        for (q, outcome) in queued.iter().zip(written) {
+            if let Err(e) = outcome {
+                let error = self.statement_failed(&describe(&q.sql), e);
+                return Err(match q.map_error {
+                    Some(map_error) => map_error(error),
+                    None => error,
+                });
+            }
+        }
+        result.map_err(|e| self.statement_failed(&context(), e))
+    }
+
+    /// Run a statement that returns rows, after the queued writes.
     pub async fn query(
         &self,
         sql: &str,
         params: &[&(dyn ToSql + Sync)],
     ) -> Result<Vec<Row>, WriteError> {
-        let (statement, begin) = self.prepare(sql).await?;
-        self.after_begin(begin, self.conn().query(&statement, params), || {
-            describe(sql)
-        })
+        self.send(
+            Some(sql),
+            |conn, statement| async move {
+                conn.query(&statement.expect("has a statement"), params)
+                    .await
+            },
+            || describe(sql),
+        )
         .await
     }
 
-    /// Run a statement, returning the number of rows it changed.
+    /// Run a statement, after the queued writes, returning the number of rows
+    /// it changed.
     pub async fn execute(
         &self,
         sql: &str,
         params: &[&(dyn ToSql + Sync)],
     ) -> Result<u64, WriteError> {
-        let (statement, begin) = self.prepare(sql).await?;
-        self.after_begin(begin, self.conn().execute(&statement, params), || {
-            describe(sql)
-        })
+        self.send(
+            Some(sql),
+            |conn, statement| async move {
+                conn.execute(&statement.expect("has a statement"), params)
+                    .await
+            },
+            || describe(sql),
+        )
         .await
     }
 
     /// Run one statement once per set of parameters, pipelined on the
-    /// connection, returning the total number of rows changed. For the
-    /// statements that need a sub-select per row; the rest can use
-    /// [`WriteTxn::insert_many`].
+    /// connection after the queued writes, returning the total number of
+    /// rows changed. For the statements that need a sub-select per row; the
+    /// rest can use [`WriteTxn::insert_many`].
     pub async fn execute_batch(
         &self,
         sql: &str,
@@ -344,16 +509,99 @@ impl WriteTxn {
         if rows.is_empty() {
             return Ok(0);
         }
-        let (statement, begin) = self.prepare(sql).await?;
-        let conn = self.conn();
-        let counts = self
-            .after_begin(
-                begin,
-                try_join_all(rows.iter().map(|params| conn.execute(&statement, params))),
-                || describe(sql),
-            )
-            .await?;
-        Ok(counts.into_iter().sum())
+        self.send(
+            Some(sql),
+            |conn, statement| async move {
+                let statement = statement.expect("has a statement");
+                let counts =
+                    join_in_order(rows.iter().map(|params| conn.execute(&statement, params))).await;
+                counts.into_iter().sum::<Result<u64, _>>()
+            },
+            || describe(sql),
+        )
+        .await
+    }
+
+    /// Send the queued writes now, and wait for them.
+    pub async fn flush(&self) -> Result<(), WriteError> {
+        if self.queued.lock().expect("not poisoned").is_empty() {
+            return Ok(());
+        }
+        self.send(None, |_, _| async { Ok(()) }, String::new).await
+    }
+
+    /// Queue a write whose result nobody reads. It goes out ahead of the
+    /// next statement that is not queued, or of the `COMMIT`, and a failure
+    /// surfaces there.
+    pub fn execute_later(&self, sql: impl Into<String>, params: Vec<OwnedParam>) {
+        self.queue(sql.into(), params, None);
+    }
+
+    /// As [`WriteTxn::execute_later`], with `map_error` applied to the
+    /// statement's error.
+    pub fn execute_later_mapping_error(
+        &self,
+        sql: impl Into<String>,
+        params: Vec<OwnedParam>,
+        map_error: MapError,
+    ) {
+        self.queue(sql.into(), params, Some(map_error));
+    }
+
+    fn queue(&self, sql: String, params: Vec<OwnedParam>, map_error: Option<MapError>) {
+        self.queued.lock().expect("not poisoned").push(Queued {
+            sql,
+            params,
+            map_error,
+        });
+    }
+
+    /// As [`WriteTxn::insert_many`], queued as [`WriteTxn::execute_later`].
+    pub fn insert_many_later(
+        &self,
+        table: &str,
+        columns: Vec<OwnedColumn>,
+        on_conflict: Option<&str>,
+    ) -> Result<(), WriteError> {
+        let shapes: Vec<(&str, &str, usize)> = columns
+            .iter()
+            .map(|c| (c.name, c.sql_type, c.rows))
+            .collect();
+        if check_batch(table, &shapes)?.is_none() {
+            return Ok(());
+        }
+        let mut sql = unnest_insert_sql(table, &shapes);
+        if let Some(on_conflict) = on_conflict {
+            sql.push(' ');
+            sql.push_str(on_conflict);
+        }
+        self.execute_later(sql, columns.into_iter().map(|c| c.values).collect());
+        Ok(())
+    }
+
+    /// As [`WriteTxn::upsert_many`], queued as [`WriteTxn::execute_later`].
+    pub fn upsert_many_later(
+        &self,
+        table: &str,
+        keys: Vec<OwnedColumn>,
+        values: Vec<OwnedColumn>,
+    ) -> Result<(), WriteError> {
+        let shapes: Vec<(&str, &str, usize)> = keys
+            .iter()
+            .chain(&values)
+            .map(|c| (c.name, c.sql_type, c.rows))
+            .collect();
+        if check_batch(table, &shapes)?.is_none() {
+            return Ok(());
+        }
+        let key_names: Vec<&str> = keys.iter().map(|c| c.name).collect();
+        let value_names: Vec<&str> = values.iter().map(|c| c.name).collect();
+        let sql = unnest_insert_sql(table, &shapes) + &on_conflict_update(&key_names, &value_names);
+        self.execute_later(
+            sql,
+            keys.into_iter().chain(values).map(|c| c.values).collect(),
+        );
+        Ok(())
     }
 
     /// Insert a batch of rows in one statement, returning the number
@@ -365,11 +613,14 @@ impl WriteTxn {
         columns: &[Column<'_>],
         on_conflict: Option<&str>,
     ) -> Result<u64, WriteError> {
-        let Some(rows) = batch_rows(table, columns)? else {
+        let shapes: Vec<(&str, &str, usize)> = columns
+            .iter()
+            .map(|c| (c.name, c.sql_type, c.rows))
+            .collect();
+        if check_batch(table, &shapes)?.is_none() {
             return Ok(0);
-        };
-        debug_assert!(rows > 0);
-        let mut sql = unnest_insert(table, columns);
+        }
+        let mut sql = unnest_insert_sql(table, &shapes);
         if let Some(on_conflict) = on_conflict {
             sql.push(' ');
             sql.push_str(on_conflict);
@@ -390,54 +641,21 @@ impl WriteTxn {
         values: &[Column<'_>],
     ) -> Result<u64, WriteError> {
         let columns: Vec<&Column<'_>> = keys.iter().chain(values).collect();
-        let Some(_) = batch_rows_of(table, &columns)? else {
+        let shapes: Vec<(&str, &str, usize)> = columns
+            .iter()
+            .map(|c| (c.name, c.sql_type, c.rows))
+            .collect();
+        if check_batch(table, &shapes)?.is_none() {
             return Ok(0);
-        };
-        let mut sql = unnest_insert_of(table, &columns);
-        let key_names: Vec<&str> = keys.iter().map(|c| c.name).collect();
-        if values.is_empty() {
-            let _ = write!(sql, " ON CONFLICT ({}) DO NOTHING", key_names.join(", "));
-        } else {
-            let updates: Vec<String> = values
-                .iter()
-                .map(|c| format!("{0} = EXCLUDED.{0}", c.name))
-                .collect();
-            let _ = write!(
-                sql,
-                " ON CONFLICT ({}) DO UPDATE SET {}",
-                key_names.join(", "),
-                updates.join(", ")
-            );
         }
+        let key_names: Vec<&str> = keys.iter().map(|c| c.name).collect();
+        let value_names: Vec<&str> = values.iter().map(|c| c.name).collect();
+        let sql = unnest_insert_sql(table, &shapes) + &on_conflict_update(&key_names, &value_names);
         let params: Vec<&(dyn ToSql + Sync)> = columns.iter().map(|c| c.values).collect();
         self.execute(&sql, &params).await
     }
 
-    /// The prepared statement for `sql`, and the transaction's `BEGIN` if
-    /// it is still to be sent in front of the statement's execution. On a
-    /// cache miss the `BEGIN` goes with the prepare instead.
-    async fn prepare(
-        &self,
-        sql: &str,
-    ) -> Result<
-        (
-            tokio_postgres::Statement,
-            Option<BoxFuture<'_, Result<(), tokio_postgres::Error>>>,
-        ),
-        WriteError,
-    > {
-        let begin = self.take_begin();
-        if let Some(statement) = self.conn().cached(sql) {
-            return Ok((statement, begin));
-        }
-        let statement = self
-            .after_begin(begin, self.conn().prepare_cached(sql, false), || {
-                format!("preparing {}", describe(sql))
-            })
-            .await?;
-        Ok((statement, None))
-    }
-
+    /// Send the queued writes and commit, in one round trip.
     async fn commit(mut self) -> Result<(), WriteError> {
         match self.failed.load(Ordering::Relaxed) {
             NOT_FAILED => {}
@@ -457,22 +675,28 @@ impl WriteTxn {
                 )));
             }
         }
-        if self.begin_pending.load(Ordering::Relaxed) {
+        if self.begin_pending.load(Ordering::Relaxed)
+            && self.queued.lock().expect("not poisoned").is_empty()
+        {
             // No statement ran, so there is no transaction to commit.
             self.in_transaction = false;
             return Ok(());
         }
-        self.conn()
-            .batch_execute("COMMIT")
-            .await
-            .map_err(|e| WriteError::from_pg("committing", e))?;
+        self.send(
+            None,
+            |conn, _| conn.batch_execute("COMMIT"),
+            || "committing".to_owned(),
+        )
+        .await?;
         self.in_transaction = false;
         Ok(())
     }
 
     /// Roll back now, rather than on a background task when dropped, so a
-    /// retry does not race the rollback for the rows.
+    /// retry does not race the rollback for the rows. Queued writes are
+    /// dropped unsent.
     async fn rollback(mut self) {
+        self.take_queued();
         if self.begin_pending.load(Ordering::Relaxed) {
             // No statement ran, so there is no transaction to roll back.
             self.in_transaction = false;
@@ -493,6 +717,64 @@ impl WriteTxn {
         }
         self.in_transaction = false;
     }
+}
+
+/// Check that `params` encode as `statement`'s parameter types, as
+/// tokio-postgres would when sending it.
+fn check_params(
+    statement: &tokio_postgres::Statement,
+    params: &[OwnedParam],
+) -> anyhow::Result<()> {
+    let types = statement.params();
+    if types.len() != params.len() {
+        anyhow::bail!(
+            "statement takes {} parameters but {} were given",
+            types.len(),
+            params.len()
+        );
+    }
+    let mut buf = bytes::BytesMut::new();
+    for (i, (param, ty)) in params.iter().zip(types).enumerate() {
+        buf.clear();
+        param
+            .to_sql_checked(ty, &mut buf)
+            .map_err(|e| anyhow::anyhow!("error serializing parameter {i}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Await `futures` together, polling every one still pending, in order, on
+/// each wake-up. tokio-postgres sends a request when its future is first
+/// polled, so the requests go out in the order given. (`join_all` and
+/// `try_join_all` do not promise an order for long lists.)
+pub(crate) fn join_in_order<F: Future>(
+    futures: impl IntoIterator<Item = F>,
+) -> impl Future<Output = Vec<F::Output>> {
+    let mut futures: Vec<_> = futures
+        .into_iter()
+        .map(|future| maybe_done(Box::pin(future)))
+        .collect();
+    poll_fn(move |cx| {
+        let mut done = true;
+        for future in futures.iter_mut() {
+            if Pin::new(future).poll(cx).is_pending() {
+                done = false;
+            }
+        }
+        if !done {
+            return Poll::Pending;
+        }
+        Poll::Ready(
+            futures
+                .iter_mut()
+                .map(|future| {
+                    Pin::new(future)
+                        .take_output()
+                        .expect("polled to completion above")
+                })
+                .collect(),
+        )
+    })
 }
 
 /// For the read helpers shared with the read-only paths, such as the chain
@@ -671,8 +953,10 @@ where
             Ok(value)
         }
         Ok(value) => {
+            // A dry run still checks its queued writes.
+            let flushed = txn.flush().await;
             txn.rollback().await;
-            Ok(value)
+            flushed.map(|()| value)
         }
         Err(error) => {
             txn.rollback().await;
@@ -683,43 +967,51 @@ where
 
 /// The batch's row count, or `None` for an empty batch. All columns must
 /// have one value per row.
-fn batch_rows(table: &str, columns: &[Column<'_>]) -> Result<Option<usize>, WriteError> {
-    batch_rows_of(table, &columns.iter().collect::<Vec<_>>())
-}
-
-fn batch_rows_of(table: &str, columns: &[&Column<'_>]) -> Result<Option<usize>, WriteError> {
-    let Some(first) = columns.first() else {
+/// The batch's row count, given each column's `(name, type, rows)`, or
+/// `None` for an empty batch. All columns must have the same number of rows.
+fn check_batch(table: &str, columns: &[(&str, &str, usize)]) -> Result<Option<usize>, WriteError> {
+    let Some(&(first_name, _, first_rows)) = columns.first() else {
         return Err(anyhow::anyhow!("a batch for {table} with no columns").into());
     };
-    if let Some(column) = columns.iter().find(|c| c.rows != first.rows) {
+    if let Some(&(name, _, rows)) = columns.iter().find(|c| c.2 != first_rows) {
         return Err(anyhow::anyhow!(
-            "a batch for {table} with {} values of {} and {} of {}",
-            first.rows,
-            first.name,
-            column.rows,
-            column.name
+            "a batch for {table} with {first_rows} values of {first_name} and {rows} of {name}"
         )
         .into());
     }
-    Ok((first.rows > 0).then_some(first.rows))
+    Ok((first_rows > 0).then_some(first_rows))
 }
 
-/// `INSERT INTO table (a, b) SELECT * FROM UNNEST($1::text[], $2::bigint[])`.
-fn unnest_insert(table: &str, columns: &[Column<'_>]) -> String {
-    unnest_insert_of(table, &columns.iter().collect::<Vec<_>>())
-}
-
-fn unnest_insert_of(table: &str, columns: &[&Column<'_>]) -> String {
-    let names: Vec<&str> = columns.iter().map(|c| c.name).collect();
+/// `INSERT INTO table (a, b) SELECT * FROM UNNEST($1::text[], $2::bigint[])`,
+/// given each column's `(name, type, rows)`.
+fn unnest_insert_sql(table: &str, columns: &[(&str, &str, usize)]) -> String {
+    let names: Vec<&str> = columns.iter().map(|c| c.0).collect();
     let arrays: Vec<String> = columns
         .iter()
         .enumerate()
-        .map(|(i, c)| format!("${}::{}[]", i + 1, c.sql_type))
+        .map(|(i, c)| format!("${}::{}[]", i + 1, c.1))
         .collect();
     format!(
         "INSERT INTO {table} ({}) SELECT * FROM UNNEST({})",
         names.join(", "),
         arrays.join(", ")
+    )
+}
+
+/// The `ON CONFLICT` clause of an upsert: do nothing without `values`,
+/// otherwise update them from the new row.
+fn on_conflict_update(keys: &[&str], values: &[&str]) -> String {
+    if values.is_empty() {
+        return format!(" ON CONFLICT ({}) DO NOTHING", keys.join(", "));
+    }
+    let updates: Vec<String> = values
+        .iter()
+        .map(|name| format!("{name} = EXCLUDED.{name}"))
+        .collect();
+    format!(
+        " ON CONFLICT ({}) DO UPDATE SET {}",
+        keys.join(", "),
+        updates.join(", ")
     )
 }
 
@@ -816,6 +1108,193 @@ mod tests {
             .iter()
             .map(|row| (row.get(0), row.get(1), row.get(2), row.get(3)))
             .collect()
+    }
+
+    /// Queued writes go out ahead of the next statement, which sees them,
+    /// and with the `COMMIT` when nothing follows them.
+    #[test]
+    fn queued_writes_are_sent_in_order() {
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            let seen = run_write_interaction(&pool, "test", |txn, _| {
+                let table = table.clone();
+                async move {
+                    txn.insert_many_later(
+                        &table,
+                        vec![
+                            OwnedColumn::new("id", "text", vec!["a".to_owned(), "b".to_owned()]),
+                            OwnedColumn::new("n", "bigint", vec![1i64, 2]),
+                        ],
+                        None,
+                    )?;
+                    txn.execute_later(
+                        format!("UPDATE {table} SET n = n + 10 WHERE id = $1"),
+                        vec![Box::new("a".to_owned())],
+                    );
+                    let rows = txn
+                        .query(&format!("SELECT id, n FROM {table} ORDER BY id"), &[])
+                        .await?;
+                    // Only queued: sent with the COMMIT.
+                    txn.upsert_many_later(
+                        &table,
+                        vec![OwnedColumn::new("id", "text", vec!["c".to_owned()])],
+                        vec![OwnedColumn::new("n", "bigint", vec![3i64])],
+                    )?;
+                    Ok(rows
+                        .iter()
+                        .map(|row| (row.get::<_, String>(0), row.get::<_, i64>(1)))
+                        .collect::<Vec<_>>())
+                }
+                .boxed()
+            })
+            .await
+            .unwrap();
+            assert_eq!(seen, vec![("a".to_owned(), 11), ("b".to_owned(), 2)]);
+            assert_eq!(
+                rows(&pool, &table).await,
+                vec![
+                    ("a".to_owned(), 11, None, None),
+                    ("b".to_owned(), 2, None, None),
+                    ("c".to_owned(), 3, None, None),
+                ]
+            );
+        });
+        teardown(&rt, &pool, &table);
+    }
+
+    /// A queued write that fails surfaces at the next statement, as itself
+    /// (the next statement only fails because it aborted the transaction),
+    /// mapped as asked. Nothing is committed.
+    #[test]
+    fn queued_write_failure_surfaces_at_the_next_statement() {
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            let error = run_write_interaction(&pool, "test", |txn, _| {
+                let table = table.clone();
+                async move {
+                    txn.execute_later(
+                        format!("INSERT INTO {table} (id, n) VALUES ('a', 1)"),
+                        vec![],
+                    );
+                    txn.execute_later_mapping_error(
+                        format!("INSERT INTO {table} (id, n) VALUES ('a', 2)"),
+                        vec![],
+                        |error| match error {
+                            WriteError::Constraint { .. } => {
+                                WriteError::Other(anyhow::anyhow!("mapped duplicate"))
+                            }
+                            other => other,
+                        },
+                    );
+                    txn.query(&format!("SELECT id FROM {table}"), &[]).await?;
+                    Ok(())
+                }
+                .boxed()
+            })
+            .await
+            .unwrap_err();
+            assert!(
+                format!("{error}").contains("mapped duplicate"),
+                "unexpected error: {error}"
+            );
+            assert_eq!(rows(&pool, &table).await, vec![]);
+        });
+        teardown(&rt, &pool, &table);
+    }
+
+    /// A queued write whose parameters do not encode stops everything queued
+    /// with it from being sent, the `COMMIT` included, so nothing is
+    /// committed.
+    #[test]
+    fn queued_write_that_does_not_encode_commits_nothing() {
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            let result: Result<(), WriteError> = run_write_interaction(&pool, "test", |txn, _| {
+                let table = table.clone();
+                async move {
+                    for (id, n) in [("x", "1"), ("y", "2"), ("z", "3")] {
+                        let id: OwnedParam = if id == "y" {
+                            // `id` is text: an integer does not encode.
+                            Box::new(5i64)
+                        } else {
+                            Box::new(id.to_owned())
+                        };
+                        txn.execute_later(
+                            format!("INSERT INTO {table} (id, n) VALUES ($1, {n})"),
+                            vec![id],
+                        );
+                    }
+                    Ok(())
+                }
+                .boxed()
+            })
+            .await;
+            let error = result.unwrap_err();
+            assert!(
+                format!("{error:#}").contains("error serializing parameter 0"),
+                "unexpected error: {error:#}"
+            );
+            assert_eq!(rows(&pool, &table).await, vec![]);
+        });
+        teardown(&rt, &pool, &table);
+    }
+
+    /// A dry run still sends its queued writes, so their failures surface.
+    #[test]
+    fn dry_run_checks_queued_writes() {
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            let result = run_rolled_back_interaction(&pool, "test", |txn, _| {
+                let table = table.clone();
+                async move {
+                    txn.execute_later(
+                        format!("INSERT INTO {table} (id, n) VALUES ('a', NULL)"),
+                        vec![],
+                    );
+                    Ok(())
+                }
+                .boxed()
+            })
+            .await;
+            assert!(
+                matches!(result, Err(WriteError::Constraint { .. })),
+                "unexpected result: {result:?}"
+            );
+        });
+        teardown(&rt, &pool, &table);
+    }
+
+    /// When the closure fails, its queued writes are dropped unsent.
+    #[test]
+    fn queued_writes_are_dropped_on_failure() {
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            let result: Result<(), WriteError> = run_write_interaction(&pool, "test", |txn, _| {
+                let table = table.clone();
+                async move {
+                    txn.execute_later(
+                        format!("INSERT INTO {table} (id, n) VALUES ('a', 1)"),
+                        vec![],
+                    );
+                    Err(WriteError::Other(anyhow::anyhow!("closure failed")))
+                }
+                .boxed()
+            })
+            .await;
+            assert!(result.is_err());
+            assert_eq!(rows(&pool, &table).await, vec![]);
+        });
+        teardown(&rt, &pool, &table);
     }
 
     /// The `BEGIN` goes out with the first statement, so that statement
@@ -949,7 +1428,11 @@ mod tests {
             Column::new("id", "text", &ids),
             Column::new("n", "bigint", &ns),
         ];
-        assert!(batch_rows("t", &columns).is_err());
+        let shapes: Vec<(&str, &str, usize)> = columns
+            .iter()
+            .map(|c| (c.name, c.sql_type, c.rows))
+            .collect();
+        assert!(check_batch("t", &shapes).is_err());
     }
 
     #[test]
