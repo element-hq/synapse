@@ -1344,7 +1344,8 @@ class DatabasePool:
             txn.execute(query, args)
             return txn.fetchall()
 
-        return await self.runInteraction(desc, interaction)
+        # One statement, so it needs no transaction.
+        return await self.runInteraction(desc, interaction, db_autocommit=True)
 
     # "Simple" SQL API methods that operate on a single table with no JOINs,
     # no complex WHERE clauses, just a dict of values for columns.
@@ -1362,7 +1363,10 @@ class DatabasePool:
             values: dict of new column names and values for them
             desc: description of the transaction, for logging and metrics
         """
-        await self.runInteraction(desc, self.simple_insert_txn, table, values)
+        # One statement, so it needs no transaction.
+        await self.runInteraction(
+            desc, self.simple_insert_txn, table, values, db_autocommit=True
+        )
 
     @staticmethod
     def simple_insert_txn(
@@ -1419,8 +1423,15 @@ class DatabasePool:
             values: for each row, a list of values in the same order as `keys`
             desc: description of the transaction, for logging and metrics
         """
+        # A single row is one statement on every backend, so it needs no
+        # transaction.
         await self.runInteraction(
-            desc, self.simple_insert_many_txn, table, keys, values
+            desc,
+            self.simple_insert_many_txn,
+            table,
+            keys,
+            values,
+            db_autocommit=len(values) <= 1,
         )
 
     @staticmethod

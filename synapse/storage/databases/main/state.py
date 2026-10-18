@@ -154,6 +154,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             "get_room_version_id_txn",
             self.get_room_version_id_txn,
             room_id,
+            db_autocommit=True,
         )
 
     def get_room_version_id_txn(self, txn: LoggingTransaction, room_id: str) -> str:
@@ -520,7 +521,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             return {(intern_string(r[0]), intern_string(r[1])): r[2] for r in txn}
 
         return await self.db_pool.runInteraction(
-            "get_partial_current_state_ids", _get_current_state_ids_txn
+            "get_partial_current_state_ids",
+            _get_current_state_ids_txn,
+            db_autocommit=True,
         )
 
     async def check_if_events_in_current_state(
@@ -612,7 +615,11 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             return results
 
         return await self.db_pool.runInteraction(
-            "_get_current_state_event_ids", _get_current_state_event_ids_txn
+            "_get_current_state_event_ids",
+            _get_current_state_event_ids_txn,
+            # One batch is one statement. More need a transaction, so they all
+            # see the same state.
+            db_autocommit=len(event_types_and_state_keys) <= 500,
         )
 
     @cancellable
@@ -679,7 +686,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             return results
 
         return await self.db_pool.runInteraction(
-            "get_filtered_current_state_ids", _get_filtered_current_state_ids_txn
+            "get_filtered_current_state_ids",
+            _get_filtered_current_state_ids_txn,
+            db_autocommit=True,
         )
 
     @cached(max_entries=50000)

@@ -257,6 +257,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction(
             "get_subset_users_in_room_with_profiles",
             _get_subset_users_in_room_with_profiles,
+            db_autocommit=True,
         )
 
     @cached(max_entries=100000, iterable=True)
@@ -298,6 +299,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction(
             "get_users_in_room_with_profiles",
             _get_users_in_room_with_profiles,
+            db_autocommit=True,
         )
 
     @cached(max_entries=100000)  # type: ignore[synapse-@cached-mutable]
