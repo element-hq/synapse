@@ -1,0 +1,1 @@
+Port the database reads and connection-state transactions of simplified sliding sync to Rust, held equal to the Python by differential tests.

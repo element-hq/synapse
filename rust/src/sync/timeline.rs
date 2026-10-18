@@ -103,6 +103,7 @@ async fn filter_recents(
         &context.client_filter,
         &recents,
         &current_state_ids,
+        false,
         context.now_ms(),
     )
     .await

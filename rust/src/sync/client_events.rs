@@ -47,9 +47,10 @@ pub struct ClientFilterContext {
     pub msc4354_enabled: bool,
 }
 
-/// `filter_and_transform_events_for_client` with `filter_send_to_client`
-/// and not peeking: the events the user may see, in order, each pruned if
-/// its sender was erased and with the user's membership at it.
+/// `filter_and_transform_events_for_client` with `filter_send_to_client`:
+/// the events the user may see, in order, each pruned if its sender was
+/// erased and with the user's membership at it. `is_peeking` is for a user
+/// who is not in the room.
 ///
 /// `now_ms` is the time the sticky and retention checks compare with.
 pub async fn filter_events_for_client(
@@ -57,6 +58,7 @@ pub async fn filter_events_for_client(
     context: &ClientFilterContext,
     events: &[Arc<Event>],
     always_include_ids: &HashSet<Arc<str>>,
+    is_peeking: bool,
     now_ms: i64,
 ) -> anyhow::Result<Vec<FilteredEvent>> {
     if events.is_empty() {
@@ -165,7 +167,7 @@ pub async fn filter_events_for_client(
             now_ms,
             msc4354_enabled: context.msc4354_enabled,
             filter_send_to_client: true,
-            is_peeking: false,
+            is_peeking,
             always_include_ids,
             sender_ignored: context.ignored_users.contains(event.sender()),
             retention_max_lifetime: retention[event.room_id()],

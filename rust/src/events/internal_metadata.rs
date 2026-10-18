@@ -623,6 +623,13 @@ impl EventInternalMetadata {
             .ok()
             .and_then(|inner| inner.stream_ordering)
     }
+
+    /// The writer that persisted the event, if known.
+    pub fn instance_name(&self) -> Option<String> {
+        self.read_inner()
+            .ok()
+            .and_then(|inner| inner.instance_name.clone())
+    }
 }
 
 /// Helper to convert `None` to an `AttributeError` for a property getter.

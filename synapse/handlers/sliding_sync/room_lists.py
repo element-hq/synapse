@@ -21,6 +21,7 @@ from typing import (
     Literal,
     Mapping,
     MutableMapping,
+    Sequence,
     cast,
 )
 
@@ -213,6 +214,57 @@ def filter_membership_for_sync(
         # Allow kicks
         or (membership == Membership.LEAVE and sender not in (user_id, None))
     )
+
+
+def _sync_list_ops(
+    ranges: Sequence[tuple[int, int]],
+    sorted_room_ids: Sequence[str],
+    room_sync_config: RoomSyncConfig,
+    relevant_room_map: dict[str, RoomSyncConfig],
+) -> list[SlidingSyncResult.SlidingWindowList.Operation]:
+    """The `SYNC` operations of a list's `ranges` over its sorted rooms.
+    Adds each room in a range to `relevant_room_map` with the list's
+    `room_sync_config`, combined with the room's existing config.
+
+    Note: once a room combines with an existing config, the rooms after it
+    in the list take the combined config too.
+    """
+    ops: list[SlidingSyncResult.SlidingWindowList.Operation] = []
+    for range in ranges:
+        room_ids_in_list: list[str] = []
+
+        # We're going to loop through the sorted list of rooms starting
+        # at the range start index and keep adding rooms until we fill
+        # up the range or run out of rooms.
+        #
+        # Both sides of range are inclusive so we `+ 1`
+        max_num_rooms = range[1] - range[0] + 1
+        for room_id in sorted_room_ids[range[0] :]:
+            if len(room_ids_in_list) >= max_num_rooms:
+                break
+
+            # Take the superset of the `RoomSyncConfig` for each room.
+            #
+            # Update our `relevant_room_map` with the room we're going
+            # to display and need to fetch more info about.
+            existing_room_sync_config = relevant_room_map.get(room_id)
+            if existing_room_sync_config is not None:
+                room_sync_config = existing_room_sync_config.combine_room_sync_config(
+                    room_sync_config
+                )
+
+            relevant_room_map[room_id] = room_sync_config
+
+            room_ids_in_list.append(room_id)
+
+        ops.append(
+            SlidingSyncResult.SlidingWindowList.Operation(
+                op=OperationType.SYNC,
+                range=range,
+                room_ids=room_ids_in_list,
+            )
+        )
+    return ops
 
 
 class SlidingSyncRoomLists:
@@ -547,44 +599,12 @@ class SlidingSyncRoomLists:
                                 limit=max(range[1] + 1 for range in list_config.ranges),
                             )
 
-                        for range in list_config.ranges:
-                            room_ids_in_list: list[str] = []
-
-                            # We're going to loop through the sorted list of rooms starting
-                            # at the range start index and keep adding rooms until we fill
-                            # up the range or run out of rooms.
-                            #
-                            # Both sides of range are inclusive so we `+ 1`
-                            max_num_rooms = range[1] - range[0] + 1
-                            for room_membership in sorted_room_info[range[0] :]:
-                                room_id = room_membership.room_id
-
-                                if len(room_ids_in_list) >= max_num_rooms:
-                                    break
-
-                                # Take the superset of the `RoomSyncConfig` for each room.
-                                #
-                                # Update our `relevant_room_map` with the room we're going
-                                # to display and need to fetch more info about.
-                                existing_room_sync_config = relevant_room_map.get(
-                                    room_id
-                                )
-                                if existing_room_sync_config is not None:
-                                    room_sync_config = existing_room_sync_config.combine_room_sync_config(
-                                        room_sync_config
-                                    )
-
-                                relevant_room_map[room_id] = room_sync_config
-
-                                room_ids_in_list.append(room_id)
-
-                            ops.append(
-                                SlidingSyncResult.SlidingWindowList.Operation(
-                                    op=OperationType.SYNC,
-                                    range=range,
-                                    room_ids=room_ids_in_list,
-                                )
-                            )
+                        ops = _sync_list_ops(
+                            list_config.ranges,
+                            [room.room_id for room in sorted_room_info],
+                            room_sync_config,
+                            relevant_room_map,
+                        )
 
                     lists[list_key] = SlidingSyncResult.SlidingWindowList(
                         count=len(filtered_sync_room_map),
@@ -735,44 +755,12 @@ class SlidingSyncRoomLists:
 
                     ops: list[SlidingSyncResult.SlidingWindowList.Operation] = []
                     if list_config.ranges:
-                        for range in list_config.ranges:
-                            room_ids_in_list: list[str] = []
-
-                            # We're going to loop through the sorted list of rooms starting
-                            # at the range start index and keep adding rooms until we fill
-                            # up the range or run out of rooms.
-                            #
-                            # Both sides of range are inclusive so we `+ 1`
-                            max_num_rooms = range[1] - range[0] + 1
-                            for room_membership in sorted_room_info[range[0] :]:
-                                room_id = room_membership.room_id
-
-                                if len(room_ids_in_list) >= max_num_rooms:
-                                    break
-
-                                # Take the superset of the `RoomSyncConfig` for each room.
-                                #
-                                # Update our `relevant_room_map` with the room we're going
-                                # to display and need to fetch more info about.
-                                existing_room_sync_config = relevant_room_map.get(
-                                    room_id
-                                )
-                                if existing_room_sync_config is not None:
-                                    room_sync_config = existing_room_sync_config.combine_room_sync_config(
-                                        room_sync_config
-                                    )
-
-                                relevant_room_map[room_id] = room_sync_config
-
-                                room_ids_in_list.append(room_id)
-
-                            ops.append(
-                                SlidingSyncResult.SlidingWindowList.Operation(
-                                    op=OperationType.SYNC,
-                                    range=range,
-                                    room_ids=room_ids_in_list,
-                                )
-                            )
+                        ops = _sync_list_ops(
+                            list_config.ranges,
+                            [room.room_id for room in sorted_room_info],
+                            room_sync_config,
+                            relevant_room_map,
+                        )
 
                     lists[list_key] = SlidingSyncResult.SlidingWindowList(
                         count=len(sorted_room_info),

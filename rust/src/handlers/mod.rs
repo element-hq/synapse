@@ -24,6 +24,7 @@ use pyo3::{
 
 use crate::homeserver::HomeServer;
 use crate::persist::python::Persister;
+use crate::sliding_sync::SlidingSyncHandler;
 use crate::state::StateResolutionHandler;
 use crate::sync::SyncHandler;
 
@@ -39,6 +40,9 @@ struct RustHandlers {
     /// Only when `rust_event_persistence` is not `off`, the main database
     /// uses the native Rust driver and this instance writes events.
     persister: Option<Py<Persister>>,
+    /// Only when the main database uses the native Rust driver. Shares
+    /// `sync`'s store.
+    sliding_sync: Option<Py<SlidingSyncHandler>>,
 }
 
 #[pymethods]
@@ -78,45 +82,53 @@ impl RustHandlers {
         let rust_connection_pool_class = py
             .import("synapse.storage.rust_pool")?
             .getattr("RustConnectionPool")?;
-        let (state_resolution, sync, persister) =
-            if connection_pool.is_instance(&rust_connection_pool_class)? {
-                let connection_pool = connection_pool.unbind();
-                let state_resolution = StateResolutionHandler::new(
+        let (state_resolution, sync, sliding_sync, persister) = if connection_pool
+            .is_instance(&rust_connection_pool_class)?
+        {
+            let connection_pool = connection_pool.unbind();
+            let state_resolution = StateResolutionHandler::new(
+                connection_pool.clone_ref(py),
+                runtime.clone(),
+                Arc::clone(&store),
+            );
+            let persister = if config.experimental.rust_event_persistence != "off" {
+                Persister::for_homeserver(
+                    py,
+                    &homeserver,
                     connection_pool.clone_ref(py),
                     runtime.clone(),
                     Arc::clone(&store),
-                );
-                let persister = if config.experimental.rust_event_persistence != "off" {
-                    Persister::for_homeserver(
-                        py,
-                        &homeserver,
-                        connection_pool.clone_ref(py),
-                        runtime.clone(),
-                        Arc::clone(&store),
-                        state_resolution.conflict_cache(),
-                    )?
-                    .map(|persister| Py::new(py, persister))
-                    .transpose()?
-                } else {
-                    None
-                };
-                (
-                    Some(Py::new(py, state_resolution)?),
-                    Some(Py::new(
-                        py,
-                        SyncHandler::new(connection_pool, runtime.clone(), store, &config),
-                    )?),
-                    persister,
-                )
+                    state_resolution.conflict_cache(),
+                )?
+                .map(|persister| Py::new(py, persister))
+                .transpose()?
             } else {
-                (None, None, None)
+                None
             };
+            let sync = SyncHandler::new(
+                connection_pool.clone_ref(py),
+                runtime.clone(),
+                store,
+                &config,
+            );
+            let sliding_sync =
+                SlidingSyncHandler::new(connection_pool, runtime.clone(), Arc::clone(sync.store()));
+            (
+                Some(Py::new(py, state_resolution)?),
+                Some(Py::new(py, sync)?),
+                Some(Py::new(py, sliding_sync)?),
+                persister,
+            )
+        } else {
+            (None, None, None, None)
+        };
 
         Ok(RustHandlers {
             versions,
             state_resolution,
             sync,
             persister,
+            sliding_sync,
         })
     }
 
@@ -145,6 +157,13 @@ impl RustHandlers {
     #[getter]
     fn persister(&self, py: Python<'_>) -> Option<Py<Persister>> {
         self.persister.as_ref().map(|h| h.clone_ref(py))
+    }
+
+    /// The Rust sliding sync handler, or `None` if the main database does
+    /// not use the native Rust driver.
+    #[getter]
+    fn sliding_sync(&self, py: Python<'_>) -> Option<Py<SlidingSyncHandler>> {
+        self.sliding_sync.as_ref().map(|h| h.clone_ref(py))
     }
 }
 

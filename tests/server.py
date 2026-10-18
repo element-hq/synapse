@@ -112,6 +112,9 @@ from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.synapse_rust.persist import Persister as RustPersister
 from synapse.synapse_rust.runtime import RustRuntime, set_virtual_time_msec
+from synapse.synapse_rust.sliding_sync import (
+    SlidingSyncHandler as RustSlidingSyncHandler,
+)
 from synapse.synapse_rust.state import (
     StateResolutionHandler as RustStateResolutionHandler,
 )
@@ -131,6 +134,8 @@ from tests.utils import (
     POSTGRES_USER,
     RUST_PERSIST_FOR_TESTS,
     RUST_PERSIST_STRICT_FOR_TESTS,
+    RUST_SLIDING_SYNC_FOR_TESTS,
+    RUST_SLIDING_SYNC_STRICT_FOR_TESTS,
     RUST_STATE_RES_FOR_TESTS,
     RUST_SYNC_FOR_TESTS,
     RUST_SYNC_STRICT_FOR_TESTS,
@@ -1345,6 +1350,13 @@ def setup_test_homeserver(
             RustEventPersistenceLevel, RUST_PERSIST_FOR_TESTS
         )
 
+    if RUST_SLIDING_SYNC_FOR_TESTS:
+        if RUST_SLIDING_SYNC_FOR_TESTS not in ("off", "on"):
+            raise ValueError("SYNAPSE_TEST_RUST_SLIDING_SYNC must be off or on")
+        config.experimental.rust_sliding_sync = cast(
+            Literal["off", "on"], RUST_SLIDING_SYNC_FOR_TESTS
+        )
+
     if USE_POSTGRES_FOR_TESTS:
         test_db = "synapse_test_%s" % uuid.uuid4().hex
 
@@ -1552,6 +1564,17 @@ def setup_test_homeserver(
             )
         sync_handler._rust_sync_strict = RUST_SYNC_STRICT_FOR_TESTS
 
+    if RUST_SLIDING_SYNC_FOR_TESTS:
+        # Likewise for the Rust sliding sync handler.
+        sliding_sync_handler = hs.get_sliding_sync_handler()
+        if sliding_sync_handler._rust_sliding_sync is not None:
+            sliding_sync_handler._rust_sliding_sync = cast(
+                Any, _BlockingRustCalls(sliding_sync_handler._rust_sliding_sync)
+            )
+        sliding_sync_handler._rust_sliding_sync_strict = (
+            RUST_SLIDING_SYNC_STRICT_FOR_TESTS
+        )
+
     # Likewise for event loads, when they run in Rust: code that loads events
     # in the background would otherwise not have finished when a test checks.
     # `GetEventCancellationTestCase` exercises the deferreds.
@@ -1623,7 +1646,7 @@ class _BlockingRustStateResolution:
 
 
 class _BlockingRustCalls:
-    """Wraps the Rust `SyncHandler`, `RustStore` or `Persister` so that each of its entry
+    """Wraps a Rust handler, the `RustStore` or the `Persister` so that each of its entry
     points blocks, for the reason `_BlockingRustStateResolution` gives.
 
     Every entry point `name` that returns a Deferred has a `name_blocking`
@@ -1631,7 +1654,10 @@ class _BlockingRustCalls:
     that twin's result in an already-fired Deferred.
     """
 
-    def __init__(self, handler: "RustSyncHandler | RustStore | RustPersister") -> None:
+    def __init__(
+        self,
+        handler: "RustSyncHandler | RustSlidingSyncHandler | RustStore | RustPersister",
+    ) -> None:
         self._handler = handler
 
     def __getattr__(self, name: str) -> Any:

@@ -1,0 +1,727 @@
+#
+# This file is licensed under the Affero General Public License (AGPL) version 3.
+#
+# Copyright (C) 2026 Element Creations Ltd
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+#
+
+"""The rooms of a sliding sync response computed and encoded in Rust
+(`rust/src/sliding_sync/room_entry.rs`, `encode.rs`) against Python's.
+
+Each request goes to two connections of the same user, one served by Python
+and one by Rust. The `rooms` of the two responses must be equal, and so must
+the changes each side makes to its connection's state.
+"""
+
+from typing import AbstractSet, Any, Mapping
+from unittest import SkipTest
+
+from parameterized import parameterized_class
+
+from twisted.internet.defer import Deferred
+from twisted.internet.testing import MemoryReactor
+
+import synapse.rest.admin
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventTypes,
+    JoinRules,
+    RelationTypes,
+)
+from synapse.events import EventBase, StrippedStateEvent
+from synapse.handlers.sliding_sync import rust_sliding_sync_rooms_counter
+from synapse.metrics import SERVER_NAME_LABEL
+from synapse.rest.client import account_data, knock, login, room, sync
+from synapse.server import HomeServer
+from synapse.synapse_rust.sliding_sync import (
+    ConnectionState as RustConnectionState,
+    InterestedRooms as RustInterestedRooms,
+    SlidingSyncHandler as RustSlidingSyncHandler,
+    SlidingSyncRequest as RustSlidingSyncRequest,
+    SlidingSyncStats as RustSlidingSyncStats,
+)
+from synapse.types import JsonDict, SlidingSyncStreamToken
+from synapse.types.handlers.sliding_sync import (
+    MutablePerConnectionState,
+    SlidingSyncConfig,
+)
+from synapse.util.clock import Clock
+
+from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
+from tests.server import _BlockingRustCalls
+from tests.test_utils.event_injection import create_event
+
+
+def _without_age(value: Any) -> Any:
+    """`value` without the `age` of each event's unsigned data, which moves on
+    with the clock between the two requests."""
+    if isinstance(value, dict):
+        return {
+            key: _without_age(item)
+            for key, item in value.items()
+            if not (key == "age" and isinstance(item, int))
+        }
+    if isinstance(value, list):
+        return [_without_age(item) for item in value]
+    return value
+
+
+def _normalized(rooms: JsonDict) -> JsonDict:
+    """`rooms` without the ages, and with each room's `required_state` in
+    order: it is a set, which neither side orders."""
+    rooms = _without_age(rooms)
+    for entry in rooms.values():
+        if "required_state" in entry:
+            entry["required_state"].sort(key=lambda e: (e["type"], e["state_key"]))
+    return rooms
+
+
+def _unordered_lists(response: JsonDict) -> JsonDict:
+    """The response's lists with each operation's rooms sorted. The lists of
+    these tests cover every room, so neither side sorts them, and Python adds
+    rooms left in the token range back in set order. `test_rust_lists`
+    compares the order of sorted lists."""
+    return {
+        name: {
+            **list_result,
+            "ops": [
+                {**op, "room_ids": sorted(op["room_ids"])}
+                for op in list_result.get("ops", [])
+            ],
+        }
+        for name, list_result in response.get("lists", {}).items()
+    }
+
+
+# What Rust's `ConnectionState.updates_for_test` returns.
+RustUpdates = tuple[
+    Mapping[str, tuple[int, Mapping[str, AbstractSet[str]]]],
+    Mapping[str, tuple[Mapping[str, int | None], AbstractSet[str]]],
+]
+
+
+def _connection_changes(state: MutablePerConnectionState | RustUpdates) -> JsonDict:
+    """What a request changed in its connection's state that the room
+    computation writes: the room configs and the lazy-loaded members. `state`
+    is Python's state, or what Rust's `updates_for_test` returns.
+
+    A lazy member's timestamp is only whether there is one: it is when its
+    own connection last sent the member, which the two connections did a
+    moment apart."""
+    configs: Mapping[str, tuple[int, Mapping[str, AbstractSet[str]]]]
+    lazy: Mapping[str, tuple[Mapping[str, int | None], AbstractSet[str]]]
+    if isinstance(state, MutablePerConnectionState):
+        configs = {
+            room_id: (config.timeline_limit, config.required_state_map)
+            for room_id, config in state.get_room_config_updates().items()
+        }
+        lazy = {
+            room_id: (
+                changes.returned_user_id_to_last_seen_ts_map,
+                changes.invalidated_user_ids,
+            )
+            for room_id, changes in state.room_lazy_membership.items()
+        }
+    else:
+        configs, lazy = state
+    return {
+        "room_configs": {
+            room_id: (
+                timeline_limit,
+                {
+                    state_type: set(state_keys)
+                    for state_type, state_keys in required_state_map.items()
+                },
+            )
+            for room_id, (timeline_limit, required_state_map) in configs.items()
+        },
+        "lazy_membership": {
+            room_id: (
+                {
+                    user_id: last_seen_ts is not None
+                    for user_id, last_seen_ts in returned.items()
+                },
+                set(invalidated),
+            )
+            for room_id, (returned, invalidated) in lazy.items()
+        },
+    }
+
+
+class _RecordingRustCalls(_BlockingRustCalls):
+    """Blocking Rust calls that record the connection state's updates of each
+    request before it is persisted, by `conn_id`."""
+
+    def __init__(
+        self,
+        handler: RustSlidingSyncHandler,
+        recorded: dict[str, MutablePerConnectionState | RustUpdates],
+    ) -> None:
+        super().__init__(handler)
+        self._recorded = recorded
+
+    def finish_request(
+        self,
+        request: RustSlidingSyncRequest,
+        state: RustConnectionState,
+        interested: RustInterestedRooms,
+    ) -> "Deferred[tuple[int, RustSlidingSyncStats]]":
+        conn_id = request.body_for_test().get("conn_id")
+        assert isinstance(conn_id, str)
+        self._recorded[conn_id] = state.updates_for_test()
+        return super().__getattr__("finish_request")(request, state, interested)
+
+
+@parameterized_class(
+    ("use_new_tables",),
+    [
+        (True,),
+        (False,),
+    ],
+    class_name_func=lambda cls,
+    num,
+    params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+)
+class SlidingSyncRustRoomsTestCase(SlidingSyncBase):
+    maxDiff = None
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        account_data.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        rust = hs.get_rust_handlers().sliding_sync
+        if rust is None:
+            raise SkipTest("needs the native Rust Postgres driver")
+        # The connection state each side records, by `conn_id`.
+        self.recorded: dict[str, MutablePerConnectionState | RustUpdates] = {}
+        self.rust = _RecordingRustCalls(rust, self.recorded)
+        self.handler = hs.get_sliding_sync_handler()
+        self.handler._rust_sliding_sync_strict = True
+        self.pos: dict[str, str | None] = {"python": None, "rust": None}
+
+        connection_store = self.handler.connection_store
+        record_new_state = connection_store.record_new_state
+
+        async def recording_record_new_state(
+            sync_config: SlidingSyncConfig,
+            from_token: SlidingSyncStreamToken | None,
+            new_connection_state: MutablePerConnectionState,
+        ) -> int:
+            assert sync_config.conn_id is not None
+            self.recorded[sync_config.conn_id] = new_connection_state
+            return await record_new_state(sync_config, from_token, new_connection_state)
+
+        connection_store.record_new_state = recording_record_new_state  # type: ignore[method-assign]
+
+        self.user1_id = self.register_user("user1", "pass")
+        self.user1_tok = self.login(self.user1_id, "pass")
+        self.user2_id = self.register_user("user2", "pass")
+        self.user2_tok = self.login(self.user2_id, "pass")
+        self.user3_id = self.register_user("user3", "pass")
+        self.user3_tok = self.login(self.user3_id, "pass")
+
+    def _rust_rooms_computed(self) -> float:
+        return rust_sliding_sync_rooms_counter.labels(
+            result="rust", **{SERVER_NAME_LABEL: self.hs.hostname}
+        )._value.get()
+
+    def _sync_both(self, sync_body: JsonDict) -> JsonDict:
+        """Sync `sync_body` on the Python and the Rust connection, assert the
+        two `rooms` and the two sides' changes to the connection state are
+        equal, and return Rust's response."""
+        responses = {}
+        self.recorded.clear()
+        for side in ("python", "rust"):
+            self.handler._rust_sliding_sync = (
+                self.rust if side == "rust" else None  # type: ignore[assignment]
+            )
+            before = self._rust_rooms_computed()
+            response, self.pos[side] = self.do_sync(
+                {**sync_body, "conn_id": side},
+                since=self.pos[side],
+                tok=self.user1_tok,
+            )
+            computed = self._rust_rooms_computed() - before
+            if side == "rust" and self.use_new_tables:
+                self.assertGreaterEqual(computed, len(response["rooms"]))
+            else:
+                # Rust leaves a request to Python until the sliding sync
+                # tables are filled.
+                self.assertEqual(computed, 0)
+            responses[side] = response
+        python_rooms = _normalized(responses["python"]["rooms"])
+        rust_rooms = _normalized(responses["rust"]["rooms"])
+        self.assertEqual(python_rooms.keys(), rust_rooms.keys())
+        for room_id, python_room in python_rooms.items():
+            self.assertEqual(python_room, rust_rooms[room_id], room_id)
+        self.assertEqual(
+            _unordered_lists(responses["python"]),
+            _unordered_lists(responses["rust"]),
+        )
+        self.assertEqual(
+            _connection_changes(self.recorded["python"]),
+            _connection_changes(self.recorded["rust"]),
+        )
+        return responses["rust"]
+
+    def _named_room(self) -> str:
+        """A room with a name, an avatar, a topic and a busy timeline: an edit,
+        a thread, a redaction."""
+        room_id = self.helper.create_room_as(self.user2_id, tok=self.user2_tok)
+        self.helper.send_state(
+            room_id, EventTypes.Name, {"name": "named"}, tok=self.user2_tok
+        )
+        self.helper.send_state(
+            room_id,
+            EventTypes.RoomAvatar,
+            {"url": "mxc://test/avatar"},
+            tok=self.user2_tok,
+        )
+        self.helper.send_state(
+            room_id, EventTypes.Topic, {"topic": "a topic"}, tok=self.user2_tok
+        )
+        self.helper.join(room_id, self.user1_id, tok=self.user1_tok)
+        root = self.helper.send(room_id, "root", tok=self.user2_tok)["event_id"]
+        self.helper.send_event(
+            room_id,
+            "m.room.message",
+            {
+                "msgtype": "m.text",
+                "body": "* edited",
+                "m.new_content": {"msgtype": "m.text", "body": "edited"},
+                "m.relates_to": {"rel_type": RelationTypes.REPLACE, "event_id": root},
+            },
+            tok=self.user2_tok,
+        )
+        doomed = self.helper.send(room_id, "doomed", tok=self.user1_tok)["event_id"]
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{room_id}/redact/{doomed}/txn1",
+            content={"reason": "test"},
+            access_token=self.user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.helper.send_event(
+            room_id,
+            "m.room.message",
+            {
+                "msgtype": "m.text",
+                "body": "in thread",
+                "m.relates_to": {"rel_type": RelationTypes.THREAD, "event_id": root},
+            },
+            tok=self.user1_tok,
+        )
+        self.helper.send(room_id, "last", tok=self.user2_tok)
+        return room_id
+
+    def _rooms(self) -> dict[str, str]:
+        """One room of each kind the room computation tells apart."""
+        rooms = {"named": self._named_room()}
+
+        # No name: heroes, with their display names and avatars.
+        unnamed = self.helper.create_room_as(self.user2_id, tok=self.user2_tok)
+        self.helper.join(unnamed, self.user3_id, tok=self.user3_tok)
+        self.helper.send_state(
+            unnamed,
+            EventTypes.Member,
+            {"membership": "join", "displayname": "Three", "avatar_url": "mxc://a/b"},
+            state_key=self.user3_id,
+            tok=self.user3_tok,
+        )
+        self.helper.join(unnamed, self.user1_id, tok=self.user1_tok)
+        self.helper.send(unnamed, "hello", tok=self.user3_tok)
+        rooms["unnamed"] = unnamed
+
+        # An empty name counts as none.
+        empty_name = self.helper.create_room_as(self.user2_id, tok=self.user2_tok)
+        self.helper.send_state(
+            empty_name, EventTypes.Name, {"name": ""}, tok=self.user2_tok
+        )
+        self.helper.join(empty_name, self.user1_id, tok=self.user1_tok)
+        rooms["empty_name"] = empty_name
+
+        invited = self.helper.create_room_as(self.user2_id, tok=self.user2_tok)
+        self.helper.invite(invited, self.user2_id, self.user1_id, tok=self.user2_tok)
+        rooms["invited"] = invited
+
+        knocked = self.helper.create_room_as(
+            self.user2_id, tok=self.user2_tok, room_version="7"
+        )
+        self.helper.send_state(
+            knocked,
+            EventTypes.JoinRules,
+            {"join_rule": JoinRules.KNOCK},
+            tok=self.user2_tok,
+        )
+        self.helper.knock(knocked, self.user1_id, tok=self.user1_tok)
+        rooms["knocked"] = knocked
+
+        left = self.helper.create_room_as(self.user2_id, tok=self.user2_tok)
+        self.helper.join(left, self.user1_id, tok=self.user1_tok)
+        self.helper.send(left, "before leaving", tok=self.user2_tok)
+        self.helper.leave(left, self.user1_id, tok=self.user1_tok)
+        self.helper.send(left, "after leaving", tok=self.user2_tok)
+        rooms["left"] = left
+
+        banned = self.helper.create_room_as(self.user2_id, tok=self.user2_tok)
+        self.helper.join(banned, self.user1_id, tok=self.user1_tok)
+        self.helper.ban(banned, self.user2_id, self.user1_id, tok=self.user2_tok)
+        rooms["banned"] = banned
+
+        rooms["dm"] = self._create_dm_room(
+            inviter_user_id=self.user2_id,
+            inviter_tok=self.user2_tok,
+            invitee_user_id=self.user1_id,
+            invitee_tok=self.user1_tok,
+        )
+
+        remote_invite, _ = self._create_remote_invite_room_for_user(
+            self.user1_id,
+            [
+                StrippedStateEvent(
+                    type=EventTypes.Name,
+                    state_key="",
+                    sender="@inviter:remote_server",
+                    content={"name": "remote"},
+                )
+            ],
+        )
+        rooms["remote_invite"] = remote_invite
+        return rooms
+
+    def _list(self, timeline_limit: int, required_state: list[list[str]]) -> JsonDict:
+        return {
+            "lists": {
+                "all": {
+                    "ranges": [[0, 99]],
+                    "required_state": required_state,
+                    "timeline_limit": timeline_limit,
+                }
+            }
+        }
+
+    def test_initial(self) -> None:
+        """Initial requests with several configs."""
+        rooms = self._rooms()
+        bodies = [
+            self._list(
+                2,
+                [
+                    [EventTypes.Name, ""],
+                    [EventTypes.Member, "$LAZY"],
+                    [EventTypes.Member, "$ME"],
+                ],
+            ),
+            self._list(20, [["*", "*"]]),
+            self._list(0, []),
+            # Back to the thread root, so that it has bundled aggregations.
+            self._list(6, [[EventTypes.Member, "*"], [EventTypes.Topic, ""]]),
+        ]
+        for body in bodies:
+            self.pos = {"python": None, "rust": None}
+            response = self._sync_both(body)
+            entries = response["rooms"]
+            for kind in ("named", "unnamed", "invited", "knocked", "dm"):
+                self.assertIn(rooms[kind], entries)
+            self.assertIn("heroes", entries[rooms["unnamed"]])
+            self.assertIn("invite_state", entries[rooms["invited"]])
+            self.assertIn("invite_state", entries[rooms["remote_invite"]])
+
+        # The last request covered the bundles and the redaction.
+        timeline = entries[rooms["named"]]["timeline"]
+        self.assertTrue(entries[rooms["named"]]["limited"])
+        self.assertTrue(any("m.relations" in e["unsigned"] for e in timeline))
+        self.assertTrue(any("redacted_because" in e["unsigned"] for e in timeline))
+
+    def test_incremental(self) -> None:
+        """Incremental requests: new events, state changes, memberships, and a
+        changed config."""
+        rooms = self._rooms()
+        body = self._list(
+            3,
+            [
+                [EventTypes.Name, ""],
+                [EventTypes.Member, "$LAZY"],
+            ],
+        )
+        self._sync_both(body)
+
+        # Nothing happened.
+        response = self._sync_both(body)
+        self.assertEqual(response["rooms"], {})
+
+        self.helper.send(rooms["named"], "new message", tok=self.user2_tok)
+        self.helper.send_state(
+            rooms["unnamed"], EventTypes.Name, {"name": "now named"}, tok=self.user2_tok
+        )
+        self.helper.leave(rooms["dm"], self.user2_id, tok=self.user2_tok)
+        self.helper.join(rooms["named"], self.user3_id, tok=self.user3_tok)
+        self.helper.send(rooms["named"], "from three", tok=self.user3_tok)
+        self.helper.join(rooms["invited"], self.user1_id, tok=self.user1_tok)
+        self.helper.leave(rooms["empty_name"], self.user1_id, tok=self.user1_tok)
+        response = self._sync_both(body)
+        self.assertIn(rooms["named"], response["rooms"])
+
+        # The client asks for more: more state, and a longer timeline.
+        body = self._list(
+            10,
+            [
+                [EventTypes.Name, ""],
+                [EventTypes.Topic, ""],
+                [EventTypes.Member, "$LAZY"],
+                [EventTypes.Member, self.user2_id],
+            ],
+        )
+        self._sync_both(body)
+
+        # And back to lazy members only, after more traffic.
+        self.helper.send(rooms["named"], "more", tok=self.user1_tok)
+        self.helper.send(rooms["unnamed"], "more", tok=self.user3_tok)
+        self._sync_both(self._list(1, [[EventTypes.Member, "$LAZY"]]))
+
+    def test_room_subscription(self) -> None:
+        """A room subscription on top of a list, in a room the list leaves out."""
+        rooms = self._rooms()
+        body: JsonDict = {
+            **self._list(1, [[EventTypes.Name, ""]]),
+            "room_subscriptions": {
+                rooms["named"]: {
+                    "required_state": [["*", "*"]],
+                    "timeline_limit": 4,
+                }
+            },
+        }
+        body["lists"]["all"]["ranges"] = [[0, 0]]
+        self._sync_both(body)
+        self.helper.send(rooms["named"], "new", tok=self.user2_tok)
+        self._sync_both(body)
+
+    def test_incremental_state_and_membership(self) -> None:
+        """Incremental requests after an avatar change, a ban, a rejected
+        remote invite and a state reset out of a room."""
+        rooms = self._rooms()
+
+        # A room to be state reset out of: a join rules event that points
+        # back to before user1 joined undoes the join.
+        reset = self.helper.create_room_as(
+            self.user2_id, is_public=True, tok=self.user2_tok
+        )
+        before_join = self.helper.send(reset, "before the join", tok=self.user2_tok)
+        self.helper.join(reset, self.user1_id, tok=self.user1_tok)
+
+        body = self._list(
+            3,
+            [
+                [EventTypes.Name, ""],
+                [EventTypes.RoomAvatar, ""],
+                [EventTypes.Member, "$ME"],
+                [EventTypes.Member, "$LAZY"],
+            ],
+        )
+        self._sync_both(body)
+
+        self.helper.send_state(
+            rooms["named"],
+            EventTypes.RoomAvatar,
+            {"url": "mxc://test/new_avatar"},
+            tok=self.user2_tok,
+        )
+        self.helper.ban(
+            rooms["unnamed"], self.user2_id, self.user1_id, tok=self.user2_tok
+        )
+        self.helper.leave(rooms["remote_invite"], self.user1_id, tok=self.user1_tok)
+
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        join_rules, context = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[before_join["event_id"]],
+                type=EventTypes.JoinRules,
+                state_key="",
+                content={"join_rule": JoinRules.INVITE},
+                sender=self.user2_id,
+                room_id=reset,
+                room_version=self.get_success(
+                    self.hs.get_datastores().main.get_room_version_id(reset)
+                ),
+            )
+        )
+        self.get_success(persistence.persist_event(join_rules, context))
+        users_in_room = self.get_success(
+            self.hs.get_datastores().main.get_users_in_room(reset)
+        )
+        self.assertEqual(users_in_room, [self.user2_id])
+        self.helper.send_state(
+            reset, EventTypes.Name, {"name": "after the reset"}, tok=self.user2_tok
+        )
+
+        response = self._sync_both(body)
+        for kind in ("named", "unnamed"):
+            self.assertIn(rooms[kind], response["rooms"])
+        self.assertIn(reset, response["rooms"])
+        self.assertIn("avatar", response["rooms"][rooms["named"]])
+
+    def test_multi_writer_prev_batch(self) -> None:
+        """A `prev_batch` that names a writer: a timeline with no new events
+        ends at the from token, whose room key names another writer."""
+        rooms = self._rooms()
+        body = self._list(2, [[EventTypes.Name, ""]])
+        self._sync_both(body)
+        self._name_other_writer_in_pos()
+
+        # More state for the named room, which has no new events.
+        body = self._list(2, [[EventTypes.Name, ""], [EventTypes.Topic, ""]])
+        response = self._sync_both(body)
+        named = response["rooms"][rooms["named"]]
+        self.assertNotIn("timeline", named)
+        self.assertTrue(named["prev_batch"].startswith("m"), named["prev_batch"])
+
+    def test_writer_added_after_instance_map_cached(self) -> None:
+        """Stored tokens that name a writer added after Rust cached the
+        `instance_map` table."""
+        rooms = self._rooms()
+        body = self._list(2, [[EventTypes.Name, ""]])
+        self._sync_both(body)
+        self._name_other_writer_in_pos()
+
+        # Rooms outside the narrower range go unsent, and are stored with the
+        # from token, which names the writer.
+        for kind in ("named", "unnamed", "empty_name"):
+            self.helper.send(rooms[kind], "again", tok=self.user2_tok)
+        narrow = {"lists": {"all": {**body["lists"]["all"], "ranges": [[0, 0]]}}}
+        self._sync_both(narrow)
+        self._sync_both(body)
+
+    def _name_other_writer_in_pos(self) -> None:
+        """Rewrite both sides' `pos` so that its room key names another
+        writer."""
+        # Move the stream on, so that the token's position for the other
+        # writer is not in the future.
+        self.helper.create_room_as(self.user2_id, tok=self.user2_tok)
+        writer_id = self.get_success(
+            self.hs.get_datastores().main.get_id_for_instance("other_writer")
+        )
+        for side, pos in self.pos.items():
+            assert pos is not None
+            connection_position, stream_token = pos.split("/", 1)
+            room_key, rest = stream_token.split("_", 1)
+            self.assertTrue(room_key.startswith("s"), room_key)
+            stream = int(room_key[1:])
+            self.pos[side] = (
+                f"{connection_position}/m{stream}~{writer_id}.{stream + 1}_{rest}"
+            )
+
+    def test_relations_change(self) -> None:
+        """Bundled aggregations after the relations Rust cached change: a
+        second edit, a second threaded reply and a reference."""
+        room_id = self._named_room()
+        # Only a limited timeline gets bundles. Six events reach back to the
+        # thread root.
+        response = self._sync_both(self._list(6, [[EventTypes.Name, ""]]))
+        root = next(
+            event
+            for event in response["rooms"][room_id]["timeline"]
+            if event["content"].get("body") == "root"
+        )
+        root_id = root["event_id"]
+        self.assertEqual(
+            root["unsigned"]["m.relations"][RelationTypes.THREAD]["count"], 1
+        )
+
+        for content in (
+            {
+                "msgtype": "m.text",
+                "body": "* edited again",
+                "m.new_content": {"msgtype": "m.text", "body": "edited again"},
+                "m.relates_to": {
+                    "rel_type": RelationTypes.REPLACE,
+                    "event_id": root_id,
+                },
+            },
+            {
+                "msgtype": "m.text",
+                "body": "in thread again",
+                "m.relates_to": {"rel_type": RelationTypes.THREAD, "event_id": root_id},
+            },
+            {
+                "msgtype": "m.text",
+                "body": "a reference",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.REFERENCE,
+                    "event_id": root_id,
+                },
+            },
+        ):
+            self.helper.send_event(
+                room_id, "m.room.message", content, tok=self.user2_tok
+            )
+
+        self.pos = {"python": None, "rust": None}
+        response = self._sync_both(self._list(9, [[EventTypes.Name, ""]]))
+        root = next(
+            event
+            for event in response["rooms"][room_id]["timeline"]
+            if event["event_id"] == root_id
+        )
+        relations = root["unsigned"]["m.relations"]
+        self.assertEqual(relations[RelationTypes.THREAD]["count"], 2)
+        self.assertEqual(
+            relations[RelationTypes.REPLACE]["content"]["body"], "* edited again"
+        )
+        self.assertEqual(len(relations[RelationTypes.REFERENCE]["chunk"]), 1)
+
+    def test_ignore_after_sync(self) -> None:
+        """Ignoring a user after Rust cached the user's ignore list."""
+        room_id = self._named_room()
+        body = self._list(20, [[EventTypes.Name, ""]])
+        response = self._sync_both(body)
+        senders = {e["sender"] for e in response["rooms"][room_id]["timeline"]}
+        self.assertIn(self.user2_id, senders)
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.user1_id}/account_data/{AccountDataTypes.IGNORED_USER_LIST}",
+            content={"ignored_users": {self.user2_id: {}}},
+            access_token=self.user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        self.pos = {"python": None, "rust": None}
+        response = self._sync_both(body)
+        # Their state events stay.
+        senders = {
+            e["sender"]
+            for e in response["rooms"][room_id]["timeline"]
+            if "state_key" not in e
+        }
+        self.assertNotIn(self.user2_id, senders)
+
+    def test_unsigned_callbacks(self) -> None:
+        """Module callbacks add to the unsigned data of Rust rooms' events."""
+
+        async def add_extra_fields(event: EventBase) -> JsonDict:
+            return {"io.test.id": event.event_id}
+
+        self.hs.get_event_client_serializer().register_add_extra_fields_to_unsigned_client_event_callback(
+            add_extra_fields
+        )
+        self._named_room()
+        response = self._sync_both(self._list(3, [["*", "*"]]))
+        (room_entry,) = response["rooms"].values()
+        for event in room_entry["timeline"] + room_entry["required_state"]:
+            self.assertEqual(event["unsigned"]["io.test.id"], event["event_id"])

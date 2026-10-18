@@ -2028,6 +2028,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "icu_segmenter",
+ "indexmap",
  "ipnet",
  "itertools",
  "lazy_static",

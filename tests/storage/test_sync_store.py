@@ -655,6 +655,38 @@ class SyncStoreTestCase(unittest.HomeserverTestCase):
                 )
 
     @parameterized.expand(SEEDS)
+    def test_last_event_of_types_before(self, seed: int) -> None:
+        rng = random.Random(seed)
+        self._write_events(self.room_id, 15)
+        lo, hi = self._stream_range(self.room_id)
+        type_choices = [
+            EventTypes.Message,
+            EventTypes.Topic,
+            EventTypes.Member,
+            EventTypes.Create,
+            "org.example.unknown",
+        ]
+        for _ in range(12):
+            end_token = self._random_token(rng, lo, hi, False)
+            event_types = rng.sample(type_choices, rng.randint(0, 3))
+            expected = self.get_success(
+                self.store.get_last_event_pos_in_room_before_stream_ordering(
+                    self.room_id, end_token, event_types=event_types
+                )
+            )
+            last = self.rust.last_event_of_types_before(
+                self.room_id, end_token, event_types
+            )
+            context = f"{event_types} at {end_token}"
+            if expected is None:
+                self.assertIsNone(last, context)
+            else:
+                event_id, position = expected
+                self.assertEqual(
+                    last, (event_id, position.instance_name, position.stream), context
+                )
+
+    @parameterized.expand(SEEDS)
     def test_membership_changes(self, seed: int) -> None:
         rng = random.Random(seed)
         rooms = [self.room_id] + [
@@ -848,6 +880,101 @@ class SyncStoreTestCase(unittest.HomeserverTestCase):
                 ),
                 f"from {from_token} to {to_token}",
             )
+
+    @parameterized.expand(SEEDS)
+    def test_state_deltas_by_stream_id(self, seed: int) -> None:
+        rng = random.Random(seed)
+        event_ids = self._write_events(self.room_id, 15)
+        other = self.helper.create_room_as(self.alice, tok=self.alice_tok)
+        self._write_events(other, 4)
+        # The delta rows of the rewritten events move to the same writer.
+        for event_id in event_ids:
+            rows = self.get_success(
+                self.store.db_pool.simple_select_list(
+                    "events", {"event_id": event_id}, ["instance_name"]
+                )
+            )
+            self.get_success(
+                self.store.db_pool.simple_update(
+                    "current_state_delta_stream",
+                    {"event_id": event_id},
+                    {"instance_name": rows[0][0]},
+                    desc="rewrite",
+                )
+            )
+        lo, hi = self._stream_range(self.room_id)
+        for _ in range(12):
+            from_token = (
+                self._random_token(rng, lo, hi, False) if rng.random() < 0.8 else None
+            )
+            to_token = (
+                self._random_token(rng, lo, hi, False) if rng.random() < 0.8 else None
+            )
+            expected = self.get_success(
+                self.store.get_current_state_deltas_for_room(
+                    self.room_id, from_token=from_token, to_token=to_token
+                )
+            )
+            # In `stream_id` order. Deltas of one batch share a `stream_id`, so
+            # compare them as a sorted list.
+            rust = self.rust.state_deltas_by_stream_id(
+                self.room_id, from_token, to_token
+            )
+            self.assertEqual(
+                [delta[0] for delta in rust], sorted(delta[0] for delta in rust)
+            )
+            self.assertEqual(
+                sorted(rust),
+                sorted(
+                    (
+                        d.stream_id,
+                        d.event_type,
+                        d.state_key,
+                        d.event_id,
+                        d.prev_event_id,
+                    )
+                    for d in expected
+                ),
+                f"from {from_token} to {to_token}",
+            )
+
+    def test_member_counts(self) -> None:
+        carol = self.register_user("carol", "pass")
+        carol_tok = self.login("carol", "pass")
+        dave = self.register_user("dave", "pass")
+        self.helper.invite(self.room_id, self.alice, carol, tok=self.alice_tok)
+        self.helper.invite(self.room_id, self.alice, dave, tok=self.alice_tok)
+        self.helper.join(self.room_id, carol, tok=carol_tok)
+        self.helper.leave(self.room_id, carol, tok=carol_tok)
+        self.helper.ban(self.room_id, self.alice, self.bob, tok=self.alice_tok)
+        other = self.helper.create_room_as(self.bob, tok=self.bob_tok)
+
+        for room_id in (self.room_id, other, "!unknown:test"):
+            self.assertEqual(
+                self.rust.member_counts(room_id),
+                dict(self.get_success(self.store.get_member_counts(room_id))),
+                room_id,
+            )
+
+    def test_latest_bump_stamp(self) -> None:
+        self.helper.send(self.room_id, "hi", tok=self.alice_tok)
+        # A room whose row has no bump stamp.
+        no_stamp = self.helper.create_room_as(self.alice, tok=self.alice_tok)
+        self.get_success(
+            self.store.db_pool.simple_update_one(
+                "sliding_sync_joined_rooms",
+                {"room_id": no_stamp},
+                {"bump_stamp": None},
+            )
+        )
+        for room_id in (self.room_id, no_stamp, "!unknown:test"):
+            self.assertEqual(
+                self.rust.latest_bump_stamp(room_id),
+                self.get_success(self.store.get_latest_bump_stamp_for_room(room_id)),
+                room_id,
+            )
+        self.assertIsNotNone(self.rust.latest_bump_stamp(self.room_id))
+        self.assertIsNone(self.rust.latest_bump_stamp(no_stamp))
 
     # Notifications.
 

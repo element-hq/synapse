@@ -35,7 +35,7 @@ use std::{hash::Hash, sync::Arc, time::SystemTime};
 
 use pyo3::{
     pyclass, pymethods,
-    types::{PyAnyMethods, PyModule, PyModuleMethods, PyTuple},
+    types::{PyAnyMethods, PyModule, PyModuleMethods, PyTuple, PyTupleMethods},
     Bound, PyResult, Python,
 };
 
@@ -91,6 +91,13 @@ impl PyCacheKey for Arc<str> {
     fn from_py_key(key: &Bound<'_, PyTuple>) -> Option<Self> {
         let (key,): (String,) = key.extract().ok()?;
         Some(Arc::from(key))
+    }
+}
+
+/// The key of a cache of a function without arguments: the empty tuple.
+impl PyCacheKey for () {
+    fn from_py_key(key: &Bound<'_, PyTuple>) -> Option<Self> {
+        key.is_empty().then_some(())
     }
 }
 

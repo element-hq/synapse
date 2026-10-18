@@ -196,6 +196,8 @@ pub struct SyncDbStats {
     pub checkouts: u64,
     /// Time spent waiting for a connection.
     pub checkout_time: Duration,
+    /// Transactions begun.
+    pub transactions: u64,
     /// Statements executed.
     pub queries: u64,
     /// Rows returned.
@@ -238,7 +240,7 @@ impl<'a> SyncReader<'a> {
         *lock_ignoring_poison(&self.stats)
     }
 
-    fn update_stats(&self, f: impl FnOnce(&mut SyncDbStats)) {
+    pub(crate) fn update_stats(&self, f: impl FnOnce(&mut SyncDbStats)) {
         f(&mut lock_ignoring_poison(&self.stats));
     }
 
@@ -278,6 +280,25 @@ impl<'a> SyncReader<'a> {
         borrowed
             .execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
             .await?;
+        self.update_stats(|stats| stats.transactions += 1);
+        Ok(borrowed)
+    }
+
+    /// Borrow a connection and open a `REPEATABLE READ` transaction on it
+    /// that may write, as a Python `runInteraction` does. Unlike
+    /// [`SyncReader::begin`]'s, such a transaction can fail with a
+    /// serialization error or a deadlock, which the caller retries. Finish
+    /// with [`Borrowed::commit`].
+    pub(crate) async fn begin_write(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
+        let mut borrowed = self.borrow().await?;
+        // Set before awaiting: if we are dropped after BEGIN is sent but
+        // before it returns, the transaction is open and must be rolled back.
+        // A ROLLBACK outside one only warns.
+        borrowed.in_transaction = true;
+        borrowed
+            .execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
+            .await?;
+        self.update_stats(|stats| stats.transactions += 1);
         Ok(borrowed)
     }
 
@@ -382,39 +403,54 @@ impl<'a> SyncReader<'a> {
     }
 
     /// `get_references_for_events`: the `(event_id, sender)` of each event
-    /// that references one of `event_ids`, oldest first.
+    /// that references one of `event_ids`, oldest first. Events with no
+    /// references are left out.
     pub async fn references_for_events(
         &self,
         event_ids: &[Arc<str>],
-    ) -> anyhow::Result<HashMap<Arc<str>, Vec<RelatedEvent>>> {
-        let mut references: HashMap<Arc<str>, Vec<RelatedEvent>> = HashMap::new();
-        if event_ids.is_empty() {
-            return Ok(references);
-        }
-        let borrowed = self.borrow().await?;
-        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
-            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
-            let rows = borrowed
-                .query(
-                    "SELECT relates_to_id, ref.event_id, ref.sender
-                    FROM events AS ref
-                    INNER JOIN event_relations USING (event_id)
-                    INNER JOIN events AS parent ON
-                        parent.event_id = relates_to_id
-                        AND parent.room_id = ref.room_id
-                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.reference'
-                    ORDER BY ref.topological_ordering, ref.stream_ordering",
-                    &[&ids],
-                )
-                .await?;
-            for row in rows {
-                let parent: &str = row.try_get(0)?;
-                references.entry(Arc::from(parent)).or_default().push((
-                    Arc::from(row.try_get::<_, &str>(1)?),
-                    Arc::from(row.try_get::<_, &str>(2)?),
-                ));
-            }
-        }
+    ) -> anyhow::Result<HashMap<Arc<str>, Arc<[RelatedEvent]>>> {
+        let mut references = self
+            .store
+            .caches
+            .references
+            .get_or_load_many(event_ids, |missing| async move {
+                let mut found: HashMap<Arc<str>, Vec<RelatedEvent>> = HashMap::new();
+                let borrowed = self.borrow().await?;
+                for batch in missing.chunks(SELECT_MANY_BATCH_SIZE) {
+                    let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+                    let rows = borrowed
+                        .query(
+                            "SELECT relates_to_id, ref.event_id, ref.sender
+                            FROM events AS ref
+                            INNER JOIN event_relations USING (event_id)
+                            INNER JOIN events AS parent ON
+                                parent.event_id = relates_to_id
+                                AND parent.room_id = ref.room_id
+                            WHERE relates_to_id = ANY($1) AND relation_type = 'm.reference'
+                            ORDER BY ref.topological_ordering, ref.stream_ordering",
+                            &[&ids],
+                        )
+                        .await?;
+                    for row in rows {
+                        let parent: &str = row.try_get(0)?;
+                        found.entry(Arc::from(parent)).or_default().push((
+                            Arc::from(row.try_get::<_, &str>(1)?),
+                            Arc::from(row.try_get::<_, &str>(2)?),
+                        ));
+                    }
+                }
+                // Python caches the empty list for events with none.
+                Ok(missing
+                    .into_iter()
+                    .map(|event_id| {
+                        let refs = found.remove(&event_id).unwrap_or_default();
+                        (event_id, Arc::from(refs))
+                    })
+                    .collect())
+            })
+            .await
+            .map_err(anyhow::Error::new)?;
+        references.retain(|_, refs| !refs.is_empty());
         Ok(references)
     }
 
@@ -424,38 +460,53 @@ impl<'a> SyncReader<'a> {
         &self,
         event_ids: &[Arc<str>],
     ) -> anyhow::Result<HashMap<Arc<str>, Arc<str>>> {
-        let mut edits = HashMap::new();
-        if event_ids.is_empty() {
-            return Ok(edits);
-        }
-        let borrowed = self.borrow().await?;
-        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
-            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
-            // `DISTINCT ON` picks the first row of each original, so the
-            // ordering picks the latest edit.
-            let rows = borrowed
-                .query(
-                    "SELECT DISTINCT ON (original.event_id) original.event_id, edit.event_id
-                    FROM events AS edit
-                    INNER JOIN event_relations USING (event_id)
-                    INNER JOIN events AS original ON
-                        original.event_id = relates_to_id
-                        AND edit.type = original.type
-                        AND edit.sender = original.sender
-                        AND edit.room_id = original.room_id
-                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.replace'
-                    ORDER BY original.event_id DESC, edit.origin_server_ts DESC, edit.event_id DESC",
-                    &[&ids],
-                )
-                .await?;
-            for row in rows {
-                edits.insert(
-                    Arc::from(row.try_get::<_, &str>(0)?),
-                    Arc::from(row.try_get::<_, &str>(1)?),
-                );
-            }
-        }
-        Ok(edits)
+        let edits = self
+            .store
+            .caches
+            .applicable_edits
+            .get_or_load_many(event_ids, |missing| async move {
+                let mut found: HashMap<Arc<str>, Arc<str>> = HashMap::new();
+                let borrowed = self.borrow().await?;
+                for batch in missing.chunks(SELECT_MANY_BATCH_SIZE) {
+                    let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+                    // `DISTINCT ON` picks the first row of each original, so
+                    // the ordering picks the latest edit.
+                    let rows = borrowed
+                        .query(
+                            "SELECT DISTINCT ON (original.event_id) original.event_id, edit.event_id
+                            FROM events AS edit
+                            INNER JOIN event_relations USING (event_id)
+                            INNER JOIN events AS original ON
+                                original.event_id = relates_to_id
+                                AND edit.type = original.type
+                                AND edit.sender = original.sender
+                                AND edit.room_id = original.room_id
+                            WHERE relates_to_id = ANY($1) AND relation_type = 'm.replace'
+                            ORDER BY original.event_id DESC, edit.origin_server_ts DESC, edit.event_id DESC",
+                            &[&ids],
+                        )
+                        .await?;
+                    for row in rows {
+                        found.insert(
+                            Arc::from(row.try_get::<_, &str>(0)?),
+                            Arc::from(row.try_get::<_, &str>(1)?),
+                        );
+                    }
+                }
+                Ok(missing
+                    .into_iter()
+                    .map(|event_id| {
+                        let edit = found.remove(&event_id);
+                        (event_id, edit)
+                    })
+                    .collect())
+            })
+            .await
+            .map_err(anyhow::Error::new)?;
+        Ok(edits
+            .into_iter()
+            .filter_map(|(event_id, edit)| Some((event_id, edit?)))
+            .collect())
     }
 
     /// The IDs and counts of `get_thread_summaries`: for each of
@@ -465,64 +516,55 @@ impl<'a> SyncReader<'a> {
         &self,
         event_ids: &[Arc<str>],
     ) -> anyhow::Result<HashMap<Arc<str>, (Arc<str>, i64)>> {
-        let mut summaries = HashMap::new();
-        if event_ids.is_empty() {
-            return Ok(summaries);
-        }
-        // One snapshot, as Python's one transaction, so that a count never
-        // misses its latest reply.
-        let borrowed = self.begin().await?;
-        for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
-            let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
-            let rows = borrowed
-                .query(
-                    "SELECT DISTINCT ON (parent.event_id) parent.event_id, child.event_id
-                    FROM events AS child
-                    INNER JOIN event_relations USING (event_id)
-                    INNER JOIN events AS parent ON
-                        parent.event_id = relates_to_id
-                        AND parent.room_id = child.room_id
-                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.thread'
-                    ORDER BY parent.event_id, child.topological_ordering DESC,
-                        child.stream_ordering DESC",
-                    &[&ids],
-                )
-                .await?;
-            let mut latest: HashMap<Arc<str>, Arc<str>> = HashMap::new();
-            for row in rows {
-                latest.insert(
-                    Arc::from(row.try_get::<_, &str>(0)?),
-                    Arc::from(row.try_get::<_, &str>(1)?),
-                );
-            }
-            if latest.is_empty() {
-                continue;
-            }
-            let parents: Vec<&str> = latest.keys().map(|id| &**id).collect();
-            let rows = borrowed
-                .query(
-                    "SELECT parent.event_id, COUNT(child.event_id)
-                    FROM events AS child
-                    INNER JOIN event_relations USING (event_id)
-                    INNER JOIN events AS parent ON
-                        parent.event_id = relates_to_id
-                        AND parent.room_id = child.room_id
-                    WHERE relates_to_id = ANY($1) AND relation_type = 'm.thread'
-                    GROUP BY parent.event_id",
-                    &[&parents],
-                )
-                .await?;
-            let mut counts: HashMap<&str, i64> = HashMap::new();
-            for row in &rows {
-                counts.insert(row.try_get(0)?, row.try_get(1)?);
-            }
-            for (parent, latest_id) in &latest {
-                let count = counts.get(&**parent).copied().unwrap_or(0);
-                summaries.insert(Arc::clone(parent), (Arc::clone(latest_id), count));
-            }
-        }
-        borrowed.commit().await?;
-        Ok(summaries)
+        let summaries = self
+            .store
+            .caches
+            .thread_summaries
+            .get_or_load_many(event_ids, |missing| async move {
+                let mut found: HashMap<Arc<str>, (Arc<str>, i64)> = HashMap::new();
+                let borrowed = self.borrow().await?;
+                for batch in missing.chunks(SELECT_MANY_BATCH_SIZE) {
+                    let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
+                    // Python counts in a second statement of the same
+                    // transaction. The window runs before `DISTINCT ON`, so
+                    // it counts every reply, and one statement is one
+                    // snapshot.
+                    let rows = borrowed
+                        .query(
+                            "SELECT DISTINCT ON (parent.event_id) parent.event_id, child.event_id,
+                                COUNT(*) OVER (PARTITION BY parent.event_id)
+                            FROM events AS child
+                            INNER JOIN event_relations USING (event_id)
+                            INNER JOIN events AS parent ON
+                                parent.event_id = relates_to_id
+                                AND parent.room_id = child.room_id
+                            WHERE relates_to_id = ANY($1) AND relation_type = 'm.thread'
+                            ORDER BY parent.event_id, child.topological_ordering DESC,
+                                child.stream_ordering DESC",
+                            &[&ids],
+                        )
+                        .await?;
+                    for row in rows {
+                        found.insert(
+                            Arc::from(row.try_get::<_, &str>(0)?),
+                            (Arc::from(row.try_get::<_, &str>(1)?), row.try_get(2)?),
+                        );
+                    }
+                }
+                Ok(missing
+                    .into_iter()
+                    .map(|event_id| {
+                        let summary = found.remove(&event_id);
+                        (event_id, summary)
+                    })
+                    .collect())
+            })
+            .await
+            .map_err(anyhow::Error::new)?;
+        Ok(summaries
+            .into_iter()
+            .filter_map(|(event_id, summary)| Some((event_id, summary?)))
+            .collect())
     }
 
     /// `get_threads_participated`: which of the threads of `event_ids` the
@@ -809,46 +851,60 @@ impl<'a> SyncReader<'a> {
     }
 
     /// `get_global_account_data_by_type_for_user`: the user's account data
-    /// of the type, if any.
+    /// of the type, if any, through its mirror.
     pub async fn global_account_data_by_type(
         &self,
         user_id: &str,
         data_type: &str,
-    ) -> anyhow::Result<Option<serde_json::Value>> {
-        let rows = self
-            .query_one_shot(
-                "SELECT content FROM account_data WHERE user_id = $1 AND account_data_type = $2",
-                &[&user_id, &data_type],
-            )
-            .await?;
-        let Some(row) = rows.first() else {
-            return Ok(None);
-        };
-        let content: Option<String> = row.try_get(0)?;
-        match content.filter(|content| !content.is_empty()) {
-            Some(content) => {
-                Ok(Some(serde_json::from_str(&content).with_context(|| {
-                    format!("account data {data_type} of {user_id}")
-                })?))
-            }
-            None => Ok(None),
-        }
+    ) -> anyhow::Result<Option<Arc<serde_json::Value>>> {
+        self.store
+            .caches
+            .global_account_data
+            .get_or_load((Arc::from(user_id), Arc::from(data_type)), || async {
+                let rows = self
+                    .query_one_shot(
+                        "SELECT content FROM account_data
+                        WHERE user_id = $1 AND account_data_type = $2",
+                        &[&user_id, &data_type],
+                    )
+                    .await?;
+                let Some(row) = rows.first() else {
+                    return Ok(None);
+                };
+                let content: Option<String> = row.try_get(0)?;
+                match content.filter(|content| !content.is_empty()) {
+                    Some(content) => Ok(Some(Arc::new(
+                        serde_json::from_str(&content)
+                            .with_context(|| format!("account data {data_type} of {user_id}"))?,
+                    ))),
+                    None => Ok(None),
+                }
+            })
+            .await
+            .map_err(anyhow::Error::new)
     }
 
     /// `ignored_users`: the users the user ignores.
-    pub async fn ignored_users(&self, user_id: &str) -> anyhow::Result<HashSet<Arc<str>>> {
-        let rows = self
-            .query_one_shot(
-                "SELECT ignored_user_id FROM ignored_users WHERE ignorer_user_id = $1",
-                &[&user_id],
-            )
-            .await?;
-        let mut users = HashSet::with_capacity(rows.len());
-        for row in rows {
-            let user_id: String = row.try_get(0)?;
-            users.insert(Arc::from(user_id));
-        }
-        Ok(users)
+    pub async fn ignored_users(&self, user_id: &str) -> anyhow::Result<Arc<HashSet<Arc<str>>>> {
+        self.store
+            .caches
+            .ignored_users
+            .get_or_load(Arc::from(user_id), || async {
+                let rows = self
+                    .query_one_shot(
+                        "SELECT ignored_user_id FROM ignored_users WHERE ignorer_user_id = $1",
+                        &[&user_id],
+                    )
+                    .await?;
+                let mut users = HashSet::with_capacity(rows.len());
+                for row in rows {
+                    let user_id: String = row.try_get(0)?;
+                    users.insert(Arc::from(user_id));
+                }
+                Ok(Arc::new(users))
+            })
+            .await
+            .map_err(anyhow::Error::new)
     }
 
     /// `are_users_erased`: which of the users have asked for their events
@@ -965,7 +1021,7 @@ impl<'a> SyncReader<'a> {
     }
 
     /// [`SyncReader::events`] on a connection already borrowed.
-    async fn load_events(
+    pub(crate) async fn load_events(
         &self,
         borrowed: &Borrowed<'_, '_>,
         event_ids: &[Arc<str>],
@@ -1272,40 +1328,62 @@ impl<'a> SyncReader<'a> {
         room_id: &str,
         end_token: &RoomStreamToken,
     ) -> anyhow::Result<Option<(Arc<str>, PersistedEventPosition)>> {
+        self.last_event_of_types_before(room_id, end_token, &[])
+            .await
+    }
+
+    /// `get_last_event_pos_in_room_before_stream_ordering` with
+    /// `event_types`: as [`Self::last_event_before`], counting only events
+    /// of one of `event_types`. No types means any type, as in Python.
+    pub async fn last_event_of_types_before(
+        &self,
+        room_id: &str,
+        end_token: &RoomStreamToken,
+        event_types: &[String],
+    ) -> anyhow::Result<Option<(Arc<str>, PersistedEventPosition)>> {
         // The first subquery is the events within the token's instance map,
         // between its minimum and maximum, to be filtered against the map;
         // the second is the last event before the minimum. The first match
         // in stream order is the answer.
         let min_stream = end_token.stream;
         let max_stream = end_token.get_max_stream_pos();
-        let rows = self
-            .query_one_shot(
-                "SELECT * FROM (
-                    SELECT instance_name, stream_ordering, topological_ordering, event_id
-                    FROM events
-                    LEFT JOIN rejections USING (event_id)
-                    WHERE room_id = $1
-                        AND $2 < stream_ordering AND stream_ordering <= $3
-                        AND NOT outlier
-                        AND rejections.event_id IS NULL
-                    ORDER BY stream_ordering DESC
-                ) AS a
-                UNION ALL
-                SELECT * FROM (
-                    SELECT instance_name, stream_ordering, topological_ordering, event_id
-                    FROM events
-                    LEFT JOIN rejections USING (event_id)
-                    WHERE room_id = $1
-                        AND stream_ordering <= $2
-                        AND NOT outlier
-                        AND rejections.event_id IS NULL
-                    ORDER BY stream_ordering DESC
-                    LIMIT 1
-                ) AS b
-                ORDER BY stream_ordering DESC",
-                &[&room_id, &min_stream, &max_stream],
-            )
-            .await?;
+        let type_clause = if event_types.is_empty() {
+            ""
+        } else {
+            "AND type = ANY($4)"
+        };
+        let sql = format!(
+            "SELECT * FROM (
+                SELECT instance_name, stream_ordering, topological_ordering, event_id
+                FROM events
+                LEFT JOIN rejections USING (event_id)
+                WHERE room_id = $1
+                    {type_clause}
+                    AND $2 < stream_ordering AND stream_ordering <= $3
+                    AND NOT outlier
+                    AND rejections.event_id IS NULL
+                ORDER BY stream_ordering DESC
+            ) AS a
+            UNION ALL
+            SELECT * FROM (
+                SELECT instance_name, stream_ordering, topological_ordering, event_id
+                FROM events
+                LEFT JOIN rejections USING (event_id)
+                WHERE room_id = $1
+                    {type_clause}
+                    AND stream_ordering <= $2
+                    AND NOT outlier
+                    AND rejections.event_id IS NULL
+                ORDER BY stream_ordering DESC
+                LIMIT 1
+            ) AS b
+            ORDER BY stream_ordering DESC"
+        );
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&room_id, &min_stream, &max_stream];
+        if !event_types.is_empty() {
+            params.push(&event_types);
+        }
+        let rows = self.query_one_shot(&sql, &params).await?;
         for row in rows {
             let instance_name: Option<String> = row.try_get(0)?;
             let stream_ordering: i64 = row.try_get(1)?;
@@ -1542,6 +1620,115 @@ impl<'a> SyncReader<'a> {
             }
         }
         Ok(deltas)
+    }
+
+    /// `get_current_state_deltas_for_room`: the changes to the room's
+    /// current state after `from_token` and up to `to_token`, in `stream_id`
+    /// order, bounded on the delta rows' own `stream_id`. Sliding sync reads
+    /// these. A token that falls inside a persist batch misses that batch's
+    /// deltas, as the Python explains: [`Self::state_deltas`] is the variant
+    /// that pairs with a timeline.
+    ///
+    /// Python first asks its delta stream cache whether the room changed
+    /// after `from_token`. Rust always reads the table, which gives the same
+    /// answer.
+    pub async fn state_deltas_by_stream_id(
+        &self,
+        room_id: &str,
+        from_token: Option<&RoomStreamToken>,
+        to_token: Option<&RoomStreamToken>,
+    ) -> anyhow::Result<Vec<StateDelta>> {
+        if let (Some(from), Some(to)) = (from_token, to_token) {
+            if to.is_before_or_eq(from) {
+                return Ok(Vec::new());
+            }
+        }
+        let lower_value = from_token.map(|from| from.stream);
+        let upper_value = to_token.map(|to| to.get_max_stream_pos());
+        let lower_clause = if lower_value.is_some() {
+            "AND $2 < stream_id"
+        } else {
+            ""
+        };
+        let upper_clause = match (lower_value, upper_value) {
+            (_, None) => "",
+            (Some(_), Some(_)) => "AND stream_id <= $3",
+            (None, Some(_)) => "AND stream_id <= $2",
+        };
+        let sql = format!(
+            "SELECT instance_name, stream_id, type, state_key, event_id, prev_event_id
+            FROM current_state_delta_stream
+            WHERE room_id = $1 {lower_clause} {upper_clause}
+            ORDER BY stream_id ASC"
+        );
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![&room_id];
+        if let Some(value) = &lower_value {
+            params.push(value);
+        }
+        if let Some(value) = &upper_value {
+            params.push(value);
+        }
+        let rows = self.query_one_shot(&sql, &params).await?;
+
+        let mut interner = Interner::default();
+        let mut deltas = Vec::with_capacity(rows.len());
+        for row in rows {
+            let instance_name: Option<String> = row.try_get(0)?;
+            let stream_id: i64 = row.try_get(1)?;
+            if !filter_results_by_stream(from_token, to_token, instance_name.as_deref(), stream_id)?
+            {
+                continue;
+            }
+            let event_type: String = row.try_get(2)?;
+            let state_key: String = row.try_get(3)?;
+            let event_id: Option<String> = row.try_get(4)?;
+            let prev_event_id: Option<String> = row.try_get(5)?;
+            deltas.push(StateDelta {
+                stream_id,
+                event_type: interner.intern(&event_type),
+                state_key: Arc::from(state_key),
+                event_id: event_id.map(Arc::from),
+                prev_event_id: prev_event_id.map(Arc::from),
+            });
+        }
+        Ok(deltas)
+    }
+
+    /// `get_member_counts`: the number of members of the room by
+    /// membership, from its current state. A rejected membership event has
+    /// no membership and is not counted.
+    pub async fn member_counts(&self, room_id: &str) -> anyhow::Result<HashMap<String, i64>> {
+        let rows = self
+            .query_one_shot(
+                "SELECT count(*), membership FROM current_state_events
+                WHERE type = 'm.room.member' AND room_id = $1
+                    AND membership IS NOT NULL
+                GROUP BY membership",
+                &[&room_id],
+            )
+            .await?;
+        let mut counts = HashMap::with_capacity(rows.len());
+        for row in rows {
+            let count: i64 = row.try_get(0)?;
+            let membership: String = row.try_get(1)?;
+            counts.insert(membership, count);
+        }
+        Ok(counts)
+    }
+
+    /// `get_latest_bump_stamp_for_room`: the room's `bump_stamp` in
+    /// `sliding_sync_joined_rooms`, or `None` if it has none or no row.
+    pub async fn latest_bump_stamp(&self, room_id: &str) -> anyhow::Result<Option<i64>> {
+        let rows = self
+            .query_one_shot(
+                "SELECT bump_stamp FROM sliding_sync_joined_rooms WHERE room_id = $1",
+                &[&room_id],
+            )
+            .await?;
+        match rows.first() {
+            Some(row) => Ok(row.try_get(0)?),
+            None => Ok(None),
+        }
     }
 
     /// `_get_state_group_for_events`: the state group of each event, which
@@ -2010,10 +2197,10 @@ const STATE_GROUP_BATCH_SIZE: usize = 100;
 
 /// Interns strings, so the event types of one result share an allocation.
 #[derive(Default)]
-struct Interner(HashSet<Arc<str>>);
+pub(crate) struct Interner(HashSet<Arc<str>>);
 
 impl Interner {
-    fn intern(&mut self, s: &str) -> Arc<str> {
+    pub(crate) fn intern(&mut self, s: &str) -> Arc<str> {
         if let Some(existing) = self.0.get(s) {
             return Arc::clone(existing);
         }
@@ -2111,7 +2298,7 @@ impl Borrowed<'_, '_> {
     }
 
     /// Run statements that return nothing.
-    async fn execute(&self, sql: &str) -> anyhow::Result<()> {
+    pub(crate) async fn execute(&self, sql: &str) -> anyhow::Result<()> {
         let start = Instant::now();
         self.conn()
             .batch_execute(sql)
@@ -2175,11 +2362,14 @@ impl Querier for Borrowed<'_, '_> {
 // Test-only entry points, so trial can compare the Rust store against the
 // Python one on a real schema.
 
-fn anyhow_to_py(e: anyhow::Error) -> PyErr {
+pub(crate) fn anyhow_to_py(e: anyhow::Error) -> PyErr {
     pyo3::exceptions::PyRuntimeError::new_err(format!("{e:#}"))
 }
 
-fn json_to_py<'py>(py: Python<'py>, value: &serde_json::Value) -> PyResult<Bound<'py, PyAny>> {
+pub(crate) fn json_to_py<'py>(
+    py: Python<'py>,
+    value: &serde_json::Value,
+) -> PyResult<Bound<'py, PyAny>> {
     pythonize::pythonize(py, value).map_err(Into::into)
 }
 
@@ -2364,14 +2554,14 @@ impl PySyncStoreForTest {
             }
             .boxed()
         })?;
-        data.as_ref().map(|data| json_to_py(py, data)).transpose()
+        data.as_deref().map(|data| json_to_py(py, data)).transpose()
     }
 
     fn ignored_users(&self, py: Python<'_>, user_id: String) -> PyResult<HashSet<String>> {
         self.run(py, |reader| {
             async move { reader.ignored_users(&user_id).await }.boxed()
         })
-        .map(arc_set)
+        .map(|users| users.iter().map(|id| id.to_string()).collect())
     }
 
     fn are_users_erased(
@@ -2539,6 +2729,46 @@ impl PySyncStoreForTest {
         }))
     }
 
+    /// `get_last_event_pos_in_room_before_stream_ordering` with
+    /// `event_types`, as `(event_id, instance_name, stream_ordering)`.
+    fn last_event_of_types_before(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        end_token: RoomStreamToken,
+        event_types: Vec<String>,
+    ) -> PyResult<Option<(String, String, i64)>> {
+        let last = self.run(py, |reader| {
+            async move {
+                reader
+                    .last_event_of_types_before(&room_id, &end_token, &event_types)
+                    .await
+            }
+            .boxed()
+        })?;
+        Ok(last.map(|(event_id, position)| {
+            (
+                event_id.to_string(),
+                position.instance_name.to_string(),
+                position.stream,
+            )
+        }))
+    }
+
+    /// `get_member_counts`.
+    fn member_counts(&self, py: Python<'_>, room_id: String) -> PyResult<HashMap<String, i64>> {
+        self.run(py, |reader| {
+            async move { reader.member_counts(&room_id).await }.boxed()
+        })
+    }
+
+    /// `get_latest_bump_stamp_for_room`.
+    fn latest_bump_stamp(&self, py: Python<'_>, room_id: String) -> PyResult<Option<i64>> {
+        self.run(py, |reader| {
+            async move { reader.latest_bump_stamp(&room_id).await }.boxed()
+        })
+    }
+
     /// `get_unread_event_push_actions_by_room_for_user`, with each timeline's
     /// counts as `(notify_count, unread_count, highlight_count)`: the main
     /// timeline's, and the threads' by thread.
@@ -2591,6 +2821,39 @@ impl PySyncStoreForTest {
             async move {
                 reader
                     .state_deltas(&room_id, from_token.as_ref(), to_token.as_ref())
+                    .await
+            }
+            .boxed()
+        })?;
+        Ok(deltas
+            .into_iter()
+            .map(|delta| {
+                (
+                    delta.stream_id,
+                    delta.event_type.to_string(),
+                    delta.state_key.to_string(),
+                    delta.event_id.map(|id| id.to_string()),
+                    delta.prev_event_id.map(|id| id.to_string()),
+                )
+            })
+            .collect())
+    }
+
+    /// `get_current_state_deltas_for_room`, with each delta as
+    /// `(stream_id, type, state_key, event_id, prev_event_id)`.
+    #[pyo3(signature = (room_id, from_token, to_token))]
+    #[allow(clippy::type_complexity)]
+    fn state_deltas_by_stream_id(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        from_token: Option<RoomStreamToken>,
+        to_token: Option<RoomStreamToken>,
+    ) -> PyResult<Vec<(i64, String, String, Option<String>, Option<String>)>> {
+        let deltas = self.run(py, |reader| {
+            async move {
+                reader
+                    .state_deltas_by_stream_id(&room_id, from_token.as_ref(), to_token.as_ref())
                     .await
             }
             .boxed()

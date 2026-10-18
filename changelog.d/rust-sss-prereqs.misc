@@ -1,0 +1,1 @@
+Add the prerequisites for computing simplified sliding sync responses in Rust, behind `experimental_features.rust_sliding_sync`.

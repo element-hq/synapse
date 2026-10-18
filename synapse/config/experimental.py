@@ -381,6 +381,24 @@ class ExperimentalConfig(Config):
             )
         self.rust_sync: Literal["off", "shadow", "on"] = rust_sync
 
+        # Whether to compute simplified sliding sync (MSC4186) responses in
+        # Rust. Needs the native Rust Postgres driver.
+        #  - "off": the Python implementation.
+        #  - "on": Rust, falling back to Python per room or per request where
+        #    Rust cannot compute it.
+        # There is no shadow mode.
+        rust_sliding_sync = experimental.get("rust_sliding_sync", "off")
+        if rust_sliding_sync is True:
+            rust_sliding_sync = "on"
+        elif rust_sliding_sync is False:
+            rust_sliding_sync = "off"
+        if rust_sliding_sync not in ("off", "on"):
+            raise ConfigError(
+                "experimental_features.rust_sliding_sync must be 'off' or 'on'",
+                ("experimental", "rust_sliding_sync"),
+            )
+        self.rust_sliding_sync: Literal["off", "on"] = rust_sliding_sync
+
         # How much of outbound federation runs in Rust. One ordered level, each
         # implying the ones before it:
         #  - "off": all Python.

@@ -37,6 +37,7 @@ pub mod rendezvous;
 pub mod room_versions;
 pub mod runtime;
 pub mod segmenter;
+pub mod sliding_sync;
 pub mod state;
 pub mod storage;
 pub mod sync;
@@ -113,6 +114,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     msc4388_rendezvous::register_module(py, m)?;
     persist::register_module(py, m)?;
     segmenter::register_module(py, m)?;
+    sliding_sync::register_module(py, m)?;
     state::register_module(py, m)?;
     sync::register_module(py, m)?;
     room_versions::register_module(py, m)?;
