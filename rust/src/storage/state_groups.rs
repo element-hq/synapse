@@ -24,7 +24,7 @@ use futures::FutureExt;
 
 use crate::database::postgres::{
     pool::ConnectionPool,
-    write::{run_write_interaction, Column, WriteError},
+    write::{run_write_interaction, OwnedColumn, WriteError},
 };
 
 /// A `(type, state_key, event_id)` state entry.
@@ -111,13 +111,13 @@ pub async fn store_state_group_chain(
                 if rows.is_empty() {
                     return Ok(Err(prev_group));
                 }
-                txn.execute(
+                // Sent with the next statement.
+                txn.execute_later(
                     "UPDATE state_groups_pending_deletion
                     SET sequence_number = DEFAULT, insertion_ts = $1
                     WHERE state_group = $2",
-                    &[&now_ms, &prev_group],
-                )
-                .await?;
+                    crate::owned_params![now_ms, prev_group],
+                );
             }
 
             let needed = chain.state_events.len() as i64 + i64::from(chain.prev_group.is_none());
@@ -175,39 +175,37 @@ pub async fn store_state_group_chain(
                 prev = group;
             }
 
+            // The rows go out with the COMMIT.
             let room_ids = vec![chain.room_id.as_str(); group_ids.len()];
-            txn.insert_many(
+            txn.insert_many_later(
                 "state_groups",
-                &[
-                    Column::new("id", "bigint", &group_ids),
-                    Column::new("room_id", "text", &room_ids),
-                    Column::new("event_id", "text", &group_event_ids),
+                vec![
+                    OwnedColumn::copy("id", "bigint", &group_ids),
+                    OwnedColumn::copy("room_id", "text", &room_ids),
+                    OwnedColumn::copy("event_id", "text", &group_event_ids),
                 ],
                 None,
-            )
-            .await?;
-            txn.insert_many(
+            )?;
+            txn.insert_many_later(
                 "state_group_edges",
-                &[
-                    Column::new("state_group", "bigint", &edge_groups),
-                    Column::new("prev_state_group", "bigint", &edge_prev_groups),
+                vec![
+                    OwnedColumn::copy("state_group", "bigint", &edge_groups),
+                    OwnedColumn::copy("prev_state_group", "bigint", &edge_prev_groups),
                 ],
                 None,
-            )
-            .await?;
+            )?;
             let state_room_ids = vec![chain.room_id.as_str(); state_group_col.len()];
-            txn.insert_many(
+            txn.insert_many_later(
                 "state_groups_state",
-                &[
-                    Column::new("state_group", "bigint", &state_group_col),
-                    Column::new("room_id", "text", &state_room_ids),
-                    Column::new("type", "text", &state_type_col),
-                    Column::new("state_key", "text", &state_key_col),
-                    Column::new("event_id", "text", &state_event_col),
+                vec![
+                    OwnedColumn::copy("state_group", "bigint", &state_group_col),
+                    OwnedColumn::copy("room_id", "text", &state_room_ids),
+                    OwnedColumn::copy("type", "text", &state_type_col),
+                    OwnedColumn::copy("state_key", "text", &state_key_col),
+                    OwnedColumn::copy("event_id", "text", &state_event_col),
                 ],
                 None,
-            )
-            .await?;
+            )?;
 
             Ok(Ok(StoredStateGroups {
                 group_before,

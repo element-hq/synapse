@@ -228,6 +228,78 @@ class RustStateGroupWriterTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(self._rows("!rust:t")["state_groups"], [])
 
+    def test_bumps_pending_deletion(self) -> None:
+        """Following a group that is pending deletion pushes its deletion back."""
+        prev_group = self.get_success(
+            self.state_store.store_state_group(
+                "$prev", "!rust:t", None, None, {("m.room.create", ""): "$create"}
+            )
+        )
+        self.get_success(
+            self.state_store.db_pool.simple_insert(
+                "state_groups_pending_deletion",
+                {"state_group": prev_group, "insertion_ts": 0},
+            )
+        )
+        before = self.get_success(
+            self.state_store.db_pool.simple_select_one(
+                "state_groups_pending_deletion",
+                {"state_group": prev_group},
+                ("sequence_number", "insertion_ts"),
+            )
+        )
+
+        self.reactor.advance(10)
+        self._store(
+            self._batch("!rust:t", None, prev_group), "!rust:t", prev_group, True
+        )
+
+        sequence_number, insertion_ts = self.get_success(
+            self.state_store.db_pool.simple_select_one(
+                "state_groups_pending_deletion",
+                {"state_group": prev_group},
+                ("sequence_number", "insertion_ts"),
+            )
+        )
+        self.assertGreater(sequence_number, before[0])
+        self.assertEqual(insertion_ts, 10_000)
+
+    def test_insert_failing_at_commit(self) -> None:
+        """A row that fails to insert, which only shows at the COMMIT, writes
+        nothing."""
+        prev_group = self.get_success(
+            self.state_store.store_state_group(
+                "$prev", "!rust:t", None, None, {("m.room.create", ""): "$create"}
+            )
+        )
+        rows_before = self._rows("!rust:t")
+
+        # Take the next state group ID from the sequence, give it to a row in
+        # another room, and wind the sequence back so the writer gets it too.
+        def clash(txn: Any) -> None:
+            txn.execute("SELECT nextval('state_group_id_seq')")
+            (next_id,) = txn.fetchone()
+            txn.execute(
+                "INSERT INTO state_groups (id, room_id, event_id) VALUES (?, ?, ?)",
+                (next_id, "!other:t", "$other"),
+            )
+            txn.execute("SELECT setval('state_group_id_seq', ?, false)", (next_id,))
+
+        self.get_success(self.state_store.db_pool.runInteraction("clash", clash))
+
+        batch = self._batch("!rust:t", None, prev_group)
+        self.state_store._rust_state_group_writer = self.rust_writer
+        failure = self.get_failure(
+            self.state_store.store_state_deltas_for_batched(
+                batch,  # type: ignore[arg-type]
+                "!rust:t",
+                prev_group,
+            ),
+            Exception,
+        )
+        self.assertIn("state_groups", str(failure.value))
+        self.assertEqual(self._rows("!rust:t"), rows_before)
+
     def test_keeps_logcontext(self) -> None:
         """Waiting for the Rust write leaves the caller in its own logcontext.
 
