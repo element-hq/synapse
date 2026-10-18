@@ -3446,6 +3446,24 @@ class PerRoomProfilesForbiddenTestCase(unittest.HomeserverTestCase):
 
         self.room_id = self.helper.create_room_as(self.user_id, tok=self.tok)
 
+    def test_join_has_the_global_profile(self) -> None:
+        """A join without profile data gets the user's display name and
+        avatar."""
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/profile/%s/avatar_url" % (self.user_id,),
+            {"avatar_url": "mxc://test/avatar"},
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        room_id = self.helper.create_room_as(self.user_id, tok=self.tok)
+        member = self.helper.get_state(
+            room_id, "m.room.member", self.tok, state_key=self.user_id
+        )
+        self.assertEqual(member["displayname"], self.displayname)
+        self.assertEqual(member["avatar_url"], "mxc://test/avatar")
+
     def test_per_room_profile_forbidden(self) -> None:
         request_data = {"membership": "join", "displayname": "other test user"}
         channel = self.make_request(

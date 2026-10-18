@@ -823,14 +823,26 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             profile = self.profile_handler
 
             try:
-                if "displayname" not in content:
-                    displayname = await profile.get_displayname(target)
-                    if displayname is not None:
-                        content["displayname"] = displayname
-                if "avatar_url" not in content:
-                    avatar_url = await profile.get_avatar_url(target)
-                    if avatar_url is not None:
-                        content["avatar_url"] = avatar_url
+                if (
+                    "displayname" not in content
+                    and "avatar_url" not in content
+                    and self.hs.is_mine(target)
+                ):
+                    # Both in one query.
+                    info = await self.store.get_profileinfo(target)
+                    if info.display_name is not None:
+                        content["displayname"] = info.display_name
+                    if info.avatar_url is not None:
+                        content["avatar_url"] = info.avatar_url
+                else:
+                    if "displayname" not in content:
+                        displayname = await profile.get_displayname(target)
+                        if displayname is not None:
+                            content["displayname"] = displayname
+                    if "avatar_url" not in content:
+                        avatar_url = await profile.get_avatar_url(target)
+                        if avatar_url is not None:
+                            content["avatar_url"] = avatar_url
             except Exception as e:
                 logger.info("Failed to get profile information for %r: %s", target, e)
 
