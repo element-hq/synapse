@@ -89,6 +89,7 @@ pub mod filter;
 pub mod formats;
 pub mod internal_metadata;
 pub mod json_object;
+pub mod local;
 pub mod relations;
 pub mod serialize;
 pub mod signatures;
@@ -111,6 +112,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<json_object::JsonObjectValuesView>()?;
     child_module.add_class::<json_object::JsonObjectItemsView>()?;
     child_module.add_class::<Event>()?;
+    child_module.add_class::<local::LocalEventSigner>()?;
     child_module.add_class::<relations::BundledAggregations>()?;
     child_module.add_class::<relations::ThreadAggregation>()?;
     child_module.add_class::<serialize::EventFormat>()?;
@@ -638,12 +640,33 @@ impl Event {
         room_version: &'static RoomVersion,
         rejected_reason: Option<Box<str>>,
     ) -> Result<Event, Error> {
-        let event_id = match &*parsed_event.specific_fields {
-            EventFormatEnum::V1(format) => {
+        Event::from_parts_with_event_id(
+            parsed_event,
+            None,
+            internal_metadata,
+            room_version,
+            rejected_reason,
+        )
+    }
+
+    /// Like [`Event::from_parts`], but for a v2+ event takes the event ID
+    /// the caller has already computed from the event's reference hash,
+    /// rather than hashing the event again. Format v1 events ignore it and
+    /// read theirs from the JSON.
+    pub(crate) fn from_parts_with_event_id(
+        parsed_event: FormattedEvent,
+        event_id: Option<Arc<str>>,
+        internal_metadata: EventInternalMetadata,
+        room_version: &'static RoomVersion,
+        rejected_reason: Option<Box<str>>,
+    ) -> Result<Event, Error> {
+        let event_id = match (&*parsed_event.specific_fields, event_id) {
+            (EventFormatEnum::V1(format), _) => {
                 // V1/V2 events have the event_id in the event dict.
                 Arc::clone(&format.event_id)
             }
-            _ => {
+            (_, Some(event_id)) => event_id,
+            (_, None) => {
                 // Calculate the event ID by hashing the event JSON. This can
                 // fail if the event can't be serialized to canonical JSON (e.g.
                 // having out-of-range integers), which indicates the event is

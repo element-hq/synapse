@@ -22,20 +22,20 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import attr
-from signedjson.types import SigningKey
+from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import MAX_DEPTH, EventTypes, StickyEvent, StickyEventField
+from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     EventFormatVersions,
     RoomVersion,
 )
-from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.event_auth import auth_types_for_event
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.state import StateHandler
 from synapse.storage.databases.main import DataStore
-from synapse.synapse_rust.events import EventInternalMetadata
+from synapse.synapse_rust.events import EventInternalMetadata, LocalEventSigner
 from synapse.types import EventID, JsonDict, StrCollection
 from synapse.types.state import StateFilter
 from synapse.util.clock import Clock
@@ -70,7 +70,7 @@ class EventBuilder:
         _store
         _clock
         _hostname: The hostname of the server creating the event
-        _signing_key: The signing key to use to sign the event as the server
+        _signer: Signs the event as the server
     """
 
     _state: StateHandler
@@ -78,7 +78,7 @@ class EventBuilder:
     _store: DataStore
     _clock: Clock
     _hostname: str
-    _signing_key: SigningKey
+    _signer: LocalEventSigner
 
     room_version: RoomVersion
 
@@ -328,7 +328,7 @@ class EventBuilder:
         return create_local_event_from_event_dict(
             clock=self._clock,
             hostname=self._hostname,
-            signing_key=self._signing_key,
+            signer=self._signer,
             room_version=self.room_version,
             event_dict=event_dict,
             internal_metadata_dict=self.internal_metadata.get_dict(),
@@ -339,7 +339,7 @@ class EventBuilderFactory:
     def __init__(self, hs: "HomeServer"):
         self.clock = hs.get_clock()
         self.hostname = hs.hostname
-        self.signing_key = hs.signing_key
+        self.signer = LocalEventSigner(hs.hostname, hs.signing_key)
 
         self.store = hs.get_datastores().main
         self.state = hs.get_state_handler()
@@ -364,7 +364,7 @@ class EventBuilderFactory:
             event_auth_handler=self._event_auth_handler,
             clock=self.clock,
             hostname=self.hostname,
-            signing_key=self.signing_key,
+            signer=self.signer,
             room_version=room_version,
             type=key_values["type"],
             state_key=key_values.get("state_key"),
@@ -381,7 +381,7 @@ class EventBuilderFactory:
 def create_local_event_from_event_dict(
     clock: Clock,
     hostname: str,
-    signing_key: SigningKey,
+    signer: LocalEventSigner,
     room_version: RoomVersion,
     event_dict: JsonDict,
     internal_metadata_dict: JsonDict | None = None,
@@ -389,6 +389,8 @@ def create_local_event_from_event_dict(
     """Takes a fully formed event dict, ensuring that fields like
     `origin_server_ts` have correct values for a locally produced event,
     then signs and hashes it.
+
+    `signer` signs as `hostname`.
     """
 
     format_version = room_version.event_format
@@ -411,10 +413,13 @@ def create_local_event_from_event_dict(
 
     event_dict.setdefault("signatures", {})
 
-    add_hashes_and_signatures(room_version, event_dict, hostname, signing_key)
-    return make_event_from_dict(
-        event_dict, room_version, internal_metadata_dict=internal_metadata_dict
-    )
+    # Hashing, signing and parsing happen in Rust, on the canonical JSON.
+    try:
+        return signer.build_event(
+            encode_canonical_json(event_dict), room_version, internal_metadata_dict
+        )
+    except ValueError:
+        raise SynapseError(400, "Invalid event JSON", Codes.BAD_JSON)
 
 
 # A counter used when generating new event IDs

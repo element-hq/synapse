@@ -12,6 +12,8 @@
 
 from typing import Any, Iterator, Mapping
 
+from signedjson.types import SigningKey
+
 from synapse.synapse_rust.room_versions import RoomVersion
 from synapse.types import JsonDict, JsonMapping, Requester, StrSequence
 from synapse.util.duration import Duration
@@ -512,3 +514,21 @@ def redact_event_dict(room_version: RoomVersion, event_dict: JsonMapping) -> Jso
 
     Returns the redacted event as a dict.
     """
+
+class LocalEventSigner:
+    """Signs the events this server creates, as `server_name` with
+    `signing_key`."""
+
+    def __init__(self, server_name: str, signing_key: SigningKey) -> None: ...
+    def build_event(
+        self,
+        event_json: bytes,
+        room_version: RoomVersion,
+        internal_metadata_dict: JsonDict,
+    ) -> Event:
+        """Add the content hash and this server's signature to the event in
+        `event_json` (its canonical JSON encoding) and parse it as an `Event`.
+
+        Raises:
+            ValueError: if the JSON is not a valid event for the room version.
+        """

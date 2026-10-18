@@ -72,6 +72,7 @@ from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.synapse_rust.events import LocalEventSigner
 from synapse.types import (
     JsonDict,
     StrCollection,
@@ -146,7 +147,7 @@ class FederationClient(FederationBase):
         self.transport_layer = hs.get_federation_transport_client()
 
         self.server_name = hs.hostname
-        self.signing_key = hs.signing_key
+        self._event_signer = LocalEventSigner(hs.hostname, hs.signing_key)
 
         # Cache mapping `event_id` to a tuple of the event itself and the `pull_origin`
         # (which server we pulled the event from)
@@ -1065,7 +1066,7 @@ class FederationClient(FederationBase):
             ev = builder.create_local_event_from_event_dict(
                 self._clock,
                 self.server_name,
-                self.signing_key,
+                self._event_signer,
                 room_version=room_version,
                 event_dict=pdu_dict,
             )

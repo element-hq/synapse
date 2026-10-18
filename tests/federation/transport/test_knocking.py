@@ -30,6 +30,7 @@ from synapse.events.snapshot import EventContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.synapse_rust.events import LocalEventSigner
 from synapse.types import RoomAlias
 from synapse.util.clock import Clock
 
@@ -292,7 +293,7 @@ class FederationKnockingTestCase(
         signed_knock_event = builder.create_local_event_from_event_dict(
             self.clock,
             self.hs.hostname,
-            self.hs.signing_key,
+            LocalEventSigner(self.hs.hostname, self.hs.signing_key),
             room_version=RoomVersions.V7,
             event_dict=knock_event,
         )

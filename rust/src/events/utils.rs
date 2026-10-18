@@ -84,7 +84,18 @@ pub fn compute_event_reference_hash(
     )
     .map_err(|err| anyhow::anyhow!(err))?;
 
-    let hash = Sha256::digest(json.as_bytes());
+    Ok(reference_hash_of_canonical_json(
+        json.as_bytes(),
+        room_version,
+    ))
+}
+
+/// The reference hash of an event, given the canonical JSON of the redacted
+/// event without its `signatures`, `unsigned` and `age_ts`. That is also
+/// what a server signs, so a signer can derive the event ID from its own
+/// bytes.
+pub fn reference_hash_of_canonical_json(json: &[u8], room_version: &RoomVersion) -> String {
+    let hash = Sha256::digest(json);
 
     let base64_alphabet = if room_version.event_format == EventFormatVersions::ROOM_V3 {
         base64::alphabet::STANDARD
@@ -96,7 +107,7 @@ pub fn compute_event_reference_hash(
         base64::engine::general_purpose::NO_PAD,
     );
 
-    Ok(base64_engine.encode(hash))
+    base64_engine.encode(hash)
 }
 
 /// Attempts to redact the provided event, returning a copy of the redacted
