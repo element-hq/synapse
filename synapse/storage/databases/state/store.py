@@ -449,7 +449,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         self,
         events_and_context: list[tuple[EventBase, UnpersistedEventContextBase]],
         room_id: str,
-        prev_group: int,
+        prev_group: int | None,
     ) -> list[tuple[EventBase, UnpersistedEventContext]]:
         """Generate and store state deltas for a group of events and contexts created to be
         batch persisted. Note that all the events must be in a linear chain (ie a <- b <- c).
@@ -459,44 +459,74 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             and their associated contexts
             room_id: the id of the room the events were created for
             prev_group: the state group of the last event persisted before the batched events
-            were created
+            were created, or None if the batch starts the room. In that case the
+            state before the first event, its context's `state_map_before_event`,
+            is stored as a full state group first.
         """
 
         def insert_deltas_group_txn(
             txn: LoggingTransaction,
             events_and_context: list[tuple[EventBase, UnpersistedEventContext]],
-            prev_group: int,
+            prev_group: int | None,
         ) -> list[tuple[EventBase, UnpersistedEventContext]]:
             """Generate and store state groups for the provided events and contexts.
 
-            Requires that we have the state as a delta from the last persisted state group.
+            Each state event gets a group that is a delta from the group before it.
+            The first event's group follows on from `prev_group`, or from a new full
+            state group when `prev_group` is None.
 
             Returns:
                 A list of state groups
             """
 
-            # We need to check that the prev group isn't about to be deleted
-            is_missing = (
-                self._state_deletion_store._check_state_groups_and_bump_deletion_txn(
-                    txn,
-                    {prev_group},
-                )
-            )
-            if is_missing:
-                raise Exception(
-                    "Trying to persist state with unpersisted prev_group: %r"
-                    % (prev_group,)
-                )
+            if prev_group is None:
+                # The first context may already have a stored group for the state
+                # before it, e.g. when a module's `check_event_allowed` callback
+                # had the event rebuilt. Build on that rather than store another.
+                prev_group = events_and_context[0][1].state_group_before_event
 
             num_state_groups = sum(
                 1 for event, _ in events_and_context if event.is_state()
             )
 
-            state_groups = self._state_group_seq_gen.get_next_mult_txn(
-                txn, num_state_groups
-            )
+            # Rows for `state_groups` and `state_groups_state` of a full state
+            # group for the state before the first event, if needed.
+            full_group_rows: list[tuple[int, str, str]] = []
+            full_group_state_rows: list[tuple[int, str, str, str, str]] = []
 
-            sg_before = prev_group
+            if prev_group is None:
+                first_event, first_context = events_and_context[0]
+                state_before = first_context.state_map_before_event
+                assert state_before is not None
+
+                state_groups = self._state_group_seq_gen.get_next_mult_txn(
+                    txn, num_state_groups + 1
+                )
+                sg_before = state_groups[0]
+                state_groups = state_groups[1:]
+
+                full_group_rows.append((sg_before, room_id, first_event.event_id))
+                full_group_state_rows.extend(
+                    (sg_before, room_id, key[0], key[1], state_id)
+                    for key, state_id in state_before.items()
+                )
+            else:
+                # We need to check that the prev group isn't about to be deleted
+                is_missing = self._state_deletion_store._check_state_groups_and_bump_deletion_txn(
+                    txn,
+                    {prev_group},
+                )
+                if is_missing:
+                    raise Exception(
+                        "Trying to persist state with unpersisted prev_group: %r"
+                        % (prev_group,)
+                    )
+
+                state_groups = self._state_group_seq_gen.get_next_mult_txn(
+                    txn, num_state_groups
+                )
+                sg_before = prev_group
+
             state_group_iter = iter(state_groups)
             for event, context in events_and_context:
                 if not event.is_state():
@@ -516,7 +546,8 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 txn,
                 table="state_groups",
                 keys=("id", "room_id", "event_id"),
-                values=[
+                values=full_group_rows
+                + [
                     (context.state_group_after_event, room_id, event.event_id)
                     for event, context in events_and_context
                     if event.is_state()
@@ -541,7 +572,8 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 txn,
                 table="state_groups_state",
                 keys=("state_group", "room_id", "type", "state_key", "event_id"),
-                values=[
+                values=full_group_state_rows
+                + [
                     (
                         context.state_group_after_event,
                         room_id,

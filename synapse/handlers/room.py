@@ -65,7 +65,11 @@ from synapse.api.errors import (
 )
 from synapse.api.filtering import Filter
 from synapse.api.ratelimiting import Ratelimiter
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
+from synapse.api.room_versions import (
+    KNOWN_ROOM_VERSIONS,
+    EventFormatVersions,
+    RoomVersion,
+)
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase, event_exists_in_state_dag
 from synapse.events.snapshot import UnpersistedEventContext
@@ -349,7 +353,7 @@ class RoomCreationHandler:
         tombstone_context: synapse.events.snapshot.EventContext,
         additional_creators: list[str] | None,
         creation_event_with_context: tuple[
-            EventBase, synapse.events.snapshot.EventContext
+            EventBase, synapse.events.snapshot.UnpersistedEventContextBase
         ]
         | None = None,
         auto_member: bool = False,
@@ -567,7 +571,7 @@ class RoomCreationHandler:
         tombstone_event_id: str,
         additional_creators: list[str] | None,
         creation_event_with_context: tuple[
-            EventBase, synapse.events.snapshot.EventContext
+            EventBase, synapse.events.snapshot.UnpersistedEventContextBase
         ]
         | None = None,
         auto_member: bool = False,
@@ -1405,8 +1409,8 @@ class RoomCreationHandler:
         creation_content: JsonDict,
         is_public: bool,
         room_version: RoomVersion,
-    ) -> tuple[EventBase, synapse.events.snapshot.EventContext]:
-        """Create and store the create event for a v12+ room, retrying on room ID collision.
+    ) -> tuple[EventBase, synapse.events.snapshot.UnpersistedEventContextBase]:
+        """Create the create event for a v12+ room and store the room, retrying on room ID collision.
 
         In v12+ rooms the room ID is derived from the create event, so this
         builds the create event, stores the room under the resulting ID, and
@@ -1419,7 +1423,8 @@ class RoomCreationHandler:
             room_version: The version of the room being created.
 
         Returns:
-            A tuple of the create event and its event context.
+            A tuple of the create event and its unpersisted event context, for
+            `_send_events_for_new_room` to persist with the rest of the room.
 
         Raises:
             StoreError: if a unique room ID could not be generated after several
@@ -1453,14 +1458,14 @@ class RoomCreationHandler:
 
             (
                 creation_event,
-                new_unpersisted_context,
+                creation_context,
             ) = await self.event_creation_handler.create_event(
                 creator,
                 event_dict,
                 prev_event_ids=[],
                 depth=1,
                 state_map={},
-                for_batch=False,
+                for_batch=True,
             )
             try:
                 await self.store.store_room(
@@ -1473,7 +1478,6 @@ class RoomCreationHandler:
                 attempts += 1
                 continue
 
-            creation_context = await new_unpersisted_context.persist(creation_event)
             return (creation_event, creation_context)
 
         raise StoreError(500, "Couldn't generate a unique room ID.")
@@ -1492,13 +1496,17 @@ class RoomCreationHandler:
         creator_join_profile: JsonDict | None = None,
         ignore_forced_encryption: bool = False,
         creation_event_with_context: tuple[
-            EventBase, synapse.events.snapshot.EventContext
+            EventBase, synapse.events.snapshot.UnpersistedEventContextBase
         ]
         | None = None,
     ) -> tuple[int, str, int]:
-        """Sends the initial events into a new room. Sends the room creation, membership,
-        and power level events into the room sequentially, then creates and batches up the
-        rest of the events to persist as a batch to the DB.
+        """Sends the initial events into a new room: the create event, the creator's
+        join, the power levels and the rest of the initial state. They are built
+        against an in-memory state map and persisted as one batch.
+
+        The create event and the join are each persisted before the next event
+        is built in v1 and v2 rooms, and when a module has a `check_event_allowed`
+        callback, as both need those events in the database.
 
         `power_level_content_override` doesn't apply when initial state has
         power level state event content.
@@ -1609,16 +1617,57 @@ class RoomCreationHandler:
 
         preset_name, preset_config = self._room_preset_config(room_config)
 
+        # The events built but not yet persisted, and the state group of the last
+        # event persisted (None until the first batch is persisted).
+        events_to_send: list[
+            tuple[EventBase, synapse.events.snapshot.UnpersistedEventContextBase]
+        ] = []
+        current_state_group: int | None = None
+        last_persisted_event: EventBase | None = None
+
+        async def persist_batch() -> None:
+            nonlocal current_state_group
+            nonlocal last_persisted_event
+
+            events_and_context = (
+                await UnpersistedEventContext.batch_persist_unpersisted_contexts(
+                    events_to_send,
+                    room_id,
+                    current_state_group,
+                    self.hs.get_datastores().state,
+                )
+            )
+            events_to_send.clear()
+
+            last_persisted_event = (
+                await self.event_creation_handler.handle_new_client_event(
+                    creator,
+                    events_and_context,
+                    ignore_shadow_ban=True,
+                    ratelimit=False,
+                    extra_users=[creator.user],
+                )
+            )
+            current_state_group = events_and_context[-1][1].state_group
+
+        # Whether to persist the create event and the join on their own, before
+        # building the next event. Events in v1 and v2 rooms refer to their prev
+        # and auth events by hash, which the builder reads from the database.
+        # `check_event_allowed` callbacks are given the room state from the
+        # database, and rebuilding an event they change reads its prev events
+        # from the database too.
+        persist_create_and_join_alone = (
+            room_version.event_format == EventFormatVersions.ROOM_V1_V2
+            or self._third_party_event_rules.has_check_event_allowed_callbacks()
+        )
+
         if creation_event_with_context is None:
             # MSC2175 removes the creator field from the create event.
             if not room_version.implicit_room_creator:
                 creation_content = dict(creation_content)
                 creation_content["creator"] = creator_id
-            creation_event, unpersisted_creation_context = await create_event(
-                EventTypes.Create, creation_content, False
-            )
-            creation_context = await unpersisted_creation_context.persist(
-                creation_event
+            creation_event, creation_context = await create_event(
+                EventTypes.Create, creation_content, True
             )
         else:
             (creation_event, creation_context) = creation_event_with_context
@@ -1629,48 +1678,23 @@ class RoomCreationHandler:
             state_map[(creation_event.type, creation_event.state_key)] = (
                 creation_event.event_id
             )
+            if room_version.msc4242_state_dags:
+                prev_state_events = [creation_event.event_id]
+        events_to_send.append((creation_event, creation_context))
+        if persist_create_and_join_alone:
+            await persist_batch()
 
         logger.debug("Sending %s in new room", EventTypes.Member)
-        ev = await self.event_creation_handler.handle_new_client_event(
-            requester=creator,
-            events_and_context=[(creation_event, creation_context)],
-            ratelimit=False,
-            ignore_shadow_ban=True,
+        join_content = await self.room_member_handler.build_creator_join_content(
+            creator, creator_join_profile
         )
-        last_sent_event_id = ev.event_id
-        if room_version.msc4242_state_dags:
-            prev_state_events = [ev.event_id]
-
-        member_event_id, _ = await self.room_member_handler.update_membership(
-            creator,
-            creator.user,
-            room_id,
-            "join",
-            ratelimit=False,
-            content=creator_join_profile,
-            new_room=True,
-            prev_event_ids=[last_sent_event_id],
-            depth=depth,
-            prev_state_events=prev_state_events,
+        join_event, join_context = await create_event(
+            EventTypes.Member, join_content, True, state_key=creator_id
         )
-        prev_event = [member_event_id]
-        if room_version.msc4242_state_dags:
-            prev_state_events = [member_event_id]
+        events_to_send.append((join_event, join_context))
+        if persist_create_and_join_alone:
+            await persist_batch()
 
-        # update the depth and state map here as the membership event has been created
-        # through a different code path
-        depth += 1
-        state_map[(EventTypes.Member, creator.user.to_string())] = member_event_id
-
-        # we need the state group of the membership event as it is the current state group
-        event_to_state = (
-            await self._storage_controllers.state.get_state_group_for_events(
-                [member_event_id]
-            )
-        )
-        current_state_group = event_to_state[member_event_id]
-
-        events_to_send = []
         # We treat the power levels override specially as this needs to be one
         # of the first events that get sent into a room.
         # If the `initial_state` has `EventTypes.PowerLevels` content, use it.
@@ -1829,21 +1853,16 @@ class RoomCreationHandler:
             )
             events_to_send.append((topic_event, topic_context))
 
-        datastore = self.hs.get_datastores().state
-        events_and_context = (
-            await UnpersistedEventContext.batch_persist_unpersisted_contexts(
-                events_to_send, room_id, current_state_group, datastore
-            )
-        )
+        if events_to_send:
+            await persist_batch()
 
-        last_event = await self.event_creation_handler.handle_new_client_event(
-            creator,
-            events_and_context,
-            ignore_shadow_ban=True,
-            ratelimit=False,
+        assert last_persisted_event is not None
+        assert last_persisted_event.internal_metadata.stream_ordering is not None
+        return (
+            last_persisted_event.internal_metadata.stream_ordering,
+            last_persisted_event.event_id,
+            depth,
         )
-        assert last_event.internal_metadata.stream_ordering is not None
-        return last_event.internal_metadata.stream_ordering, last_event.event_id, depth
 
     def _validate_room_config(
         self,

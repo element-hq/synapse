@@ -1,9 +1,15 @@
+from typing import Any
 from unittest.mock import patch
+
+from twisted.internet.testing import MemoryReactor
 
 import synapse
 from synapse.api.constants import EventTypes, RoomEncryptionAlgorithms
+from synapse.events import EventBase
 from synapse.rest.client import login, room
-from synapse.types import create_requester
+from synapse.server import HomeServer
+from synapse.types import JsonDict, StateMap, UserID, create_requester
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -256,3 +262,206 @@ class RoomIDCollisionTestCase(unittest.HomeserverTestCase):
         # v12 room IDs are content hashes with no domain component.
         self.assertNotIn(":", room_id1)
         self.assertNotIn(":", room_id2)
+
+
+class CreateRoomPersistBatchesTestCase(unittest.HomeserverTestCase):
+    """The initial events of a new room are persisted in as few batches as the
+    room version allows, with the same state as when sent one by one."""
+
+    servlets = [
+        login.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user_id = self.register_user("alice", "pass")
+        self.tok = self.login("alice", "pass")
+        self.get_success(
+            hs.get_profile_handler().set_displayname(
+                target_user=UserID.from_string(self.user_id),
+                requester=create_requester(self.user_id),
+                new_displayname="Alice",
+            )
+        )
+        self.store = hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
+
+        # Record the event types of each call to persist events.
+        self.batches: list[list[str]] = []
+        persistence = self.storage_controllers.persistence
+        assert persistence is not None
+        persist_events = persistence.persist_events
+
+        async def record_persist_events(
+            events_and_contexts: Any, *args: Any, **kwargs: Any
+        ) -> Any:
+            self.batches.append([event.type for event, _ in events_and_contexts])
+            return await persist_events(events_and_contexts, *args, **kwargs)
+
+        patcher = patch.object(persistence, "persist_events", record_persist_events)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _create_room(self, room_version: str) -> str:
+        self.batches.clear()
+        return self.helper.create_room_as(
+            self.user_id,
+            tok=self.tok,
+            room_version=room_version,
+            extra_content={"name": "A room"},
+        )
+
+    def _check_room(self, room_id: str) -> None:
+        state = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self.assertEqual(
+            set(state),
+            {
+                (EventTypes.Create, ""),
+                (EventTypes.Member, self.user_id),
+                (EventTypes.PowerLevels, ""),
+                (EventTypes.JoinRules, ""),
+                (EventTypes.RoomHistoryVisibility, ""),
+                (EventTypes.Name, ""),
+            },
+        )
+
+        join = state[(EventTypes.Member, self.user_id)]
+        self.assertEqual(join.content, {"membership": "join", "displayname": "Alice"})
+        create = state[(EventTypes.Create, "")]
+        self.assertEqual(join.prev_event_ids(), [create.event_id])
+
+        # The state after the create event is the create event alone, and its
+        # state group follows on from an empty one.
+        groups = self.get_success(
+            self.storage_controllers.state.get_state_group_for_events(
+                [create.event_id, join.event_id]
+            )
+        )
+        create_group = groups[create.event_id]
+        self.assertEqual(
+            self.get_success(
+                self.storage_controllers.state.get_state_ids_for_group(create_group)
+            ),
+            {(EventTypes.Create, ""): create.event_id},
+        )
+        prev_group = self.get_success(
+            self.hs.get_datastores().state.db_pool.simple_select_one_onecol(
+                table="state_group_edges",
+                keyvalues={"state_group": create_group},
+                retcol="prev_state_group",
+            )
+        )
+        self.assertEqual(
+            self.get_success(
+                self.storage_controllers.state.get_state_ids_for_group(prev_group)
+            ),
+            {},
+        )
+        self.assertEqual(
+            self.get_success(
+                self.storage_controllers.state.get_state_ids_for_group(
+                    groups[join.event_id]
+                )
+            ),
+            {
+                (EventTypes.Create, ""): create.event_id,
+                (EventTypes.Member, self.user_id): join.event_id,
+            },
+        )
+
+        # The creator is joined as far as the membership tables are concerned.
+        self.assertIn(
+            room_id, self.get_success(self.store.get_rooms_for_user(self.user_id))
+        )
+
+    def test_one_batch(self) -> None:
+        """A room is persisted in one batch."""
+        for room_version in ("10", "12"):
+            room_id = self._create_room(room_version)
+            self.assertEqual(
+                self.batches,
+                [
+                    [
+                        EventTypes.Create,
+                        EventTypes.Member,
+                        EventTypes.PowerLevels,
+                        EventTypes.JoinRules,
+                        EventTypes.RoomHistoryVisibility,
+                        EventTypes.Name,
+                    ]
+                ],
+            )
+            self._check_room(room_id)
+
+    def test_hashed_prev_events(self) -> None:
+        """In v1 rooms the create event and the join are persisted on their own,
+        as the builder reads their hashes from the database."""
+        room_id = self._create_room("1")
+        self.assertEqual(
+            self.batches,
+            [
+                [EventTypes.Create],
+                [EventTypes.Member],
+                [
+                    EventTypes.PowerLevels,
+                    EventTypes.JoinRules,
+                    EventTypes.RoomHistoryVisibility,
+                    EventTypes.Name,
+                ],
+            ],
+        )
+        self._check_room(room_id)
+
+    def test_check_event_allowed_callback(self) -> None:
+        """With a `check_event_allowed` callback, the create event and the join
+        are persisted on their own. A callback that rewrites them leaves no
+        extra state groups behind."""
+
+        async def add_field(
+            event: EventBase, state: StateMap[EventBase]
+        ) -> tuple[bool, JsonDict | None]:
+            if event.type not in (EventTypes.Create, EventTypes.Member):
+                return True, None
+            d = event.get_dict()
+            d["content"] = {**event.content, "rewritten": True}
+            return True, d
+
+        self.hs.get_module_api_callbacks().third_party_event_rules._check_event_allowed_callbacks = [
+            add_field
+        ]
+
+        for room_version in ("10", "12"):
+            room_id = self._create_room(room_version)
+            self.assertEqual(
+                self.batches,
+                [
+                    [EventTypes.Create],
+                    [EventTypes.Member],
+                    [
+                        EventTypes.PowerLevels,
+                        EventTypes.JoinRules,
+                        EventTypes.RoomHistoryVisibility,
+                        EventTypes.Name,
+                    ],
+                ],
+            )
+            state = self.get_success(
+                self.storage_controllers.state.get_current_state(room_id)
+            )
+            self.assertTrue(state[(EventTypes.Create, "")].content["rewritten"])
+            self.assertTrue(
+                state[(EventTypes.Member, self.user_id)].content["rewritten"]
+            )
+
+            # One empty group, then one per state event.
+            groups = self.get_success(
+                self.hs.get_datastores().state.db_pool.simple_select_onecol(
+                    table="state_groups",
+                    keyvalues={"room_id": room_id},
+                    retcol="id",
+                )
+            )
+            self.assertEqual(len(groups), len(state) + 1)

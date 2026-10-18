@@ -315,8 +315,9 @@ class StateHandler:
         # first of all, figure out the state before the event, unless we
         # already have it.
         #
-        if state_ids_before_event:
-            # if we're given the state before the event, then we use that
+        if state_ids_before_event is not None:
+            # if we're given the state before the event, then we use that. It
+            # is empty for the create event of a room created in one batch.
             state_group_before_event_prev_group = None
             deltas_to_state_group_before_event = None
 

@@ -252,6 +252,10 @@ class ThirdPartyEventRulesModuleApiCallbacks:
                 on_remove_user_third_party_identifier
             )
 
+    def has_check_event_allowed_callbacks(self) -> bool:
+        """Whether any module checks events with `check_event_allowed`."""
+        return len(self._check_event_allowed_callbacks) > 0
+
     async def check_event_allowed(
         self,
         event: EventBase,

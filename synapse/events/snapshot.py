@@ -367,7 +367,7 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
         cls,
         events_and_context: list[tuple[EventBase, "UnpersistedEventContextBase"]],
         room_id: str,
-        last_known_state_group: int,
+        last_known_state_group: int | None,
         datastore: "StateGroupDataStore",
     ) -> list[EventPersistencePair]:
         """
@@ -378,7 +378,9 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
         Args:
             events_and_context: A list of events and their unpersisted contexts
             room_id: the room_id for the events
-            last_known_state_group: the last persisted state group
+            last_known_state_group: the last persisted state group, or None if
+                the batch starts the room. In that case the first context's
+                `state_map_before_event` is stored as a full state group.
             datastore: a state datastore
         """
         amended_events_and_context = await datastore.store_state_deltas_for_batched(
@@ -413,7 +415,7 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
             Maps a (type, state_key) to the event ID of the state event matching
             this tuple.
         """
-        if self.state_map_before_event:
+        if self.state_map_before_event is not None:
             return self.state_map_before_event
 
         assert self.state_group_before_event is not None
@@ -437,7 +439,7 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
         # If we have a full set of state for before the event but don't have a state
         # group for that state, we need to get one
         if self.state_group_before_event is None:
-            assert self.state_map_before_event
+            assert self.state_map_before_event is not None
             state_group_before_event = await self._storage.state.store_state_group(
                 event.event_id,
                 event.room_id,

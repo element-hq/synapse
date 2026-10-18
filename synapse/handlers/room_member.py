@@ -695,65 +695,33 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         return result
 
-    async def update_membership_locked(
+    async def _prepare_membership_content(
         self,
         requester: Requester,
         target: UserID,
-        room_id: str,
         action: str,
-        txn_id: str | None = None,
-        remote_room_hosts: list[str] | None = None,
-        third_party_signed: dict | None = None,
-        ratelimit: bool = True,
-        content: dict | None = None,
-        new_room: bool = False,
-        require_consent: bool = True,
-        outlier: bool = False,
-        prev_event_ids: list[str] | None = None,
-        state_event_ids: list[str] | None = None,
-        depth: int | None = None,
-        origin_server_ts: int | None = None,
-        prev_state_events: list[str] | None = None,
-        delay_id: str | None = None,
-    ) -> tuple[str, int]:
-        """Helper for update_membership.
+        content: JsonDict | None,
+    ) -> tuple[str, JsonDict]:
+        """Check a membership change against the requester's and target's
+        account state and fill in the content of the membership event.
 
-        Assumes that the membership linearizer is already held for the room.
+        Applies the suspension checks, strips or checks per-room profile data
+        and adds the target's global profile where the membership type carries
+        one.
 
         Args:
-            requester:
-            target:
-            room_id:
-            action:
-            txn_id:
-            remote_room_hosts:
-            third_party_signed:
-            ratelimit:
-            content:
-            new_room: Whether the membership update is happening in the context of a room
-                creation.
-            require_consent:
-            outlier: Indicates whether the event is an `outlier`, i.e. if
-                it's from an arbitrary point and floating in the DAG as
-                opposed to being inline with the current DAG.
-            prev_event_ids: The event IDs to use as the prev events
-            state_event_ids:
-                The full state at a given event. This was previously used particularly
-                by the MSC2716 /batch_send endpoint. This should normally be left as
-                None, which will cause the auth_event_ids to be calculated based on the
-                room state at the prev_events.
-            depth: Override the depth used to order the event in the DAG.
-                Should normally be set to None, which will cause the depth to be calculated
-                based on the prev_events.
-            origin_server_ts: The origin_server_ts to use if a new event is created. Uses
-                the current timestamp if set to None.
-            delay_id: The delay ID of this event, if it was a delayed event.
+            requester: The user changing the membership.
+            target: The user whose membership changes.
+            action: The membership action, which may be `kick` or `unban`.
+            content: The requested event content, which is not modified.
 
         Returns:
-            A tuple of the new event ID and stream ID.
-        """
+            The membership the event will have, and the event content (without
+            the `membership` key).
 
-        content_specified = bool(content)
+        Raises:
+            SynapseError if the change is not allowed or the content is invalid.
+        """
         if content is None:
             content = {}
         else:
@@ -865,6 +833,97 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         content["avatar_url"] = avatar_url
             except Exception as e:
                 logger.info("Failed to get profile information for %r: %s", target, e)
+
+        return effective_membership_state, content
+
+    async def build_creator_join_content(
+        self, requester: Requester, content: JsonDict | None
+    ) -> JsonDict:
+        """Build the content of a room creator's join event in a new room.
+
+        Matches what `update_membership` puts in the event for a join with
+        `new_room=True`, without creating or sending the event.
+
+        Args:
+            requester: The user creating the room.
+            content: The requested content of the join, e.g. a per-room profile.
+
+        Returns:
+            The content of the join event.
+
+        Raises:
+            SynapseError if the user may not join rooms or the content is invalid.
+        """
+        _, content = await self._prepare_membership_content(
+            requester, requester.user, Membership.JOIN, content
+        )
+        content["membership"] = Membership.JOIN
+        if requester.is_guest:
+            content["kind"] = "guest"
+        return content
+
+    async def update_membership_locked(
+        self,
+        requester: Requester,
+        target: UserID,
+        room_id: str,
+        action: str,
+        txn_id: str | None = None,
+        remote_room_hosts: list[str] | None = None,
+        third_party_signed: dict | None = None,
+        ratelimit: bool = True,
+        content: dict | None = None,
+        new_room: bool = False,
+        require_consent: bool = True,
+        outlier: bool = False,
+        prev_event_ids: list[str] | None = None,
+        state_event_ids: list[str] | None = None,
+        depth: int | None = None,
+        origin_server_ts: int | None = None,
+        prev_state_events: list[str] | None = None,
+        delay_id: str | None = None,
+    ) -> tuple[str, int]:
+        """Helper for update_membership.
+
+        Assumes that the membership linearizer is already held for the room.
+
+        Args:
+            requester:
+            target:
+            room_id:
+            action:
+            txn_id:
+            remote_room_hosts:
+            third_party_signed:
+            ratelimit:
+            content:
+            new_room: Whether the membership update is happening in the context of a room
+                creation.
+            require_consent:
+            outlier: Indicates whether the event is an `outlier`, i.e. if
+                it's from an arbitrary point and floating in the DAG as
+                opposed to being inline with the current DAG.
+            prev_event_ids: The event IDs to use as the prev events
+            state_event_ids:
+                The full state at a given event. This was previously used particularly
+                by the MSC2716 /batch_send endpoint. This should normally be left as
+                None, which will cause the auth_event_ids to be calculated based on the
+                room state at the prev_events.
+            depth: Override the depth used to order the event in the DAG.
+                Should normally be set to None, which will cause the depth to be calculated
+                based on the prev_events.
+            origin_server_ts: The origin_server_ts to use if a new event is created. Uses
+                the current timestamp if set to None.
+            delay_id: The delay ID of this event, if it was a delayed event.
+
+        Returns:
+            A tuple of the new event ID and stream ID.
+        """
+
+        content_specified = bool(content)
+        effective_membership_state, content = await self._prepare_membership_content(
+            requester, target, action, content
+        )
 
         # if this is a join with a 3pid signature, we may need to turn a 3pid
         # invite into a normal invite before we can handle the join.
