@@ -104,9 +104,9 @@ _POOL_COUNTERS = (
         "database",
     ),
     (
-        "synapse_rust_db_pool_statement_cache_clears_total",
-        "Times a native Rust pool connection's prepared-statement cache was emptied "
-        "for being full",
+        "synapse_rust_db_pool_statement_cache_evictions_total",
+        "Statements a native Rust pool connection dropped from its full "
+        "prepared-statement cache, least recently used first",
     ),
     (
         "synapse_rust_db_pool_connections_opened_total",
@@ -283,7 +283,7 @@ class RustConnectionPool:
     def stats(self) -> tuple[int, int, int, int, int]:
         """What this pool's connections have done, counted over every native
         pool it has opened: ``(statement_cache_hits, statement_prepares,
-        statement_cache_clears, connections_opened, connections_retired)``."""
+        statement_cache_evictions, connections_opened, connections_retired)``."""
         with self._stats_lock:
             return self._stats_unlocked()
 

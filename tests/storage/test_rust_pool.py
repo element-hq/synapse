@@ -326,8 +326,8 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         for _ in range(3):
             await pool.runWithConnection(query)
 
-        hits, prepares, clears, opened, retired = pool.stats()
-        self.assertEqual((hits, prepares, clears), (1, 2, 0))
+        hits, prepares, evictions, opened, retired = pool.stats()
+        self.assertEqual((hits, prepares, evictions), (1, 2, 0))
         self.assertEqual((opened, retired), (2, 1))
 
         prepares_metric = REGISTRY.get_sample_value(
@@ -339,6 +339,67 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         # Closing the native pool keeps what it counted.
         pool.close()
         self.assertEqual(pool.stats(), (1, 2, 0, 2, 1))
+
+    async def test_statement_cache_evicts_least_recently_used(self) -> None:
+        """A full statement cache drops the least recently used statement, so
+        statements in use stay prepared."""
+        pool = RustConnectionPool(
+            reactor,
+            _test_runtime(),
+            _build_dsn(),
+            name="test-rust-db-lru",
+            server_name="test",
+            threads=1,
+        )
+        pool.start()
+        self.addCleanup(pool.close)
+
+        def run(conn: Any, queries: list[str]) -> None:
+            cursor = conn.cursor()
+            for query in queries:
+                cursor.execute(query)
+                cursor.fetchall()
+
+        hot = "SELECT 'hot'"
+        # Fill the 512-statement cache, using the hot statement throughout.
+        fill = [f"SELECT {i}" for i in range(511)]
+        await pool.runWithConnection(run, [hot] + fill + [hot])
+        _, prepares, evictions, _, _ = pool.stats()
+        self.assertEqual((prepares, evictions), (512, 0))
+
+        # One more statement evicts the least recently used: `SELECT 0`, not
+        # the hot statement.
+        await pool.runWithConnection(run, ["SELECT 'new'", hot])
+        _, prepares, evictions, _, _ = pool.stats()
+        self.assertEqual((prepares, evictions), (513, 1))
+        await pool.runWithConnection(run, ["SELECT 0"])
+        _, prepares, evictions, _, _ = pool.stats()
+        self.assertEqual((prepares, evictions), (514, 2))
+
+    async def test_reuses_the_last_returned_connection(self) -> None:
+        """Calls one after another get the same connection, so its statement
+        cache stays warm, rather than rotating through the pool."""
+        pool = RustConnectionPool(
+            reactor,
+            _test_runtime(),
+            _build_dsn(),
+            name="test-rust-db-lifo",
+            server_name="test",
+            threads=4,
+        )
+        pool.start()
+        self.addCleanup(pool.close)
+
+        def backend_pid(conn: Any) -> int:
+            cursor = conn.cursor()
+            cursor.execute("SELECT pg_backend_pid()")
+            (pid,) = cursor.fetchone()
+            return pid
+
+        # Open several connections at once, then use them one at a time.
+        await gatherResults([pool.runWithConnection(backend_pid) for _ in range(4)])
+        pids = {await pool.runWithConnection(backend_pid) for _ in range(5)}
+        self.assertEqual(len(pids), 1)
 
     def test_status_reports_pool_occupancy(self) -> None:
         # Nothing checked out yet: at most the configured number of

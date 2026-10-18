@@ -68,11 +68,12 @@ class ConnectionPool:
     def close(self) -> None: ...
     def stats(self) -> tuple[int, int, int, int, int]:
         """What the pool's connections have done since it was built:
-        ``(statement_cache_hits, statement_prepares, statement_cache_clears,
+        ``(statement_cache_hits, statement_prepares, statement_cache_evictions,
         connections_opened, connections_retired)``.
 
         A prepare is a round trip to the database: a statement missing from the
-        connection's cache. A clear empties a full cache. A retired connection
+        connection's cache. An eviction drops the least recently used statement
+        from a full cache. A retired connection
         reached its use limit (``max_uses``).
         """
 

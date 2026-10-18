@@ -15,16 +15,18 @@
 //! both share a single set of connections rather than running two pools that
 //! could exhaust the server's connection limit between them.
 
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use deadpool::managed::{
-    Manager, Metrics, Object, Pool, PoolError, RecycleError, RecycleResult, TimeoutType, Timeouts,
+    Manager, Metrics, Object, Pool, PoolError, QueueMode, RecycleError, RecycleResult, TimeoutType,
+    Timeouts,
 };
 use deadpool::Runtime;
 use log::warn;
+use lru::LruCache;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -103,9 +105,8 @@ pub struct PoolStats {
     /// Statements prepared, each costing a round trip: cache misses and
     /// refreshes.
     statement_prepares: AtomicU64,
-    /// Times a connection's cache was emptied for reaching
-    /// [`STATEMENT_CACHE_CAP`].
-    statement_cache_clears: AtomicU64,
+    /// Statements dropped from a full cache, least recently used first.
+    statement_cache_evictions: AtomicU64,
     /// Connections opened.
     connections_opened: AtomicU64,
     /// Connections closed for reaching their use limit (`txn_limit`).
@@ -117,13 +118,13 @@ impl PoolStats {
         counter.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// `(statement_cache_hits, statement_prepares, statement_cache_clears,
-    /// connections_opened, connections_retired)`.
+    /// `(statement_cache_hits, statement_prepares,
+    /// statement_cache_evictions, connections_opened, connections_retired)`.
     pub fn snapshot(&self) -> (u64, u64, u64, u64, u64) {
         (
             self.statement_cache_hits.load(Ordering::Relaxed),
             self.statement_prepares.load(Ordering::Relaxed),
-            self.statement_cache_clears.load(Ordering::Relaxed),
+            self.statement_cache_evictions.load(Ordering::Relaxed),
             self.connections_opened.load(Ordering::Relaxed),
             self.connections_retired.load(Ordering::Relaxed),
         )
@@ -199,19 +200,20 @@ where
 /// existing call sites are unaffected.
 pub struct PooledClient {
     client: Client,
-    /// Prepared statements keyed by their SQL. Guarded by a plain [`Mutex`]:
-    /// the critical sections are lookups/inserts (never awaits).
-    statements: Mutex<HashMap<String, Statement>>,
+    /// Prepared statements keyed by their SQL, least recently used dropped
+    /// first. Guarded by a plain [`Mutex`]: the critical sections are
+    /// lookups/inserts (never awaits).
+    statements: Mutex<LruCache<String, Statement>>,
     /// The pool's counters.
     stats: Arc<PoolStats>,
 }
 
-/// The cache is cleared once it holds this many statements. Synapse's hot set
-/// of distinct SQL strings is far smaller; the bound exists so one-off SQL
-/// (e.g. `execute_values`'s literal-spliced statements) can't grow the map
-/// without limit on a long-lived connection. A clear-all is crude but simple,
-/// and the hot set re-warms in one round of queries.
-const STATEMENT_CACHE_CAP: usize = 512;
+/// The most statements a connection keeps prepared. Synapse's hot set of
+/// distinct SQL strings is far smaller; the bound exists so one-off SQL (e.g.
+/// `execute_values`'s literal-spliced statements) can't grow the cache without
+/// limit on a long-lived connection. Those are evicted first, as the least
+/// recently used, so the hot set stays prepared.
+const STATEMENT_CACHE_CAP: NonZeroUsize = NonZeroUsize::new(512).expect("not zero");
 
 impl PooledClient {
     /// Fetch the prepared [`Statement`] for `sql`, preparing and caching it on
@@ -224,21 +226,23 @@ impl PooledClient {
         refresh: bool,
     ) -> Result<Statement, tokio_postgres::Error> {
         if refresh {
-            self.statements.lock().expect("not poisoned").remove(sql);
-        } else if let Some(statement) = self.statements.lock().expect("not poisoned").get(sql) {
-            PoolStats::bump(&self.stats.statement_cache_hits);
-            return Ok(statement.clone());
+            self.statements.lock().expect("not poisoned").pop(sql);
+        } else if let Some(statement) = self.cached(sql) {
+            return Ok(statement);
         }
 
         PoolStats::bump(&self.stats.statement_prepares);
         let statement = self.client.prepare(sql).await?;
 
-        let mut statements = self.statements.lock().expect("not poisoned");
-        if statements.len() >= STATEMENT_CACHE_CAP {
-            PoolStats::bump(&self.stats.statement_cache_clears);
-            statements.clear();
+        // Dropping an evicted statement closes it on the server.
+        let evicted = self
+            .statements
+            .lock()
+            .expect("not poisoned")
+            .push(sql.to_owned(), statement.clone());
+        if evicted.is_some_and(|(evicted_sql, _)| evicted_sql != sql) {
+            PoolStats::bump(&self.stats.statement_cache_evictions);
         }
-        statements.insert(sql.to_owned(), statement.clone());
         Ok(statement)
     }
 
@@ -261,7 +265,7 @@ impl PooledClient {
     /// stale plan from inside an aborted transaction, where re-preparing is
     /// impossible until the transaction ends.
     pub fn invalidate(&self, sql: &str) {
-        self.statements.lock().expect("not poisoned").remove(sql);
+        self.statements.lock().expect("not poisoned").pop(sql);
     }
 }
 
@@ -305,7 +309,7 @@ impl Manager for ConnectionManager {
         PoolStats::bump(&self.stats.connections_opened);
         Ok(PooledClient {
             client,
-            statements: Mutex::new(HashMap::new()),
+            statements: Mutex::new(LruCache::new(STATEMENT_CACHE_CAP)),
             stats: Arc::clone(&self.stats),
         })
     }
@@ -389,7 +393,13 @@ pub fn create_pool(
 ) -> Result<ConnectionPool, anyhow::Error> {
     let mut manager = ConnectionManager::from_dsn(dsn, handle, config.session, &config.tls)?;
     manager.max_uses = config.max_uses;
-    let mut builder = Pool::builder(manager).max_size(config.max_size);
+    // Hand out the most recently returned connection first. Each connection
+    // has its own statement cache, so reusing the busy few keeps their caches
+    // warm, where rotating through all of them would prepare each statement
+    // on every connection.
+    let mut builder = Pool::builder(manager)
+        .max_size(config.max_size)
+        .queue_mode(QueueMode::Lifo);
     if let Some(timeout) = config.checkout_timeout {
         // deadpool enforces timeouts by sleeping on a runtime (we drive `get()`
         // on our own tokio runtime, so `Runtime::Tokio1` is correct). `recycle`
@@ -499,7 +509,7 @@ impl PyConnectionPool {
 
     /// What the pool's connections have done since it was built, for
     /// metrics: `(statement_cache_hits, statement_prepares,
-    /// statement_cache_clears, connections_opened, connections_retired)`.
+    /// statement_cache_evictions, connections_opened, connections_retired)`.
     fn stats(&self) -> (u64, u64, u64, u64, u64) {
         self.pool.manager().stats.snapshot()
     }
