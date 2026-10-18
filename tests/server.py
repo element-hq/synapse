@@ -1780,16 +1780,19 @@ def _apply_background_updates_to_template_db() -> None:
 
         # Neither database may have connections while it is used as a template or
         # dropped, so close the pool first and connect to the maintenance database.
+        # Admin work over psycopg2 regardless of the driver under test, as
+        # `setup_test_homeserver` does.
         db_pool._db_pool.close()
-        db_engine = db_pool.engine
-        db_conn = db_engine.module.connect(
+        import psycopg2
+
+        db_conn = psycopg2.connect(
             dbname=POSTGRES_DBNAME_FOR_INITIAL_CREATE,
             user=POSTGRES_USER,
             host=POSTGRES_HOST,
             port=POSTGRES_PORT,
             password=POSTGRES_PASSWORD,
         )
-        db_engine.attempt_to_set_autocommit(db_conn, True)
+        db_conn.autocommit = True
         cur = db_conn.cursor()
         cur.execute("DROP DATABASE %s;" % (POSTGRES_BASE_DB,))
         cur.execute(

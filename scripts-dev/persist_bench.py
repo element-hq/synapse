@@ -120,9 +120,10 @@ def _metrics() -> dict[str, float]:
 class Server:
     """A Synapse process on its own database."""
 
-    def __init__(self, level: str, workdir: str) -> None:
+    def __init__(self, level: str, workdir: str, rust_driver: bool = True) -> None:
         self.level = level
         self.workdir = workdir
+        self.rust_driver = rust_driver
         self.database = f"persist_bench_{level}_{secrets.token_hex(3)}"
         self.process: subprocess.Popen | None = None
 
@@ -153,7 +154,7 @@ class Server:
             ],
             "database": {
                 "name": "psycopg2",
-                "use_rust_driver": True,
+                "use_rust_driver": self.rust_driver,
                 "args": {
                     "database": self.database,
                     "host": os.environ.get("PGHOST", "localhost"),
@@ -171,6 +172,7 @@ class Server:
             },
             "rc_joins_per_room": {"per_second": 100000, "burst_count": 100000},
             "rc_registration": {"per_second": 100000, "burst_count": 100000},
+            "rc_room_creation": {"per_second": 100000, "burst_count": 100000},
             "rc_login": {
                 "address": {"per_second": 100000, "burst_count": 100000},
                 "account": {"per_second": 100000, "burst_count": 100000},
