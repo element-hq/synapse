@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import bisect
 import hashlib
 import ipaddress
 import json
@@ -57,12 +58,14 @@ from twisted.enterprise import adbapi
 from twisted.internet import address, defer, tcp, threads, udp
 from twisted.internet._resolver import SimpleResolverComplexifier
 from twisted.internet.address import IPv4Address, IPv6Address
+from twisted.internet.base import DelayedCall
 from twisted.internet.defer import Deferred, fail, maybeDeferred, succeed
 from twisted.internet.error import DNSLookupError
 from twisted.internet.interfaces import (
     IAddress,
     IConnector,
     IConsumer,
+    IDelayedCall,
     IHostnameResolver,
     IListeningPort,
     IProducer,
@@ -620,6 +623,9 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
     """
 
     def __init__(self) -> None:
+        # See `callLater` below.
+        self._calls_sorted = True
+
         self.threadpool = ThreadPool(self)
 
         self._tcp_callbacks: dict[tuple[str, int], Callable] = {}
@@ -698,6 +704,39 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         p.startListening()
         self._udp.append(p)
         return p
+
+    # `twisted.internet.task.Clock` keeps its pending calls in a list which it
+    # re-sorts in full on every `callLater` and after every call it runs. A
+    # homeserver has dozens of pending calls (looping calls, timeouts, ...) and the
+    # threadless database pool schedules a `callLater(0, ...)` per transaction, so
+    # that sorting adds up to a noticeable share of a test's time. Instead we
+    # insert new calls in order and only re-sort after a call's time was changed
+    # with `reset` or `delay`.
+    @override
+    def callLater(
+        self, delay: float, callable: Callable[..., object], *args: object, **kw: object
+    ) -> IDelayedCall:
+        dc = DelayedCall(
+            self.seconds() + delay,
+            callable,
+            args,
+            kw,
+            self.calls.remove,
+            self._on_call_rescheduled,
+            self.seconds,
+        )
+        self._sortCalls()
+        bisect.insort(self.calls, dc, key=DelayedCall.getTime)
+        return dc
+
+    def _on_call_rescheduled(self, call: DelayedCall) -> None:
+        self._calls_sorted = False
+
+    @override
+    def _sortCalls(self) -> None:
+        if not self._calls_sorted:
+            self.calls.sort(key=DelayedCall.getTime)
+            self._calls_sorted = True
 
     def callFromThread(
         self, callable: Callable[..., Any], *args: object, **kwargs: object
