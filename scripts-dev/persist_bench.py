@@ -166,6 +166,7 @@ class Server:
                 "args": {
                     "database": self.database,
                     "host": os.environ.get("PGHOST", "localhost"),
+                    "port": int(os.environ.get("PGPORT", "5432")),
                     "user": os.environ.get("PGUSER", "postgres"),
                     "password": os.environ.get("PGPASSWORD", ""),
                     "cp_min": 5,
