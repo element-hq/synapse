@@ -1,0 +1,1 @@
+Record the database transactions of the Rust event persister in the transaction metrics, and add a benchmark of event persistence at each `experimental_features.rust_event_persistence` level.
