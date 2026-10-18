@@ -794,10 +794,14 @@ class RoomsCreateTestCase(RoomBase):
 
     def _expected_create_room_txn_count(self) -> int:
         """The Python transactions a plain room creation runs. The state groups
-        are written in Rust on the native driver, outside them."""
+        are written in Rust on the native driver, outside them, and building the
+        events in Rust skips looking up the room version."""
+        count = 10
         if self.hs.get_datastores().state._rust_state_group_writer is not None:
-            return 9
-        return 10
+            count -= 1
+        if self.hs.config.experimental.rust_room_creation == "on":
+            count -= 1
+        return count
 
     def test_post_room_no_keys(self) -> None:
         # POST with no config keys, expect new room id

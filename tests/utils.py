@@ -78,6 +78,13 @@ RUST_SLIDING_SYNC_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_SLIDING_SYNC")
 RUST_SLIDING_SYNC_STRICT_FOR_TESTS = (
     os.environ.get("SYNAPSE_TEST_RUST_SLIDING_SYNC_STRICT", "1") != "0"
 )
+# As above, for `experimental_features.rust_room_creation` ("off" or "on").
+RUST_ROOM_CREATION_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_ROOM_CREATION")
+# A Rust error fails the test rather than falling back to building the room's
+# events in Python. Set to 0 to fall back and count, as production does.
+RUST_ROOM_CREATION_STRICT_FOR_TESTS = (
+    os.environ.get("SYNAPSE_TEST_RUST_ROOM_CREATION_STRICT", "1") != "0"
+)
 # At `rust_federation_sending: transactions`, check every transaction body Rust
 # builds against the one Python would build, and fail the test if they differ.
 RUST_FED_STRICT_FOR_TESTS = os.environ.get("SYNAPSE_TEST_RUST_FED_STRICT", "1") != "0"

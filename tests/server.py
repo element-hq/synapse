@@ -97,6 +97,7 @@ from synapse.config.homeserver import HomeServerConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
+from synapse.handlers.room import RoomCreationHandler
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import ContextResourceUsage, LoggingContext
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
@@ -138,6 +139,8 @@ from tests.utils import (
     POSTGRES_USER,
     RUST_PERSIST_FOR_TESTS,
     RUST_PERSIST_STRICT_FOR_TESTS,
+    RUST_ROOM_CREATION_FOR_TESTS,
+    RUST_ROOM_CREATION_STRICT_FOR_TESTS,
     RUST_SLIDING_SYNC_FOR_TESTS,
     RUST_SLIDING_SYNC_STRICT_FOR_TESTS,
     RUST_STATE_RES_FOR_TESTS,
@@ -1415,6 +1418,13 @@ def setup_test_homeserver(
             Literal["off", "on"], RUST_SLIDING_SYNC_FOR_TESTS
         )
 
+    if RUST_ROOM_CREATION_FOR_TESTS:
+        if RUST_ROOM_CREATION_FOR_TESTS not in ("off", "on"):
+            raise ValueError("SYNAPSE_TEST_RUST_ROOM_CREATION must be off or on")
+        config.experimental.rust_room_creation = cast(
+            Literal["off", "on"], RUST_ROOM_CREATION_FOR_TESTS
+        )
+
     if USE_POSTGRES_FOR_TESTS:
         test_db = "synapse_test_%s" % uuid.uuid4().hex
 
@@ -1642,6 +1652,11 @@ def setup_test_homeserver(
                 Any, _BlockingRustCalls(sync_handler._rust_sync)
             )
         sync_handler._rust_sync_strict = RUST_SYNC_STRICT_FOR_TESTS
+
+    if RUST_ROOM_CREATION_FOR_TESTS:
+        RoomCreationHandler._rust_room_creation_strict = (
+            RUST_ROOM_CREATION_STRICT_FOR_TESTS
+        )
 
     if RUST_SLIDING_SYNC_FOR_TESTS:
         # Likewise for the Rust sliding sync handler.

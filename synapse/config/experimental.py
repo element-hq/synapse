@@ -399,6 +399,24 @@ class ExperimentalConfig(Config):
             )
         self.rust_sliding_sync: Literal["off", "on"] = rust_sliding_sync
 
+        # Whether a new room's events after its create event are built, hashed
+        # and signed in one Rust call, rather than one Python `create_event`
+        # each. Python still runs every check and persists them. Rooms Rust
+        # cannot build (v1 and v2, MSC4242 state DAGs, appservice senders,
+        # `check_event_allowed` modules, `m.room.aliases` in the initial
+        # state) are built in Python.
+        rust_room_creation = experimental.get("rust_room_creation", "off")
+        if rust_room_creation is True:
+            rust_room_creation = "on"
+        elif rust_room_creation is False:
+            rust_room_creation = "off"
+        if rust_room_creation not in ("off", "on"):
+            raise ConfigError(
+                "experimental_features.rust_room_creation must be 'off' or 'on'",
+                ("experimental", "rust_room_creation"),
+            )
+        self.rust_room_creation: Literal["off", "on"] = rust_room_creation
+
         # How much of outbound federation runs in Rust. One ordered level, each
         # implying the ones before it:
         #  - "off": all Python.

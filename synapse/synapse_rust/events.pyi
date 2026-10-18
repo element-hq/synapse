@@ -558,3 +558,28 @@ class LocalEventSigner:
         Raises:
             ValueError: if the JSON is not a valid event for the room version.
         """
+    def build_room_events(
+        self,
+        room_version: RoomVersion,
+        room_id: str,
+        sender: str,
+        prev_event_id: str,
+        depth: int,
+        state_map: dict[tuple[str, str], str],
+        specs: list[tuple[str, str, bytes]],
+        origin_server_ts: int,
+        internal_metadata_dict: JsonDict,
+    ) -> list[Event]:
+        """Build the state events that follow the create event of a new room,
+        as the room handler's batch builds them one by one: each event's prev
+        event is the one before it, its depth one more, and its auth events are
+        picked from the state before it, which starts as `state_map`.
+
+        `specs` are `(type, state_key, content)`, with the content as its
+        canonical JSON. Every event gets `origin_server_ts` and its own copy of
+        `internal_metadata_dict`.
+
+        Raises:
+            ValueError: for anything it cannot build, including v1 and v2 rooms
+                and MSC4242 state DAG rooms. Build the events in Python then.
+        """

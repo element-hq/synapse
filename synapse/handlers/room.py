@@ -39,6 +39,8 @@ from typing import (
 )
 
 import attr
+from canonicaljson import encode_canonical_json
+from prometheus_client import Counter
 
 import synapse.events.snapshot
 from synapse.api.constants import (
@@ -79,8 +81,10 @@ from synapse.events.utils import (
     copy_and_fixup_power_levels_contents,
 )
 from synapse.handlers.relations import BundledAggregations
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.rest.admin._base import assert_user_is_admin
 from synapse.streams import EventSource
+from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import (
     JsonDict,
     JsonMapping,
@@ -116,6 +120,23 @@ id_server_scheme = "https://"
 
 FIVE_MINUTES_IN_MS = 5 * 60 * 1000
 
+# Event types whose creation runs checks the Rust room builder leaves to
+# `create_event`: `m.call.invite` against the database, and `m.room.create`,
+# which cannot be sent again. (`m.room.aliases` in the initial state
+# already has the create event and the join persisted on their own, which the
+# Rust builder does not cover.)
+_NOT_BUILT_IN_RUST = frozenset({EventTypes.CallInvite, EventTypes.Create})
+
+# New rooms in `rust_room_creation: on` mode. `result` is "rust" for a room
+# whose events after the create event Rust built, "fallback" for one Rust does
+# not cover, or "error" for one Python built after Rust failed on it.
+rust_room_creation_counter = Counter(
+    "synapse_rust_room_creation_total",
+    "Rooms created in `rust_room_creation: on` mode, by whether Rust built "
+    "their initial events",
+    labelnames=["result", SERVER_NAME_LABEL],
+)
+
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventContext:
@@ -129,6 +150,10 @@ class EventContext:
 
 
 class RoomCreationHandler:
+    # Tests set this, so that a Rust failure fails the test rather than falling
+    # back to Python.
+    _rust_room_creation_strict = False
+
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
@@ -142,6 +167,8 @@ class RoomCreationHandler:
         self.room_member_handler = hs.get_room_member_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
         self.config = hs.config
+        self._rust_room_creation = hs.config.experimental.rust_room_creation == "on"
+        self._event_signer = hs.get_event_builder_factory().signer
         self.common_request_ratelimiter = hs.get_request_ratelimiter()
         self.creation_ratelimiter = Ratelimiter(
             store=self.store,
@@ -1702,6 +1729,90 @@ class RoomCreationHandler:
         )
         assert not (persist_create_and_join_alone and batched_invites)
 
+        # In `rust_room_creation: on` mode, the events after the create event
+        # are collected here as `(type, state_key, content)`, then built in one
+        # Rust call by `build_collected_events`. None when each is built in
+        # Python as it comes.
+        collected: list[tuple[str, str, JsonMapping]] | None = None
+        if self._rust_room_creation:
+            if self._rust_room_creation_unsupported(
+                creator, room_version, persist_create_and_join_alone
+            ):
+                rust_room_creation_counter.labels(
+                    result="fallback", **{SERVER_NAME_LABEL: self.hs.hostname}
+                ).inc()
+            else:
+                collected = []
+
+        async def add_event(
+            etype: str, content: JsonMapping, state_key: str = ""
+        ) -> None:
+            """Build the next event of the batch, or collect it for Rust."""
+            if collected is not None:
+                collected.append((etype, state_key, content))
+                return
+            event, context = await create_event(
+                etype, content, True, state_key=state_key
+            )
+            events_to_send.append((event, context))
+
+        async def build_collected_events() -> None:
+            """Build the collected events and add them to the batch, in Rust, or
+            in Python if Rust cannot build them."""
+            nonlocal collected, depth, prev_event
+
+            specs, collected = collected, None
+            if not specs:
+                return
+
+            if any(etype in _NOT_BUILT_IN_RUST for etype, _, _ in specs):
+                rust_room_creation_counter.labels(
+                    result="fallback", **{SERVER_NAME_LABEL: self.hs.hostname}
+                ).inc()
+                for etype, state_key, content in specs:
+                    await add_event(etype, content, state_key=state_key)
+                return
+
+            try:
+                events = self._build_room_events_in_rust(
+                    creator, room_version, room_id, prev_event, depth, state_map, specs
+                )
+            except Exception as rust_error:
+                # Build them in Python. If Python rejects them too, the request
+                # was bad, and Python's error is the one to give. Otherwise Rust
+                # got it wrong.
+                for etype, state_key, content in specs:
+                    await add_event(etype, content, state_key=state_key)
+                logger.error(
+                    "Failed to build the events of room %s in Rust",
+                    room_id,
+                    exc_info=rust_error,
+                )
+                rust_room_creation_counter.labels(
+                    result="error", **{SERVER_NAME_LABEL: self.hs.hostname}
+                ).inc()
+                if self._rust_room_creation_strict:
+                    raise
+                return
+
+            rust_room_creation_counter.labels(
+                result="rust", **{SERVER_NAME_LABEL: self.hs.hostname}
+            ).inc()
+
+            # The checks `create_event` runs on each event it builds. Those on
+            # the requester ran when it built the create event.
+            for event in events:
+                await self._check_event_built_in_rust(event)
+                context = await self.hs.get_state_handler().calculate_context_info(
+                    event,
+                    state_ids_before_event=dict(state_map),
+                    partial_state=False,
+                )
+                events_to_send.append((event, context))
+                depth += 1
+                prev_event = [event.event_id]
+                state_map[(event.type, event.state_key)] = event.event_id
+
         if creation_event_with_context is None:
             # MSC2175 removes the creator field from the create event.
             if not room_version.implicit_room_creator:
@@ -1729,10 +1840,7 @@ class RoomCreationHandler:
         join_content = await self.room_member_handler.build_creator_join_content(
             creator, creator_join_profile
         )
-        join_event, join_context = await create_event(
-            EventTypes.Member, join_content, True, state_key=creator_id
-        )
-        events_to_send.append((join_event, join_context))
+        await add_event(EventTypes.Member, join_content, state_key=creator_id)
         if persist_create_and_join_alone:
             await persist_batch()
 
@@ -1741,10 +1849,7 @@ class RoomCreationHandler:
         # If the `initial_state` has `EventTypes.PowerLevels` content, use it.
         pl_content = initial_state.pop((EventTypes.PowerLevels, ""), None)
         if pl_content is not None:
-            power_event, power_context = await create_event(
-                EventTypes.PowerLevels, pl_content, True
-            )
-            events_to_send.append((power_event, power_context))
+            await add_event(EventTypes.PowerLevels, pl_content)
         else:
             # If the `initial_state` does not have `EventTypes.PowerLevels` content,
             # use the default power level content.
@@ -1803,49 +1908,33 @@ class RoomCreationHandler:
             # apply those. Supplied room override wins over server config.
             if power_level_content_override:
                 power_level_content.update(power_level_content_override)
-            pl_event, pl_context = await create_event(
-                EventTypes.PowerLevels,
-                power_level_content,
-                True,
-            )
-            events_to_send.append((pl_event, pl_context))
+            await add_event(EventTypes.PowerLevels, power_level_content)
 
         if room_alias and (EventTypes.CanonicalAlias, "") not in initial_state:
-            room_alias_event, room_alias_context = await create_event(
-                EventTypes.CanonicalAlias, {"alias": room_alias.to_string()}, True
+            await add_event(
+                EventTypes.CanonicalAlias, {"alias": room_alias.to_string()}
             )
-            events_to_send.append((room_alias_event, room_alias_context))
 
         if (EventTypes.JoinRules, "") not in initial_state:
-            join_rules_event, join_rules_context = await create_event(
-                EventTypes.JoinRules,
-                {"join_rule": preset_config["join_rules"]},
-                True,
+            await add_event(
+                EventTypes.JoinRules, {"join_rule": preset_config["join_rules"]}
             )
-            events_to_send.append((join_rules_event, join_rules_context))
 
         if (EventTypes.RoomHistoryVisibility, "") not in initial_state:
-            visibility_event, visibility_context = await create_event(
+            await add_event(
                 EventTypes.RoomHistoryVisibility,
                 {"history_visibility": preset_config["history_visibility"]},
-                True,
             )
-            events_to_send.append((visibility_event, visibility_context))
 
         if preset_config["guest_can_join"]:
             if (EventTypes.GuestAccess, "") not in initial_state:
-                guest_access_event, guest_access_context = await create_event(
+                await add_event(
                     EventTypes.GuestAccess,
                     {EventContentFields.GUEST_ACCESS: GuestAccess.CAN_JOIN},
-                    True,
                 )
-                events_to_send.append((guest_access_event, guest_access_context))
 
         for (etype, state_key), content in initial_state.items():
-            event, context = await create_event(
-                etype, content, True, state_key=state_key
-            )
-            events_to_send.append((event, context))
+            await add_event(etype, content, state_key=state_key)
 
         # If the client supplied its own `m.room.encryption` event in the
         # initial state, only let it take precedence over the forced default
@@ -1862,26 +1951,19 @@ class RoomCreationHandler:
             and not ignore_forced_encryption
             and not supplied_encryption_is_valid
         ):
-            encryption_event, encryption_context = await create_event(
+            await add_event(
                 EventTypes.RoomEncryption,
                 {"algorithm": RoomEncryptionAlgorithms.DEFAULT},
-                True,
                 state_key="",
             )
-            events_to_send.append((encryption_event, encryption_context))
 
         if "name" in room_config:
             name = room_config["name"]
-            name_event, name_context = await create_event(
-                EventTypes.Name,
-                {"name": name},
-                True,
-            )
-            events_to_send.append((name_event, name_context))
+            await add_event(EventTypes.Name, {"name": name})
 
         if "topic" in room_config:
             topic = room_config["topic"]
-            topic_event, topic_context = await create_event(
+            await add_event(
                 EventTypes.Topic,
                 {
                     EventContentFields.TOPIC: topic,
@@ -1890,9 +1972,9 @@ class RoomCreationHandler:
                         EventContentFields.M_TEXT: [{MTextFields.BODY: topic}]
                     },
                 },
-                True,
             )
-            events_to_send.append((topic_event, topic_context))
+
+        await build_collected_events()
 
         for invitee, invite_content in batched_invites:
             # Check the invite against the auth rules before it joins the batch:
@@ -1926,6 +2008,66 @@ class RoomCreationHandler:
             depth,
             len(invited_users),
         )
+
+    def _rust_room_creation_unsupported(
+        self,
+        creator: Requester,
+        room_version: RoomVersion,
+        persist_create_and_join_alone: bool,
+    ) -> bool:
+        """Whether a new room's events must be built in Python even in
+        `rust_room_creation: on` mode.
+
+        The Rust builder needs the create event and the join in the batch, refers
+        to events by ID only, and has no state DAG. Events sent by an appservice
+        carry it in their context.
+        """
+        return (
+            persist_create_and_join_alone
+            or room_version.msc4242_state_dags
+            or creator.app_service_id is not None
+        )
+
+    def _build_room_events_in_rust(
+        self,
+        creator: Requester,
+        room_version: RoomVersion,
+        room_id: str,
+        prev_event: list[str],
+        depth: int,
+        state_map: StateMap[str],
+        specs: list[tuple[str, str, JsonMapping]],
+    ) -> list[EventBase]:
+        """Build, hash and sign the events of `specs` in one Rust call, as
+        `create_event` would build each in turn after `prev_event`."""
+        # The internal metadata `create_event` gives each event it builds.
+        internal_metadata = EventInternalMetadata({})
+        if creator.device_id is not None:
+            internal_metadata.device_id = creator.device_id
+        internal_metadata.outlier = False
+
+        (prev_event_id,) = prev_event
+        return self._event_signer.build_room_events(
+            room_version,
+            room_id,
+            creator.user.to_string(),
+            prev_event_id,
+            depth,
+            dict(state_map),
+            [
+                (etype, state_key, encode_canonical_json(content))
+                for etype, state_key, content in specs
+            ],
+            int(self.clock.time_msec()),
+            internal_metadata.get_dict(),
+        )
+
+    async def _check_event_built_in_rust(self, event: EventBase) -> None:
+        """The checks `create_event` runs on an event of a new room once built."""
+        validator = self.event_creation_handler.validator
+        validator.validate_builder(event)
+        validator.validate_new(event, self.config)
+        await self.event_creation_handler._validate_event_relation(event)
 
     def _persist_create_and_join_alone(
         self, room_version: RoomVersion, initial_state: StateMap[Any]
