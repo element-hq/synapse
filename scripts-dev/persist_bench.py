@@ -23,6 +23,12 @@ transactions from the metrics endpoint.
 
     poetry run python scripts-dev/persist_bench.py --levels off,full
 
+`--opentracing unsampled` enables opentracing with a sampler that samples
+nothing, to measure what tracing costs when it is on but a request is not
+traced; `sampled` samples everything. `python` is `unsampled` with tracing
+in Rust patched off, so that `python` against `unsampled` is what Rust's
+tracing costs. Spans go to a UDP port nothing reads.
+
 Needs a Postgres server the `PG*` environment variables reach, with
 permission to create databases.
 """
@@ -46,6 +52,8 @@ from typing import Any, Callable
 LEVELS = ("off", "prepare", "transaction", "full")
 CLIENT_PORT = 18008
 METRICS_PORT = 19092
+# Where spans go when `--opentracing` is on. Nothing listens.
+OPENTRACING_PORT = 16831
 SHARED_SECRET = "bench"
 
 
@@ -126,8 +134,10 @@ class Server:
         workdir: str,
         rust_driver: bool = True,
         experimental: dict[str, Any] | None = None,
+        opentracing: str = "off",
     ) -> None:
         self.level = level
+        self.opentracing = opentracing
         self.workdir = workdir
         self.rust_driver = rust_driver
         # Experimental features to set besides `rust_event_persistence`.
@@ -196,6 +206,20 @@ class Server:
             },
             "log_config": os.path.join(self.workdir, "log.yaml"),
         }
+        if self.opentracing != "off":
+            config["opentracing"] = {
+                "enabled": True,
+                "jaeger_config": {
+                    "sampler": {
+                        "type": "const",
+                        "param": 1 if self.opentracing == "sampled" else 0,
+                    },
+                    "local_agent": {
+                        "reporting_host": "127.0.0.1",
+                        "reporting_port": OPENTRACING_PORT,
+                    },
+                },
+            }
         with open(os.path.join(self.workdir, "log.yaml"), "w") as f:
             f.write(
                 "version: 1\n"
@@ -220,8 +244,28 @@ class Server:
             check=True,
             env=env,
         )
+        if self.opentracing == "python":
+            # Tracing in Python only: `init_tracer` looks the function up
+            # when it runs.
+            command = [
+                sys.executable,
+                "-c",
+                "import runpy, synapse.logging.opentracing as ot; "
+                "ot._enable_rust_tracing = lambda *args: None; "
+                "runpy.run_module('synapse.app.homeserver', run_name='__main__')",
+                "-c",
+                config_path,
+            ]
+        else:
+            command = [
+                sys.executable,
+                "-m",
+                "synapse.app.homeserver",
+                "-c",
+                config_path,
+            ]
         self.process = subprocess.Popen(
-            [sys.executable, "-m", "synapse.app.homeserver", "-c", config_path],
+            command,
             env=env,
             stdout=open(os.path.join(self.workdir, "stdout.log"), "w"),
             stderr=subprocess.STDOUT,
@@ -397,9 +441,11 @@ WORKLOADS = {
 }
 
 
-def bench_level(level: str, users: int, scale: int, concurrency: int) -> list[Result]:
+def bench_level(
+    level: str, users: int, scale: int, concurrency: int, opentracing: str = "off"
+) -> list[Result]:
     workdir = tempfile.mkdtemp(prefix=f"persist-bench-{level}-")
-    server = Server(level, workdir)
+    server = Server(level, workdir, opentracing=opentracing)
     results = []
     try:
         server.start()
@@ -445,12 +491,25 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int, default=20)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--json", help="Write the results here, as JSON.")
+    parser.add_argument(
+        "--opentracing",
+        default="off",
+        help="Comma-separated: off, python (unsampled, Rust tracing patched off), "
+        "unsampled (enabled, nothing sampled) or sampled.",
+    )
     args = parser.parse_args()
 
     results: list[Result] = []
     for _ in range(args.repeat):
-        for level in args.levels.split(","):
-            results.extend(bench_level(level, args.users, args.scale, args.concurrency))
+        for opentracing in args.opentracing.split(","):
+            for level in args.levels.split(","):
+                level_results = bench_level(
+                    level, args.users, args.scale, args.concurrency, opentracing
+                )
+                for result in level_results:
+                    if opentracing != "off":
+                        result.level = f"{level}/{opentracing}"
+                results.extend(level_results)
 
     print(
         f"\n{'workload':<16} {'level':<12} {'events':>6} {'wall s':>8} "
