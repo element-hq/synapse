@@ -1605,7 +1605,7 @@ The following fields are returned in the JSON response body:
 - `failed_redactions` - dictionary (optional) - when the redaction status is `complete`,
   contains the keys of the dict are event ids the process was unable to redact, if any,
   and the values are the corresponding error that caused the redaction to fail
-- `error` - string (optional) - when the redaction `status` is `failed, this field will
+- `error` - string (optional) - when the redaction `status` is `failed`, this field will
   contains a description of the error encountered during the redaction process.
 
 _Added in Synapse 1.116.0._
