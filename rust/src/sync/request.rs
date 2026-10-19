@@ -181,7 +181,11 @@ pub struct RoomSyncResult {
     pub(crate) data: RoomSyncResultData,
 }
 
-fn filtered_to_py<'py>(py: Python<'py>, events: &[FilteredEvent]) -> PyResult<Bound<'py, PyList>> {
+/// `events` as a list of `(event, membership)` pairs.
+pub(crate) fn filtered_to_py<'py>(
+    py: Python<'py>,
+    events: &[FilteredEvent],
+) -> PyResult<Bound<'py, PyList>> {
     let items = events
         .iter()
         .map(|filtered| {
@@ -196,6 +200,49 @@ fn filtered_to_py<'py>(py: Python<'py>, events: &[FilteredEvent]) -> PyResult<Bo
         })
         .collect::<PyResult<Vec<_>>>()?;
     PyList::new(py, items)
+}
+
+/// `bundles` as the Python `BundledAggregations` of each event, by event
+/// ID.
+pub(crate) fn bundles_to_py<'py>(
+    py: Python<'py>,
+    bundles: &HashMap<Arc<str>, Bundle>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    for (event_id, bundle) in bundles {
+        let references = bundle
+            .as_ref()
+            .references
+            .map(|references| serde_json::from_value::<JsonObject>(Value::Object(references)))
+            .transpose()
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        let replace = bundle
+            .replace
+            .as_ref()
+            .map(|event| Py::new(py, event.shallow_clone()))
+            .transpose()?;
+        let thread = bundle
+            .thread
+            .as_ref()
+            .map(|thread| -> PyResult<_> {
+                Py::new(
+                    py,
+                    ThreadAggregation {
+                        latest_event: Py::new(py, thread.latest_event.shallow_clone())?,
+                        count: thread.count,
+                        current_user_participated: thread.current_user_participated,
+                    },
+                )
+            })
+            .transpose()?;
+        let aggregations = BundledAggregations {
+            references,
+            replace,
+            thread,
+        };
+        dict.set_item(&**event_id, Bound::new(py, aggregations)?)?;
+    }
+    Ok(dict)
 }
 
 impl RoomSyncResult {
@@ -270,41 +317,7 @@ impl RoomSyncResult {
     /// The bundled aggregations of the timeline, by event ID.
     #[getter]
     fn bundled_aggregations<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new(py);
-        for (event_id, bundle) in &self.data.bundles {
-            let references = bundle
-                .as_ref()
-                .references
-                .map(|references| serde_json::from_value::<JsonObject>(Value::Object(references)))
-                .transpose()
-                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-            let replace = bundle
-                .replace
-                .as_ref()
-                .map(|event| Py::new(py, event.shallow_clone()))
-                .transpose()?;
-            let thread = bundle
-                .thread
-                .as_ref()
-                .map(|thread| -> PyResult<_> {
-                    Py::new(
-                        py,
-                        ThreadAggregation {
-                            latest_event: Py::new(py, thread.latest_event.shallow_clone())?,
-                            count: thread.count,
-                            current_user_participated: thread.current_user_participated,
-                        },
-                    )
-                })
-                .transpose()?;
-            let aggregations = BundledAggregations {
-                references,
-                replace,
-                thread,
-            };
-            dict.set_item(&**event_id, Bound::new(py, aggregations)?)?;
-        }
-        Ok(dict)
+        bundles_to_py(py, &self.data.bundles)
     }
 
     /// The events bundled with the timeline's events: edits and the latest

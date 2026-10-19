@@ -29,6 +29,7 @@ pub mod json;
 pub mod libpq;
 pub mod logging;
 pub mod matrix_const;
+pub mod messages;
 pub mod msc4388_rendezvous;
 pub mod persist;
 pub mod push;
@@ -112,6 +113,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     runtime::register_module(py, m)?;
     storage::python::register_module(py, m)?;
     storage::stream_ids::register_module(py, m)?;
+    messages::register_module(py, m)?;
     msc4388_rendezvous::register_module(py, m)?;
     persist::register_module(py, m)?;
     segmenter::register_module(py, m)?;

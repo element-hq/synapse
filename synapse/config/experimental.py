@@ -399,6 +399,24 @@ class ExperimentalConfig(Config):
             )
         self.rust_sliding_sync: Literal["off", "on"] = rust_sliding_sync
 
+        # Whether to compute `/messages` pages in Rust. Needs the native Rust
+        # Postgres driver.
+        #  - "off": the Python implementation.
+        #  - "on": Rust, falling back to Python for the requests Rust cannot
+        #    compute: event filters other than `lazy_load_members`, the admin
+        #    API, `event_format: federation` and partial state rooms.
+        rust_messages = experimental.get("rust_messages", "off")
+        if rust_messages is True:
+            rust_messages = "on"
+        elif rust_messages is False:
+            rust_messages = "off"
+        if rust_messages not in ("off", "on"):
+            raise ConfigError(
+                "experimental_features.rust_messages must be 'off' or 'on'",
+                ("experimental", "rust_messages"),
+            )
+        self.rust_messages: Literal["off", "on"] = rust_messages
+
         # Whether a new room's events after its create event are built, hashed
         # and signed in one Rust call, rather than one Python `create_event`
         # each. Python still runs every check and persists them. Rooms Rust

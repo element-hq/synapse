@@ -114,6 +114,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
+from synapse.synapse_rust.messages import MessagesHandler as RustMessagesHandler
 from synapse.synapse_rust.persist import Persister as RustPersister
 from synapse.synapse_rust.runtime import RustRuntime, set_virtual_time_msec
 from synapse.synapse_rust.sliding_sync import (
@@ -137,6 +138,8 @@ from tests.utils import (
     POSTGRES_PASSWORD,
     POSTGRES_PORT,
     POSTGRES_USER,
+    RUST_MESSAGES_FOR_TESTS,
+    RUST_MESSAGES_STRICT_FOR_TESTS,
     RUST_PERSIST_FOR_TESTS,
     RUST_PERSIST_STRICT_FOR_TESTS,
     RUST_ROOM_CREATION_FOR_TESTS,
@@ -1411,6 +1414,13 @@ def setup_test_homeserver(
             RustEventPersistenceLevel, RUST_PERSIST_FOR_TESTS
         )
 
+    if RUST_MESSAGES_FOR_TESTS:
+        if RUST_MESSAGES_FOR_TESTS not in ("off", "on"):
+            raise ValueError("SYNAPSE_TEST_RUST_MESSAGES must be off or on")
+        config.experimental.rust_messages = cast(
+            Literal["off", "on"], RUST_MESSAGES_FOR_TESTS
+        )
+
     if RUST_SLIDING_SYNC_FOR_TESTS:
         if RUST_SLIDING_SYNC_FOR_TESTS not in ("off", "on"):
             raise ValueError("SYNAPSE_TEST_RUST_SLIDING_SYNC must be off or on")
@@ -1669,6 +1679,15 @@ def setup_test_homeserver(
             RUST_SLIDING_SYNC_STRICT_FOR_TESTS
         )
 
+    if RUST_MESSAGES_FOR_TESTS:
+        # Likewise for the Rust `/messages` handler.
+        pagination_handler = hs.get_pagination_handler()
+        if pagination_handler._rust_messages is not None:
+            pagination_handler._rust_messages = cast(
+                Any, _BlockingRustCalls(pagination_handler._rust_messages)
+            )
+        pagination_handler._rust_messages_strict = RUST_MESSAGES_STRICT_FOR_TESTS
+
     # Likewise for event loads, when they run in Rust: code that loads events
     # in the background would otherwise not have finished when a test checks.
     # `GetEventCancellationTestCase` exercises the deferreds.
@@ -1757,7 +1776,7 @@ class _BlockingRustCalls:
 
     def __init__(
         self,
-        handler: "RustSyncHandler | RustSlidingSyncHandler | RustStore | RustPersister",
+        handler: "RustSyncHandler | RustSlidingSyncHandler | RustMessagesHandler | RustStore | RustPersister",
     ) -> None:
         self._handler = handler
 

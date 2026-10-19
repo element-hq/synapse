@@ -22,7 +22,9 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 import attr
+from prometheus_client import Counter
 
+from twisted.internet.defer import CancelledError
 from twisted.python.failure import Failure
 
 from synapse.api.constants import Direction, EventTypes, Membership
@@ -32,12 +34,20 @@ from synapse.events import EventBase
 from synapse.events.utils import FilteredEvent
 from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
-from synapse.logging.opentracing import trace
+from synapse.logging.opentracing import start_active_span, trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.rest.admin._base import assert_user_is_admin
 from synapse.streams.config import PaginationConfig
+from synapse.synapse_rust.messages import (
+    MessagesHandler as RustMessagesHandler,
+    MessagesRequest as RustMessagesRequest,
+    MessagesResult as RustMessagesResult,
+    RustMessagesFallback,
+)
 from synapse.types import (
     JsonMapping,
     Requester,
+    RoomStreamToken,
     ScheduledTask,
     StreamKeyType,
     StreamToken,
@@ -72,6 +82,40 @@ PURGE_HISTORY_ACTION_NAME = "purge_history"
 PURGE_ROOM_ACTION_NAME = "purge_room"
 
 SHUTDOWN_AND_PURGE_ROOM_ACTION_NAME = "shutdown_and_purge_room"
+
+rust_messages_counter = Counter(
+    "synapse_handlers_messages_rust_total",
+    "`/messages` requests in `rust_messages: on` mode, by whether Rust served "
+    "them, left them to Python, or failed and Python served them",
+    labelnames=["result", SERVER_NAME_LABEL],
+)
+
+
+def _rust_supports_filter(event_filter: Filter | None) -> bool:
+    """Whether the Rust `/messages` handler can apply `event_filter`: it
+    applies none, so the filter must keep every event. `lazy_load_members`
+    is supported.
+
+    An empty list keeps no event, so the allow lists must be absent rather
+    than empty.
+    """
+    if event_filter is None:
+        return True
+    return (
+        event_filter.types is None
+        and not event_filter.not_types
+        and event_filter.senders is None
+        and not event_filter.not_senders
+        and event_filter.rooms is None
+        and not event_filter.not_rooms
+        and event_filter.contains_url is None
+        and event_filter.labels is None
+        and not event_filter.not_labels
+        and event_filter.related_by_senders is None
+        and event_filter.related_by_rel_types is None
+        and event_filter.rel_types is None
+        and not event_filter.not_rel_types
+    )
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -165,6 +209,21 @@ class PaginationHandler:
             hs.config.server.forgotten_room_retention_period
         )
         self._is_master = hs.config.worker.worker_app is None
+
+        # The Rust `/messages` handler, used when the `rust_messages`
+        # experimental option is "on". It needs the native Rust Postgres
+        # driver.
+        self._rust_messages: RustMessagesHandler | None = None
+        if hs.config.experimental.rust_messages == "on":
+            self._rust_messages = hs.get_rust_handlers().messages
+            if self._rust_messages is None:
+                logger.warning(
+                    "rust_messages is 'on' but the main database does not use "
+                    "the native Rust driver: using the Python handler"
+                )
+        # Whether a Rust error raises rather than falling back to Python.
+        # Tests set it.
+        self._rust_messages_strict = False
 
         if hs.config.retention.retention_enabled and self._is_master:
             # Run the purge jobs described in the configuration file.
@@ -561,6 +620,31 @@ class PaginationHandler:
         if pagin_config.to_token:
             to_room_key = pagin_config.to_token.room_key
 
+        # Whether the Rust handler backfilled in the foreground before
+        # leaving the page to Python.
+        already_backfilled = False
+        if (
+            self._rust_messages is not None
+            and not use_admin_priviledge
+            and as_client_event
+            and _rust_supports_filter(event_filter)
+        ):
+            rust_result, already_backfilled = await self._get_messages_in_rust(
+                self._rust_messages,
+                user_id=user_id,
+                room_id=room_id,
+                pagin_config=pagin_config,
+                from_token=from_token,
+                to_room_key=to_room_key,
+                is_peeking=member_event_id is None,
+                lazy_load_members=bool(event_filter and event_filter.lazy_load_members),
+                curr_topo=(
+                    curr_topo if pagin_config.direction == Direction.BACKWARDS else None
+                ),
+            )
+            if rust_result is not None:
+                return rust_result
+
         # Initially fetch the events from the database. With any luck, we can return
         # these without blocking on backfill (handled below).
         (
@@ -576,7 +660,7 @@ class PaginationHandler:
             event_filter=event_filter,
         )
 
-        if pagin_config.direction == Direction.BACKWARDS:
+        if pagin_config.direction == Direction.BACKWARDS and not already_backfilled:
             # We use a `Set` because there can be multiple events at a given depth
             # and we only care about looking at the unique continum of depths to
             # find gaps.
@@ -733,6 +817,119 @@ class PaginationHandler:
             state=state,
             start_token=from_token,
             end_token=next_token,
+        )
+
+    async def _get_messages_in_rust(
+        self,
+        rust: RustMessagesHandler,
+        *,
+        user_id: str,
+        room_id: str,
+        pagin_config: PaginationConfig,
+        from_token: StreamToken,
+        to_room_key: RoomStreamToken | None,
+        is_peeking: bool,
+        lazy_load_members: bool,
+        curr_topo: int | None,
+    ) -> tuple[GetMessagesResult | None, bool]:
+        """The rest of `get_messages` through the Rust handler, from the page
+        query on. Python still backfills.
+
+        Returns the result, or None if Python should compute the page
+        instead: Rust leaves it to Python, or failed. Then whether the
+        request already backfilled in the foreground, which Python must not
+        do again.
+        """
+        labels = {SERVER_NAME_LABEL: self.server_name}
+
+        async def build_request() -> RustMessagesRequest:
+            is_server_admin = await self.store.is_server_admin(user_id)
+            client_config = await self.store.get_admin_client_config_for_user(user_id)
+            return RustMessagesRequest(
+                room_id=room_id,
+                user_id=user_id,
+                from_key=from_token.room_key,
+                to_key=to_room_key,
+                direction=pagin_config.direction.value,
+                limit=pagin_config.limit,
+                is_peeking=is_peeking,
+                lazy_load_members=lazy_load_members,
+                ignored_users=await self.store.ignored_users(user_id),
+                is_server_admin=is_server_admin,
+                return_soft_failed_events=client_config.return_soft_failed_events,
+                return_policy_server_spammy_events=client_config.return_policy_server_spammy_events,
+                msc4354_enabled=self.hs.config.experimental.msc4354_enabled,
+            )
+
+        request: RustMessagesRequest | None = None
+
+        async def call_rust() -> RustMessagesResult | None:
+            nonlocal request
+            try:
+                with start_active_span("get_messages.rust"):
+                    if request is None:
+                        request = await build_request()
+                    return await rust.get_messages(request)
+            except CancelledError:
+                raise
+            except RustMessagesFallback as e:
+                rust_messages_counter.labels(result="fallback", **labels).inc()
+                logger.debug("Computing /messages of %s in Python: %s", room_id, e)
+                return None
+            except Exception:
+                rust_messages_counter.labels(result="error", **labels).inc()
+                if self._rust_messages_strict:
+                    raise
+                logger.exception(
+                    "Rust /messages failed for %s in %s. Computing it in Python",
+                    user_id,
+                    room_id,
+                )
+                return None
+
+        result = await call_rust()
+        if result is None:
+            return None, False
+        if pagin_config.direction == Direction.BACKWARDS:
+            assert curr_topo is not None
+            if result.needs_backfill:
+                did_backfill = await self.hs.get_federation_handler().maybe_backfill(
+                    room_id, curr_topo, limit=pagin_config.limit
+                )
+                # Read the page again to pick up what backfill added, as the
+                # Python does. Python reads it if Rust fails this time,
+                # without backfilling again.
+                if did_backfill:
+                    result = await call_rust()
+                    if result is None:
+                        return None, True
+            else:
+                # Backfill in the background for eventual consistency's sake,
+                # as the Python does.
+                self.hs.run_as_background_process(
+                    "maybe_backfill_in_the_background",
+                    self.hs.get_federation_handler().maybe_backfill,
+                    room_id,
+                    curr_topo,
+                    limit=pagin_config.limit,
+                )
+        rust_messages_counter.labels(result="rust", **labels).inc()
+
+        end_token = None
+        if not result.end_of_history:
+            end_token = from_token.copy_and_replace(StreamKeyType.ROOM, result.next_key)
+        return (
+            GetMessagesResult(
+                messages_chunk=[
+                    FilteredEvent(event=event, membership=membership)
+                    for event, membership in result.events
+                ],
+                bundled_aggregations=result.bundled_aggregations,
+                state=result.state,
+                start_token=from_token,
+                end_token=end_token,
+            ),
+            False,
         )
 
     async def _shutdown_and_purge_room(

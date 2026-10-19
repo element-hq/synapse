@@ -23,6 +23,7 @@ use pyo3::{
 };
 
 use crate::homeserver::HomeServer;
+use crate::messages::MessagesHandler;
 use crate::persist::python::Persister;
 use crate::sliding_sync::SlidingSyncHandler;
 use crate::state::StateResolutionHandler;
@@ -43,6 +44,9 @@ struct RustHandlers {
     /// Only when the main database uses the native Rust driver. Shares
     /// `sync`'s store.
     sliding_sync: Option<Py<SlidingSyncHandler>>,
+    /// Only when the main database uses the native Rust driver. Shares
+    /// `sync`'s store.
+    messages: Option<Py<MessagesHandler>>,
 }
 
 #[pymethods]
@@ -82,7 +86,7 @@ impl RustHandlers {
         let rust_connection_pool_class = py
             .import("synapse.storage.rust_pool")?
             .getattr("RustConnectionPool")?;
-        let (state_resolution, sync, sliding_sync, persister) = if connection_pool
+        let (state_resolution, sync, sliding_sync, messages, persister) = if connection_pool
             .is_instance(&rust_connection_pool_class)?
         {
             let connection_pool = connection_pool.unbind();
@@ -111,16 +115,22 @@ impl RustHandlers {
                 store,
                 &config,
             );
+            let messages = MessagesHandler::new(
+                connection_pool.clone_ref(py),
+                runtime.clone(),
+                Arc::clone(sync.store()),
+            );
             let sliding_sync =
                 SlidingSyncHandler::new(connection_pool, runtime.clone(), Arc::clone(sync.store()));
             (
                 Some(Py::new(py, state_resolution)?),
                 Some(Py::new(py, sync)?),
                 Some(Py::new(py, sliding_sync)?),
+                Some(Py::new(py, messages)?),
                 persister,
             )
         } else {
-            (None, None, None, None)
+            (None, None, None, None, None)
         };
 
         Ok(RustHandlers {
@@ -129,6 +139,7 @@ impl RustHandlers {
             sync,
             persister,
             sliding_sync,
+            messages,
         })
     }
 
@@ -164,6 +175,13 @@ impl RustHandlers {
     #[getter]
     fn sliding_sync(&self, py: Python<'_>) -> Option<Py<SlidingSyncHandler>> {
         self.sliding_sync.as_ref().map(|h| h.clone_ref(py))
+    }
+
+    /// The Rust `/messages` handler, or `None` if the main database does
+    /// not use the native Rust driver.
+    #[getter]
+    fn messages(&self, py: Python<'_>) -> Option<Py<MessagesHandler>> {
+        self.messages.as_ref().map(|h| h.clone_ref(py))
     }
 }
 
