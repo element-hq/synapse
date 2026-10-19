@@ -577,11 +577,12 @@ class StoreError(SynapseError):
 class RoomIdCollisionError(StoreError):
     """A new room's ID is already taken, found when its events are persisted.
 
-    The creator may try again under a fresh ID.
+    The creator may try again under a fresh ID. The errcode lets a worker
+    that sent the events to an event persister tell this error apart.
     """
 
     def __init__(self, room_id: str):
-        super().__init__(500, f"Room ID {room_id} is already in use")
+        super().__init__(500, f"Room ID {room_id} is already in use", Codes.ROOM_IN_USE)
 
 
 class InvalidCaptchaError(SynapseError):

@@ -45,6 +45,7 @@ from synapse.api.errors import (
     ConsentNotGivenError,
     NotFoundError,
     PartialStateConflictError,
+    RoomIdCollisionError,
     ShadowBanError,
     SynapseError,
     UnstableSpecAuthError,
@@ -1804,6 +1805,12 @@ class EventCreationHandler:
                 except SynapseError as e:
                     if e.code == HTTPStatus.CONFLICT:
                         raise PartialStateConflictError()
+                    if (
+                        e.code == HTTPStatus.INTERNAL_SERVER_ERROR
+                        and e.errcode == Codes.ROOM_IN_USE
+                    ):
+                        # The persister found the new room's ID taken.
+                        raise RoomIdCollisionError(events_and_context[0][0].room_id)
                     raise
 
                 event_id = result["event_id"]
