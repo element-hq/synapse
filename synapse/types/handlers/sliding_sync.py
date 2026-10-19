@@ -895,6 +895,11 @@ class MutableRoomStatusMap(RoomStatusMap[T]):
     ) -> None:
         """Record that we have sent these rooms in the response, but only up to
         `last_token` (exclusive of anything after it).
+
+        Used for Sticky Events, which are implicitly paginated by the server.
+        But this is not necessarily a good pattern to follow for future work,
+        so consider alternatives.
+        See: https://github.com/matrix-org/matrix-spec-proposals/pull/4480#discussion_r4165887827
         """
         for room_id in room_ids:
             self._statuses[room_id] = HaveSentRoom.previously(last_token)
