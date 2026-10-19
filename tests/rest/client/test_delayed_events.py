@@ -751,10 +751,12 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             access_token=self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body["delay_id"]
 
         self.helper.leave(self.room_id, self.user1_user_id, tok=self.user1_access_token)
 
-        self.reactor.advance(1)
+        # Advance time enough to confirm that the delayed event was not sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         self.helper.get_state(
             self.room_id,
             _EVENT_TYPE,
@@ -762,6 +764,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             state_key=state_key,
             expect_code=HTTPStatus.NOT_FOUND,
         )
+        self._assert_finalised(delay_id, errcode=Codes.FORBIDDEN)
 
     def test_delayed_self_join_accepted_if_sender_not_in_room(self) -> None:
         """A delayed join is accepted from outside a public room, and the sender is
@@ -781,17 +784,18 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             access_token=self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body["delay_id"]
 
-        self.reactor.advance(1)
-        content = self.helper.get_state(
-            room_id,
-            EventTypes.Member,
-            self.user2_access_token,
-            state_key=self.user1_user_id,
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id}/state/{EventTypes.Member}/{self.user1_user_id}?format=event",
+            access_token=self.user2_access_token,
         )
-        self.assertEqual(
-            Membership.JOIN, content.get(EventContentFields.MEMBERSHIP), content
-        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assert_dict({EventContentFields.MEMBERSHIP: Membership.JOIN}, channel.json_body["content"])
+        self._assert_finalised(delay_id, event_id=channel.json_body["event_id"])
 
     def test_delayed_self_join_fails_on_timeout_if_join_not_allowed(self) -> None:
         """A delayed join is accepted from outside an invite-only room, and fails
@@ -809,8 +813,10 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             access_token=self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body["delay_id"]
 
-        self.reactor.advance(1)
+        # Advance time enough to confirm that the delayed event was not sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         self.helper.get_state(
             room_id,
             EventTypes.Member,
@@ -818,6 +824,7 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             state_key=self.user1_user_id,
             expect_code=HTTPStatus.NOT_FOUND,
         )
+        self._assert_finalised(delay_id, errcode=Codes.FORBIDDEN)
 
     def test_delayed_event_is_finalised_with_error_if_timeout_send_fails(
         self,
