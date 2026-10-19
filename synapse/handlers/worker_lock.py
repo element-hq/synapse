@@ -84,7 +84,10 @@ class WorkerLocksHandler:
 
         # Map from lock name/key to set of `WaitingLock` that are active for
         # that lock.
-        self._locks: dict[tuple[str, str], WeakSet[WaitingLock | WaitingMultiLock]] = {}
+        self._locks: dict[
+            tuple[str, str],
+            WeakSet[WaitingLock | WaitingMultiLock | WaitingLockSnapshot],
+        ] = {}
 
         self._clock.looping_call(self._cleanup_locks, Duration(seconds=30))
 
@@ -175,6 +178,37 @@ class WorkerLocksHandler:
 
         return lock
 
+    async def wait_for_current_read_write_lock_holders(
+        self,
+        lock_name: str,
+        lock_key: str,
+        *,
+        write: bool,
+    ) -> None:
+        """Wait for the current holders of a read/write lock to release it.
+
+        This snapshots the lock tokens which exist when the method is called and
+        waits only for those tokens. Lock holders which arrive after the snapshot
+        do not delay the wait.
+        """
+
+        tokens = await self._store.get_read_write_lock_tokens(
+            lock_name, lock_key, write=write
+        )
+        if not tokens:
+            return
+
+        waiter = WaitingLockSnapshot(
+            clock=self._clock,
+            store=self._store,
+            lock_name=lock_name,
+            lock_key=lock_key,
+            write=write,
+            tokens=tokens,
+        )
+        self._locks.setdefault((lock_name, lock_key), WeakSet()).add(waiter)
+        await waiter.wait()
+
     def notify_lock_released(self, lock_name: str, lock_key: str) -> None:
         """Notify that a lock has been released.
 
@@ -195,7 +229,7 @@ class WorkerLocksHandler:
             return
 
         def _wake_all_locks(
-            locks: Collection[WaitingLock | WaitingMultiLock],
+            locks: Collection[WaitingLock | WaitingMultiLock | WaitingLockSnapshot],
         ) -> None:
             for lock in locks:
                 lock.release_lock()
@@ -210,6 +244,77 @@ class WorkerLocksHandler:
     async def _cleanup_locks(self) -> None:
         """Periodically cleans out stale entries in the locks map"""
         self._locks = {key: value for key, value in self._locks.items() if value}
+
+
+@attr.s(auto_attribs=True, eq=False)
+class WaitingLockSnapshot:
+    """Waits for a snapshot of read/write lock tokens to be released."""
+
+    clock: Clock
+    store: LockStore
+    lock_name: str
+    lock_key: str
+    write: bool
+    tokens: set[str]
+    start_ts_ms: int = 0
+    deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
+    _timeout_interval: float = 0.1
+
+    def release_lock(self) -> None:
+        """Wake the waiter so that it rechecks the outstanding tokens."""
+        if not self.deferred.called:
+            with PreserveLoggingContext():
+                self.deferred.callback(None)
+
+    async def wait(self) -> None:
+        self.start_ts_ms = self.clock.time_msec()
+
+        with start_active_span("WaitingLockSnapshot.wait"):
+            while self.tokens:
+                # Create the deferred before querying the database so a release
+                # notification cannot be missed between the query and the wait.
+                self.deferred = defer.Deferred()
+
+                current_tokens = await self.store.get_read_write_lock_tokens(
+                    self.lock_name, self.lock_key, write=self.write
+                )
+                self.tokens.intersection_update(current_tokens)
+                if not self.tokens:
+                    return
+
+                try:
+                    # Notifications normally wake us promptly. The timeout also
+                    # covers direct storage users and stale locks being reaped,
+                    # neither of which emits a notification.
+                    with PreserveLoggingContext():
+                        await timeout_deferred(
+                            deferred=self.deferred,
+                            timeout=self._timeout_interval,
+                            clock=self.clock,
+                        )
+                except defer.TimeoutError:
+                    self._increment_timeout_interval()
+
+                    time_spent_waiting = Duration(
+                        milliseconds=self.clock.time_msec() - self.start_ts_ms
+                    )
+                    if (
+                        time_spent_waiting.as_millis()
+                        > WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION.as_millis()
+                    ):
+                        logger.warning(
+                            "(WaitingLockSnapshot (%s, %s)) Time spent waiting for "
+                            "lock holders is getting excessive: %ss.",
+                            self.lock_name,
+                            self.lock_key,
+                            time_spent_waiting.as_secs(),
+                        )
+
+    def _increment_timeout_interval(self) -> None:
+        next_interval = min(
+            WORKER_LOCK_MAX_RETRY_INTERVAL.as_secs(), self._timeout_interval * 2
+        )
+        self._timeout_interval = next_interval * random.uniform(0.9, 1.1)
 
 
 @attr.s(auto_attribs=True, eq=False)
