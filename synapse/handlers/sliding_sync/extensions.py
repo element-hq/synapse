@@ -263,8 +263,8 @@ class SlidingSyncExtensionHandler:
 
     def find_relevant_room_ids_for_extension(
         self,
-        requested_lists: StrCollection | None,
-        requested_room_ids: StrCollection | None,
+        requested_lists: StrCollection,
+        requested_room_ids: StrCollection,
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: AbstractSet[str],
     ) -> set[str]:

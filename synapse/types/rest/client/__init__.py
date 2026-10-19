@@ -340,10 +340,10 @@ class SlidingSyncBody(RequestBodyModel):
                 enabled
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
 
         class AccountDataExtension(RequestBodyModel):
-            """The Account Data extension (MSC3959)
+            """The Account Data extension (MSC4548, previously MSC3959)
 
             Attributes:
                 enabled
@@ -353,14 +353,14 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] | None = ["*"]
+            lists: list[StrictStr] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] | None = ["*"]
+            rooms: list[StrictStr] = ["*"]
 
         class ReceiptsExtension(RequestBodyModel):
-            """The Receipts extension (MSC3960)
+            """The Receipts extension (MSC4551, previously MSC3960)
 
             Attributes:
                 enabled
@@ -370,14 +370,14 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] | None = ["*"]
+            lists: list[StrictStr] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] | None = ["*"]
+            rooms: list[StrictStr] = ["*"]
 
         class TypingExtension(RequestBodyModel):
-            """The Typing Notification extension (MSC3961)
+            """The Typing Notification extension (MSC4508, previously MSC3961)
 
             Attributes:
                 enabled
@@ -387,11 +387,11 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] | None = ["*"]
+            lists: list[StrictStr] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] | None = ["*"]
+            rooms: list[StrictStr] = ["*"]
 
         class ThreadSubscriptionsExtension(RequestBodyModel):
             """The Thread Subscriptions extension (MSC4308)
@@ -401,7 +401,7 @@ class SlidingSyncBody(RequestBodyModel):
                 limit: maximum number of subscription changes to return (default 100)
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
             limit: StrictInt = 100
 
         class StickyEventsExtension(RequestBodyModel):
