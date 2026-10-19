@@ -33,9 +33,12 @@ use pyo3::{
 };
 use tokio::runtime::Handle;
 use tokio_postgres::{types::ToSql, Row};
+use tracing::Instrument;
 
 use super::{auth_chain, EventMap};
 use crate::database::postgres::pool::{ConnectionPool, PooledConnection, PyConnectionPool};
+use crate::database::postgres::write::next_txn_id;
+use crate::logging::opentracing::{db_query_span, traced_query};
 use crate::storage::caches::StoreCaches;
 use crate::storage::events::{EventLoadStats, EventLoader, Querier};
 
@@ -118,6 +121,11 @@ pub struct DbStats {
 /// connection goes back to the pool.
 pub struct PostgresStateResStore {
     conn: Option<PooledConnection>,
+    /// `db.connection`, from the checkout until the store is done. Only
+    /// held, so that it lasts as long as the store.
+    _connection_span: tracing::Span,
+    /// `db.txn`, the read-only transaction, a child of `connection_span`.
+    txn_span: tracing::Span,
     handle: Handle,
     /// Events, chain positions and chain links loaded earlier, consulted
     /// before the database.
@@ -134,12 +142,30 @@ impl PostgresStateResStore {
         handle: Handle,
         caches: Option<Arc<StoreCaches>>,
     ) -> anyhow::Result<Self> {
+        let waiting = Instant::now();
         let conn = pool
             .get()
             .await
             .map_err(|e| anyhow::Error::new(e).context("checking out a database connection"))?;
+        // The wait goes on the caller's span, as on the write path: Python's
+        // `db.connection` starts once the connection is in hand.
+        tracing::info!(
+            message = "checked out",
+            wait_ms = waiting.elapsed().as_secs_f64() * 1000.0
+        );
+        let connection_span = tracing::info_span!("db.connection");
+        let txn_id = next_txn_id();
+        let txn_span = tracing::info_span!(
+            parent: &connection_span,
+            "db.txn",
+            db.txn_desc = "state_res",
+            db.txn_id = %format_args!("state_res-{txn_id:x}"),
+            db.readonly = true,
+        );
         let store = PostgresStateResStore {
             conn: Some(conn),
+            _connection_span: connection_span,
+            txn_span,
             handle,
             caches,
             db_stats: Mutex::default(),
@@ -147,11 +173,13 @@ impl PostgresStateResStore {
         // If this fails, dropping the store sends a ROLLBACK, which is
         // harmless outside a transaction.
         let start = Instant::now();
-        store
-            .client()
-            .batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            .await
-            .context("BEGIN")?;
+        const BEGIN: &str = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY";
+        traced_query(
+            db_query_span(Some(&store.txn_span), BEGIN),
+            store.client().batch_execute(BEGIN),
+        )
+        .await
+        .context("BEGIN")?;
         store.record(start, 0);
         Ok(store)
     }
@@ -160,7 +188,13 @@ impl PostgresStateResStore {
     pub async fn finish(mut self) -> anyhow::Result<DbStats> {
         let stats = self.stats();
         if let Some(conn) = self.conn.take() {
-            conn.batch_execute("COMMIT").await.context("COMMIT")?;
+            tracing::info!(parent: &self.txn_span, message = "commit");
+            traced_query(
+                db_query_span(Some(&self.txn_span), "COMMIT"),
+                conn.batch_execute("COMMIT"),
+            )
+            .await
+            .context("COMMIT")?;
         }
         Ok(stats)
     }
@@ -200,14 +234,24 @@ impl PostgresStateResStore {
     ) -> anyhow::Result<Vec<Row>> {
         let start = Instant::now();
         let client = self.client();
-        let statement = client
-            .prepare_cached(sql, false)
-            .await
-            .with_context(|| format!("preparing {}", sql.trim()))?;
-        let rows = client
-            .query(&statement, params)
-            .await
-            .with_context(|| format!("running {}", sql.trim()))?;
+        let span = db_query_span(Some(&self.txn_span), sql);
+        let rows = traced_query(span, async {
+            let statement = match client.cached(sql) {
+                Some(statement) => statement,
+                None => {
+                    tracing::Span::current().record("db.prepared", true);
+                    client
+                        .prepare_cached(sql, false)
+                        .await
+                        .with_context(|| format!("preparing {}", sql.trim()))?
+                }
+            };
+            client
+                .query(&statement, params)
+                .await
+                .with_context(|| format!("running {}", sql.trim()))
+        })
+        .await?;
         self.record(start, rows.len());
         if log::log_enabled!(log::Level::Debug) {
             let head: String = sql.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
@@ -226,12 +270,16 @@ impl Drop for PostgresStateResStore {
         if let Some(conn) = self.conn.take() {
             // Roll back before the connection goes back to the pool, so the
             // next user doesn't find it inside our transaction.
-            self.handle.spawn(async move {
-                if let Err(e) = conn.batch_execute("ROLLBACK").await {
-                    warn!("Failed to roll back state res transaction: {e}");
+            let span = tracing::info_span!(parent: &self.txn_span, "db.rollback");
+            self.handle.spawn(
+                async move {
+                    if let Err(e) = conn.batch_execute("ROLLBACK").await {
+                        warn!("Failed to roll back state res transaction: {e}");
+                    }
+                    drop(conn);
                 }
-                drop(conn);
-            });
+                .instrument(span),
+            );
         }
     }
 }
@@ -462,4 +510,70 @@ pub(super) fn register_test_functions(py: Python<'_>, m: &Bound<'_, PyModule>) -
     m.add_function(wrap_pyfunction!(get_auth_chain_difference_for_test, m)?)?;
     m.add_function(wrap_pyfunction!(load_events_for_test, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tracing_tests {
+    //! Against a real server: these run when `SYNAPSE_TEST_POSTGRES_DSN` is
+    //! set, and otherwise do nothing.
+
+    use super::*;
+    use crate::logging::opentracing::layer::testing::{tag, traced};
+    use crate::logging::opentracing::thrift::TagValue;
+    use crate::logging::opentracing::SamplerConfig;
+    use crate::storage::pool_querier::tests::test_pool;
+
+    /// `db.connection` → `db.txn` → a `db.query` each for the BEGIN, the
+    /// read and the COMMIT.
+    #[test]
+    fn traced_store() {
+        let Some((rt, pool)) = test_pool() else {
+            return;
+        };
+        let (_, spans) = traced(SamplerConfig::Const(true), || {
+            rt.block_on(async {
+                let store = PostgresStateResStore::begin(&pool, rt.handle().clone(), None)
+                    .await
+                    .unwrap();
+                store.query("SELECT 1", &[]).await.unwrap();
+                store.finish().await.unwrap();
+            })
+        });
+
+        let operations: Vec<&str> = spans.iter().map(|span| &*span.operation).collect();
+        assert_eq!(
+            operations,
+            [
+                "db.query",
+                "db.query",
+                "db.query",
+                "db.txn",
+                "db.connection"
+            ]
+        );
+        let (queries, rest) = spans.split_at(3);
+        let (txn, connection) = (&rest[0], &rest[1]);
+        assert_eq!(txn.parent_id, connection.span_id);
+        assert_eq!(
+            tag(txn, "db.txn_desc"),
+            Some(&TagValue::Str("state_res".into()))
+        );
+        let statements: Vec<_> = queries
+            .iter()
+            .map(|query| {
+                assert_eq!(query.parent_id, txn.span_id);
+                tag(query, "db.statement").cloned()
+            })
+            .collect();
+        assert_eq!(
+            statements,
+            [
+                Some(TagValue::Str(
+                    "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY".into()
+                )),
+                Some(TagValue::Str("SELECT 1".into())),
+                Some(TagValue::Str("COMMIT".into())),
+            ]
+        );
+    }
 }

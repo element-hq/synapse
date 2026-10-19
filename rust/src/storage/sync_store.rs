@@ -48,11 +48,14 @@ use log::{debug, warn};
 use pyo3::{prelude::*, types::PyModule};
 use tokio::runtime::Handle;
 use tokio_postgres::{types::ToSql, Row};
+use tracing::Instrument;
 
 use crate::caches::lock_ignoring_poison;
 use crate::config::SynapseHomeServerConfig;
 use crate::database::postgres::pool::{ConnectionPool, PooledConnection, PyConnectionPool};
+use crate::database::postgres::write::next_txn_id;
 use crate::events::Event;
+use crate::logging::opentracing::{db_query_span, traced_query};
 use crate::state::{StateKey, StateMap};
 use crate::storage::caches::StoreCaches;
 use crate::storage::events::{EventLoadStats, EventLoader, Querier, RedactBehaviour};
@@ -231,6 +234,10 @@ pub struct SyncReader<'a> {
 pub struct Borrowed<'r, 'a> {
     reader: &'r SyncReader<'a>,
     conn: Option<PooledConnection>,
+    /// `db.connection`, from the checkout until the drop.
+    connection_span: tracing::Span,
+    /// `db.txn` once a transaction is begun, a child of `connection_span`.
+    txn_span: Option<tracing::Span>,
     in_transaction: bool,
     /// The `BEGIN` of a transaction no statement has sent yet. The first
     /// statement sends it in front of its own request, so that they share a
@@ -265,6 +272,16 @@ impl<'a> SyncReader<'a> {
             // Keep the pool's error as the cause, so that a caller can tell
             // a lost connection, which is worth retrying.
             .map_err(|e| anyhow::Error::new(e).context("checking out a database connection"))?;
+        let waiting = start;
+        // The wait goes on the caller's span, as on the write path: Python's
+        // `db.connection` starts once the connection is in hand.
+        tracing::info!(
+            message = "checked out",
+            wait_ms = waiting.elapsed().as_secs_f64() * 1000.0
+        );
+        // Never entered, so it lasts until it closes: when the borrow and
+        // the spans it parents are done.
+        let connection_span = tracing::info_span!("db.connection");
         self.update_stats(|stats| {
             stats.checkouts += 1;
             stats.checkout_time += start.elapsed();
@@ -272,6 +289,8 @@ impl<'a> SyncReader<'a> {
         Ok(Borrowed {
             reader: self,
             conn: Some(conn),
+            connection_span,
+            txn_span: None,
             in_transaction: false,
             pending_begin: Mutex::new(None),
             begin_failed: AtomicBool::new(false),
@@ -285,6 +304,7 @@ impl<'a> SyncReader<'a> {
     /// [`Borrowed::commit`].
     pub(crate) async fn begin(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
         let mut borrowed = self.borrow().await?;
+        borrowed.begin_txn_span("sync", true);
         // Set before anything is sent: if we are dropped after the BEGIN goes
         // out but before it returns, the transaction is open and must be
         // rolled back before the connection goes back to the pool.
@@ -303,6 +323,7 @@ impl<'a> SyncReader<'a> {
     /// with [`Borrowed::commit`].
     pub(crate) async fn begin_write(&self) -> anyhow::Result<Borrowed<'_, 'a>> {
         let mut borrowed = self.borrow().await?;
+        borrowed.begin_txn_span("sync_write", false);
         // Set before anything is sent: if we are dropped after the BEGIN goes
         // out but before it returns, the transaction is open and must be
         // rolled back. A ROLLBACK outside one only warns.
@@ -2252,6 +2273,23 @@ impl Borrowed<'_, '_> {
         self.conn.as_ref().expect("held until dropped")
     }
 
+    /// Open the `db.txn` span for the transaction about to begin.
+    fn begin_txn_span(&mut self, desc: &'static str, readonly: bool) {
+        let txn_id = next_txn_id();
+        self.txn_span = Some(tracing::info_span!(
+            parent: &self.connection_span,
+            "db.txn",
+            db.txn_desc = desc,
+            db.txn_id = %format_args!("{desc}-{txn_id:x}"),
+            db.readonly = readonly,
+        ));
+    }
+
+    /// The parent of this connection's `db.query` spans.
+    fn query_parent(&self) -> &tracing::Span {
+        self.txn_span.as_ref().unwrap_or(&self.connection_span)
+    }
+
     /// Await `request`, sending the transaction's `BEGIN` in front of it if
     /// no statement has sent it yet. tokio-postgres sends a request when its
     /// future is first polled, and `join` polls the `BEGIN` first.
@@ -2260,6 +2298,8 @@ impl Borrowed<'_, '_> {
         request: impl std::future::Future<Output = Result<T, tokio_postgres::Error>>,
     ) -> anyhow::Result<Result<T, tokio_postgres::Error>> {
         let begin = lock_ignoring_poison(&self.pending_begin).take();
+        // Called inside the statement's `db.query` span.
+        tracing::Span::current().record("db.begin", begin.is_some());
         let Some(begin) = begin else {
             return Ok(request.await);
         };
@@ -2280,19 +2320,25 @@ impl Borrowed<'_, '_> {
     ) -> anyhow::Result<Vec<Row>> {
         let start = Instant::now();
         let conn = self.conn();
+        let span = db_query_span(Some(self.query_parent()), sql);
         // A pending `BEGIN` goes with the statement's first request: its
         // execution if it is cached, otherwise its prepare.
-        let rows = match conn.cached(sql) {
-            Some(statement) => self.after_begin(conn.query(&statement, params)).await?,
-            None => {
-                let statement = self
-                    .after_begin(conn.prepare_cached(sql, false))
-                    .await?
-                    .with_context(|| format!("preparing {}", sql.trim()))?;
-                conn.query(&statement, params).await
+        let rows = traced_query(span, async {
+            let cached = conn.cached(sql);
+            tracing::Span::current().record("db.prepared", cached.is_none());
+            match cached {
+                Some(statement) => self.after_begin(conn.query(&statement, params)).await?,
+                None => {
+                    let statement = self
+                        .after_begin(conn.prepare_cached(sql, false))
+                        .await?
+                        .with_context(|| format!("preparing {}", sql.trim()))?;
+                    conn.query(&statement, params).await
+                }
             }
-        }
-        .with_context(|| format!("running {}", sql.trim()))?;
+            .with_context(|| format!("running {}", sql.trim()))
+        })
+        .await?;
         self.record(start, rows.len());
         if log::log_enabled!(log::Level::Debug) {
             let head: String = sql.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
@@ -2312,10 +2358,13 @@ impl Borrowed<'_, '_> {
         sql: &str,
     ) -> anyhow::Result<Vec<Vec<tokio_postgres::SimpleQueryRow>>> {
         let start = Instant::now();
-        let messages = self
-            .after_begin(self.conn().simple_query(sql))
-            .await?
-            .with_context(|| format!("running {}", sql.trim()))?;
+        let span = db_query_span(Some(self.query_parent()), sql);
+        let messages = traced_query(span, async {
+            self.after_begin(self.conn().simple_query(sql))
+                .await?
+                .with_context(|| format!("running {}", sql.trim()))
+        })
+        .await?;
         let mut results: Vec<Vec<tokio_postgres::SimpleQueryRow>> = Vec::new();
         let mut current = Vec::new();
         let mut rows = 0;
@@ -2336,9 +2385,13 @@ impl Borrowed<'_, '_> {
     /// Run statements that return nothing.
     pub(crate) async fn execute(&self, sql: &str) -> anyhow::Result<()> {
         let start = Instant::now();
-        self.after_begin(self.conn().batch_execute(sql))
-            .await?
-            .with_context(|| format!("running {sql}"))?;
+        let span = db_query_span(Some(self.query_parent()), sql);
+        traced_query(span, async {
+            self.after_begin(self.conn().batch_execute(sql))
+                .await?
+                .with_context(|| format!("running {sql}"))
+        })
+        .await?;
         self.record(start, 0);
         Ok(())
     }
@@ -2359,6 +2412,9 @@ impl Borrowed<'_, '_> {
             self.in_transaction = false;
         }
         if self.in_transaction {
+            if let Some(txn_span) = &self.txn_span {
+                tracing::info!(parent: txn_span, message = "commit");
+            }
             self.execute("COMMIT").await?;
             self.in_transaction = false;
         }
@@ -2383,12 +2439,16 @@ impl Drop for Borrowed<'_, '_> {
         // do that on, the connection is dropped rather than returned.
         match Handle::try_current() {
             Ok(handle) => {
-                handle.spawn(async move {
-                    if let Err(e) = conn.batch_execute("ROLLBACK").await {
-                        warn!("Failed to roll back a sync transaction: {e}");
+                let span = tracing::info_span!(parent: self.query_parent(), "db.rollback");
+                handle.spawn(
+                    async move {
+                        if let Err(e) = conn.batch_execute("ROLLBACK").await {
+                            warn!("Failed to roll back a sync transaction: {e}");
+                        }
+                        drop(conn);
                     }
-                    drop(conn);
-                });
+                    .instrument(span),
+                );
             }
             Err(_) => {
                 drop(PooledConnection::take(conn));
@@ -3019,4 +3079,133 @@ fn events_to_py(py: Python<'_>, events: Vec<Event>) -> PyResult<Vec<Py<Event>>> 
 
 pub fn register_test_classes(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySyncStoreForTest>()
+}
+
+#[cfg(test)]
+mod tracing_tests {
+    //! Against a real server: these run when `SYNAPSE_TEST_POSTGRES_DSN` is
+    //! set, and otherwise do nothing.
+
+    use super::*;
+    use crate::caches::registry::CacheRegistry;
+    use crate::logging::opentracing::layer::testing::{tag, traced};
+    use crate::logging::opentracing::thrift::{FinishedSpan, TagValue};
+    use crate::logging::opentracing::SamplerConfig;
+    use crate::storage::caches::StoreCaches;
+    use crate::storage::pool_querier::tests::test_pool;
+
+    fn store() -> SyncStore {
+        let registry = CacheRegistry::new();
+        SyncStore::new(
+            Arc::new(StoreCaches::new(&registry, 10)),
+            SyncStoreConfig {
+                retention_enabled: false,
+                retention_default_min_lifetime: None,
+                retention_default_max_lifetime: None,
+            },
+        )
+    }
+
+    fn named<'a>(spans: &'a [FinishedSpan], name: &str) -> Vec<&'a FinishedSpan> {
+        spans.iter().filter(|span| span.operation == name).collect()
+    }
+
+    /// A committed transaction: `db.connection` → `db.txn` → a `db.query`
+    /// carrying the BEGIN, then the COMMIT's.
+    #[test]
+    fn traced_transaction() {
+        let Some((rt, pool)) = test_pool() else {
+            return;
+        };
+        let store = store();
+        let (_, spans) = traced(SamplerConfig::Const(true), || {
+            rt.block_on(async {
+                let reader = store.reader(pool.clone());
+                let txn = reader.begin().await.unwrap();
+                txn.query("SELECT 1", &[]).await.unwrap();
+                txn.commit().await.unwrap();
+            })
+        });
+
+        let [connection] = named(&spans, "db.connection")[..] else {
+            panic!("expected one db.connection: {spans:#?}")
+        };
+        let [txn] = named(&spans, "db.txn")[..] else {
+            panic!("expected one db.txn: {spans:#?}")
+        };
+        assert_eq!(txn.parent_id, connection.span_id);
+        assert_eq!(tag(txn, "db.txn_desc"), Some(&TagValue::Str("sync".into())));
+        assert_eq!(tag(txn, "db.readonly"), Some(&TagValue::Bool(true)));
+        assert!(matches!(
+            tag(txn, "db.txn_id"),
+            Some(TagValue::Str(id)) if id.starts_with("sync-")
+        ));
+        // The connection span lasts from checkout until the borrow is done.
+        assert!(connection.start + connection.duration >= txn.start + txn.duration);
+        assert_eq!(txn.logs.len(), 1, "the commit log");
+
+        let queries = named(&spans, "db.query");
+        let [select, commit] = &queries[..] else {
+            panic!("expected two db.query spans: {spans:#?}")
+        };
+        for query in [select, commit] {
+            assert_eq!(query.parent_id, txn.span_id);
+        }
+        assert_eq!(tag(select, "db.begin"), Some(&TagValue::Bool(true)));
+        assert_eq!(tag(commit, "db.begin"), Some(&TagValue::Bool(false)));
+        assert_eq!(
+            tag(commit, "db.statement"),
+            Some(&TagValue::Str("COMMIT".into()))
+        );
+    }
+
+    /// A transaction dropped without committing rolls back in a
+    /// `db.rollback` span; a one-shot query has no `db.txn`.
+    #[test]
+    fn traced_rollback_and_one_shot() {
+        let Some((rt, pool)) = test_pool() else {
+            return;
+        };
+        let store = store();
+        let (_, spans) = traced(SamplerConfig::Const(true), || {
+            rt.block_on(async {
+                let reader = store.reader(pool.clone());
+                let txn = reader.begin_write().await.unwrap();
+                txn.query("SELECT 1", &[]).await.unwrap();
+                drop(txn);
+                reader.query_one_shot("SELECT 2", &[]).await.unwrap();
+                // Wait for the rollback, on its own task, to give its
+                // connection back.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    let status = pool.status();
+                    if status.available == status.size {
+                        break;
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "rollback never finished"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            })
+        });
+
+        let [txn] = named(&spans, "db.txn")[..] else {
+            panic!("expected one db.txn: {spans:#?}")
+        };
+        assert_eq!(tag(txn, "db.readonly"), Some(&TagValue::Bool(false)));
+        let [rollback] = named(&spans, "db.rollback")[..] else {
+            panic!("expected one db.rollback: {spans:#?}")
+        };
+        assert_eq!(rollback.parent_id, txn.span_id);
+
+        let connections = named(&spans, "db.connection");
+        assert_eq!(connections.len(), 2);
+        let one_shot = named(&spans, "db.query")
+            .into_iter()
+            .find(|query| tag(query, "db.statement") == Some(&TagValue::Str("SELECT 2".into())))
+            .expect("the one-shot query");
+        assert!(connections.iter().any(|c| c.span_id == one_shot.parent_id));
+    }
 }

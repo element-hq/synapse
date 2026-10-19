@@ -737,6 +737,12 @@ pub(crate) mod testing {
 
     /// Run `f` with a [`JaegerLayer`] as this thread's subscriber, returning
     /// the spans it reported in the order they closed.
+    ///
+    /// Spans must only be entered on this thread: run async code on a
+    /// current-thread runtime. The registry releases the reference an enter
+    /// takes through the thread's default subscriber, so a span entered on a
+    /// tokio worker thread never closes. (In production the layer is the
+    /// global default, which every thread sees.)
     pub(crate) fn traced<R>(
         sampler: SamplerConfig,
         f: impl FnOnce() -> R,

@@ -1089,7 +1089,7 @@ where
     let mut elapsed = Duration::ZERO;
     let mut attempt = 1;
     // One ID for every attempt, as Python names the transaction once.
-    let txn_id = NEXT_TXN_ID.fetch_add(1, Ordering::Relaxed);
+    let txn_id = next_txn_id();
     // Python's `db.{desc}` span: the whole interaction, every attempt and
     // the waits for a connection included.
     let span = tracing::info_span!(
@@ -1121,6 +1121,11 @@ where
 
 /// Numbers transactions for their `db.txn_id` tag, as Python numbers its own.
 static NEXT_TXN_ID: AtomicU64 = AtomicU64::new(0);
+
+/// A number for a transaction's `db.txn_id` tag, `{desc}-{number:x}`.
+pub(crate) fn next_txn_id() -> u64 {
+    NEXT_TXN_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 /// What each write interaction run in a [`with_txn_timings`] scope took,
 /// as `(name, seconds)`, in the order they finished.

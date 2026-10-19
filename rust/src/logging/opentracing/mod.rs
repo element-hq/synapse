@@ -145,6 +145,53 @@ pub fn record_error(span: &tracing::Span, error: &dyn std::fmt::Display) {
     tracing::info!(parent: span, event = "error", message = %error);
 }
 
+/// A `db.query` span for one round trip running `sql`, a child of `parent`
+/// (or of the current span, if `None`). `db.statement` is only filled in
+/// when the span is sampled. `db.queued`, `db.prepared` and `db.begin` are
+/// left for the caller to record.
+pub fn db_query_span(parent: Option<&tracing::Span>, sql: &str) -> tracing::Span {
+    let span = match parent {
+        Some(parent) => tracing::info_span!(
+            parent: parent,
+            "db.query",
+            db.type = "sql",
+            db.statement = tracing::field::Empty,
+            db.queued = tracing::field::Empty,
+            db.prepared = tracing::field::Empty,
+            db.begin = tracing::field::Empty,
+            error = tracing::field::Empty,
+        ),
+        None => tracing::info_span!(
+            "db.query",
+            db.type = "sql",
+            db.statement = tracing::field::Empty,
+            db.queued = tracing::field::Empty,
+            db.prepared = tracing::field::Empty,
+            db.begin = tracing::field::Empty,
+            error = tracing::field::Empty,
+        ),
+    };
+    if !sql.is_empty() && layer::is_sampled(&span) {
+        span.record("db.statement", one_line_sql(sql).as_str());
+    }
+    span
+}
+
+/// Run `request` in the `db.query` span `span`, marking the span failed
+/// if the request fails.
+pub async fn traced_query<T, E: std::fmt::Display>(
+    span: tracing::Span,
+    request: impl std::future::Future<Output = Result<T, E>>,
+) -> Result<T, E> {
+    use tracing::Instrument;
+
+    let result = request.instrument(span.clone()).await;
+    if let Err(error) = &result {
+        record_error(&span, error);
+    }
+    result
+}
+
 /// `sql` on one line, for the `db.statement` tag: each line trimmed, blank
 /// lines dropped, joined with spaces. Python's `_make_sql_one_line`.
 pub fn one_line_sql(sql: &str) -> String {
