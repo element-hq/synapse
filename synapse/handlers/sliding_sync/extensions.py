@@ -1086,126 +1086,137 @@ class SlidingSyncExtensionHandler:
             actual_room_ids=actual_room_ids,
         )
 
+        if not relevant_room_ids:
+            # No rooms are relevant, so shortcut out after recording
+            # any sticky events we're missing in out-of-scope rooms.
+            await self._record_sticky_events_in_out_of_scope_rooms(
+                previous_connection_state=previous_connection_state,
+                new_connection_state=new_connection_state,
+                relevant_room_ids=set(),
+                to_token=to_token,
+                from_token=from_token,
+            )
+            return SlidingSyncResult.Extensions.StickyEventsExtension(
+                room_id_to_sticky_events={},
+            )
+
         room_id_to_sticky_events: dict[str, list[FilteredEvent]] = {}
-        if len(relevant_room_ids) > 0:
-            # We need to handle the different cases depending on if we have sent
-            # down sticky events previously or not, so we split the relevant rooms
-            # up into different collections based on status.
-            initial_rooms: set[str] = set()
-            previously_rooms: dict[str, MultiWriterStreamToken] = {}
-            live_rooms: set[str] = set()
+        # We need to handle the different cases depending on if we have sent
+        # down sticky events previously or not, so we split the relevant rooms
+        # up into different collections based on status.
+        initial_rooms: set[str] = set()
+        previously_rooms: dict[str, MultiWriterStreamToken] = {}
+        live_rooms: set[str] = set()
 
-            for room_id in relevant_room_ids:
-                if not from_token or room_id in newly_joined_room_ids:
-                    initial_rooms.add(room_id)
-                    continue
+        for room_id in relevant_room_ids:
+            if not from_token or room_id in newly_joined_room_ids:
+                initial_rooms.add(room_id)
+                continue
 
-                # If we're sending down the room from scratch again for some
-                # reason, we should also resend all the sticky events.
-                room_result = actual_room_response_map.get(room_id)
-                if room_result is not None and room_result.initial:
-                    initial_rooms.add(room_id)
-                    continue
+            # If we're sending down the room from scratch again for some
+            # reason, we should also resend all the sticky events.
+            room_result = actual_room_response_map.get(room_id)
+            if room_result is not None and room_result.initial:
+                initial_rooms.add(room_id)
+                continue
 
-                room_status = previous_connection_state.sticky_events.have_sent_room(
-                    room_id
+            room_status = previous_connection_state.sticky_events.have_sent_room(
+                room_id
+            )
+            if room_status.status == HaveSentRoomFlag.LIVE:
+                live_rooms.add(room_id)
+            elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
+                assert room_status.last_token is not None
+                previously_rooms[room_id] = room_status.last_token
+            elif room_status.status == HaveSentRoomFlag.NEVER:
+                initial_rooms.add(room_id)
+            else:
+                assert_never(room_status.status)
+
+        # Build the groups of rooms to read sticky events for and their stream
+        # position to read from.
+        groups: list[tuple[AbstractSet[str], MultiWriterStreamToken]] = []
+        if initial_rooms:
+            # Read from the start of the stream to get all unexpired sticky
+            # events.
+            groups.append((initial_rooms, StreamToken.START.sticky_events_key))
+        previously_rooms_by_token: dict[MultiWriterStreamToken, set[str]] = {}
+        for room_id, last_token in previously_rooms.items():
+            previously_rooms_by_token.setdefault(last_token, set()).add(room_id)
+        groups.extend(
+            (room_ids, last_token)
+            for last_token, room_ids in previously_rooms_by_token.items()
+        )
+        if live_rooms:
+            assert from_token is not None
+            groups.append((live_rooms, from_token.stream_token.sticky_events_key))
+
+        now = self.clock.time_msec()
+        remaining_limit = min(
+            sticky_events_request.limit, StickyEvent.MAX_EVENTS_IN_SYNC
+        )
+        room_to_event_ids: dict[str, list[str]] = {}
+        for room_ids, group_from_token in groups:
+            if remaining_limit <= 0:
+                # We've run out of budget. Record that these rooms still need
+                # to be read from `group_from_token` on a subsequent request.
+                new_connection_state.sticky_events.record_partially_sent_rooms(
+                    room_ids, group_from_token
                 )
-                if room_status.status == HaveSentRoomFlag.LIVE:
-                    live_rooms.add(room_id)
-                elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
-                    assert room_status.last_token is not None
-                    previously_rooms[room_id] = room_status.last_token
-                elif room_status.status == HaveSentRoomFlag.NEVER:
-                    initial_rooms.add(room_id)
-                else:
-                    assert_never(room_status.status)
+                continue
 
-            # Build the groups of rooms to read sticky events for and their stream
-            # position to read from.
-            groups: list[tuple[AbstractSet[str], MultiWriterStreamToken]] = []
-            if initial_rooms:
-                # Read from the start of the stream to get all unexpired sticky
-                # events.
-                groups.append((initial_rooms, StreamToken.START.sticky_events_key))
-            previously_rooms_by_token: dict[MultiWriterStreamToken, set[str]] = {}
-            for room_id, last_token in previously_rooms.items():
-                previously_rooms_by_token.setdefault(last_token, set()).add(room_id)
-            groups.extend(
-                (room_ids, last_token)
-                for last_token, room_ids in previously_rooms_by_token.items()
+            (
+                read_to_token,
+                group_room_to_event_ids,
+            ) = await self.store.get_sticky_events_in_rooms(
+                room_ids,
+                from_token=group_from_token,
+                to_token=to_token.sticky_events_key,
+                now=now,
+                limit=remaining_limit,
             )
-            if live_rooms:
-                assert from_token is not None
-                groups.append((live_rooms, from_token.stream_token.sticky_events_key))
+            num_read = 0
+            for room_id, event_ids in group_room_to_event_ids.items():
+                room_to_event_ids.setdefault(room_id, []).extend(event_ids)
+                num_read += len(event_ids)
 
-            now = self.clock.time_msec()
-            remaining_limit = min(
-                sticky_events_request.limit, StickyEvent.MAX_EVENTS_IN_SYNC
-            )
-            room_to_event_ids: dict[str, list[str]] = {}
-            for room_ids, group_from_token in groups:
-                if remaining_limit <= 0:
-                    # We've run out of budget. Record that these rooms still need
-                    # to be read from `group_from_token` on a subsequent request.
-                    new_connection_state.sticky_events.record_partially_sent_rooms(
-                        room_ids, group_from_token
-                    )
-                    continue
-
-                (
-                    read_to_token,
-                    group_room_to_event_ids,
-                ) = await self.store.get_sticky_events_in_rooms(
-                    room_ids,
-                    from_token=group_from_token,
-                    to_token=to_token.sticky_events_key,
-                    now=now,
-                    limit=remaining_limit,
+            if num_read >= remaining_limit:
+                # We hit the limit, so there may be more sticky events to send
+                # for these rooms. Record where we got up to so that the next
+                # request continues from there.
+                new_connection_state.sticky_events.record_partially_sent_rooms(
+                    room_ids, read_to_token
                 )
-                num_read = 0
-                for room_id, event_ids in group_room_to_event_ids.items():
-                    room_to_event_ids.setdefault(room_id, []).extend(event_ids)
-                    num_read += len(event_ids)
+            else:
+                # We read everything up to `to_token` for these rooms.
+                new_connection_state.sticky_events.record_sent_rooms(room_ids)
+            remaining_limit -= num_read
 
-                if num_read >= remaining_limit:
-                    # We hit the limit, so there may be more sticky events to send
-                    # for these rooms. Record where we got up to so that the next
-                    # request continues from there.
-                    new_connection_state.sticky_events.record_partially_sent_rooms(
-                        room_ids, read_to_token
-                    )
-                else:
-                    # We read everything up to `to_token` for these rooms.
-                    new_connection_state.sticky_events.record_sent_rooms(room_ids)
-                remaining_limit -= num_read
+        # No need to preserve sticky event order here because we will
+        # reassemble it in the right order after.
+        all_sticky_event_ids = {
+            ev_id for evs in room_to_event_ids.values() for ev_id in evs
+        }
+        unfiltered_events = await self.store.get_events_as_list(all_sticky_event_ids)
+        filtered_events = await filter_and_transform_events_for_client(
+            self._storage_controllers,
+            sync_config.user.to_string(),
+            unfiltered_events,
+        )
+        filtered_event_map = {ev.event.event_id: ev for ev in filtered_events}
 
-            # No need to preserve sticky event order here because we will
-            # reassemble it in the right order after.
-            all_sticky_event_ids = {
-                ev_id for evs in room_to_event_ids.values() for ev_id in evs
-            }
-            unfiltered_events = await self.store.get_events_as_list(
-                all_sticky_event_ids
-            )
-            filtered_events = await filter_and_transform_events_for_client(
-                self._storage_controllers,
-                sync_config.user.to_string(),
-                unfiltered_events,
-            )
-            filtered_event_map = {ev.event.event_id: ev for ev in filtered_events}
+        for room_id, sticky_event_ids in room_to_event_ids.items():
+            filtered_events_for_room = [
+                filtered_event_map[event_id]
+                # This reintroduces the correct order
+                # (by the sticky events stream)
+                for event_id in sticky_event_ids
+                if event_id in filtered_event_map
+            ]
+            if len(filtered_events_for_room) == 0:
+                continue
 
-            for room_id, sticky_event_ids in room_to_event_ids.items():
-                filtered_events_for_room = [
-                    filtered_event_map[event_id]
-                    # This reintroduces the correct order
-                    # (by the sticky events stream)
-                    for event_id in sticky_event_ids
-                    if event_id in filtered_event_map
-                ]
-                if len(filtered_events_for_room) == 0:
-                    continue
-
-                room_id_to_sticky_events[room_id] = filtered_events_for_room
+            room_id_to_sticky_events[room_id] = filtered_events_for_room
 
         await self._record_sticky_events_in_out_of_scope_rooms(
             previous_connection_state=previous_connection_state,
