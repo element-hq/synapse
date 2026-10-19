@@ -281,8 +281,10 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         to_token: MultiWriterStreamToken,
     ) -> set[str]:
         """Given a set of room IDs, find out which of them have sticky events
-        (unexpired or not) with sticky stream positions after `from_token` and
-        at or before `to_token`.
+        in the `sticky_events` table (which may be expired and awaiting cleanup)
+        with sticky stream positions after `from_token` and at or before `to_token`.
+
+        Bounds: from_token < ... <= to_token
 
         Args:
             room_ids: The room IDs to check.
