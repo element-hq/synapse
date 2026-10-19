@@ -41,11 +41,11 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
         Arc, Mutex,
     },
     task::Poll,
@@ -60,8 +60,11 @@ use futures::{
 use log::warn;
 use tokio::runtime::Handle;
 use tokio_postgres::{types::ToSql, Row};
+use tracing::Instrument;
 
 use super::pool::{ConnectionPool, PooledConnection};
+use crate::logging::opentracing::layer::is_sampled;
+use crate::logging::opentracing::{one_line_sql, record_error};
 use crate::storage::events::Querier;
 
 /// Python's `MAX_NUMBER_OF_ATTEMPTS`.
@@ -458,11 +461,63 @@ impl WriteTxn {
     /// when its future is first polled and [`join_in_order`] polls them in
     /// order. A failure is reported as the first one on the wire: the
     /// requests after it fail only because it aborted the transaction.
+    ///
+    /// Each call is one `db.query` span: the unit the pipelining saves is a
+    /// round trip, not a statement. Its `db.statement` is the statement
+    /// `sqls` names (or `label`, for the `COMMIT`), and `db.queued`,
+    /// `db.queued_statements`, `db.prepared` and `db.begin` say what else
+    /// went with it.
     async fn send<'s, T, F>(
+        &'s self,
+        sqls: &[&str],
+        label: Option<&'static str>,
+        last: impl FnOnce(&'s PooledConnection, Vec<tokio_postgres::Statement>) -> F,
+        context: impl FnOnce() -> String,
+    ) -> Result<T, WriteError>
+    where
+        F: Future<Output = Result<T, tokio_postgres::Error>> + 's,
+    {
+        let span = tracing::info_span!(
+            "db.query",
+            db.type = "sql",
+            db.statement = tracing::field::Empty,
+            db.queued = tracing::field::Empty,
+            db.queued_statements = tracing::field::Empty,
+            db.prepared = tracing::field::Empty,
+            db.begin = tracing::field::Empty,
+            error = tracing::field::Empty,
+        );
+        let sampled = is_sampled(&span);
+        if sampled {
+            let statement = match label {
+                Some(label) => label.to_owned(),
+                None => sqls
+                    .iter()
+                    .map(|sql| one_line_sql(sql))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            };
+            if !statement.is_empty() {
+                span.record("db.statement", statement.as_str());
+            }
+        }
+        let result = self
+            .send_in_span(sqls, last, context, &span, sampled)
+            .instrument(span.clone())
+            .await;
+        if let Err(error) = &result {
+            record_error(&span, error);
+        }
+        result
+    }
+
+    async fn send_in_span<'s, T, F>(
         &'s self,
         sqls: &[&str],
         last: impl FnOnce(&'s PooledConnection, Vec<tokio_postgres::Statement>) -> F,
         context: impl FnOnce() -> String,
+        span: &tracing::Span,
+        sampled: bool,
     ) -> Result<T, WriteError>
     where
         F: Future<Output = Result<T, tokio_postgres::Error>> + 's,
@@ -470,6 +525,21 @@ impl WriteTxn {
         let conn = self.conn();
         let queued = self.take_queued();
         let mut begin = self.take_begin();
+        if sampled {
+            span.record("db.queued", queued.len() as u64);
+            span.record("db.begin", begin.is_some());
+            if !queued.is_empty() {
+                // Each distinct statement once, in order: a batch queues the
+                // same statement once per row.
+                let mut seen = HashSet::new();
+                let statements: Vec<String> = queued
+                    .iter()
+                    .filter(|q| seen.insert(&*q.sql))
+                    .map(|q| one_line_sql(&q.sql))
+                    .collect();
+                span.record("db.queued_statements", statements.join("; ").as_str());
+            }
+        }
 
         let sqls: Vec<&str> = queued
             .iter()
@@ -488,12 +558,21 @@ impl WriteTxn {
             .map(|(sql, _)| *sql)
             .collect();
         missing.sort_unstable();
+        if sampled {
+            span.record("db.prepared", missing.len() as u64);
+        }
         if !missing.is_empty() {
+            // A round trip of its own, so a span of its own.
+            let prepare_span = tracing::info_span!(
+                "db.prepare",
+                db.prepared = missing.len() as u64,
+                db.begin = begin.is_some(),
+            );
             let prepares = join_in_order(missing.iter().map(|sql| conn.prepare_cached(sql, false)));
             let prepared = match begin.take() {
-                None => prepares.await,
+                None => prepares.instrument(prepare_span).await,
                 Some(begin) => {
-                    let (begun, prepared) = join(begin, prepares).await;
+                    let (begun, prepared) = join(begin, prepares).instrument(prepare_span).await;
                     if let Err(e) = begun {
                         self.begin_failed.store(true, Ordering::Relaxed);
                         return Err(self.statement_failed("opening a transaction", e));
@@ -565,6 +644,7 @@ impl WriteTxn {
     ) -> Result<Vec<Row>, WriteError> {
         self.send(
             &[sql],
+            None,
             |conn, statements| async move { conn.query(&statements[0], params).await },
             || describe(sql),
         )
@@ -581,6 +661,7 @@ impl WriteTxn {
         let sqls: Vec<&str> = queries.iter().map(|(sql, _)| *sql).collect();
         self.send(
             &sqls,
+            None,
             |conn, statements| async move {
                 let results = join_in_order(
                     statements
@@ -610,6 +691,7 @@ impl WriteTxn {
     ) -> Result<u64, WriteError> {
         self.send(
             &[sql],
+            None,
             |conn, statements| async move { conn.execute(&statements[0], params).await },
             || describe(sql),
         )
@@ -630,6 +712,7 @@ impl WriteTxn {
         }
         self.send(
             &[sql],
+            None,
             |conn, statements| async move {
                 let statement = &statements[0];
                 let counts =
@@ -646,7 +729,8 @@ impl WriteTxn {
         if self.queued.lock().expect("not poisoned").is_empty() {
             return Ok(());
         }
-        self.send(&[], |_, _| async { Ok(()) }, String::new).await
+        self.send(&[], None, |_, _| async { Ok(()) }, String::new)
+            .await
     }
 
     /// Queue a write whose result nobody reads. It goes out ahead of the
@@ -813,8 +897,10 @@ impl WriteTxn {
             self.in_transaction = false;
             return Ok(());
         }
+        tracing::info!(message = "commit");
         self.send(
             &[],
+            Some("COMMIT"),
             |conn, _| conn.batch_execute("COMMIT"),
             || "committing".to_owned(),
         )
@@ -837,7 +923,12 @@ impl WriteTxn {
             // Dropping discards the connection.
             return;
         }
-        if let Err(e) = self.conn().batch_execute("ROLLBACK").await {
+        let rolled_back = self
+            .conn()
+            .batch_execute("ROLLBACK")
+            .instrument(tracing::info_span!("db.rollback"))
+            .await;
+        if let Err(e) = rolled_back {
             warn!("Failed to roll back a write transaction: {e}");
             // Leave `in_transaction` set: dropping discards the connection
             // rather than returning it to the pool.
@@ -997,19 +1088,39 @@ where
     // wait for one is not the transaction's.
     let mut elapsed = Duration::ZERO;
     let mut attempt = 1;
-    let result = loop {
-        let result = run_once(pool, commit, &mut f, &mut elapsed).await;
-        match result {
-            Err(error) if error.is_retryable() && attempt < MAX_ATTEMPTS => {
-                warn!("[TXN RETRY] {{{name}}} {error} {attempt}/{MAX_ATTEMPTS}");
-                attempt += 1;
+    // One ID for every attempt, as Python names the transaction once.
+    let txn_id = NEXT_TXN_ID.fetch_add(1, Ordering::Relaxed);
+    // Python's `db.{desc}` span: the whole interaction, every attempt and
+    // the waits for a connection included.
+    let span = tracing::info_span!(
+        "db.interaction",
+        otel.name = %format_args!("db.{name}"),
+        error = tracing::field::Empty,
+    );
+    let result = async {
+        loop {
+            let result = run_once(pool, name, txn_id, attempt, commit, &mut f, &mut elapsed).await;
+            match result {
+                Err(error) if error.is_retryable() && attempt < MAX_ATTEMPTS => {
+                    warn!("[TXN RETRY] {{{name}}} {error} {attempt}/{MAX_ATTEMPTS}");
+                    tracing::info!(message = "retry", error = %error, attempt);
+                    attempt += 1;
+                }
+                result => break result,
             }
-            result => break result,
         }
-    };
+    }
+    .instrument(span.clone())
+    .await;
+    if let Err(error) = &result {
+        record_error(&span, error);
+    }
     record_txn_timing(name, elapsed);
     result
 }
+
+/// Numbers transactions for their `db.txn_id` tag, as Python numbers its own.
+static NEXT_TXN_ID: AtomicU64 = AtomicU64::new(0);
 
 /// What each write interaction run in a [`with_txn_timings`] scope took,
 /// as `(name, seconds)`, in the order they finished.
@@ -1050,6 +1161,9 @@ pub fn record_txn_timing(name: &str, elapsed: Duration) {
 /// `elapsed`.
 async fn run_once<'env, T, F>(
     pool: &ConnectionPool,
+    name: &str,
+    txn_id: u64,
+    attempt_number: u32,
     commit: bool,
     f: &mut F,
     elapsed: &mut Duration,
@@ -1057,43 +1171,73 @@ async fn run_once<'env, T, F>(
 where
     F: for<'t> FnMut(&'t WriteTxn, &'t &'env ()) -> BoxFuture<'t, Result<T, WriteError>>,
 {
+    let waiting = Instant::now();
     let conn = pool.get().await.map_err(|e| match e {
         deadpool::managed::PoolError::Backend(e) => {
             WriteError::from_pg("checking out a database connection", e)
         }
         e => WriteError::Other(anyhow::anyhow!("checking out a database connection: {e}")),
     })?;
+    // On the interaction's span: Python records the wait for a connection
+    // outside `db.connection` too.
+    tracing::info!(
+        message = "checked out",
+        wait_ms = waiting.elapsed().as_secs_f64() * 1000.0
+    );
+
+    // Python's `db.connection`: from having the connection to giving it
+    // back.
     let start = Instant::now();
-    let result = attempt(conn, commit, f).await;
+    let result = attempt(conn, name, txn_id, attempt_number, commit, f)
+        .instrument(tracing::info_span!("db.connection"))
+        .await;
     *elapsed += start.elapsed();
     result
 }
 
 async fn attempt<'env, T, F>(
     conn: PooledConnection,
+    name: &str,
+    txn_id: u64,
+    attempt_number: u32,
     commit: bool,
     f: &mut F,
 ) -> Result<T, WriteError>
 where
     F: for<'t> FnMut(&'t WriteTxn, &'t &'env ()) -> BoxFuture<'t, Result<T, WriteError>>,
 {
-    let txn = WriteTxn::begin(conn);
-    match f(&txn, &&()).await {
-        Ok(value) if commit => {
-            txn.commit().await?;
-            Ok(value)
-        }
-        Ok(value) => {
-            // A dry run still checks its queued writes.
-            let flushed = txn.flush().await;
-            txn.rollback().await;
-            flushed.map(|()| value)
-        }
-        Err(error) => {
-            txn.rollback().await;
-            Err(error)
+    let span = tracing::info_span!(
+        "db.txn",
+        db.txn_desc = name,
+        db.txn_id = %format_args!("{name}-{txn_id:x}"),
+        db.attempt = attempt_number,
+        error = tracing::field::Empty,
+    );
+    let result = async {
+        let txn = WriteTxn::begin(conn);
+        match f(&txn, &&()).await {
+            Ok(value) if commit => {
+                txn.commit().await?;
+                Ok(value)
+            }
+            Ok(value) => {
+                // A dry run still checks its queued writes.
+                let flushed = txn.flush().await;
+                txn.rollback().await;
+                flushed.map(|()| value)
+            }
+            Err(error) => {
+                txn.rollback().await;
+                Err(error)
+            }
         }
     }
+    .instrument(span.clone())
+    .await;
+    if let Err(error) = &result {
+        record_error(&span, error);
+    }
+    result
 }
 
 /// The batch's row count, or `None` for an empty batch. All columns must
@@ -1168,6 +1312,7 @@ mod tests {
 
     use super::*;
     use crate::database::postgres::pool::{create_pool, PoolConfig};
+    use crate::logging::opentracing::thrift::{FinishedSpan, Tag};
 
     fn setup() -> Option<(Runtime, ConnectionPool, String)> {
         let Ok(dsn) = std::env::var("SYNAPSE_TEST_POSTGRES_DSN") else {
@@ -1720,6 +1865,190 @@ mod tests {
             assert_eq!(rows(&pool, &table).await[0].1, 21);
         });
         teardown(&rt, &pool, &table);
+    }
+
+    /// The spans of a traced write interaction: Python's `db.{name}` →
+    /// `db.connection` → `db.txn` → `db.query` tree, one `db.txn` per
+    /// attempt, and one `db.query` per round trip.
+    #[test]
+    fn traced_interaction_with_a_retry() {
+        use crate::logging::opentracing::layer::testing::{tag, traced};
+        use crate::logging::opentracing::thrift::TagValue;
+        use crate::logging::opentracing::SamplerConfig;
+
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        let (_, spans) = traced(SamplerConfig::Const(true), || {
+            rt.block_on(async {
+                pool.get()
+                    .await
+                    .unwrap()
+                    .batch_execute(&format!("INSERT INTO {table} (id, n) VALUES ('a', 0)"))
+                    .await
+                    .unwrap();
+
+                // The first attempt hits a serialization failure.
+                let attempts = Arc::new(AtomicU32::new(0));
+                run_write_interaction(&pool, "conflict", |txn, _| {
+                    let (pool, table, attempts) = (&pool, &table, Arc::clone(&attempts));
+                    async move {
+                        let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                        txn.query(&format!("SELECT n FROM {table} WHERE id = 'a'"), &[])
+                            .await?;
+                        if attempt == 1 {
+                            pool.get()
+                                .await
+                                .unwrap()
+                                .batch_execute(&format!(
+                                    "UPDATE {table} SET n = n + 10 WHERE id = 'a'"
+                                ))
+                                .await
+                                .unwrap();
+                        }
+                        txn.execute_later(
+                            format!("UPDATE {table}\n  SET n = n + 1\n  WHERE id = 'a'"),
+                            vec![],
+                        );
+                        txn.flush().await?;
+                        Ok(())
+                    }
+                    .boxed()
+                })
+                .await
+                .unwrap();
+            })
+        });
+        teardown(&rt, &pool, &table);
+
+        let named = |name: &str| -> Vec<&FinishedSpan> {
+            spans.iter().filter(|span| span.operation == name).collect()
+        };
+
+        let [interaction] = named("db.conflict")[..] else {
+            panic!("expected one db.conflict span: {spans:#?}")
+        };
+        assert_eq!(interaction.parent_id, 0);
+
+        let connections = named("db.connection");
+        assert_eq!(connections.len(), 2);
+        for connection in &connections {
+            assert_eq!(connection.parent_id, interaction.span_id);
+        }
+
+        // The retry log says why.
+        let retry = &interaction.logs[1].fields;
+        assert!(retry.contains(&Tag::new("attempt", TagValue::Long(1))));
+        assert!(retry.iter().any(|field| field.key == "error"));
+
+        let txns = named("db.txn");
+        assert_eq!(txns.len(), 2);
+        // Both attempts are one transaction to Python's way of naming them.
+        assert_eq!(tag(txns[0], "db.txn_id"), tag(txns[1], "db.txn_id"));
+        // The failed attempt is marked as Python marks a span an exception
+        // left, and so is the round trip that failed in it.
+        assert_eq!(tag(txns[0], "error"), Some(&TagValue::Bool(true)));
+        assert_eq!(tag(txns[1], "error"), None);
+        assert!(named("db.query").iter().any(|query| {
+            query.parent_id == txns[0].span_id && tag(query, "error") == Some(&TagValue::Bool(true))
+        }));
+        assert_eq!(tag(interaction, "error"), None);
+        let attempts: Vec<_> = txns.iter().map(|txn| tag(txn, "db.attempt")).collect();
+        assert_eq!(
+            attempts,
+            vec![Some(&TagValue::Long(1)), Some(&TagValue::Long(2))]
+        );
+        assert_eq!(
+            tag(txns[0], "db.txn_desc"),
+            Some(&TagValue::Str("conflict".into()))
+        );
+        assert_eq!(txns[0].parent_id, connections[0].span_id);
+        assert_eq!(txns[1].parent_id, connections[1].span_id);
+        // Checked out on the interaction's span, not the connection's.
+        assert_eq!(interaction.logs.len(), 3, "two checkouts and a retry");
+
+        // The failed attempt rolled back; the second committed.
+        let [rollback] = named("db.rollback")[..] else {
+            panic!("expected one db.rollback span: {spans:#?}")
+        };
+        assert_eq!(rollback.parent_id, txns[0].span_id);
+        let commit_logged = txns[1].logs.iter().any(|log| {
+            log.fields
+                .iter()
+                .any(|field| field.value == TagValue::Str("commit".into()))
+        });
+        assert!(commit_logged);
+
+        // Second attempt: the SELECT (with the BEGIN), the flush of the
+        // queued UPDATE, and the COMMIT, one span per round trip.
+        let queries: Vec<_> = named("db.query")
+            .into_iter()
+            .filter(|query| query.parent_id == txns[1].span_id)
+            .collect();
+        assert_eq!(queries.len(), 3, "{queries:#?}");
+        assert_eq!(tag(queries[0], "db.begin"), Some(&TagValue::Bool(true)));
+        assert_eq!(tag(queries[0], "db.queued"), Some(&TagValue::Long(0)));
+        assert_eq!(
+            tag(queries[0], "db.statement"),
+            Some(&TagValue::Str(
+                format!("SELECT n FROM {table} WHERE id = 'a'").into()
+            ))
+        );
+        assert_eq!(tag(queries[1], "db.begin"), Some(&TagValue::Bool(false)));
+        assert_eq!(tag(queries[1], "db.queued"), Some(&TagValue::Long(1)));
+        assert_eq!(tag(queries[1], "db.statement"), None);
+        assert_eq!(
+            tag(queries[1], "db.queued_statements"),
+            Some(&TagValue::Str(
+                format!("UPDATE {table} SET n = n + 1 WHERE id = 'a'").into()
+            ))
+        );
+        assert_eq!(
+            tag(queries[2], "db.statement"),
+            Some(&TagValue::Str("COMMIT".into()))
+        );
+
+        // The first SELECT was prepared in a round trip of its own.
+        assert!(named("db.prepare")
+            .iter()
+            .any(|prepare| { tag(prepare, "db.prepared") == Some(&TagValue::Long(1)) }));
+    }
+
+    /// Under an unsampled Python parent, an interaction reports nothing, even
+    /// with a sampler that would sample a trace starting in Rust: its spans
+    /// follow the parent's decision.
+    #[test]
+    fn interaction_under_an_unsampled_parent_reports_nothing() {
+        use crate::logging::context::testing::handle_with_span;
+        use crate::logging::opentracing::layer::testing::traced;
+        use crate::logging::opentracing::{SamplerConfig, SpanContext};
+
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        let parent = SpanContext {
+            trace_id: 5,
+            span_id: 6,
+            flags: 0,
+            baggage: None,
+        };
+        let (_, spans) = traced(SamplerConfig::Const(true), || {
+            rt.block_on(handle_with_span(Some(parent)).scope(async {
+                run_write_interaction(&pool, "quiet", |txn, _| {
+                    let table = table.clone();
+                    async move {
+                        txn.execute(&format!("INSERT INTO {table} (id, n) VALUES ('q', 1)"), &[])
+                            .await?;
+                        Ok(())
+                    }
+                    .boxed()
+                })
+                .await
+                .unwrap();
+            }))
+        });
+        teardown(&rt, &pool, &table);
+        assert!(spans.is_empty());
     }
 
     #[test]

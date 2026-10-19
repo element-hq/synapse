@@ -709,17 +709,17 @@ pub fn follows_from(span: &tracing::Span, context: &SpanContext) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod testing {
+    //! Collecting spans in memory, for tests of instrumented code.
+
     use std::sync::Mutex;
 
-    use tracing::Instrument;
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;
-    use crate::logging::context::testing::handle_with_span;
 
     #[derive(Default)]
-    struct MemorySink {
+    pub(crate) struct MemorySink {
         spans: Mutex<Vec<FinishedSpan>>,
     }
 
@@ -730,19 +730,45 @@ mod tests {
     }
 
     impl MemorySink {
-        fn take(&self) -> Vec<FinishedSpan> {
+        pub(crate) fn take(&self) -> Vec<FinishedSpan> {
             std::mem::take(&mut *self.spans.lock().unwrap())
         }
     }
 
     /// Run `f` with a [`JaegerLayer`] as this thread's subscriber, returning
     /// the spans it reported in the order they closed.
-    fn traced(sampler: SamplerConfig, f: impl FnOnce()) -> Vec<FinishedSpan> {
+    pub(crate) fn traced<R>(
+        sampler: SamplerConfig,
+        f: impl FnOnce() -> R,
+    ) -> (R, Vec<FinishedSpan>) {
         let sink = Arc::new(MemorySink::default());
         let dyn_sink: Arc<dyn SpanSink> = sink.clone();
         let layer = JaegerLayer::new(LayerTarget::new(&dyn_sink, sampler));
-        tracing::subscriber::with_default(Registry::default().with(layer), f);
-        sink.take()
+        let output = tracing::subscriber::with_default(Registry::default().with(layer), f);
+        (output, sink.take())
+    }
+
+    /// The value of the tag `key` on `span`.
+    pub(crate) fn tag<'a>(span: &'a FinishedSpan, key: &str) -> Option<&'a TagValue> {
+        span.tags
+            .iter()
+            .find(|tag| tag.key == key)
+            .map(|tag| &tag.value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tracing::Instrument;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    use super::testing::{tag, MemorySink};
+    use super::*;
+    use crate::logging::context::testing::handle_with_span;
+
+    /// [`testing::traced`] for closures that return nothing.
+    fn traced(sampler: SamplerConfig, f: impl FnOnce()) -> Vec<FinishedSpan> {
+        testing::traced(sampler, f).1
     }
 
     fn sampled_parent() -> SpanContext {
@@ -752,13 +778,6 @@ mod tests {
             flags: FLAG_SAMPLED,
             baggage: Some(Arc::new(vec![("k".to_owned(), "v".to_owned())])),
         }
-    }
-
-    fn tag<'a>(span: &'a FinishedSpan, key: &str) -> Option<&'a TagValue> {
-        span.tags
-            .iter()
-            .find(|tag| tag.key == key)
-            .map(|tag| &tag.value)
     }
 
     #[test]

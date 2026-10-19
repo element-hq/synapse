@@ -24,6 +24,7 @@ use std::{
 use futures::{future::BoxFuture, FutureExt};
 use http::StatusCode;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyDict};
+use tracing::Instrument;
 
 use super::{
     batch,
@@ -1283,24 +1284,31 @@ async fn allocate_stream_orderings(
 ) -> anyhow::Result<Vec<i64>> {
     let start = std::time::Instant::now();
     let mut attempt = 1;
-    loop {
-        let result = async {
-            let querier = PoolQuerier::checkout(pool).await?;
-            stream.next_ids_outside_txn(&querier, n).await
-        }
-        .await;
-        // As Python's `runInteraction`, retries included.
-        if !matches!(&result, Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(e)) {
-            record_txn_timing("_load_next_mult_id", start.elapsed());
-        }
-        match result {
-            Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(&e) => {
-                log::warn!("[TXN RETRY] {{_load_next_mult_id}} {e:#} {attempt}/{MAX_ATTEMPTS}");
-                attempt += 1;
+    // Python's `db.{desc}` span for the same interaction.
+    let span = tracing::info_span!("db.interaction", otel.name = "db._load_next_mult_id");
+    async {
+        loop {
+            let result = async {
+                let querier = PoolQuerier::checkout(pool).await?;
+                stream.next_ids_outside_txn(&querier, n).await
             }
-            result => return result,
+            .await;
+            // As Python's `runInteraction`, retries included.
+            if !matches!(&result, Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(e)) {
+                record_txn_timing("_load_next_mult_id", start.elapsed());
+            }
+            match result {
+                Err(e) if attempt < MAX_ATTEMPTS && is_retryable_error(&e) => {
+                    log::warn!("[TXN RETRY] {{_load_next_mult_id}} {e:#} {attempt}/{MAX_ATTEMPTS}");
+                    tracing::info!(message = "retry", error = %e, attempt);
+                    attempt += 1;
+                }
+                result => return result,
+            }
         }
     }
+    .instrument(span)
+    .await
 }
 
 /// Set each event's stream ordering from `ids`, in order, with the time

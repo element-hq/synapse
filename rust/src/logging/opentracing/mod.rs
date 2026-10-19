@@ -134,6 +134,27 @@ fn span_context_from_scope(scope: &Bound<'_, PyAny>) -> PyResult<Option<SpanCont
     }))
 }
 
+/// Mark `span` as failed, as opentracing's `Scope` does when an exception
+/// leaves it: an `error = true` tag, and an `error` log with the message.
+/// `span` must declare an `error` field (`error = tracing::field::Empty`).
+pub fn record_error(span: &tracing::Span, error: &dyn std::fmt::Display) {
+    if span.is_disabled() {
+        return;
+    }
+    span.record("error", true);
+    tracing::info!(parent: span, event = "error", message = %error);
+}
+
+/// `sql` on one line, for the `db.statement` tag: each line trimmed, blank
+/// lines dropped, joined with spaces. Python's `_make_sql_one_line`.
+pub fn one_line_sql(sql: &str) -> String {
+    sql.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The process-wide settings for reporting spans to the Jaeger agent, copied
 /// from the Python tracer so that Rust spans show up under the same service.
 #[derive(Clone, Debug, PartialEq)]
