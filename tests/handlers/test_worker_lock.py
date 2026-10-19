@@ -59,6 +59,33 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         self.get_success(d2)
         self.get_success(lock2.__aexit__(None, None, None))
 
+    def test_wait_for_current_read_lock_holders_locally(self) -> None:
+        """Only read locks present in the initial snapshot are waited for."""
+        lock1 = self.worker_lock_handler.acquire_read_write_lock(
+            "name", "key", write=False
+        )
+        self.get_success(lock1.__aenter__())
+
+        wait = defer.ensureDeferred(
+            self.worker_lock_handler.wait_for_current_read_write_lock_holders(
+                "name", "key", write=False
+            )
+        )
+        self.pump()
+        self.assertNoResult(wait)
+
+        # This lock is acquired after the waiter took its snapshot, so it must not
+        # prevent the waiter from completing.
+        lock2 = self.worker_lock_handler.acquire_read_write_lock(
+            "name", "key", write=False
+        )
+        self.get_success(lock2.__aenter__())
+
+        self.get_success(lock1.__aexit__(None, None, None))
+        self.get_success(wait)
+
+        self.get_success(lock2.__aexit__(None, None, None))
+
     def test_timeouts_for_lock_locally(self) -> None:
         """
         Test that we regularly retry to reacquire locks.
@@ -199,6 +226,35 @@ class WorkerLockWorkersTestCase(BaseMultiWorkerStreamTestCase):
         self.get_success(lock1.__aexit__(None, None, None))
 
         self.get_success(d2)
+        self.get_success(lock2.__aexit__(None, None, None))
+
+    def test_wait_for_current_read_lock_holders_worker(self) -> None:
+        """A snapshot waiter observes read locks held on another worker."""
+        worker = self.make_worker_hs(
+            "synapse.app.generic_worker",
+            extra_config={
+                "redis": {"enabled": True},
+            },
+        )
+        worker_lock_handler = worker.get_worker_locks_handler()
+
+        lock1 = worker_lock_handler.acquire_read_write_lock("name", "key", write=False)
+        self.get_success(lock1.__aenter__())
+
+        wait = defer.ensureDeferred(
+            self.main_worker_lock_handler.wait_for_current_read_write_lock_holders(
+                "name", "key", write=False
+            )
+        )
+        self.pump()
+        self.assertNoResult(wait)
+
+        lock2 = worker_lock_handler.acquire_read_write_lock("name", "key", write=False)
+        self.get_success(lock2.__aenter__())
+
+        self.get_success(lock1.__aexit__(None, None, None))
+        self.get_success(wait)
+
         self.get_success(lock2.__aexit__(None, None, None))
 
     def test_timeouts_for_lock_worker(self) -> None:

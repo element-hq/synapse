@@ -925,16 +925,6 @@ class FederationServer(FederationBase):
             # FIXME: We don't yet support faster room joins in Synapse with MSC4242
             caller_supports_partial_state = False
 
-        # Use the join event's own stream ordering as the upper bound when fetching
-        # forward extremities (below), so we only consider extremities that existed at
-        # or before the join rather than those introduced by concurrent writes that
-        # occur while we prepare the response.
-        # Note: in workers mode the event is persisted on a separate worker, so
-        # event.internal_metadata.stream_ordering is not populated here; query the DB.
-        stream_ordering_of_join = (
-            await self.store.get_position_for_event(event.event_id)
-        ).stream
-
         prev_state_ids = await context.get_prev_state_ids()
 
         state_event_ids: Collection[str]
@@ -989,23 +979,27 @@ class FederationServer(FederationBase):
             resp["state"] = serialize_and_filter_pdus(state_events, time_now)
             resp["auth_chain"] = serialize_and_filter_pdus(auth_chain_events, time_now)
 
-        # Check the forward extremities for the room here. If there is more than one, it
-        # is likely that another event was created in the room during the
-        # make_join/send_join handshake. The joining server is likely to thus miss this event
-        # until a second event is created that references it - which could be some time.
-        # In that case, we proactively send a dummy extensible event that ties these
-        # forward extremities together. The remote server will then attempt to backfill
-        # the missing event on its own.
+        # Snapshot event creations which were already in progress when the join was
+        # persisted, then wait for that snapshot to finish. These creations may have
+        # selected prev_events which do not include the join. Event creations which
+        # start later are not waited for: they select prev_events after the join and
+        # will be sent to the newly joined server through normal federation.
+        await self._worker_lock_handler.wait_for_current_read_write_lock_holders(
+            NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
+        )
+
+        # Check the current forward extremities for the room here. If there is more
+        # than one, an event was created in the room during the make_join/send_join
+        # handshake. The joining server is likely to miss this event until a second
+        # event references it - which could be some time. In that case, we proactively
+        # send a dummy extensible event that ties these forward extremities together.
+        # The remote server will then attempt to backfill the missing event on its own.
         #
         # By not sending the 'missing event' directly, but instead having the joining
         # homeserver backfill it, the stream ordering for the missing event will be
         # "before" the join (which is what we expect).
 
-        forward_extremities = (
-            await self.store.get_forward_extremities_for_room_at_stream_ordering(
-                room_id, stream_ordering_of_join
-            )
-        )
+        forward_extremities = await self.store.get_latest_event_ids_in_room(room_id)
 
         if len(forward_extremities) > 1:
             # The likelihood of this being used is extremely low, thus only build the handler
