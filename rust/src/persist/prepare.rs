@@ -40,6 +40,8 @@ use std::{
     sync::Arc,
 };
 
+use tracing::Instrument;
+
 use super::{
     chain_cover::{self, ChainCoverEvent, NewEventChainLinks},
     context::PersistContext,
@@ -155,6 +157,7 @@ pub async fn prepare_chunk(
         let state = if input.backfilled {
             StateAndExtremities::default()
         } else {
+            let span = tracing::info_span!("persist.state_delta");
             let result = if input.state_dag {
                 state_delta::process_state_dag_forward_extremities_and_state_delta(
                     reader,
@@ -166,6 +169,7 @@ pub async fn prepare_chunk(
                     now_ms()?,
                     counts,
                 )
+                .instrument(span)
                 .await
             } else {
                 state_delta::calculate_new_forward_extremities_and_state_delta(
@@ -178,6 +182,7 @@ pub async fn prepare_chunk(
                     now_ms()?,
                     counts,
                 )
+                .instrument(span)
                 .await
             };
             match result {
@@ -200,6 +205,7 @@ pub async fn prepare_chunk(
                     &input.sliding_sync_events,
                     delta,
                 )
+                .instrument(tracing::info_span!("persist.sliding_sync"))
                 .await?,
             );
             if options.sticky {
@@ -210,6 +216,7 @@ pub async fn prepare_chunk(
                     delta,
                     now_ms()?,
                 )
+                .instrument(tracing::info_span!("persist.sticky"))
                 .await?;
             }
         }
@@ -221,7 +228,8 @@ pub async fn prepare_chunk(
         room_id,
         &input.chain_cover_events,
         options.dry_run,
-    );
+    )
+    .instrument(tracing::info_span!("persist.chain_cover"));
 
     let (state_part, new_event_links) = futures::future::join(state_part, chain_cover).await;
     // The state's outcome first, as when it was worked out first.

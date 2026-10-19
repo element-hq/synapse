@@ -252,7 +252,9 @@ impl Persister {
         let state = Arc::clone(&batch.state);
         let inner = Arc::clone(&self.inner);
         async move {
-            let (step, timings) = with_txn_timings(batch_next(&mut *state.lock().await)).await;
+            let (step, timings) = with_txn_timings(batch_next(&mut *state.lock().await))
+                .instrument(tracing::info_span!("persist.batch_next"))
+                .await;
             Ok(match reported(&inner, step, &timings)? {
                 BatchStep::Written(mut chunk) => {
                     chunk.effects.add_txn_timings(timings);
@@ -277,6 +279,7 @@ impl Persister {
                 state.done = true;
                 state.release_guard(true).await
             })
+            .instrument(tracing::info_span!("persist.batch_abort"))
             .await;
             // Nothing carries them back to Python, which gives up.
             inner.metrics.record_failed_txn_timings(timings);
@@ -293,8 +296,11 @@ impl Persister {
         let pool = self.inner.pool.get()?;
         let inner = Arc::clone(&self.inner);
         Ok(async move {
-            let (update, timings) =
-                with_txn_timings(update_current_state(&inner, &pool, &room_id)).await;
+            let span =
+                tracing::info_span!("persist.update_current_state", room_id = room_id.as_str(),);
+            let (update, timings) = with_txn_timings(update_current_state(&inner, &pool, &room_id))
+                .instrument(span)
+                .await;
             let mut update = reported(&inner, update, &timings)?;
             update.txn_timings = timings;
             Ok(update)
@@ -595,6 +601,23 @@ async fn prepare_chunk(
     input: &PrepareInput,
     shadow: bool,
 ) -> anyhow::Result<(Prepared, PersistCounts)> {
+    let span = tracing::info_span!(
+        "persist.prepare_chunk",
+        room_id = input.room_id.as_str(),
+        events = input.events.len() as u64,
+        backfilled = input.backfilled,
+    );
+    prepare_chunk_in_span(inner, pool, input, shadow)
+        .instrument(span)
+        .await
+}
+
+async fn prepare_chunk_in_span(
+    inner: &PersisterInner,
+    pool: &ConnectionPool,
+    input: &PrepareInput,
+    shadow: bool,
+) -> anyhow::Result<(Prepared, PersistCounts)> {
     let resolver = NativeStateResolver {
         pool: pool.clone(),
         handle: inner.runtime.tokio_handle()?,
@@ -630,6 +653,33 @@ async fn prepare_chunk(
 /// stream orderings first if `orderings` says so. Resolves with the
 /// effects, whose stream IDs are unfinished.
 async fn write_chunk(
+    inner: &PersisterInner,
+    pool: &ConnectionPool,
+    room_id: &str,
+    events: Vec<(Event, PersistContext)>,
+    chunk: &prepare::PreparedChunk,
+    orderings: StreamOrderings,
+    inhibit_local_membership_updates: bool,
+) -> PyResult<PersistEffects> {
+    let span = tracing::info_span!(
+        "persist.write_chunk",
+        room_id = room_id,
+        events = events.len() as u64,
+    );
+    write_chunk_in_span(
+        inner,
+        pool,
+        room_id,
+        events,
+        chunk,
+        orderings,
+        inhibit_local_membership_updates,
+    )
+    .instrument(span)
+    .await
+}
+
+async fn write_chunk_in_span(
     inner: &PersisterInner,
     pool: &ConnectionPool,
     room_id: &str,

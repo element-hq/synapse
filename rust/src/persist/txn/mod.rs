@@ -46,6 +46,7 @@ use anyhow::anyhow;
 use pyo3::PyErr;
 use serde_json::Value;
 use tokio_postgres::types::ToSql;
+use tracing::Instrument;
 
 use self::streams::TxnStream;
 use super::{
@@ -339,7 +340,14 @@ async fn persist_events_txn_steps<'a>(
         );
     }
     let prefetch = input.cache_stream.begin_prefetch();
-    let mut results = txn.query_many(&queries).await?.into_iter();
+    // The step spans below time each step's own work. Most steps only queue
+    // their writes, which go out, and are timed, in the next round trip's
+    // `db.query` (`db.queued` says how many it carried).
+    let mut results = txn
+        .query_many(&queries)
+        .instrument(tracing::info_span!("persist.txn.read"))
+        .await?
+        .into_iter();
     if new_room.is_none() && results.next().is_some_and(|rows| rows.is_empty()) {
         return Err(anyhow!("Room does not exist {room_id}").into());
     }
@@ -359,7 +367,9 @@ async fn persist_events_txn_steps<'a>(
     // bug, kept.
     events::delete_sticky_events(txn, &newly_redacted).await?;
 
-    events::store_events(txn, input, &events).await?;
+    events::store_events(txn, input, &events)
+        .instrument(tracing::info_span!("persist.txn.store_events"))
+        .await?;
 
     let state = &input.prepared.state;
     if let Some(extremities) = state
@@ -379,12 +389,16 @@ async fn persist_events_txn_steps<'a>(
 
     events::persist_transaction_ids(txn, input, &events).await?;
     events::store_state_mappings(txn, &events, effects).await?;
-    events::persist_auth_chain(txn, &events, &input.prepared.new_event_links).await?;
+    events::persist_auth_chain(txn, &events, &input.prepared.new_event_links)
+        .instrument(tracing::info_span!("persist.txn.auth_chain"))
+        .await?;
 
     // From here on, only events that were not rejected.
     let events = events::store_rejections(txn, input, events).await?;
 
-    metadata::update_metadata_tables(txn, input, &events, &redacted, effects).await?;
+    metadata::update_metadata_tables(txn, input, &events, &redacted, effects)
+        .instrument(tracing::info_span!("persist.txn.metadata"))
+        .await?;
 
     // Last, as it reads the memberships the metadata step stored.
     if let Some(delta) = &state.state_delta {
@@ -392,6 +406,7 @@ async fn persist_events_txn_steps<'a>(
             anyhow!("a state delta for {room_id} without its sliding sync changes")
         })?;
         current_state::update_current_state(txn, input, delta, changes, min_stream_order, effects)
+            .instrument(tracing::info_span!("persist.txn.current_state"))
             .await?;
     }
 
@@ -411,7 +426,9 @@ async fn persist_events_txn_steps<'a>(
         sticky::un_soft_fail_sticky_events(txn, input, &un_soft_fail, effects).await?;
     }
 
-    sliding_sync::update_sliding_sync_joined_room(txn, room_id, &events).await?;
+    sliding_sync::update_sliding_sync_joined_room(txn, room_id, &events)
+        .instrument(tracing::info_span!("persist.txn.sliding_sync"))
+        .await?;
 
     Ok(())
 }

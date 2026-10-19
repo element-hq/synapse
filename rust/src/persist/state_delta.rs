@@ -56,6 +56,7 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use log::info;
 use tokio::runtime::Handle;
+use tracing::Instrument;
 
 use super::{
     extremities::{
@@ -518,9 +519,21 @@ pub async fn get_new_state_after_events(
     }
     let state_sets: Vec<Arc<StateMap>> =
         groups.iter().map(|(_, state)| Arc::clone(state)).collect();
+    let span = tracing::info_span!(
+        "persist.state_res",
+        state_sets = state_sets.len() as u64,
+        total_ms = tracing::field::Empty,
+        db_ms = tracing::field::Empty,
+    );
     let (state, stats) = resolver
         .resolve(room_id, room_version, &state_sets, event_map)
+        .instrument(span.clone())
         .await?;
+    // Zero when nothing conflicted and nothing was resolved.
+    if stats.total_time > 0.0 {
+        span.record("total_ms", stats.total_time * 1000.0);
+        span.record("db_ms", stats.db_time * 1000.0);
+    }
     counts.state_resolutions += 1;
 
     // If the resolved state is one of the new groups, the extremities in
@@ -605,9 +618,21 @@ pub async fn calculate_current_state(
         .iter()
         .map(|group| state_groups_map.get(group).cloned().unwrap_or_default())
         .collect();
+    let span = tracing::info_span!(
+        "persist.state_res",
+        state_sets = state_sets.len() as u64,
+        total_ms = tracing::field::Empty,
+        db_ms = tracing::field::Empty,
+    );
     let (state, stats) = resolver
         .resolve(room_id, room_version, &state_sets, &EventMap::new())
+        .instrument(span.clone())
         .await?;
+    // Zero when nothing conflicted and nothing was resolved.
+    if stats.total_time > 0.0 {
+        span.record("total_ms", stats.total_time * 1000.0);
+        span.record("db_ms", stats.db_time * 1000.0);
+    }
     Ok((state, Some(stats)))
 }
 

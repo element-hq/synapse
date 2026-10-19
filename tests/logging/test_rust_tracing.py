@@ -15,14 +15,18 @@
 """Tests for reporting opentracing spans from Rust."""
 
 import socket
-from typing import Callable, cast
+from typing import Any, Callable, cast
+from unittest import SkipTest
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.logging.context import LoggingContext
 from synapse.logging.opentracing import _enable_rust_tracing, start_active_span
 from synapse.logging.rust_tracing_metrics import rust_tracing_collector
+from synapse.rest import admin
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.opentracing import (
     captured_span_for_test,
     set_tracing_enabled_for_test,
@@ -392,3 +396,175 @@ class ReporterRoundTripTestCase(HomeserverTestCase):
         stats = self.runtime.tracing_stats()
         assert stats is not None
         self.assertEqual(stats[5], 1)
+
+
+class PersistTracingTestCase(HomeserverTestCase):
+    """Events persisted by the Rust persister report the persister's steps,
+    with the write transaction's `db.*` spans under them.
+
+    Needs the native Rust Postgres driver:
+
+        SYNAPSE_TEST_RUST_DRIVER=1 POSTGRES=1 run-trial.sh tests.logging.test_rust_tracing
+    """
+
+    if jaeger_client is None:
+        skip = "Requires jaeger_client"  # type: ignore[unreachable]
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})["rust_event_persistence"] = (
+            "full"
+        )
+        return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        hs = self.setup_test_homeserver()
+        if not isinstance(
+            hs.get_datastores().main.db_pool._db_pool, RustConnectionPool
+        ):
+            raise SkipTest("needs the native Rust Postgres driver")
+        persistence = hs.get_storage_controllers().persistence
+        if persistence is None or persistence._rust_persister is None:
+            raise SkipTest("needs the Rust persister")
+        return hs
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.addCleanup(set_tracing_enabled_for_test, False)
+
+        self.agent = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.addCleanup(self.agent.close)
+        self.agent.bind(("127.0.0.1", 0))
+        port = self.agent.getsockname()[1]
+
+        config = jaeger_client.config.Config(
+            config={
+                "local_agent": {"reporting_host": "127.0.0.1", "reporting_port": port}
+            },
+            service_name="test service",
+            scope_manager=LogContextScopeManager(),
+        )
+        self.python_spans = jaeger_client.reporter.InMemoryReporter()
+        tracer = config.create_tracer(
+            sampler=ConstSampler(True), reporter=self.python_spans
+        )
+        self.user = self.register_user("user", "pass")
+        self.token = self.login("user", "pass")
+        self.room_id = self.helper.create_room_as(self.user, tok=self.token)
+
+        # Synapse's own spans, the request's and the persist queue's, come
+        # from the global tracer: make it this one, as `init_tracer` does.
+        previous_tracer = opentracing.global_tracer()
+        opentracing.set_global_tracer(tracer)
+        self.addCleanup(opentracing.set_global_tracer, previous_tracer)
+
+        _enable_rust_tracing(hs, config, tracer)
+        self.runtime = hs.get_rust_runtime()
+        self.addCleanup(self.runtime.shutdown_tracing_for_test)
+
+    def _received_spans(self) -> "list[ttypes.Span]":
+        """Every span sent so far."""
+        self.assertTrue(self.runtime.flush_tracing_for_test(5))
+        spans: list[ttypes.Span] = []
+        self.agent.settimeout(0.2)
+        while True:
+            try:
+                data, _ = self.agent.recvfrom(70_000)
+            except TimeoutError:
+                return spans
+            spans.extend(_decode_emit_batch(data).spans)
+
+    def test_persist_span_tree(self) -> None:
+        self.helper.send(self.room_id, "hello", tok=self.token)
+
+        spans = self._received_spans()
+        by_id = {span.spanId: span for span in spans}
+
+        def parent(span: "ttypes.Span") -> "ttypes.Span | None":
+            return by_id.get(span.parentSpanId)
+
+        def tags(span: "ttypes.Span") -> dict[str, Any]:
+            return {
+                tag.key: tag.vStr if tag.vType == ttypes.TagType.STRING else tag.vLong
+                for tag in span.tags
+            }
+
+        def named(name: str) -> "list[ttypes.Span]":
+            return [s for s in spans if s.operationName == name]
+
+        # The Rust persist hangs off the Python span of the persist queue,
+        # in the same trace as the request.
+        python_by_id = {
+            _signed(span.span_id): span for span in self.python_spans.get_spans()
+        }
+        (batch_next, _done) = named("persist.batch_next")
+        python_parent = python_by_id.get(batch_next.parentSpanId)
+        assert python_parent is not None, (batch_next, list(python_by_id.values()))
+        python_trace = _signed(python_parent.trace_id)
+        # The active Python span may be one the persist holds open, such as
+        # the lock it waits for: walk up to the persist queue's span.
+        ancestors = []
+        python_span: jaeger_client.Span | None = python_parent
+        while python_span is not None:
+            ancestors.append(python_span.operation_name)
+            parent_id = python_span.parent_id
+            python_span = python_by_id.get(_signed(parent_id)) if parent_id else None
+        self.assertIn("persist_event_batch", ancestors)
+        for span in spans:
+            if _in_subtree(span, batch_next, by_id):
+                self.assertEqual(span.traceIdLow, python_trace, span)
+
+        # persist.batch_next → persist.prepare_chunk and persist.write_chunk
+        (prepare_chunk,) = named("persist.prepare_chunk")
+        (write_chunk,) = named("persist.write_chunk")
+        self.assertEqual(prepare_chunk.parentSpanId, batch_next.spanId)
+        self.assertEqual(write_chunk.parentSpanId, batch_next.spanId)
+        self.assertEqual(tags(write_chunk)["room_id"], self.room_id)
+        for stage in ("persist.state_delta", "persist.chain_cover"):
+            (stage_span,) = named(stage)
+            self.assertEqual(stage_span.parentSpanId, prepare_chunk.spanId)
+
+        # persist.write_chunk → db.persist_events → db.connection → db.txn
+        (interaction,) = named("db.persist_events")
+        self.assertEqual(interaction.parentSpanId, write_chunk.spanId)
+        txns = []
+        for txn in named("db.txn"):
+            connection = parent(txn)
+            if connection is not None and connection.parentSpanId == interaction.spanId:
+                txns.append(txn)
+        self.assertEqual(len(txns), 1)
+        (txn,) = txns
+        self.assertEqual(tags(txn)["db.txn_desc"], "persist_events")
+
+        # The transaction's writes go out queued, with the statements that
+        # read and with the COMMIT.
+        queries = [s for s in named("db.query") if s.parentSpanId == txn.spanId]
+        self.assertGreater(len(queries), 0)
+        self.assertTrue(
+            any(tags(query).get("db.queued", 0) > 0 for query in queries), queries
+        )
+        self.assertIn("COMMIT", [tags(query).get("db.statement") for query in queries])
+
+        # The transaction's steps are children of the transaction.
+        steps = {s.operationName for s in spans if s.parentSpanId == txn.spanId} - {
+            "db.query",
+            "db.rollback",
+        }
+        self.assertIn("persist.txn.read", steps)
+        self.assertIn("persist.txn.store_events", steps)
+
+
+def _in_subtree(
+    span: "ttypes.Span", root: "ttypes.Span", by_id: "dict[int, ttypes.Span]"
+) -> bool:
+    while True:
+        if span.spanId == root.spanId:
+            return True
+        if span.parentSpanId not in by_id:
+            return False
+        span = by_id[span.parentSpanId]
