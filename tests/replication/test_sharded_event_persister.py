@@ -19,12 +19,15 @@
 #
 #
 
+from unittest.mock import patch
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
-from synapse.rest.client import login, room, sync
+from synapse.rest.client import directory, login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.types import RoomAlias
 from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -312,3 +315,61 @@ class EventPersisterShardTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(
             channel.json_body["chunk"][0]["event_id"], first_event_in_room2
         )
+
+
+class RoomIdCollisionOnPersisterTestCase(BaseMultiWorkerStreamTestCase):
+    """A new room whose ID is taken, found by an event persister on another
+    worker, is created again under a fresh ID."""
+
+    servlets = [
+        admin.register_servlets_for_client_rest_resource,
+        room.register_servlets,
+        login.register_servlets,
+        directory.register_servlets,
+    ]
+
+    def default_config(self) -> dict:
+        conf = super().default_config()
+        conf["stream_writers"] = {"events": ["worker1"]}
+        conf["instance_map"] = {
+            "main": {"host": "testserv", "port": 8765},
+            "worker1": {"host": "testserv", "port": 1001},
+        }
+        return conf
+
+    def test_collision_retries_with_fresh_id(self) -> None:
+        worker = self.make_worker_hs(
+            "synapse.app.generic_worker", {"worker_name": "worker1"}
+        )
+        # The room's events go to the persister in one request, larger than
+        # the test sites allow by default.
+        self._hs_to_site[worker].max_request_body_size = 1024 * 1024
+        user_id = self.register_user("user", "pass")
+        access_token = self.login("user", "pass")
+        taken = self.helper.create_room_as(user_id, tok=access_token, room_version="10")
+
+        fresh = "!freshroomid:test"
+        room_ids = iter([taken, fresh])
+        handler = self.hs.get_room_creation_handler()
+        with patch.object(handler, "_generate_room_id", lambda: next(room_ids)):
+            room_id = self.helper.create_room_as(
+                user_id,
+                tok=access_token,
+                room_version="10",
+                extra_content={"room_alias_name": "collided", "name": "second"},
+            )
+
+        self.assertEqual(room_id, fresh)
+        store = self.hs.get_datastores().main
+        alias = self.get_success(
+            store.get_association_from_room_alias(
+                RoomAlias.from_string("#collided:test")
+            )
+        )
+        assert alias is not None
+        self.assertEqual(alias.room_id, fresh)
+        # The room that owned the ID is untouched.
+        state = self.get_success(
+            self.hs.get_storage_controllers().state.get_current_state_ids(taken)
+        )
+        self.assertNotIn(("m.room.name", ""), state)

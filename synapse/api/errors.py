@@ -130,6 +130,10 @@ class Codes(str, Enum):
     AS_FEDPROXY_CONNECTION_FAILED = "IO.ELEMENT.MSC4512.M_FEDPROXY_CONNECTION_FAILED"
     AS_FEDPROXY_DESTINATION_DENIED = "IO.ELEMENT.MSC4512.M_FEDPROXY_DESTINATION_DENIED"
 
+    # Not a spec errcode. A new room's ID is taken: sent between workers, so
+    # that the one creating the room can tell.
+    ROOM_ID_COLLISION = "ORG.MATRIX.SYNAPSE.ROOM_ID_COLLISION"
+
     # Attempt to send a second annotation with the same event type & annotation key
     # MSC2677
     DUPLICATE_ANNOTATION = "M_DUPLICATE_ANNOTATION"
@@ -577,11 +581,14 @@ class StoreError(SynapseError):
 class RoomIdCollisionError(StoreError):
     """A new room's ID is already taken, found when its events are persisted.
 
-    The creator may try again under a fresh ID.
+    The creator may try again under a fresh ID. The errcode lets a worker
+    that sent the events to an event persister tell this error apart.
     """
 
     def __init__(self, room_id: str):
-        super().__init__(500, f"Room ID {room_id} is already in use")
+        super().__init__(
+            500, f"Room ID {room_id} is already in use", Codes.ROOM_ID_COLLISION
+        )
 
 
 class InvalidCaptchaError(SynapseError):
