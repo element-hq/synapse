@@ -1,0 +1,1 @@
+Update `/redact_status` admin API docs to reflect better response example and document the `error` field.
