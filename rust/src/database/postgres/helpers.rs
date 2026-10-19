@@ -52,7 +52,7 @@ where
     /// threads.
     ///
     /// `handle` is expected to be the server's shared runtime (see
-    /// [`crate::tokio_runtime`]). It is passed in explicitly rather than taken
+    /// [`crate::runtime`]). It is passed in explicitly rather than taken
     /// from the thread-local context via [`Handle::current`], so callers work
     /// from any Python thread with no need to have *entered* the runtime first.
     /// The blocking wait runs on the calling (Python) thread, never on a
