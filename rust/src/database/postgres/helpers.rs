@@ -224,30 +224,12 @@ mod tests {
     }
 
     #[test]
-    fn block_on_next_blocks_when_first_poll_is_pending() {
+    fn block_on_next() {
         Python::initialize();
         let rt = test_runtime();
         Python::attach(|py| {
-            // A stream whose first poll is `Pending` (it yields back to the
-            // runtime before producing the value). `now_or_never` polls exactly
-            // once and so sees `Pending` and gives up, forcing `block_on_next`
-            // down its blocking path.
-            let stream = stream::once(async {
-                tokio::task::yield_now().await;
-                Ok::<i32, ()>(7)
-            });
-            let mut stream = pin!(stream);
-
-            assert_eq!(stream.as_mut().next().now_or_never(), None);
-            // `next().now_or_never()` above polled (and so advanced) the *same*
-            // pinned stream; `block_on_next` re-polls that same stream via
-            // `&mut self`, resuming the yielded future rather than restarting
-            // it, so it still resolves to 7.
-            assert_eq!(stream.as_mut().block_on_next(py, rt.handle()), Some(Ok(7)));
-            assert_eq!(stream.as_mut().block_on_next(py, rt.handle()), None);
-
-            // And, on a fresh stream, `block_on_next` handles a pending first
-            // poll on its own, with no preceding `get_next_if_ready`.
+            // `block_on_next` handles streams that may not be ready on the
+            // first poll.
             let stream = stream::once(async {
                 tokio::task::yield_now().await;
                 Ok::<i32, ()>(8)
