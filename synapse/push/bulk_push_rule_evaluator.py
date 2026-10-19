@@ -549,14 +549,10 @@ class BulkPushRuleEvaluator:
         for user_id in set(actions_by_user).difference(uids_with_visibility):
             actions_by_user.pop(user_id, None)
 
-        # Mark in the DB staging area the push actions for users who should be
-        # notified for this event. (This will then get handled when we persist
-        # the event)
-        await self.store.add_push_actions_to_staging(
-            event.event_id,
-            actions_by_user,
-            count_as_unread,
-            thread_id,
+        # The push actions for users who should be notified for this event go
+        # with the event: the persister writes them, or stages them first.
+        context.push_actions = self.store.push_action_rows(
+            actions_by_user, count_as_unread, thread_id
         )
 
 

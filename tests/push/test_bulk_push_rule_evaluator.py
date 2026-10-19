@@ -162,7 +162,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
 
         bulk_evaluator = BulkPushRuleEvaluator(self.hs)
         # should not raise
-        self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
+        self._evaluate_and_stage(bulk_evaluator, event, context)
 
         # Did Bob see Alice's @room notification?
         highlighted_actions = self.get_success(
@@ -226,6 +226,19 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         context = self.get_success(unpersisted_context.persist(event))
         return event, context
 
+    def _evaluate_and_stage(
+        self,
+        bulk_evaluator: BulkPushRuleEvaluator,
+        event: EventBase,
+        context: EventContext,
+    ) -> None:
+        """Evaluate the push rules for the event and write the actions to the
+        staging table, as a persister that reads them from there would."""
+        self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
+        self.get_success(
+            self.hs.get_datastores().main.stage_push_actions([(event, context)])
+        )
+
     def _get_users_with_staged_push_actions(self, event_id: str) -> list[str]:
         return self.get_success(
             self.hs.get_datastores().main.db_pool.simple_select_onecol(
@@ -254,7 +267,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         # ensure that code isn't even running.
         bulk_evaluator._get_power_levels_and_sender_level = AsyncMock()  # type: ignore[method-assign]
 
-        self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
+        self._evaluate_and_stage(bulk_evaluator, event, context)
         bulk_evaluator._get_power_levels_and_sender_level.assert_not_called()
         self.assertEqual(self._get_users_with_staged_push_actions(event.event_id), [])
 
@@ -273,7 +286,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         rules_by_user = self.get_success(bulk_evaluator._get_rules_for_event(event))
         self.assertEqual(set(rules_by_user), {bob})
 
-        self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
+        self._evaluate_and_stage(bulk_evaluator, event, context)
         self.assertEqual(
             self._get_users_with_staged_push_actions(event.event_id), [bob]
         )
@@ -299,7 +312,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         )
         context = self.get_success(unpersisted_context.persist(event))
         # Execute the push rule machinery.
-        self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
+        self._evaluate_and_stage(bulk_evaluator, event, context)
 
         # If any actions are generated for this event, return true.
         result = self.get_success(

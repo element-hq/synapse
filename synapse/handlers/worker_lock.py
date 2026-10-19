@@ -121,12 +121,17 @@ class WorkerLocksHandler:
         lock_key: str,
         *,
         write: bool,
+        release_in_background: bool = False,
     ) -> "WaitingLock":
         """Acquire a read/write lock, returns a context manager that will block
         until the lock is acquired.
 
         Note: Care must be taken to avoid deadlocks. In particular, this
         function does *not* timeout.
+
+        `release_in_background` leaves the context manager without waiting for
+        the lock's row to be deleted: for a lock on a request's critical path
+        whose waiters retry on their own.
 
         Usage:
             async with handler.acquire_read_write_lock(name, key, write=True):
@@ -140,6 +145,7 @@ class WorkerLocksHandler:
             lock_name=lock_name,
             lock_key=lock_key,
             write=write,
+            release_in_background=release_in_background,
         )
 
         self._locks.setdefault((lock_name, lock_key), WeakSet()).add(lock)
@@ -220,6 +226,7 @@ class WaitingLock:
     lock_name: str
     lock_key: str
     write: bool | None
+    release_in_background: bool = False
     start_ts_ms: int = 0
     deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
     _inner_lock: Lock | None = None
@@ -308,11 +315,11 @@ class WaitingLock:
         self.handler.notify_lock_released(self.lock_name, self.lock_key)
 
         try:
-            r = await self._inner_lock.__aexit__(exc_type, exc, tb)
+            await self._inner_lock.release(wait=not self.release_in_background)
         finally:
             self._lock_span.__exit__(exc_type, exc, tb)
 
-        return r
+        return False
 
     def _increment_timeout_interval(self) -> float:
         next_interval = self._timeout_interval

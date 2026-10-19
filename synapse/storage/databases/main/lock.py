@@ -508,10 +508,13 @@ class Lock:
 
         return False
 
-    async def release(self) -> None:
+    async def release(self, *, wait: bool = True) -> None:
         """Release the lock.
 
         This is automatically called when using the lock as a context manager.
+
+        Unless `wait` is set, the lock's row is deleted in the background, so
+        the caller does not wait for the round trip.
         """
 
         if self._dropped:
@@ -520,7 +523,7 @@ class Lock:
         if self._looping_call and self._looping_call.running:
             self._looping_call.stop()
 
-        await self._store.db_pool.simple_delete(
+        delete = self._store.db_pool.simple_delete(
             table=self._table,
             keyvalues={
                 "lock_name": self._lock_name,
@@ -529,6 +532,10 @@ class Lock:
             },
             desc="drop_lock",
         )
+        if wait:
+            await delete
+        else:
+            self._hs.run_as_background_process("Lock.release", lambda: delete)
 
         if self._read_write:
             self._store._live_read_write_lock_tokens.pop(

@@ -35,6 +35,10 @@ if TYPE_CHECKING:
     from synapse.storage.databases.main import DataStore
     from synapse.types.state import StateFilter
 
+# A row of `event_push_actions` without the event's own columns: `(user_id,
+# actions, notif, highlight, unread, thread_id)`.
+PushActionRow = tuple[str, str, int, int, int, str]
+
 
 class UnpersistedEventContextBase(ABC):
     """
@@ -136,6 +140,14 @@ class EventContext(UnpersistedEventContextBase):
             built. ``get_prev_state_ids`` returns it instead of reading the state
             group. It is not serialized, so a context passed to another worker
             reads the state group.
+
+        push_actions: The event's push actions, as rows of ``event_push_actions``
+            without the event's own columns: ``(user_id, actions, notif,
+            highlight, unread, thread_id)``. Set by the push rule evaluator
+            instead of writing the staging table. The Rust persister writes them
+            with the event; before any other persister, or another worker, gets
+            the event, ``stage_push_actions`` moves them to the staging table and
+            clears this. Not serialized.
     """
 
     _storage: "StorageControllers"
@@ -148,6 +160,7 @@ class EventContext(UnpersistedEventContextBase):
 
     partial_state: bool = False
     _state_map_before_event: StateMap[str] | None = None
+    push_actions: list[PushActionRow] | None = None
 
     @staticmethod
     def with_state(

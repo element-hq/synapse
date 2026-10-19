@@ -665,7 +665,11 @@ class EventsPersistenceStorageController:
         # it. We might already have taken out the lock, but since this is just a
         # "read" lock its inherently reentrant.
         async with self.hs.get_worker_locks_handler().acquire_read_write_lock(
-            NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
+            NEW_EVENT_DURING_PURGE_LOCK_NAME,
+            room_id,
+            write=False,
+            # The request need not wait for the lock row to go.
+            release_in_background=True,
         ):
             if isinstance(task, _PersistEventsTask):
                 return await self._persist_event_batch(room_id, task)
@@ -982,6 +986,8 @@ class EventsPersistenceStorageController:
         backfilled: bool,
     ) -> None:
         """Persist the events, deduplicated, in chunks of 100."""
+        # The Python persister reads push actions from the staging table.
+        await self.main_store.stage_push_actions(events_and_contexts)
         chunks = [
             events_and_contexts[x : x + 100]
             for x in range(0, len(events_and_contexts), 100)

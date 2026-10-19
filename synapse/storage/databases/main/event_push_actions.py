@@ -84,6 +84,7 @@ from collections import defaultdict
 from typing import (
     TYPE_CHECKING,
     Collection,
+    Iterable,
     Mapping,
     cast,
 )
@@ -93,6 +94,8 @@ import attr
 from twisted.internet.task import LoopingCall
 
 from synapse.api.constants import MAIN_TIMELINE, ReceiptTypes
+from synapse.events import EventBase
+from synapse.events.snapshot import EventContext, PushActionRow
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -1169,24 +1172,56 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         if not user_id_actions:
             return
 
-        # This is a helper function for generating the necessary tuple that
-        # can be used to insert into the `event_push_actions_staging` table.
-        def _gen_entry(
-            user_id: str, actions: Collection[Mapping | str]
-        ) -> tuple[str, str, str, int, int, int, str, int]:
+        await self._stage_push_action_rows(
+            [
+                (event_id, *row)
+                for row in self.push_action_rows(
+                    user_id_actions, count_as_unread, thread_id
+                )
+            ]
+        )
+
+    @staticmethod
+    def push_action_rows(
+        user_id_actions: dict[str, Collection[Mapping | str]],
+        count_as_unread: bool,
+        thread_id: str,
+    ) -> list[PushActionRow]:
+        """The push actions of an event as rows of `event_push_actions`, without
+        the event's own columns, for `EventContext.push_actions`."""
+        rows: list[PushActionRow] = []
+        for user_id, actions in user_id_actions.items():
             is_highlight = 1 if _action_has_highlight(actions) else 0
             notif = 1 if "notify" in actions else 0
-            return (
-                event_id,  # event_id column
-                user_id,  # user_id column
-                _serialize_action(actions, bool(is_highlight)),  # actions column
-                notif,  # notif column
-                is_highlight,  # highlight column
-                int(count_as_unread),  # unread column
-                thread_id,  # thread_id column
-                self.clock.time_msec(),  # inserted_ts column
+            rows.append(
+                (
+                    user_id,
+                    _serialize_action(actions, bool(is_highlight)),
+                    notif,
+                    is_highlight,
+                    int(count_as_unread),
+                    thread_id,
+                )
             )
+        return rows
 
+    async def stage_push_actions(
+        self, events_and_contexts: Iterable[tuple[EventBase, EventContext]]
+    ) -> None:
+        """Move the push actions the contexts hold to the staging table, for a
+        persister that reads them from there: Python's, or another worker's."""
+        rows: list[tuple[str, str, str, int, int, int, str]] = []
+        for event, context in events_and_contexts:
+            if context.push_actions:
+                rows.extend((event.event_id, *row) for row in context.push_actions)
+            context.push_actions = None
+        if rows:
+            await self._stage_push_action_rows(rows)
+
+    async def _stage_push_action_rows(
+        self, rows: list[tuple[str, str, str, int, int, int, str]]
+    ) -> None:
+        now = self.clock.time_msec()
         await self.db_pool.simple_insert_many(
             "event_push_actions_staging",
             keys=(
@@ -1199,10 +1234,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 "thread_id",
                 "inserted_ts",
             ),
-            values=[
-                _gen_entry(user_id, actions)
-                for user_id, actions in user_id_actions.items()
-            ],
+            values=[(*row, now) for row in rows],
             desc="add_push_actions_to_staging",
         )
 

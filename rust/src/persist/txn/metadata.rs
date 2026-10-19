@@ -37,7 +37,7 @@ use crate::{
         json_object::JsonObject,
         Event,
     },
-    persist::{effects::PersistEffects, extremities::is_mine_id},
+    persist::{context::PushActionRow, effects::PersistEffects, extremities::is_mine_id},
 };
 
 /// `EventContentFields.LABELS`.
@@ -121,9 +121,10 @@ async fn add_to_cache(
     Ok(())
 }
 
-/// `_set_push_actions_for_event_and_users_txn`: move the push actions of
-/// `events` from the staging table, and clear the staging rows of the whole
-/// chunk, `input.events`. Only notifiable events have push actions.
+/// `_set_push_actions_for_event_and_users_txn`: write the push actions of
+/// `events`, those that came with the batch directly and the rest from the
+/// staging table, and clear the staging rows of the whole chunk,
+/// `input.events`. Only notifiable events have push actions.
 async fn set_push_actions(
     txn: &WriteTxn,
     input: &TxnInput<'_>,
@@ -132,9 +133,12 @@ async fn set_push_actions(
     let mut event_ids = Vec::new();
     let mut stream_orderings = Vec::new();
     let mut depths = Vec::new();
+    let mut direct = DirectPushActions::default();
     for persisting in events {
         let event = persisting.event();
-        if event
+        if let Some(rows) = &persisting.context().push_actions {
+            direct.add(persisting, rows);
+        } else if event
             .internal_metadata()
             .is_notifiable()
             .map_err(py_error)?
@@ -144,6 +148,7 @@ async fn set_push_actions(
             depths.push(event.depth());
         }
     }
+    direct.write(txn, input.room_id)?;
     if !event_ids.is_empty() {
         txn.execute_later(
             "INSERT INTO event_push_actions (
@@ -177,6 +182,61 @@ async fn set_push_actions(
         );
     }
     Ok(())
+}
+
+/// The rows of `event_push_actions` for the events whose push actions came
+/// with the batch, as columns.
+#[derive(Default)]
+struct DirectPushActions {
+    event_ids: Vec<String>,
+    user_ids: Vec<String>,
+    actions: Vec<String>,
+    stream_orderings: Vec<i64>,
+    depths: Vec<i64>,
+    notifs: Vec<i16>,
+    highlights: Vec<i16>,
+    unreads: Vec<i16>,
+    thread_ids: Vec<String>,
+}
+
+impl DirectPushActions {
+    fn add(&mut self, persisting: &Persisting<'_>, rows: &[PushActionRow]) {
+        let event = persisting.event();
+        for (user_id, actions, notif, highlight, unread, thread_id) in rows {
+            self.event_ids.push(event.event_id().to_owned());
+            self.user_ids.push(user_id.clone());
+            self.actions.push(actions.clone());
+            self.stream_orderings.push(persisting.stream_ordering());
+            self.depths.push(event.depth());
+            self.notifs.push(*notif);
+            self.highlights.push(*highlight);
+            self.unreads.push(*unread);
+            self.thread_ids.push(thread_id.clone());
+        }
+    }
+
+    fn write(self, txn: &WriteTxn, room_id: &str) -> Result<(), WriteError> {
+        if self.event_ids.is_empty() {
+            return Ok(());
+        }
+        let room_ids = vec![room_id.to_owned(); self.event_ids.len()];
+        txn.insert_many_later(
+            "event_push_actions",
+            vec![
+                OwnedColumn::new("room_id", "text", room_ids),
+                OwnedColumn::new("event_id", "text", self.event_ids),
+                OwnedColumn::new("user_id", "text", self.user_ids),
+                OwnedColumn::new("actions", "text", self.actions),
+                OwnedColumn::new("stream_ordering", "bigint", self.stream_orderings),
+                OwnedColumn::new("topological_ordering", "bigint", self.depths),
+                OwnedColumn::new("notif", "smallint", self.notifs),
+                OwnedColumn::new("highlight", "smallint", self.highlights),
+                OwnedColumn::new("unread", "smallint", self.unreads),
+                OwnedColumn::new("thread_id", "text", self.thread_ids),
+            ],
+            None,
+        )
+    }
 }
 
 /// `_handle_redact_relations`: the redacted event no longer relates to

@@ -1790,6 +1790,8 @@ class EventCreationHandler:
                             requester, is_admin_redaction=is_admin_redaction
                         )
 
+                # The persister reads the push actions from the staging table.
+                await self.store.stage_push_actions(events_and_context)
                 try:
                     result = await self.send_events(
                         instance_name=writer_instance,

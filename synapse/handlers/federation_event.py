@@ -2301,6 +2301,8 @@ class FederationEventHandler:
             # Limit the number of events sent over replication. We choose 200
             # here as that is what we default to in `max_request_body_size(..)`
             result = {}
+            # The persister reads the push actions from the staging table.
+            await self._store.stage_push_actions(event_and_contexts)
             try:
                 for batch in batch_iter(event_and_contexts, 200):
                     result = await self._send_events(

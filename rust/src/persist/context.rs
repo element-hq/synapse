@@ -49,7 +49,15 @@ pub struct PersistContext {
     /// Whether an application service sent the event. Only used to label
     /// the persisted events metric.
     pub app_service: bool,
+    /// The event's push actions, as rows of `event_push_actions` without
+    /// the event's own columns, when the push rules were evaluated on this
+    /// worker. `None` when they are in the staging table, or there are none.
+    pub push_actions: Option<Vec<PushActionRow>>,
 }
+
+/// `(user_id, actions, notif, highlight, unread, thread_id)`: Python's
+/// `PushActionRow`.
+pub type PushActionRow = (String, String, i16, i16, i16, String);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for PersistContext {
     type Error = PyErr;
@@ -77,7 +85,15 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PersistContext {
             );
         }
 
+        let push_actions = context.getattr(intern!(py, "push_actions"))?;
+        let push_actions = if push_actions.is_none() {
+            None
+        } else {
+            Some(push_actions.extract()?)
+        };
+
         Ok(PersistContext {
+            push_actions,
             rejected: context.getattr(intern!(py, "rejected"))?.extract()?,
             state_group: context.getattr(intern!(py, "_state_group"))?.extract()?,
             state_group_before_event: context
