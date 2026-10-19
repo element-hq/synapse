@@ -41,7 +41,9 @@ use crate::clock::{set_virtual_time_msec, Clock};
 use crate::homeserver::HomeServer;
 use crate::logging::context::LogContextHandle;
 use crate::logging::opentracing::thrift::{FinishedSpan, Tag};
-use crate::logging::opentracing::{set_tracing_enabled, SamplerConfig, Tracer, TracerConfig};
+use crate::logging::opentracing::{
+    set_homeserver_whitelist, set_tracing_enabled, SamplerConfig, Tracer, TracerConfig,
+};
 use crate::reactor::Reactor;
 use crate::twisted_dispatch::{self, TwistedDispatchReader, TwistedDispatcher};
 
@@ -314,7 +316,11 @@ impl RustRuntime {
     /// The agent's host name is resolved when spans are sent, so one that
     /// does not resolve yet is not an error. Raises `OSError` only if the
     /// reporter thread cannot start. A second call is ignored.
-    #[pyo3(signature = (service_name, process_tags, reporting_host, reporting_port, sampler_type, sampler_param))]
+    ///
+    /// `homeserver_whitelist` is the opentracing config's list of patterns
+    /// of the servers Rust may send trace context to.
+    #[pyo3(signature = (service_name, process_tags, reporting_host, reporting_port, sampler_type, sampler_param, homeserver_whitelist = Vec::new()))]
+    #[allow(clippy::too_many_arguments)]
     fn enable_tracing(
         &self,
         service_name: String,
@@ -323,6 +329,7 @@ impl RustRuntime {
         reporting_port: u16,
         sampler_type: &str,
         sampler_param: f64,
+        homeserver_whitelist: Vec<String>,
     ) -> PyResult<()> {
         if self.inner.tracing.get().is_some() {
             log::warn!("Rust tracing was already enabled for this homeserver");
@@ -344,6 +351,7 @@ impl RustRuntime {
             return Ok(());
         }
 
+        set_homeserver_whitelist(&homeserver_whitelist);
         set_tracing_enabled(true);
         Ok(())
     }

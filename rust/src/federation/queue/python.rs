@@ -34,6 +34,7 @@ use pyo3::{
     types::{PyDict, PyList, PyString, PyTuple},
 };
 use serde_json::Value;
+use tracing::Instrument;
 
 use super::{
     changes::StreamChanges,
@@ -43,6 +44,9 @@ use super::{
     Observer, PduBody, PresenceState, QueueConfig, QueueHooks, QueuedPdu, Receipt, SendOutcome,
     StickyBatch, StickyStreamPosition, TransactionSink,
 };
+use crate::logging::opentracing::layer::{follows_from, with_remote_parent};
+use crate::logging::opentracing::SpanContext;
+use crate::logging::opentracing::{parse_uber_trace_id, record_error, whitelisted_homeserver};
 use crate::{
     deferred::run_python_awaitable_observed,
     events::Event,
@@ -784,8 +788,17 @@ impl TransactionSink for ClientSink {
 
         let destination = transaction.destination.clone();
         let transaction_id = transaction.transaction_id.clone();
+        let mut transaction = transaction;
+        let span = send_transaction_span(&mut transaction);
         let mut stats = RequestStats::default();
-        let result = self.sender.send(transaction, Vec::new(), &mut stats).await;
+        let result = self
+            .sender
+            .send(transaction, Vec::new(), &mut stats)
+            .instrument(span.clone())
+            .await;
+        if let Err(err) = &result {
+            record_error(&span, err);
+        }
         match result {
             Ok(TransactionResponse::Acknowledged(acknowledged)) => Ok(SendOutcome {
                 acknowledged,
@@ -809,5 +822,154 @@ impl TransactionSink for ClientSink {
                 Err(LoopError::from_client(err, &destination))
             }
         }
+    }
+}
+
+/// The key of the trace context Python puts in an EDU's content.
+const EDU_CONTEXT_KEY: &str = "org.matrix.opentracing_context";
+
+/// Python's `send_transaction` span for a transaction the native queue
+/// sends. It follows from the spans that queued its EDUs and, as
+/// jaeger-client makes the first reference the parent, is a child of the
+/// first of them. With none it starts a trace of its own, as the queue's
+/// loop has no parent. For a whitelisted destination the EDUs' contexts
+/// are then stripped, as `send_new_transaction` does.
+fn send_transaction_span(transaction: &mut Transaction) -> tracing::Span {
+    let contexts: Vec<SpanContext> = transaction
+        .edus
+        .iter()
+        .filter_map(|edu| {
+            let context = edu.get("content")?.get(EDU_CONTEXT_KEY)?.as_str()?;
+            let map: serde_json::Map<String, Value> = serde_json::from_str(context).ok()?;
+            parse_uber_trace_id(map.get("uber-trace-id")?.as_str()?)
+        })
+        .collect();
+
+    let make_span = || {
+        tracing::info_span!(
+            "send_transaction",
+            destination = transaction.destination.as_str(),
+            txn_id = transaction.transaction_id.as_str(),
+            pdus = transaction.pdus.len() as u64,
+            edus = transaction.edus.len() as u64,
+            error = tracing::field::Empty,
+        )
+    };
+    let span = match contexts.first() {
+        Some(first) => with_remote_parent(first.clone(), make_span),
+        None => tracing::info_span!(
+            parent: None,
+            "send_transaction",
+            destination = transaction.destination.as_str(),
+            txn_id = transaction.transaction_id.as_str(),
+            pdus = transaction.pdus.len() as u64,
+            edus = transaction.edus.len() as u64,
+            error = tracing::field::Empty,
+        ),
+    };
+    for context in &contexts {
+        follows_from(&span, context);
+    }
+
+    // `Edu.strip_context`, for every EDU.
+    if whitelisted_homeserver(&transaction.destination) {
+        for edu in &mut transaction.edus {
+            if let Some(content) = edu.get_mut("content").and_then(Value::as_object_mut) {
+                content.insert(EDU_CONTEXT_KEY.to_owned(), Value::from("{}"));
+            }
+        }
+    }
+    span
+}
+
+#[cfg(test)]
+mod send_transaction_span_tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::logging::opentracing::layer::testing::traced;
+    use crate::logging::opentracing::thrift::{RefType, SpanRef};
+    use crate::logging::opentracing::{set_test_homeserver_whitelist, SamplerConfig};
+
+    fn transaction(destination: &str) -> Transaction {
+        Transaction {
+            transaction_id: "7".to_owned(),
+            origin: "local.example".to_owned(),
+            destination: destination.to_owned(),
+            origin_server_ts: 0,
+            pdus: vec![],
+            edus: vec![
+                json!({
+                    "edu_type": "m.device_list_update",
+                    "content": {
+                        "org.matrix.opentracing_context": r#"{"uber-trace-id": "abc:1f:0:1"}"#,
+                    },
+                }),
+                json!({"edu_type": "m.typing", "content": {}}),
+                json!({
+                    "edu_type": "m.receipt",
+                    "content": {"org.matrix.opentracing_context": "{}"},
+                }),
+            ],
+        }
+    }
+
+    /// The span follows from each EDU's context, and the contexts are
+    /// stripped for a whitelisted server, as `send_new_transaction` does.
+    #[test]
+    fn follows_from_and_strips_edu_contexts() {
+        set_test_homeserver_whitelist();
+
+        let (stripped, spans) = traced(SamplerConfig::Const(true), || {
+            let mut transaction = transaction("remote.example");
+            drop(send_transaction_span(&mut transaction));
+            transaction.edus
+        });
+        let [span] = &spans[..] else {
+            panic!("expected one span: {spans:#?}")
+        };
+        assert_eq!(span.operation, "send_transaction");
+        // A child of the first EDU's span, as jaeger-client makes it.
+        assert_eq!(span.trace_id, 0xabc);
+        assert_eq!(span.parent_id, 0x1f);
+        assert_eq!(
+            span.references,
+            vec![SpanRef {
+                ref_type: RefType::FollowsFrom,
+                trace_id: 0xabc,
+                span_id: 0x1f,
+            }]
+        );
+        // Every EDU, as `Edu.strip_context`.
+        for edu in &stripped {
+            assert_eq!(edu["content"][EDU_CONTEXT_KEY], json!("{}"));
+        }
+
+        // Kept for a server off the whitelist.
+        let (kept, _) = traced(SamplerConfig::Const(true), || {
+            let mut transaction = transaction("other.example");
+            drop(send_transaction_span(&mut transaction));
+            transaction.edus
+        });
+        assert_eq!(
+            kept[0]["content"][EDU_CONTEXT_KEY],
+            json!(r#"{"uber-trace-id": "abc:1f:0:1"}"#)
+        );
+        assert!(kept[1]["content"].get(EDU_CONTEXT_KEY).is_none());
+    }
+
+    /// With no EDU context, the span starts a trace of its own.
+    #[test]
+    fn no_contexts_is_a_root() {
+        let (_, spans) = traced(SamplerConfig::Const(true), || {
+            let mut transaction = transaction("other.example");
+            transaction.edus.clear();
+            drop(send_transaction_span(&mut transaction));
+        });
+        let [span] = &spans[..] else {
+            panic!("expected one span: {spans:#?}")
+        };
+        assert_eq!(span.parent_id, 0);
+        assert!(span.references.is_empty());
     }
 }

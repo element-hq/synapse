@@ -48,6 +48,7 @@ class RustRuntime:
         reporting_port: int,
         sampler_type: str,
         sampler_param: float,
+        homeserver_whitelist: list[str] = ...,
     ) -> None:
         """Report spans from Rust to the Jaeger agent, as the same service as
         the Python tracer. Called by `init_tracer`.
@@ -56,7 +57,8 @@ class RustRuntime:
         decision or rate. Any other type means Rust never starts a sampled
         trace of its own. The agent's host name is resolved when spans are
         sent. Raises `OSError` only if the reporter thread cannot start. A
-        second call is ignored."""
+        second call is ignored. Rust sends trace context only to servers
+        matching `homeserver_whitelist`."""
 
     def tracing_config_for_test(
         self,

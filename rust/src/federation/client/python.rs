@@ -327,6 +327,9 @@ impl RustFederationClient {
             backoff_on_404,
             backoff_on_all_error_codes,
             try_trailing_slash_on_400,
+            // `MatrixFederationHttpClient` wraps the call in its own
+            // `outgoing-federation-request` span and injects it.
+            traced_by_caller: true,
         };
 
         let client = Arc::clone(&self.client);

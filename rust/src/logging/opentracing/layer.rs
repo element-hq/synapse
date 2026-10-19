@@ -236,6 +236,27 @@ struct Recording {
 thread_local! {
     /// The parent set by [`with_py_parent`] for spans created on this thread.
     static PY_PARENT: RefCell<Option<SpanContext>> = const { RefCell::new(None) };
+
+    /// The parent set by [`with_remote_parent`] for spans created on this
+    /// thread.
+    static REMOTE_PARENT: RefCell<Option<SpanContext>> = const { RefCell::new(None) };
+}
+
+/// Run `f`, a span-creating call, with `parent` as the parent of the
+/// spans it creates that have no `tracing` parent: for work that continues a
+/// trace whose context arrived as data, such as an EDU's. It wins over the
+/// Python span a task carries.
+pub fn with_remote_parent<R>(parent: SpanContext, f: impl FnOnce() -> R) -> R {
+    let previous = REMOTE_PARENT.with(|slot| slot.replace(Some(parent)));
+    struct Restore(Option<SpanContext>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            REMOTE_PARENT.with(|slot| *slot.borrow_mut() = previous);
+        }
+    }
+    let _restore = Restore(previous);
+    f()
 }
 
 /// Run `f` with the span Python has active as the parent of `tracing` spans
@@ -325,7 +346,9 @@ where
         // is the caller's choice: only a contextual span falls back to
         // Python's.
         let parent = if attrs.is_contextual() {
-            tracing_parent.or_else(python_parent)
+            tracing_parent
+                .or_else(|| REMOTE_PARENT.with(|slot| slot.borrow().clone()))
+                .or_else(python_parent)
         } else {
             tracing_parent
         };
@@ -754,6 +777,20 @@ pub(crate) mod testing {
         (output, sink.take())
     }
 
+    /// Make a [`JaegerLayer`] this thread's subscriber until the guard drops,
+    /// for async tests on a current-thread runtime. The sink collects the
+    /// spans reported. The layer holds it weakly: keep it until the guard
+    /// drops.
+    pub(crate) fn traced_until_dropped(
+        sampler: SamplerConfig,
+    ) -> (tracing::subscriber::DefaultGuard, Arc<MemorySink>) {
+        let sink = Arc::new(MemorySink::default());
+        let dyn_sink: Arc<dyn SpanSink> = sink.clone();
+        let layer = JaegerLayer::new(LayerTarget::new(&dyn_sink, sampler));
+        let guard = tracing::subscriber::set_default(Registry::default().with(layer));
+        (guard, sink)
+    }
+
     /// The value of the tag `key` on `span`.
     pub(crate) fn tag<'a>(span: &'a FinishedSpan, key: &str) -> Option<&'a TagValue> {
         span.tags
@@ -1150,6 +1187,33 @@ mod tests {
             assert!(tracing::info_span!("dropped").is_disabled());
             assert!(layer.set_target_if_unset(LayerTarget::new(&sink, sampler)));
         });
+    }
+
+    #[test]
+    fn remote_parent_wins_over_python() {
+        let python = sampled_parent();
+        let remote = SpanContext {
+            trace_id: 99,
+            span_id: 98,
+            flags: FLAG_SAMPLED,
+            baggage: None,
+        };
+        let spans = traced(SamplerConfig::Const(false), || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+            runtime.block_on(handle_with_span(Some(python.clone())).scope(async {
+                let span = with_remote_parent(remote.clone(), || tracing::info_span!("remote"));
+                drop(span);
+                // Not set outside the call.
+                let _plain = tracing::info_span!("plain").entered();
+            }));
+        });
+        let remote_child = spans.iter().find(|s| s.operation == "remote").unwrap();
+        assert_eq!(remote_child.trace_id, 99);
+        assert_eq!(remote_child.parent_id, 98);
+        let plain = spans.iter().find(|s| s.operation == "plain").unwrap();
+        assert_eq!(plain.parent_id, python.span_id);
     }
 
     #[test]

@@ -54,6 +54,67 @@ pub fn tracing_enabled() -> bool {
     TRACING_ENABLED.load(Ordering::Relaxed)
 }
 
+/// The homeservers trace context may be sent to, as Python's
+/// `opentracing.homeserver_whitelist`. Set once, by the first homeserver to
+/// enable tracing, as Python's module-level whitelist is.
+static HOMESERVER_WHITELIST: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+
+/// Set the homeserver whitelist from Python's config patterns. Each pattern
+/// must match at the start of the server name, as Python's `re.match` does.
+pub(crate) fn set_homeserver_whitelist(patterns: &[String]) {
+    let whitelist = if patterns.is_empty() {
+        None
+    } else {
+        let joined = format!("^(?:({}))", patterns.join(")|("));
+        match regex::Regex::new(&joined) {
+            Ok(regex) => Some(regex),
+            Err(err) => {
+                log::warn!(
+                    "The opentracing homeserver whitelist does not compile as a Rust regex, \
+                     so Rust sends trace context to no homeserver: {err}"
+                );
+                None
+            }
+        }
+    };
+    let _ = HOMESERVER_WHITELIST.set(whitelist);
+}
+
+/// Whether trace context may be sent to `destination`. Python's
+/// `whitelisted_homeserver`.
+pub fn whitelisted_homeserver(destination: &str) -> bool {
+    HOMESERVER_WHITELIST
+        .get()
+        .and_then(Option::as_ref)
+        .is_some_and(|whitelist| whitelist.is_match(destination))
+}
+
+/// Set the whitelist tests use, `remote.example`. The whitelist is set
+/// once per process, so this is the only test whitelist.
+#[cfg(test)]
+pub(crate) fn set_test_homeserver_whitelist() {
+    set_homeserver_whitelist(&[r"remote\.example$".to_owned()]);
+}
+
+/// Parse an `uber-trace-id` value, `{trace}:{span}:{parent}:{flags}` in hex,
+/// as jaeger-client's `span_context_from_string` does.
+pub fn parse_uber_trace_id(value: &str) -> Option<SpanContext> {
+    let mut parts = value.trim().split(':');
+    let trace_id = u128::from_str_radix(parts.next()?, 16).ok()?;
+    let span_id = u64::from_str_radix(parts.next()?, 16).ok()?;
+    let _parent_id = u64::from_str_radix(parts.next()?, 16).ok()?;
+    let flags = u8::from_str_radix(parts.next()?, 16).ok()?;
+    if parts.next().is_some() || trace_id == 0 || span_id == 0 {
+        return None;
+    }
+    Some(SpanContext {
+        trace_id,
+        span_id,
+        flags,
+        baggage: None,
+    })
+}
+
 pub(crate) fn set_tracing_enabled(enabled: bool) {
     TRACING_ENABLED.store(enabled, Ordering::Relaxed);
 }
@@ -405,6 +466,23 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uber_trace_id() {
+        assert_eq!(
+            parse_uber_trace_id("abc:1f:0:1"),
+            Some(SpanContext {
+                trace_id: 0xabc,
+                span_id: 0x1f,
+                flags: 1,
+                baggage: None,
+            })
+        );
+        assert_eq!(parse_uber_trace_id("abc:1f:0"), None);
+        assert_eq!(parse_uber_trace_id("abc:1f:0:1:2"), None);
+        assert_eq!(parse_uber_trace_id("0:1f:0:1"), None);
+        assert_eq!(parse_uber_trace_id("xyz:1f:0:1"), None);
+    }
 
     #[test]
     fn sampler_from_type_and_param() {

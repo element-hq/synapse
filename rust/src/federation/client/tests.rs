@@ -675,3 +675,120 @@ async fn read_body_limit_and_timeout() {
         "{err:?}"
     );
 }
+
+/// The request is Python's `outgoing-federation-request` span, with its
+/// status code, and carries its trace context to a whitelisted server.
+#[tokio::test(start_paused = true)]
+async fn traced_request_injects_its_context() {
+    use crate::logging::opentracing::layer::testing::{tag, traced_until_dropped};
+    use crate::logging::opentracing::thrift::TagValue;
+    use crate::logging::opentracing::{set_test_homeserver_whitelist, SamplerConfig};
+
+    set_test_homeserver_whitelist();
+    let (guard, sink) = traced_until_dropped(SamplerConfig::Const(true));
+
+    let transport = ScriptedTransport::new([
+        Step::Fail(|| TransportError::Dns(anyhow::anyhow!("no such host"))),
+        Step::Respond(200, "{}"),
+    ]);
+    let (client, _) = new_client(Arc::clone(&transport));
+    let request = get("/_matrix/federation/v1/version");
+    send(&client, &request, &RequestOptions::default())
+        .await
+        .unwrap();
+    drop(guard);
+
+    let spans = sink.take();
+    let [span] = &spans[..] else {
+        panic!("expected one span: {spans:#?}")
+    };
+    assert_eq!(span.operation, "outgoing-federation-request");
+    assert_eq!(tag(span, "peer.address"), Some(&TagValue::Str(DEST.into())));
+    assert_eq!(tag(span, "http.status_code"), Some(&TagValue::Long(200)));
+    assert_eq!(span.logs.len(), 1, "the failed attempt");
+
+    // Both attempts carry the span's context.
+    let expected = format!("{:x}:{:x}:0:1", span.trace_id, span.span_id);
+    for sent in transport.seen() {
+        assert_eq!(sent.headers()["uber-trace-id"], expected.as_str());
+    }
+}
+
+/// Python's context, from `extra_headers`, wins over the Rust span's, and
+/// nothing is injected for a server off the whitelist.
+#[tokio::test(start_paused = true)]
+async fn injection_follows_python_and_the_whitelist() {
+    use crate::logging::opentracing::layer::testing::traced_until_dropped;
+    use crate::logging::opentracing::{set_test_homeserver_whitelist, SamplerConfig};
+
+    set_test_homeserver_whitelist();
+    let (_guard, _sink) = traced_until_dropped(SamplerConfig::Const(true));
+
+    let transport = ScriptedTransport::new([Step::Respond(200, "{}"), Step::Respond(200, "{}")]);
+    let (client, _) = new_client(Arc::clone(&transport));
+
+    let mut from_python = get("/a");
+    from_python.extra_headers = vec![("uber-trace-id".to_owned(), "1:2:0:1".to_owned())];
+    send(&client, &from_python, &RequestOptions::default())
+        .await
+        .unwrap();
+
+    let mut elsewhere = get("/b");
+    elsewhere.destination = "other.example".to_owned();
+    send(&client, &elsewhere, &RequestOptions::default())
+        .await
+        .unwrap();
+
+    let seen = transport.seen();
+    let python: Vec<_> = seen[0].headers().get_all("uber-trace-id").iter().collect();
+    assert_eq!(python, ["1:2:0:1"]);
+    assert!(seen[1].headers().get("uber-trace-id").is_none());
+}
+
+/// An error response still tags its status, as Python's span does, and
+/// marks the span failed.
+#[tokio::test(start_paused = true)]
+async fn traced_error_response_has_its_status() {
+    use crate::logging::opentracing::layer::testing::{tag, traced_until_dropped};
+    use crate::logging::opentracing::thrift::TagValue;
+    use crate::logging::opentracing::SamplerConfig;
+
+    let (guard, sink) = traced_until_dropped(SamplerConfig::Const(true));
+    let transport = ScriptedTransport::new([Step::Respond(403, r#"{"errcode":"M_FORBIDDEN"}"#)]);
+    let (client, _) = new_client(transport);
+    assert!(
+        send(&client, &get("/forbidden"), &RequestOptions::default())
+            .await
+            .is_err()
+    );
+    drop(guard);
+
+    let spans = sink.take();
+    let [span] = &spans[..] else {
+        panic!("expected one span: {spans:#?}")
+    };
+    assert_eq!(tag(span, "http.status_code"), Some(&TagValue::Long(403)));
+    assert_eq!(tag(span, "error"), Some(&TagValue::Bool(true)));
+}
+
+/// A caller that traces the request itself, as Python does, gets no second
+/// span and no injected context.
+#[tokio::test(start_paused = true)]
+async fn traced_by_caller_makes_no_span() {
+    use crate::logging::opentracing::layer::testing::traced_until_dropped;
+    use crate::logging::opentracing::{set_test_homeserver_whitelist, SamplerConfig};
+
+    set_test_homeserver_whitelist();
+    let (guard, sink) = traced_until_dropped(SamplerConfig::Const(true));
+    let transport = ScriptedTransport::new([Step::Respond(200, "{}")]);
+    let (client, _) = new_client(Arc::clone(&transport));
+    let options = RequestOptions {
+        traced_by_caller: true,
+        ..RequestOptions::default()
+    };
+    send(&client, &get("/p"), &options).await.unwrap();
+    drop(guard);
+
+    assert!(sink.take().is_empty());
+    assert!(transport.seen()[0].headers().get("uber-trace-id").is_none());
+}

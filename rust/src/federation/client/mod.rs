@@ -42,7 +42,10 @@ use http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode};
 use http_body_util::BodyExt;
 use rand::RngExt;
 use serde_json::Value;
+use tracing::Instrument;
 
+use crate::logging::opentracing::layer::inject_headers;
+use crate::logging::opentracing::{record_error, whitelisted_homeserver};
 use crate::{
     clock::Sleeper,
     event_auth::is_valid_server_name,
@@ -113,6 +116,10 @@ pub struct RequestOptions {
     pub backoff_on_404: bool,
     pub backoff_on_all_error_codes: bool,
     pub try_trailing_slash_on_400: bool,
+    /// The caller made the `outgoing-federation-request` span and injected
+    /// its context, as Python's `MatrixFederationHttpClient` does when it
+    /// sends through this client: make neither again.
+    pub traced_by_caller: bool,
 }
 
 impl Default for RequestOptions {
@@ -125,6 +132,7 @@ impl Default for RequestOptions {
             backoff_on_404: false,
             backoff_on_all_error_codes: false,
             try_trailing_slash_on_400: false,
+            traced_by_caller: false,
         }
     }
 }
@@ -422,11 +430,56 @@ impl FederationClient {
     }
 
     /// The retry loop inside the limiter.
+    /// Python's `outgoing-federation-request` span covers the request, all
+    /// its attempts included.
     async fn send_with_retries(
         &self,
         request: &FederationRequest,
         options: &RequestOptions,
         stats: &mut RequestStats,
+    ) -> Result<SentResponse, ClientError> {
+        if options.traced_by_caller {
+            return self
+                .send_with_retries_in_span(request, options, stats, &[])
+                .await;
+        }
+        let span = tracing::info_span!(
+            "outgoing-federation-request",
+            span.kind = "client",
+            peer.address = request.destination.as_str(),
+            http.method = request.method.as_str(),
+            http.url = request.path.as_str(),
+            http.status_code = tracing::field::Empty,
+            error = tracing::field::Empty,
+        );
+        // As `inject_header_dict`: only to whitelisted servers, and not if
+        // the caller sent Python's context already.
+        let trace_headers = if whitelisted_homeserver(&request.destination)
+            && !request
+                .extra_headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("uber-trace-id"))
+        {
+            inject_headers(&span)
+        } else {
+            Vec::new()
+        };
+        let result = self
+            .send_with_retries_in_span(request, options, stats, &trace_headers)
+            .instrument(span.clone())
+            .await;
+        if let Err(err) = &result {
+            record_error(&span, err);
+        }
+        result
+    }
+
+    async fn send_with_retries_in_span(
+        &self,
+        request: &FederationRequest,
+        options: &RequestOptions,
+        stats: &mut RequestStats,
+        trace_headers: &[(String, String)],
     ) -> Result<SentResponse, ClientError> {
         let destination = request.destination.as_str();
         let txn_id = format!(
@@ -473,7 +526,8 @@ impl FederationClient {
                 }
             };
 
-            let http_request = self.build_request(request, &uri, &path_and_query, body)?;
+            let http_request =
+                self.build_request(request, &uri, &path_and_query, body, trace_headers)?;
 
             log::debug!(
                 "{{{txn_id}}} [{destination}] Sending request: {description}; timeout {}s",
@@ -510,6 +564,7 @@ impl FederationClient {
                     log::info!(
                         "{{{txn_id}}} [{destination}] Request failed: {description}: {cause}"
                     );
+                    tracing::info!(message = "request failed", error = %cause, retries_left);
 
                     let err = ClientError::SendFailed { cause, can_retry };
                     // Python retries only when the caller did not set a
@@ -564,6 +619,7 @@ impl FederationClient {
         uri: &str,
         path_and_query: &str,
         body: Option<CanonicalBody>,
+        trace_headers: &[(String, String)],
     ) -> Result<Request<Bytes>, ClientError> {
         let invalid = |err: anyhow::Error| ClientError::InvalidRequest(format!("{err:#}"));
 
@@ -582,7 +638,7 @@ impl FederationClient {
             .uri(uri)
             .header(header::USER_AGENT, self.config.user_agent.clone())
             .header(header::AUTHORIZATION, auth);
-        for (name, value) in &request.extra_headers {
+        for (name, value) in request.extra_headers.iter().chain(trace_headers) {
             builder = builder.header(name.as_str(), value.as_str());
         }
         let body = match body {
@@ -633,6 +689,9 @@ impl FederationClient {
 
         let (parts, body) = response.into_parts();
         stats.responses.push(parts.status.as_u16());
+        // On the request's span, for every response, as Python sets it
+        // before it raises for an error.
+        tracing::Span::current().record("http.status_code", parts.status.as_u16());
         let phrase = reason_phrase(&parts);
 
         if parts.status.is_success() {

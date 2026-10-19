@@ -45,7 +45,6 @@ from synapse.http.matrixfederationclient import (
     outgoing_requests_counter,
 )
 from synapse.logging import issue9533_logger
-from synapse.logging.opentracing import whitelisted_homeserver
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
 from synapse.metrics.background_process_metrics import BackgroundProcessLoggingContext
 from synapse.module_api.callbacks.federation import FederatedEventDeliveryMethod
@@ -216,12 +215,14 @@ class RustPerDestinationQueue(_CatchUpLoop):
     def queue_read_receipt(self, receipt: ReadReceipt) -> None:
         self._rust.queue_read_receipt(receipt)
 
+    # The EDUs keep their opentracing context: Rust's `send_transaction`
+    # span follows from it, and strips it for a whitelisted destination, as
+    # `send_new_transaction` does.
+
     def send_keyed_edu(self, edu: Edu, key: Hashable) -> None:
-        self._strip_context(edu)
         self._rust.send_keyed_edu(edu, repr(key))
 
     def send_edu(self, edu: Edu) -> None:
-        self._strip_context(edu)
         self._rust.send_edu(edu)
 
     def mark_new_data(self) -> None:
@@ -229,12 +230,6 @@ class RustPerDestinationQueue(_CatchUpLoop):
 
     def attempt_new_transaction(self) -> None:
         self._rust.attempt_new_transaction()
-
-    def _strip_context(self, edu: Edu) -> None:
-        # As `send_new_transaction` does. The `send_transaction` span the
-        # contexts would have followed from is not made at this level.
-        if whitelisted_homeserver(self._destination):
-            edu.strip_context()
 
     # The catch-up state, which `_catch_up_transmission_loop` reads and
     # writes.

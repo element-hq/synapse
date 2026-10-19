@@ -535,6 +535,10 @@ def _enable_rust_tracing(
         reporting_port=config.local_agent_reporting_port,
         sampler_type=sampler_type,
         sampler_param=sampler_param,
+        # Only set when opentracing is enabled in the config.
+        homeserver_whitelist=list(
+            getattr(hs.config.tracing, "opentracer_whitelist", [])
+        ),
     )
     rust_tracing_collector.add(runtime, hs.hostname)
 
