@@ -14,12 +14,14 @@
 
 """Tests for reporting opentracing spans from Rust."""
 
+import socket
 from typing import cast
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.logging.context import LoggingContext
 from synapse.logging.opentracing import _enable_rust_tracing, start_active_span
+from synapse.logging.rust_tracing_metrics import rust_tracing_collector
 from synapse.server import HomeServer
 from synapse.synapse_rust.opentracing import (
     captured_span_for_test,
@@ -34,6 +36,14 @@ try:
     import jaeger_client
     import opentracing
     from jaeger_client.sampler import ConstSampler, ProbabilisticSampler
+    from jaeger_client.thrift_gen.agent.Agent import emitBatch_args
+    from jaeger_client.thrift_gen.jaeger import ttypes
+    from thrift.protocol.TCompactProtocol import (  # type: ignore[import-untyped]
+        TCompactProtocol,
+    )
+    from thrift.transport.TTransport import (  # type: ignore[import-untyped]
+        TMemoryBuffer,
+    )
 
     from synapse.logging.scopecontextmanager import LogContextScopeManager
 except ImportError:
@@ -209,3 +219,109 @@ class EnableRustTracingTestCase(HomeserverTestCase):
         settings = self.hs.get_rust_runtime().tracing_config_for_test()
         assert settings is not None
         self.assertEqual(settings[4], "Never")
+
+
+def _decode_emit_batch(data: bytes) -> "ttypes.Batch":
+    """Decode an `emitBatch` datagram the way the Jaeger agent does."""
+    protocol = TCompactProtocol(TMemoryBuffer(data))
+    name, _message_type, _seq_id = protocol.readMessageBegin()
+    assert name == "emitBatch", name
+    args = emitBatch_args()
+    args.read(protocol)
+    return args.batch
+
+
+class ReporterRoundTripTestCase(HomeserverTestCase):
+    """Spans reported from Rust reach the Jaeger agent's UDP port in a form
+    jaeger-client's own thrift code decodes."""
+
+    if jaeger_client is None:
+        skip = "Requires jaeger_client"  # type: ignore[unreachable]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.addCleanup(set_tracing_enabled_for_test, False)
+
+        self.agent = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.addCleanup(self.agent.close)
+        self.agent.bind(("127.0.0.1", 0))
+        self.agent.settimeout(5)
+        port = self.agent.getsockname()[1]
+
+        config = jaeger_client.config.Config(
+            config={
+                "local_agent": {"reporting_host": "127.0.0.1", "reporting_port": port},
+                "tags": {"instance": "master"},
+            },
+            service_name="test service",
+        )
+        tracer = config.create_tracer(
+            sampler=ConstSampler(True),
+            reporter=jaeger_client.reporter.InMemoryReporter(),
+        )
+        _enable_rust_tracing(hs, config, tracer)
+        self.runtime = hs.get_rust_runtime()
+
+    def _receive(self) -> "ttypes.Batch":
+        data, _ = self.agent.recvfrom(70_000)
+        return _decode_emit_batch(data)
+
+    def test_round_trip(self) -> None:
+        trace_id = (1 << 100) + 5
+        span_id = (1 << 63) + 7
+        self.runtime.report_span_for_test(
+            "db.query", trace_id, span_id, 42, 1, [("db.statement", "SELECT 1")]
+        )
+        self.assertTrue(self.runtime.flush_tracing_for_test(5))
+
+        batch = self._receive()
+        self.assertEqual(batch.process.serviceName, "test service")
+        process_tags = {tag.key: tag.vStr for tag in batch.process.tags}
+        self.assertEqual(process_tags["instance"], "master")
+
+        (span,) = batch.spans
+        self.assertEqual(span.operationName, "db.query")
+        # Thrift's i64s are signed, so the high span ID arrives negative,
+        # exactly as jaeger-client would send it.
+        self.assertEqual(span.traceIdLow, 5)
+        self.assertEqual(span.traceIdHigh, 1 << 36)
+        self.assertEqual(span.spanId, span_id - (1 << 64))
+        self.assertEqual(span.parentSpanId, 42)
+        self.assertEqual(span.flags, 1)
+        self.assertEqual(span.duration, 1000)
+        self.assertGreater(span.startTime, 0)
+        self.assertEqual(
+            [(tag.key, tag.vType, tag.vStr) for tag in span.tags],
+            [("db.statement", ttypes.TagType.STRING, "SELECT 1")],
+        )
+
+    def test_metrics(self) -> None:
+        for span_id in range(1, 4):
+            self.runtime.report_span_for_test("op", 1, span_id, 0, 1, [])
+        self.assertTrue(self.runtime.flush_tracing_for_test(5))
+        self.assertEqual(len(self._receive().spans), 3)
+
+        self.assertEqual(self.runtime.tracing_stats(), (0, 3, 1, 0, 0, 0, 0))
+
+        metrics = {
+            (metric.name, sample.labels.get("reason")): sample.value
+            for metric in rust_tracing_collector.collect()
+            for sample in metric.samples
+            if sample.labels.get("server_name") == self.hs.hostname
+        }
+        self.assertEqual(metrics[("synapse_rust_tracing_spans_sent", None)], 3)
+        self.assertEqual(metrics[("synapse_rust_tracing_batches_sent", None)], 1)
+        self.assertEqual(
+            metrics[("synapse_rust_tracing_spans_dropped", "queue_full")], 0
+        )
+
+    def test_shutdown_sends_queued_spans(self) -> None:
+        self.runtime.report_span_for_test("op", 1, 2, 0, 1, [])
+        self.runtime.shutdown_tracing_for_test()
+
+        self.assertEqual(len(self._receive().spans), 1)
+
+        # Spans reported after shutdown are dropped and counted.
+        self.runtime.report_span_for_test("op", 1, 3, 0, 1, [])
+        stats = self.runtime.tracing_stats()
+        assert stats is not None
+        self.assertEqual(stats[5], 1)

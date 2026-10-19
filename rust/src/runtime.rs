@@ -40,7 +40,8 @@ use crate::caches::registry::CacheRegistry;
 use crate::clock::{set_virtual_time_msec, Clock};
 use crate::homeserver::HomeServer;
 use crate::logging::context::LogContextHandle;
-use crate::logging::opentracing::{set_tracing_enabled, SamplerConfig, TracerConfig};
+use crate::logging::opentracing::thrift::{FinishedSpan, Tag};
+use crate::logging::opentracing::{set_tracing_enabled, SamplerConfig, Tracer, TracerConfig};
 use crate::reactor::Reactor;
 use crate::twisted_dispatch::{self, TwistedDispatchReader, TwistedDispatcher};
 
@@ -52,6 +53,9 @@ use crate::twisted_dispatch::{self, TwistedDispatchReader, TwistedDispatcher};
 ///
 /// See [`tokio::runtime`] for details.
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// How long shutdown waits for the Jaeger reporter to send its last spans.
+const REPORTER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// State of the lazily-started tokio runtime.
 enum TokioState {
@@ -81,7 +85,7 @@ pub struct RustRuntimeInner {
 
     /// Set by `enable_tracing` when opentracing is enabled for this
     /// homeserver. See [`crate::logging::opentracing`].
-    tracing: OnceLock<Arc<TracerConfig>>,
+    tracing: OnceLock<Arc<Tracer>>,
 }
 
 impl RustRuntimeInner {
@@ -165,8 +169,8 @@ impl RustRuntimeInner {
         }
     }
 
-    /// The tracing settings, if opentracing is enabled for this homeserver.
-    pub fn tracer_config(&self) -> Option<&Arc<TracerConfig>> {
+    /// The tracer, if opentracing is enabled for this homeserver.
+    pub fn tracer(&self) -> Option<&Arc<Tracer>> {
         self.tracing.get()
     }
 
@@ -200,11 +204,20 @@ impl RustRuntimeInner {
         // All tokio tasks should be stopped by now, so only long running
         // blocking threads may still be active. If they try to dispatch new
         // work they get an error and should stop.
-        self.reactor
-            .remove_reader(py, self.dispatch_reader.bind(py).as_any())?;
-        self.dispatch_reader.get().close_and_drain(py);
+        let removed = self
+            .reactor
+            .remove_reader(py, self.dispatch_reader.bind(py).as_any());
+        if removed.is_ok() {
+            self.dispatch_reader.get().close_and_drain(py);
+        }
 
-        Ok(())
+        // Last, so that spans finished by the work above still go out, and
+        // even if removing the reader failed.
+        if let Some(tracer) = self.tracing.get() {
+            py.detach(|| tracer.shutdown(REPORTER_SHUTDOWN_TIMEOUT));
+        }
+
+        removed
     }
 }
 
@@ -298,7 +311,9 @@ impl RustRuntime {
     /// other type never samples such a trace. Rust spans with a Python parent
     /// follow the parent's decision.
     ///
-    /// A second call is ignored.
+    /// The agent's host name is resolved when spans are sent, so one that
+    /// does not resolve yet is not an error. Raises `OSError` only if the
+    /// reporter thread cannot start. A second call is ignored.
     #[pyo3(signature = (service_name, process_tags, reporting_host, reporting_port, sampler_type, sampler_param))]
     fn enable_tracing(
         &self,
@@ -308,7 +323,12 @@ impl RustRuntime {
         reporting_port: u16,
         sampler_type: &str,
         sampler_param: f64,
-    ) {
+    ) -> PyResult<()> {
+        if self.inner.tracing.get().is_some() {
+            log::warn!("Rust tracing was already enabled for this homeserver");
+            return Ok(());
+        }
+
         let config = TracerConfig {
             service_name,
             process_tags,
@@ -317,12 +337,15 @@ impl RustRuntime {
             sampler: SamplerConfig::from_type_and_param(sampler_type, sampler_param),
         };
 
-        if self.inner.tracing.set(Arc::new(config)).is_err() {
+        let tracer = Tracer::start(config)?;
+
+        if self.inner.tracing.set(Arc::new(tracer)).is_err() {
             log::warn!("Rust tracing was already enabled for this homeserver");
-            return;
+            return Ok(());
         }
 
         set_tracing_enabled(true);
+        Ok(())
     }
 
     /// The settings `enable_tracing` stored, as `(service_name,
@@ -332,7 +355,8 @@ impl RustRuntime {
     fn tracing_config_for_test(
         &self,
     ) -> Option<(String, Vec<(String, String)>, String, u16, String)> {
-        self.inner.tracing.get().map(|config| {
+        self.inner.tracing.get().map(|tracer| {
+            let config = tracer.config();
             (
                 config.service_name.clone(),
                 config.process_tags.clone(),
@@ -341,6 +365,79 @@ impl RustRuntime {
                 format!("{:?}", config.sampler),
             )
         })
+    }
+
+    /// The Jaeger reporter's counters, as `(queue_depth, spans_sent,
+    /// batches_sent, dropped_queue_full, dropped_oversize, dropped_closed,
+    /// send_errors)`, or `None` if tracing is not enabled.
+    #[allow(clippy::type_complexity)]
+    fn tracing_stats(&self) -> Option<(u64, u64, u64, u64, u64, u64, u64)> {
+        use std::sync::atomic::Ordering::Relaxed;
+
+        self.inner.tracing.get().map(|tracer| {
+            let stats = tracer.reporter().stats();
+            (
+                stats.queue_depth.load(Relaxed),
+                stats.spans_sent.load(Relaxed),
+                stats.batches_sent.load(Relaxed),
+                stats.dropped_queue_full.load(Relaxed),
+                stats.dropped_oversize.load(Relaxed),
+                stats.dropped_closed.load(Relaxed),
+                stats.send_errors.load(Relaxed),
+            )
+        })
+    }
+
+    /// Report a span with the given IDs and string tags, started now and one
+    /// millisecond long. For tests.
+    #[pyo3(signature = (operation, trace_id, span_id, parent_id, flags, tags))]
+    fn report_span_for_test(
+        &self,
+        operation: String,
+        trace_id: u128,
+        span_id: u64,
+        parent_id: u64,
+        flags: u8,
+        tags: Vec<(String, String)>,
+    ) -> PyResult<()> {
+        let tracer = self
+            .inner
+            .tracing
+            .get()
+            .ok_or_else(|| PyRuntimeError::new_err("tracing is not enabled"))?;
+        tracer.report(FinishedSpan {
+            trace_id,
+            span_id,
+            parent_id,
+            flags,
+            operation: operation.into(),
+            start: std::time::SystemTime::now(),
+            duration: Duration::from_millis(1),
+            tags: tags
+                .into_iter()
+                .map(|(key, value)| Tag::string(key, value))
+                .collect(),
+            logs: vec![],
+            references: vec![],
+        });
+        Ok(())
+    }
+
+    /// Send the queued spans now, waiting up to `timeout_secs`. Returns
+    /// whether they went in time. For tests.
+    fn flush_tracing_for_test(&self, py: Python<'_>, timeout_secs: f64) -> bool {
+        let Some(tracer) = self.inner.tracing.get() else {
+            return false;
+        };
+        let timeout = Duration::from_secs_f64(timeout_secs.max(0.0));
+        py.detach(|| tracer.reporter().flush(timeout))
+    }
+
+    /// Shut the Jaeger reporter down as homeserver shutdown does. For tests.
+    fn shutdown_tracing_for_test(&self, py: Python<'_>) {
+        if let Some(tracer) = self.inner.tracing.get() {
+            py.detach(|| tracer.shutdown(REPORTER_SHUTDOWN_TIMEOUT));
+        }
     }
 
     /// Evict entries not read for `expiry_secs` from every Rust cache of this

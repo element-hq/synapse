@@ -152,6 +152,7 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, ArgLocation | None] = 
     "synapse.util.metrics.DynamicCollectorRegistry": None,
     "synapse.metrics.background_process_metrics._Collector": None,
     "synapse.storage.rust_pool._RustPoolStatsCollector": None,
+    "synapse.logging.rust_tracing_metrics._RustTracingCollector": None,
     #
     # `Metric` subclasses:
     "prometheus_client.metrics_core.Metric": None,

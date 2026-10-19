@@ -54,13 +54,39 @@ class RustRuntime:
 
         `sampler_type` is `const` or `probabilistic`, with `sampler_param` the
         decision or rate. Any other type means Rust never starts a sampled
-        trace of its own. A second call is ignored."""
+        trace of its own. The agent's host name is resolved when spans are
+        sent. Raises `OSError` only if the reporter thread cannot start. A
+        second call is ignored."""
 
     def tracing_config_for_test(
         self,
     ) -> tuple[str, list[tuple[str, str]], str, int, str] | None:
         """The settings `enable_tracing` stored, as `(service_name,
         process_tags, reporting_host, reporting_port, sampler)`, or None. For
+        tests."""
+
+    def tracing_stats(self) -> tuple[int, int, int, int, int, int, int] | None:
+        """The Jaeger reporter's counters, as `(queue_depth, spans_sent,
+        batches_sent, dropped_queue_full, dropped_oversize, dropped_closed,
+        send_errors)`, or None if tracing is not enabled."""
+
+    def report_span_for_test(
+        self,
+        operation: str,
+        trace_id: int,
+        span_id: int,
+        parent_id: int,
+        flags: int,
+        tags: list[tuple[str, str]],
+    ) -> None:
+        """Report a span started now and one millisecond long. For tests."""
+
+    def flush_tracing_for_test(self, timeout_secs: float) -> bool:
+        """Send the queued spans now. Returns whether they went within the
+        timeout. For tests."""
+
+    def shutdown_tracing_for_test(self) -> None:
+        """Shut the Jaeger reporter down as homeserver shutdown does. For
         tests."""
 
 def set_virtual_time_msec(millis: int) -> None:

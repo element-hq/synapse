@@ -23,14 +23,18 @@
 //! Tracing is off unless a homeserver calls `RustRuntime.enable_tracing`.
 //! While it is off, a capture costs one relaxed atomic load.
 
+pub mod reporter;
 pub mod thrift;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use pyo3::{intern, IntoPyObjectExt};
+use reporter::Reporter;
+use thrift::{FinishedSpan, Process, Tag};
 
 use crate::logging::context::{LogContextHandle, LoggingContext};
 use crate::runtime::RustRuntime;
@@ -140,6 +144,46 @@ pub struct TracerConfig {
     pub reporting_host: String,
     pub reporting_port: u16,
     pub sampler: SamplerConfig,
+}
+
+/// A homeserver's tracing: its settings and the reporter sending its spans.
+pub struct Tracer {
+    config: TracerConfig,
+    reporter: Reporter,
+}
+
+impl Tracer {
+    /// Start reporting to the agent `config` names.
+    pub fn start(config: TracerConfig) -> std::io::Result<Tracer> {
+        let process = Process {
+            service_name: config.service_name.clone(),
+            tags: config
+                .process_tags
+                .iter()
+                .map(|(key, value)| Tag::string(key.clone(), value.clone()))
+                .collect(),
+        };
+        let reporter = Reporter::start(process, &config.reporting_host, config.reporting_port)?;
+        Ok(Tracer { config, reporter })
+    }
+
+    pub fn config(&self) -> &TracerConfig {
+        &self.config
+    }
+
+    /// Queue a finished span for the agent. Never blocks.
+    pub fn report(&self, span: FinishedSpan) {
+        self.reporter.report(span);
+    }
+
+    pub fn reporter(&self) -> &Reporter {
+        &self.reporter
+    }
+
+    /// Send the queued spans and stop the reporter, waiting up to `timeout`.
+    pub fn shutdown(&self, timeout: Duration) {
+        self.reporter.shutdown(timeout);
+    }
 }
 
 /// How to decide whether to sample a trace that starts in Rust. Spans with a

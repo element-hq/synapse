@@ -97,3 +97,17 @@ to two problems, namely:
 
 Sampling strategies can be set as in this document:
 <https://www.jaegertracing.io/docs/latest/sampling/>.
+
+## Spans from Rust code
+
+Synapse reports spans for work done in its Rust extension through the same
+Jaeger agent, under the same service name, as the Python spans. It uses the
+agent address from `jaeger_config.local_agent` (or the `JAEGER_AGENT_HOST` and
+`JAEGER_AGENT_PORT` environment variables), so there is nothing extra to
+configure. A Rust span with a Python parent follows the parent's sampling
+decision. A trace that starts in Rust is sampled according to the `const` or
+`probabilistic` sampler. Under any other sampler, such traces are not sampled.
+
+The Rust reporter's counters are exported as Prometheus metrics named
+`synapse_rust_tracing_*`. A growing `synapse_rust_tracing_spans_dropped_total`
+means spans are finishing faster than they can be sent.

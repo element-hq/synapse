@@ -525,7 +525,10 @@ def _enable_rust_tracing(
         # never starts a sampled trace of its own under them.
         sampler_type, sampler_param = type(sampler).__name__, 0.0
 
-    hs.get_rust_runtime().enable_tracing(
+    from synapse.logging.rust_tracing_metrics import rust_tracing_collector
+
+    runtime = hs.get_rust_runtime()
+    runtime.enable_tracing(
         service_name=tracer.service_name,
         process_tags=[(str(k), str(v)) for k, v in tracer.tags.items()],
         reporting_host=config.local_agent_reporting_host,
@@ -533,6 +536,7 @@ def _enable_rust_tracing(
         sampler_type=sampler_type,
         sampler_param=sampler_param,
     )
+    rust_tracing_collector.add(runtime, hs.hostname)
 
 
 # Whitelisting
