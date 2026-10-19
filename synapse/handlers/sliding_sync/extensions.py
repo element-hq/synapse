@@ -123,9 +123,12 @@ class SlidingSyncExtensionHandler:
         """
 
         if sync_config.extensions is None:
+            # If no extensions are enabled, shortcut out.
+
             if self._enable_sticky_events:
                 # The sticky events extension tracks per-room state even while it
-                # isn't enabled, so that re-enabling it doesn't miss anything.
+                # isn't enabled on the request, so that re-enabling it doesn't miss anything.
+                # (But only if the MSC4354 experimental feature is enabled)
                 await self._record_sticky_events_rooms_out_of_scope(
                     previous_connection_state=previous_connection_state,
                     new_connection_state=new_connection_state,
