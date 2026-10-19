@@ -23,6 +23,8 @@
 //! Tracing is off unless a homeserver calls `RustRuntime.enable_tracing`.
 //! While it is off, a capture costs one relaxed atomic load.
 
+pub mod thrift;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
