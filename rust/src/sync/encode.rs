@@ -33,6 +33,7 @@ use crate::events::serialize::{
     serialize_event, BundleRef, PyLookups, SerializeEventConfig, SerializeLookups,
 };
 use crate::events::Event;
+use crate::logging::opentracing::layer::with_py_parent;
 use crate::sync::request::{PrevBatchBase, RoomSyncResult, RoomSyncResultData, RoomType};
 use crate::sync::rooms::TokenBase;
 use crate::types::stream_token::RoomStreamToken;
@@ -125,13 +126,18 @@ impl RoomsEncoder {
             redactions: redaction_map.unwrap_or_default(),
             unsigned_additions: unsigned_additions.unwrap_or_default(),
         };
-        rooms
-            .iter()
-            .map(|room| {
-                let encoded = self.encode_room(&room.get().data, time_now_ms, config, &python)?;
-                Ok(pythonize(py, &encoded)?)
-            })
-            .collect()
+        // On the reactor thread, under the request's Python span.
+        with_py_parent(py, || {
+            let _span = tracing::info_span!("sync.encode", rooms = rooms.len() as u64).entered();
+            rooms
+                .iter()
+                .map(|room| {
+                    let encoded =
+                        self.encode_room(&room.get().data, time_now_ms, config, &python)?;
+                    Ok(pythonize(py, &encoded)?)
+                })
+                .collect()
+        })
     }
 }
 

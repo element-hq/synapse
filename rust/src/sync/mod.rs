@@ -32,6 +32,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyModule};
+use tracing::Instrument;
 
 use crate::caches::lock_ignoring_poison;
 use crate::config::SynapseHomeServerConfig;
@@ -122,6 +123,7 @@ impl SyncHandler {
         Ok(Box::pin(async move {
             let reader = store.reader(pool);
             let data = rooms::room_changes(&reader, &request, input)
+                .instrument(tracing::info_span!("sync.room_changes"))
                 .await
                 .map_err(anyhow_to_py)?;
             Ok(RoomChanges {
@@ -165,8 +167,10 @@ impl SyncHandler {
         let ll_members = Arc::clone(&self.ll_members);
         Ok(Box::pin(async move {
             let reader = store.reader(pool);
-            let outcomes =
-                rooms::generate_room_entries(&reader, &request, &ll_members, rooms).await;
+            let span = tracing::info_span!("sync.room_entries", rooms = rooms.len() as u64);
+            let outcomes = rooms::generate_room_entries(&reader, &request, &ll_members, rooms)
+                .instrument(span)
+                .await;
             Ok(RoomsResult::new(&changes, outcomes))
         }))
     }

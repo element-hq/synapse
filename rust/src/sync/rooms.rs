@@ -40,11 +40,13 @@ use pyo3::{
     types::{PyBool, PyList, PyTuple},
 };
 use pythonize::depythonize;
+use tracing::Instrument;
 
 use crate::caches::lock_ignoring_poison;
 use crate::clock::Clock;
 use crate::events::constants::event_type::M_ROOM_MEMBER;
 use crate::events::Event;
+use crate::logging::opentracing::record_error;
 use crate::state::StateKey;
 use crate::storage::events::RedactBehaviour;
 use crate::storage::sync_store::{PaginationOrder, SyncReader};
@@ -630,11 +632,18 @@ async fn room_entry(
         ll_pending: Mutex::default(),
         clock: Clock::new(),
     };
+    let span = tracing::info_span!(
+        "sync.room",
+        room_id = &*room.room_id,
+        outcome = tracing::field::Empty,
+        error = tracing::field::Empty,
+    );
     // A panic is this room's error. It would otherwise fail every room of
     // the request, including those that have recorded the members they
     // sent, which Python then could not compute.
     let outcome = match AssertUnwindSafe(generate_room_entry(&context, &room))
         .catch_unwind()
+        .instrument(span.clone())
         .await
     {
         Ok(Ok(result)) => {
@@ -647,6 +656,15 @@ async fn room_entry(
         },
         Err(panic) => RoomOutcome::Error(format!("panicked: {}", panic_message(&*panic))),
     };
+    let outcome_name = match &outcome {
+        RoomOutcome::Entry(_) => "entry",
+        RoomOutcome::Fallback(_) => "fallback",
+        RoomOutcome::Error(_) => "error",
+    };
+    span.record("outcome", outcome_name);
+    if let RoomOutcome::Error(error) = &outcome {
+        record_error(&span, error);
+    }
     (Arc::clone(&room.room_id), outcome)
 }
 

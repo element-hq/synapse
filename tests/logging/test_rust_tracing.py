@@ -24,7 +24,7 @@ from synapse.logging.context import LoggingContext
 from synapse.logging.opentracing import _enable_rust_tracing, start_active_span
 from synapse.logging.rust_tracing_metrics import rust_tracing_collector
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.opentracing import (
@@ -398,7 +398,78 @@ class ReporterRoundTripTestCase(HomeserverTestCase):
         self.assertEqual(stats[5], 1)
 
 
-class PersistTracingTestCase(HomeserverTestCase):
+class _AgentTestCase(HomeserverTestCase):
+    """Tracing on, as `init_tracer` sets it up: a sampling Jaeger tracer as the
+    global tracer, and Rust reporting to a UDP socket the test reads."""
+
+    if jaeger_client is None:
+        skip = "Requires jaeger_client"  # type: ignore[unreachable]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.addCleanup(set_tracing_enabled_for_test, False)
+
+        self.agent = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.addCleanup(self.agent.close)
+        self.agent.bind(("127.0.0.1", 0))
+        port = self.agent.getsockname()[1]
+
+        config = jaeger_client.config.Config(
+            config={
+                "local_agent": {"reporting_host": "127.0.0.1", "reporting_port": port}
+            },
+            service_name="test service",
+            scope_manager=LogContextScopeManager(),
+        )
+        self.python_spans = jaeger_client.reporter.InMemoryReporter()
+        tracer = config.create_tracer(
+            sampler=ConstSampler(True), reporter=self.python_spans
+        )
+        self.prepare_before_tracing()
+
+        # Synapse's own spans, the request's and the persist queue's, come
+        # from the global tracer: make it this one, as `init_tracer` does.
+        previous_tracer = opentracing.global_tracer()
+        opentracing.set_global_tracer(tracer)
+        self.addCleanup(opentracing.set_global_tracer, previous_tracer)
+
+        _enable_rust_tracing(hs, config, tracer)
+        self.runtime = hs.get_rust_runtime()
+        self.addCleanup(self.runtime.shutdown_tracing_for_test)
+
+    def prepare_before_tracing(self) -> None:
+        """Set-up that should not be traced."""
+
+    def _received_spans(self) -> "list[ttypes.Span]":
+        """Every span sent so far."""
+        self.assertTrue(self.runtime.flush_tracing_for_test(5))
+        spans: list[ttypes.Span] = []
+        self.agent.settimeout(0.2)
+        while True:
+            try:
+                data, _ = self.agent.recvfrom(70_000)
+            except TimeoutError:
+                return spans
+            spans.extend(_decode_emit_batch(data).spans)
+
+    def _python_spans_by_id(self) -> "dict[int, jaeger_client.Span]":
+        """The Python spans reported so far, by thrift's signed span ID."""
+        return {_signed(span.span_id): span for span in self.python_spans.get_spans()}
+
+    def _python_ancestors(
+        self, span: "ttypes.Span", python_by_id: "dict[int, jaeger_client.Span]"
+    ) -> list[str]:
+        """The names of the Python spans above the Rust span `span`, nearest
+        first."""
+        ancestors = []
+        python_span = python_by_id.get(span.parentSpanId)
+        while python_span is not None:
+            ancestors.append(python_span.operation_name)
+            parent_id = python_span.parent_id
+            python_span = python_by_id.get(_signed(parent_id)) if parent_id else None
+        return ancestors
+
+
+class PersistTracingTestCase(_AgentTestCase):
     """Events persisted by the Rust persister report the persister's steps,
     with the write transaction's `db.*` spans under them.
 
@@ -406,9 +477,6 @@ class PersistTracingTestCase(HomeserverTestCase):
 
         SYNAPSE_TEST_RUST_DRIVER=1 POSTGRES=1 run-trial.sh tests.logging.test_rust_tracing
     """
-
-    if jaeger_client is None:
-        skip = "Requires jaeger_client"  # type: ignore[unreachable]
 
     servlets = [
         admin.register_servlets,
@@ -434,50 +502,10 @@ class PersistTracingTestCase(HomeserverTestCase):
             raise SkipTest("needs the Rust persister")
         return hs
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.addCleanup(set_tracing_enabled_for_test, False)
-
-        self.agent = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.addCleanup(self.agent.close)
-        self.agent.bind(("127.0.0.1", 0))
-        port = self.agent.getsockname()[1]
-
-        config = jaeger_client.config.Config(
-            config={
-                "local_agent": {"reporting_host": "127.0.0.1", "reporting_port": port}
-            },
-            service_name="test service",
-            scope_manager=LogContextScopeManager(),
-        )
-        self.python_spans = jaeger_client.reporter.InMemoryReporter()
-        tracer = config.create_tracer(
-            sampler=ConstSampler(True), reporter=self.python_spans
-        )
+    def prepare_before_tracing(self) -> None:
         self.user = self.register_user("user", "pass")
         self.token = self.login("user", "pass")
         self.room_id = self.helper.create_room_as(self.user, tok=self.token)
-
-        # Synapse's own spans, the request's and the persist queue's, come
-        # from the global tracer: make it this one, as `init_tracer` does.
-        previous_tracer = opentracing.global_tracer()
-        opentracing.set_global_tracer(tracer)
-        self.addCleanup(opentracing.set_global_tracer, previous_tracer)
-
-        _enable_rust_tracing(hs, config, tracer)
-        self.runtime = hs.get_rust_runtime()
-        self.addCleanup(self.runtime.shutdown_tracing_for_test)
-
-    def _received_spans(self) -> "list[ttypes.Span]":
-        """Every span sent so far."""
-        self.assertTrue(self.runtime.flush_tracing_for_test(5))
-        spans: list[ttypes.Span] = []
-        self.agent.settimeout(0.2)
-        while True:
-            try:
-                data, _ = self.agent.recvfrom(70_000)
-            except TimeoutError:
-                return spans
-            spans.extend(_decode_emit_batch(data).spans)
 
     def test_persist_span_tree(self) -> None:
         self.helper.send(self.room_id, "hello", tok=self.token)
@@ -499,22 +527,16 @@ class PersistTracingTestCase(HomeserverTestCase):
 
         # The Rust persist hangs off the Python span of the persist queue,
         # in the same trace as the request.
-        python_by_id = {
-            _signed(span.span_id): span for span in self.python_spans.get_spans()
-        }
+        python_by_id = self._python_spans_by_id()
         (batch_next, _done) = named("persist.batch_next")
         python_parent = python_by_id.get(batch_next.parentSpanId)
         assert python_parent is not None, (batch_next, list(python_by_id.values()))
         python_trace = _signed(python_parent.trace_id)
         # The active Python span may be one the persist holds open, such as
         # the lock it waits for: walk up to the persist queue's span.
-        ancestors = []
-        python_span: jaeger_client.Span | None = python_parent
-        while python_span is not None:
-            ancestors.append(python_span.operation_name)
-            parent_id = python_span.parent_id
-            python_span = python_by_id.get(_signed(parent_id)) if parent_id else None
-        self.assertIn("persist_event_batch", ancestors)
+        self.assertIn(
+            "persist_event_batch", self._python_ancestors(batch_next, python_by_id)
+        )
         for span in spans:
             if _in_subtree(span, batch_next, by_id):
                 self.assertEqual(span.traceIdLow, python_trace, span)
@@ -568,3 +590,89 @@ def _in_subtree(
         if span.parentSpanId not in by_id:
             return False
         span = by_id[span.parentSpanId]
+
+
+class SyncTracingTestCase(_AgentTestCase):
+    """A `/sync` whose rooms Rust computes reports a span per room under the
+    request's Python span.
+
+    Needs the native Rust Postgres driver:
+
+        SYNAPSE_TEST_RUST_DRIVER=1 POSTGRES=1 run-trial.sh tests.logging.test_rust_tracing
+    """
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})["rust_sync"] = "on"
+        return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        hs = self.setup_test_homeserver()
+        if not isinstance(
+            hs.get_datastores().main.db_pool._db_pool, RustConnectionPool
+        ):
+            raise SkipTest("needs the native Rust Postgres driver")
+        if hs.config.experimental.rust_sync != "on":
+            raise SkipTest("SYNAPSE_TEST_RUST_SYNC overrides the config")
+        return hs
+
+    def prepare_before_tracing(self) -> None:
+        self.user = self.register_user("user", "pass")
+        self.token = self.login("user", "pass")
+        self.rooms = [
+            self.helper.create_room_as(self.user, tok=self.token) for _ in range(2)
+        ]
+
+    def test_sync_span_tree(self) -> None:
+        channel = self.make_request("GET", "/sync", access_token=self.token)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        spans = self._received_spans()
+
+        def named(name: str) -> "list[ttypes.Span]":
+            return [s for s in spans if s.operationName == name]
+
+        # Under the request's Python span.
+        python_by_id = self._python_spans_by_id()
+        (changes,) = named("sync.room_changes")
+        (entries,) = named("sync.room_entries")
+        for span in (changes, entries):
+            self.assertIn("SyncRestServlet", self._python_ancestors(span, python_by_id))
+
+        rooms = named("sync.room")
+        self.assertEqual(len(rooms), 2)
+        room_ids = {
+            next(t.vStr for t in room_span.tags if t.key == "room_id")
+            for room_span in rooms
+        }
+        self.assertEqual(room_ids, set(self.rooms))
+        for room_span in rooms:
+            self.assertEqual(room_span.parentSpanId, entries.spanId)
+            self.assertEqual(
+                next(t.vStr for t in room_span.tags if t.key == "outcome"), "entry"
+            )
+
+        # The rooms' reads nest under them.
+        room_span_ids = {room_span.spanId for room_span in rooms}
+        self.assertTrue(
+            any(
+                s.operationName == "db.connection" and s.parentSpanId in room_span_ids
+                for s in spans
+            ),
+            [s.operationName for s in spans],
+        )
+
+        (encode,) = named("sync.encode")
+        self.assertEqual(
+            next(t.vLong for t in encode.tags if t.key == "rooms"), 2, encode
+        )
+        # Encoded on the reactor, under the request's Python span.
+        self.assertEqual(encode.traceIdLow, entries.traceIdLow)
+        self.assertIn("SyncRestServlet", self._python_ancestors(encode, python_by_id))
