@@ -114,6 +114,23 @@ class RustMessagesDispatchTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self._count("rust"), before)
         self.assertEqual(body["chunk"], [])
 
+    def test_stream_token_converted_in_rust(self) -> None:
+        """A `from` token without a topological part is converted by Rust,
+        not by the Python query."""
+        token = self.get_success(
+            self.hs.get_event_sources()
+            .get_current_token()
+            .to_string(self.hs.get_datastores().main)
+        )
+        store = self.hs.get_datastores().main
+        with patch.object(
+            store,
+            "get_current_topological_token",
+            Mock(side_effect=AssertionError("called")),
+        ):
+            body = self._messages(**{"from": token})
+        self.assertEqual(body["chunk"][0]["event_id"], self.event_id)
+
     def test_error_falls_back_to_python(self) -> None:
         self.handler._rust_messages_strict = False
         before = self._count("error")

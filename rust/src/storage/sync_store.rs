@@ -149,6 +149,10 @@ const MAIN_TIMELINE: &str = "main";
 /// The receipt types that mark events read.
 const READ_RECEIPT_TYPES: [&str; 2] = ["m.read", "m.read.private"];
 
+/// How many events after a token [`SyncReader::current_topological_token`]
+/// reads before running the aggregate over the whole range instead.
+pub const CURRENT_TOPOLOGICAL_TOKEN_SCAN: i64 = 1001;
+
 /// The parts of the homeserver config the queries apply.
 #[derive(Debug, Clone)]
 pub struct SyncStoreConfig {
@@ -1241,6 +1245,71 @@ impl<'a> SyncReader<'a> {
             None => to_token.cloned().unwrap_or_else(|| from_token.clone()),
         };
         Ok((rows, next_token, limited))
+    }
+
+    /// `get_current_topological_token`: the lowest topological ordering of
+    /// the room's events from stream position `stream` on, with `stream`
+    /// capped at the room's last event. 0 for a room without events.
+    ///
+    /// Postgres plans the Python aggregate as an ordered scan of the
+    /// `(room_id, topological_ordering, stream_ordering)` index from the
+    /// room's first event, which reads the whole room when the token is
+    /// recent. So this reads the events after the token in stream order
+    /// instead, up to a limit, and takes the minimum itself. A token more
+    /// than [`CURRENT_TOPOLOGICAL_TOKEN_SCAN`] events back runs the
+    /// aggregate.
+    pub async fn current_topological_token(
+        &self,
+        room_id: &str,
+        stream: i64,
+    ) -> anyhow::Result<i64> {
+        self.current_topological_token_with_scan(room_id, stream, CURRENT_TOPOLOGICAL_TOKEN_SCAN)
+            .await
+    }
+
+    /// [`SyncReader::current_topological_token`], reading at most `limit`
+    /// events before running the aggregate. For tests.
+    pub(crate) async fn current_topological_token_with_scan(
+        &self,
+        room_id: &str,
+        stream: i64,
+        limit: i64,
+    ) -> anyhow::Result<i64> {
+        let borrowed = self.borrow().await?;
+        let rows = borrowed
+            .query(
+                "SELECT topological_ordering FROM events
+                WHERE room_id = $1
+                AND stream_ordering >= LEAST(
+                    $2,
+                    (SELECT MAX(stream_ordering) FROM events WHERE room_id = $1)
+                )
+                ORDER BY stream_ordering
+                LIMIT $3",
+                &[&room_id, &stream, &limit],
+            )
+            .await?;
+        if (rows.len() as i64) < limit {
+            let mut lowest: Option<i64> = None;
+            for row in rows {
+                let topological: i64 = row.try_get(0)?;
+                lowest = Some(lowest.map_or(topological, |l| l.min(topological)));
+            }
+            return Ok(lowest.unwrap_or(0));
+        }
+        let rows = borrowed
+            .query(
+                "SELECT COALESCE(MIN(topological_ordering), 0) FROM events
+                WHERE room_id = $1
+                AND stream_ordering >= LEAST(
+                    $2,
+                    (SELECT MAX(stream_ordering) FROM events WHERE room_id = $1)
+                )",
+                &[&room_id, &stream],
+            )
+            .await?;
+        let row = rows.first().context("no row from MIN()")?;
+        Ok(row.try_get(0)?)
     }
 
     /// `get_recent_event_ids_for_room`: the last `limit` events of the room
@@ -2794,6 +2863,26 @@ impl PySyncStoreForTest {
             .boxed()
         })?;
         Ok((events_to_py(py, events)?, token, limited))
+    }
+
+    /// `get_current_topological_token`, reading at most `scan` events
+    /// after the token before running the aggregate.
+    #[pyo3(signature = (room_id, stream, scan = CURRENT_TOPOLOGICAL_TOKEN_SCAN))]
+    fn current_topological_token(
+        &self,
+        py: Python<'_>,
+        room_id: String,
+        stream: i64,
+        scan: i64,
+    ) -> PyResult<i64> {
+        self.run(py, |reader| {
+            async move {
+                reader
+                    .current_topological_token_with_scan(&room_id, stream, scan)
+                    .await
+            }
+            .boxed()
+        })
     }
 
     /// `get_recent_event_ids_for_room`, with each row as

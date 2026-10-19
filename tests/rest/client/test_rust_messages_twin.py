@@ -435,6 +435,19 @@ class RustMessagesTwinTestCase(unittest.HomeserverTestCase):
             pages[0]["start"],
         )
 
+        # From a `/sync` token, which has no topological part: the leave is
+        # compared with the position the token converts to.
+        sync_token = self.get_success(
+            self.hs.get_event_sources().get_current_token().to_string(self.store)
+        )
+        pages = self._walk(
+            room_id, self.bob_tok, dir="b", limit=3, **{"from": sync_token}
+        )
+        self.assertTrue(
+            pages[0]["start"].startswith(f"t{leave_token.topological}-"),
+            pages[0]["start"],
+        )
+
     def _room_with_visibility(self, visibility: str) -> str:
         return self.helper.create_room_as(
             self.alice,

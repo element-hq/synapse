@@ -582,6 +582,55 @@ class SyncStoreTestCase(unittest.HomeserverTestCase):
         }
         return RoomStreamToken(stream=stream, instance_map=immutabledict(instance_map))
 
+    def test_current_topological_token(self) -> None:
+        """Every stream position around the room's, read by the bounded scan
+        and by the aggregate it falls back to, against Python's."""
+        self._write_events(self.room_id, 15)
+
+        # Orderings that do not rise together: a late event with a low
+        # topological ordering, as a late federated event gets, and an
+        # outlier. The rows are only read here, so they need not be events
+        # anything else knows about.
+        def add_row(
+            event_id: str, stream: int, topological: int, outlier: bool
+        ) -> None:
+            self.get_success(
+                self.store.db_pool.simple_insert(
+                    "events",
+                    {
+                        "event_id": event_id,
+                        "room_id": self.room_id,
+                        "type": "m.room.message",
+                        "stream_ordering": stream,
+                        "topological_ordering": topological,
+                        "processed": True,
+                        "outlier": outlier,
+                    },
+                    desc="add_row",
+                )
+            )
+
+        _, last = self._stream_range(self.room_id)
+        add_row("$late", last + 100, 2, False)
+        add_row("$outlier", last + 101, 1, True)
+        # A backfilled event, with a negative stream ordering.
+        add_row("$backfilled", -50, 3, False)
+        lo, hi = self._stream_range(self.room_id)
+        other_room = self.helper.create_room_as(self.alice, tok=self.alice_tok)
+        for stream in range(lo - 2, hi + 3):
+            expected = self.get_success(
+                self.store.get_current_topological_token(self.room_id, stream)
+            )
+            for scan in (1, 3, 1001):
+                self.assertEqual(
+                    self.rust.current_topological_token(self.room_id, stream, scan),
+                    expected,
+                    (stream, scan),
+                )
+        # A room without events at all.
+        self.assertEqual(self.rust.current_topological_token("!nothing:test", 5), 0)
+        self.assertGreater(self.rust.current_topological_token(other_room, hi), 0)
+
     @parameterized.expand(SEEDS)
     def test_paginate_room_events(self, seed: int) -> None:
         rng = random.Random(seed)

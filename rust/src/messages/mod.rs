@@ -30,6 +30,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use anyhow::Context;
 use futures::future::BoxFuture;
 use pyo3::{
     create_exception,
@@ -68,12 +69,18 @@ create_exception!(
 const BACKFILL_BECAUSE_TOO_MANY_GAPS_THRESHOLD: usize = 3;
 
 /// One `/messages` request, after Python's auth checks and token handling.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MessagesRequestData {
     pub room_id: Arc<str>,
-    /// The `from` token, clamped to the user's leave if they left.
+    /// The `from` token, as the client sent it.
     pub from_key: RoomStreamToken,
     pub to_key: Option<RoomStreamToken>,
+    /// The token of the user's leave, for a user who left, going
+    /// backwards: the page starts there if it is before `from_key`.
+    pub leave_key: Option<RoomStreamToken>,
+    /// The topological position of `from_key`, when an earlier read of
+    /// the same request worked it out.
+    pub curr_topo: Option<i64>,
     pub direction: Direction,
     pub limit: i64,
     /// Whether the user is not in the room and was not when the events
@@ -92,13 +99,14 @@ pub struct MessagesRequest {
 #[pymethods]
 impl MessagesRequest {
     #[new]
-    #[pyo3(signature = (*, room_id, user_id, from_key, to_key, direction, limit, is_peeking, lazy_load_members, ignored_users, is_server_admin, return_soft_failed_events, return_policy_server_spammy_events, msc4354_enabled))]
+    #[pyo3(signature = (*, room_id, user_id, from_key, to_key, leave_key, direction, limit, is_peeking, lazy_load_members, ignored_users, is_server_admin, return_soft_failed_events, return_policy_server_spammy_events, msc4354_enabled))]
     #[allow(clippy::too_many_arguments)]
     fn py_new(
         room_id: &str,
         user_id: &str,
         from_key: RoomStreamToken,
         to_key: Option<RoomStreamToken>,
+        leave_key: Option<RoomStreamToken>,
         direction: &str,
         limit: i64,
         is_peeking: bool,
@@ -120,6 +128,8 @@ impl MessagesRequest {
                 room_id: Arc::from(room_id),
                 from_key,
                 to_key,
+                leave_key,
+                curr_topo: None,
                 direction,
                 limit,
                 is_peeking,
@@ -133,6 +143,17 @@ impl MessagesRequest {
             }),
         })
     }
+
+    /// This request with the topological position of its `from` token
+    /// known, as a read of it returned it, so that reading the page again
+    /// does not work it out again.
+    fn with_curr_topo(&self, curr_topo: i64) -> Self {
+        let mut data = (*self.data).clone();
+        data.curr_topo = Some(curr_topo);
+        MessagesRequest {
+            data: Arc::new(data),
+        }
+    }
 }
 
 /// A computed page: what `get_messages` builds its `GetMessagesResult`
@@ -144,6 +165,12 @@ pub struct MessagesResultData {
     pub bundles: HashMap<Arc<str>, Bundle>,
     /// The lazy-loaded members, when asked for and there are any.
     pub state: Option<Vec<Event>>,
+    /// The room key of the response's `start` token: the request's, or the
+    /// user's leave.
+    pub from_key: RoomStreamToken,
+    /// Going backwards, the topological position of the `from` token as
+    /// the client sent it, which backfill starts from.
+    pub curr_topo: Option<i64>,
     /// The room key of the response's `end` token.
     pub next_key: RoomStreamToken,
     /// Whether the page is empty and there is nothing after it, in which
@@ -187,6 +214,17 @@ impl MessagesResult {
                 PyList::new(py, events)
             })
             .transpose()
+    }
+
+    /// The room key of the response's `start` token.
+    #[getter]
+    fn start_key(&self) -> RoomStreamToken {
+        self.data.from_key.clone()
+    }
+
+    #[getter]
+    fn curr_topo(&self) -> Option<i64> {
+        self.data.curr_topo
     }
 
     #[getter]
@@ -252,10 +290,37 @@ pub async fn get_messages(
         return Err(Fallback(format!("{room_id} has partial state")).into());
     }
 
+    // Going backwards, backfill needs the topological position of the
+    // `from` token, and a user who left pages from their leave if it is
+    // before that. As the Python, a topological part of 0 counts as none.
+    let mut from_key = request.from_key.clone();
+    let mut curr_topo = None;
+    if request.direction == Direction::Backwards {
+        let topological = match (request.curr_topo, from_key.topological) {
+            (Some(known), _) => known,
+            (None, Some(topological)) if topological != 0 => topological,
+            _ => {
+                reader
+                    .current_topological_token(room_id, from_key.stream)
+                    .instrument(tracing::info_span!("messages.topological_token"))
+                    .await?
+            }
+        };
+        curr_topo = Some(topological);
+        if let Some(leave_key) = &request.leave_key {
+            let leave_topological = leave_key
+                .topological
+                .context("the leave token has no topological part")?;
+            if leave_topological < topological {
+                from_key = leave_key.clone();
+            }
+        }
+    }
+
     let (events, next_key, limited) = reader
         .paginate_room_events(
             room_id,
-            &request.from_key,
+            &from_key,
             request.to_key.as_ref(),
             request.direction,
             request.limit,
@@ -268,6 +333,8 @@ pub async fn get_messages(
         request.direction == Direction::Backwards && page_needs_backfill(&events, request.limit);
 
     let mut result = MessagesResultData {
+        from_key,
+        curr_topo,
         next_key,
         needs_backfill,
         ..MessagesResultData::default()

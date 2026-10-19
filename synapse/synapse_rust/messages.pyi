@@ -34,6 +34,7 @@ class MessagesRequest:
         user_id: str,
         from_key: RoomStreamToken,
         to_key: RoomStreamToken | None,
+        leave_key: RoomStreamToken | None,
         direction: str,
         limit: int,
         is_peeking: bool,
@@ -44,6 +45,9 @@ class MessagesRequest:
         return_policy_server_spammy_events: bool,
         msc4354_enabled: bool,
     ) -> None: ...
+    def with_curr_topo(self, curr_topo: int) -> "MessagesRequest":
+        """This request with the topological position of its `from` token
+        known, so that reading the page again does not work it out again."""
 
 class MessagesResult:
     """A page of events computed by Rust."""
@@ -57,6 +61,14 @@ class MessagesResult:
     @property
     def state(self) -> list[EventBase] | None:
         """The lazy-loaded members, when asked for and there are any."""
+    @property
+    def start_key(self) -> RoomStreamToken:
+        """The room key of the response's `start` token: the request's, or
+        the user's leave."""
+    @property
+    def curr_topo(self) -> int | None:
+        """Going backwards, the topological position of the request's `from`
+        token, which backfill starts from."""
     @property
     def next_key(self) -> RoomStreamToken:
         """The room key of the response's `end` token."""

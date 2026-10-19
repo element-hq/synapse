@@ -442,6 +442,11 @@ class SyncStoreForTest:
         """`get_events_as_list`, with `redact_behaviour` as the name of a
         member of `EventRedactBehaviour`."""
 
+    def current_topological_token(
+        self, room_id: str, stream: int, scan: int = 1001
+    ) -> int:
+        """`get_current_topological_token`, reading at most `scan` events
+        after the token before running the aggregate."""
     def paginate_room_events(
         self,
         room_id: str,

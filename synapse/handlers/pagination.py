@@ -583,6 +583,44 @@ class PaginationHandler:
                 room_id, requester, allow_departed_users=True
             )
 
+        to_room_key = None
+        if pagin_config.to_token:
+            to_room_key = pagin_config.to_token.room_key
+
+        # Whether the Rust handler backfilled in the foreground before
+        # leaving the page to Python.
+        already_backfilled = False
+        if (
+            self._rust_messages is not None
+            and not use_admin_priviledge
+            and as_client_event
+            and _rust_supports_filter(event_filter)
+        ):
+            # Rust works out the topological position of the token and
+            # clamps it to the leave, from the leave's token.
+            leave_key = None
+            if (
+                pagin_config.direction == Direction.BACKWARDS
+                and membership == Membership.LEAVE
+            ):
+                assert member_event_id
+                leave_key = await self.store.get_topological_token_for_event(
+                    member_event_id
+                )
+            rust_result, already_backfilled = await self._get_messages_in_rust(
+                self._rust_messages,
+                user_id=user_id,
+                room_id=room_id,
+                pagin_config=pagin_config,
+                from_token=from_token,
+                to_room_key=to_room_key,
+                leave_key=leave_key,
+                is_peeking=member_event_id is None,
+                lazy_load_members=bool(event_filter and event_filter.lazy_load_members),
+            )
+            if rust_result is not None:
+                return rust_result
+
         if pagin_config.direction == Direction.BACKWARDS:
             # if we're going backwards, we might need to backfill. This
             # requires that we have a topo token.
@@ -615,35 +653,6 @@ class PaginationHandler:
                 from_token = from_token.copy_and_replace(
                     StreamKeyType.ROOM, leave_token
                 )
-
-        to_room_key = None
-        if pagin_config.to_token:
-            to_room_key = pagin_config.to_token.room_key
-
-        # Whether the Rust handler backfilled in the foreground before
-        # leaving the page to Python.
-        already_backfilled = False
-        if (
-            self._rust_messages is not None
-            and not use_admin_priviledge
-            and as_client_event
-            and _rust_supports_filter(event_filter)
-        ):
-            rust_result, already_backfilled = await self._get_messages_in_rust(
-                self._rust_messages,
-                user_id=user_id,
-                room_id=room_id,
-                pagin_config=pagin_config,
-                from_token=from_token,
-                to_room_key=to_room_key,
-                is_peeking=member_event_id is None,
-                lazy_load_members=bool(event_filter and event_filter.lazy_load_members),
-                curr_topo=(
-                    curr_topo if pagin_config.direction == Direction.BACKWARDS else None
-                ),
-            )
-            if rust_result is not None:
-                return rust_result
 
         # Initially fetch the events from the database. With any luck, we can return
         # these without blocking on backfill (handled below).
@@ -828,9 +837,9 @@ class PaginationHandler:
         pagin_config: PaginationConfig,
         from_token: StreamToken,
         to_room_key: RoomStreamToken | None,
+        leave_key: RoomStreamToken | None,
         is_peeking: bool,
         lazy_load_members: bool,
-        curr_topo: int | None,
     ) -> tuple[GetMessagesResult | None, bool]:
         """The rest of `get_messages` through the Rust handler, from the page
         query on. Python still backfills.
@@ -850,6 +859,7 @@ class PaginationHandler:
                 user_id=user_id,
                 from_key=from_token.room_key,
                 to_key=to_room_key,
+                leave_key=leave_key,
                 direction=pagin_config.direction.value,
                 limit=pagin_config.limit,
                 is_peeking=is_peeking,
@@ -891,6 +901,7 @@ class PaginationHandler:
         if result is None:
             return None, False
         if pagin_config.direction == Direction.BACKWARDS:
+            curr_topo = result.curr_topo
             assert curr_topo is not None
             if result.needs_backfill:
                 did_backfill = await self.hs.get_federation_handler().maybe_backfill(
@@ -900,6 +911,10 @@ class PaginationHandler:
                 # Python does. Python reads it if Rust fails this time,
                 # without backfilling again.
                 if did_backfill:
+                    # The page is read again as the first read saw it,
+                    # without working the token out again.
+                    assert request is not None
+                    request = request.with_curr_topo(curr_topo)
                     result = await call_rust()
                     if result is None:
                         return None, True
@@ -915,6 +930,8 @@ class PaginationHandler:
                 )
         rust_messages_counter.labels(result="rust", **labels).inc()
 
+        # The start token is the leave's for a user who left.
+        from_token = from_token.copy_and_replace(StreamKeyType.ROOM, result.start_key)
         end_token = None
         if not result.end_of_history:
             end_token = from_token.copy_and_replace(StreamKeyType.ROOM, result.next_key)
