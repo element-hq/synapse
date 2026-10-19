@@ -1,0 +1,1 @@
+Filter out [MSC4426](https://github.com/matrix-org/matrix-spec-proposals/pull/4426) User Status fields for remote user profile lookups which become stale on clients without [MSC4259](https://github.com/matrix-org/matrix-spec-proposals/pull/4259) to get updates about profiles over federation.

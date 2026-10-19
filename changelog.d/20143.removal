@@ -1,0 +1,1 @@
+Remove support for unstable [MSC2965](https://github.com/matrix-org/matrix-spec-proposals/pull/2965) `.well-known` endpoint.

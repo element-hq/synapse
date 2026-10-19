@@ -182,6 +182,7 @@ async def filter_and_transform_events_for_client(
             user_id=user_id,
             event=event,
             clock=storage.main.clock,
+            msc4354_enabled=storage.main.hs.config.experimental.msc4354_enabled,
             filter_send_to_client=filter_send_to_client,
             sender_ignored=event.sender in ignore_list,
             always_include_ids=always_include_ids,
@@ -372,6 +373,7 @@ def _check_client_allowed_to_see_event(
     user_id: str,
     event: EventBase,
     clock: Clock,
+    msc4354_enabled: bool,
     filter_send_to_client: bool,
     is_peeking: bool,
     always_include_ids: frozenset[str],
@@ -388,6 +390,7 @@ def _check_client_allowed_to_see_event(
         user_id
         event
         clock
+        msc4354_enabled: Whether MSC4354 Sticky Events are enabled.
         filter_send_to_client
         is_peeking
         always_include_ids
@@ -443,6 +446,25 @@ def _check_client_allowed_to_see_event(
 
     if state is None:
         raise Exception("Missing state for non-outlier event")
+
+    if msc4354_enabled and not is_peeking:
+        # For sticky events, apply an exemption from the membership test part of history visibility rules.
+        # Essentially, this alters `invited`/`joined` history visibility rules to `shared` for sticky events.
+        #
+        # > History visibility **checks** MUST NOT be applied to sticky events. This applies to all endpoints where the sticky events could be returned.
+        # > Any joined user or server is authorised to see sticky events for the duration they remain sticky.[^hisvis]
+        # > — https://github.com/matrix-org/matrix-spec-proposals/blob/3635b765267452eb452cd2ced963aee52d1fd185/proposals/4354-sticky-events.md#L101-L102
+        #
+        # > [^hisvis]: This ensures that newly joined servers can see sticky events sent from before they were joined to the room, regardless
+        # > of the history visibility setting. This matches the behaviour of state events.
+        # > — https://github.com/matrix-org/matrix-spec-proposals/blob/3635b765267452eb452cd2ced963aee52d1fd185/proposals/4354-sticky-events.md#L501-L502
+        sticky_until_ts = event.locally_sticky_until_ts()
+        if (
+            sticky_until_ts is not None
+            # Check the event is still sticky
+            and clock.time_msec() < sticky_until_ts
+        ):
+            return event
 
     # get the room_visibility at the time of the event.
     visibility = get_effective_room_visibility_from_state(state)
