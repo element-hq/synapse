@@ -36,7 +36,7 @@ use crate::{
 /// `_load_next_mult_id_txn`'s statement: `$2` IDs from the sequence `$1`.
 pub const NEXTVAL_SQL: &str = "SELECT nextval($1::text) FROM generate_series(1, $2::bigint)";
 
-/// How many IDs [`TxnStream::add_prefetched`] is asked for: enough for a
+/// How many IDs a [`TxnStream::begin_prefetch`] asks for: enough for a
 /// chunk's cache invalidations, as a rule. The rest are finished unused.
 pub const PREFETCH: i64 = 8;
 
@@ -100,17 +100,19 @@ impl TxnStream {
     }
 
     /// The Postgres sequence the IDs come from, for a [`NEXTVAL_SQL`] sent
-    /// with other reads, whose rows go to [`TxnStream::add_prefetched`].
+    /// with other reads.
     pub fn sequence(&self) -> &'static str {
         self.sequence
     }
 
-    /// Keep the IDs `rows` of a [`NEXTVAL_SQL`] allocated, for
-    /// [`TxnStream::next_ids`] to hand out without a round trip of its own.
-    pub fn add_prefetched(&self, rows: &[Row]) -> anyhow::Result<()> {
-        let ids = Fetch::begin(self).allocated_rows(rows)?;
-        self.lock_spare().extend(ids);
-        Ok(())
+    /// Start fetching IDs with a [`NEXTVAL_SQL`] sent with other reads.
+    /// Call this before sending it, as `next_ids` begins its fetch before
+    /// its query: otherwise the stream's position can pass the IDs while
+    /// they are on their way back.
+    pub fn begin_prefetch(&self) -> Prefetch<'_> {
+        Prefetch {
+            fetch: Fetch::begin(self),
+        }
     }
 
     /// `_load_next_id_txn`: the next ID on the stream, unfinished.
@@ -154,6 +156,9 @@ impl TxnStream {
     /// Mark finished the IDs of an attempt that failed, as Python's
     /// `call_on_exception` does.
     pub fn finish_pending(&self) {
+        // The spare IDs are pending too, so they are finished with the rest
+        // and must not be handed out again.
+        self.lock_spare().clear();
         let ids = std::mem::take(&mut *self.lock_pending());
         if !ids.is_empty() {
             self.tracker.mark_finished(&ids);
@@ -164,6 +169,31 @@ impl TxnStream {
     /// finished once it has applied the effects.
     pub fn hand_over(&self, handed: &[i64]) {
         self.lock_pending().retain(|id| !handed.contains(id));
+    }
+}
+
+/// A fetch begun by [`TxnStream::begin_prefetch`]. It ends without
+/// allocating if dropped before [`Prefetch::allocated`].
+pub struct Prefetch<'a> {
+    fetch: Fetch<'a>,
+}
+
+impl Prefetch<'_> {
+    /// Keep the IDs `rows` of the [`NEXTVAL_SQL`] allocated, for
+    /// [`TxnStream::next_ids`] to hand out without a round trip of its own.
+    pub fn allocated(self, rows: &[Row]) -> anyhow::Result<()> {
+        let stream = self.fetch.stream;
+        let ids = self.fetch.allocated_rows(rows)?;
+        stream.lock_spare().extend(ids);
+        Ok(())
+    }
+
+    /// As [`Prefetch::allocated`], for tests, which cannot make rows.
+    #[cfg(test)]
+    fn allocate_ids(self, ids: &[i64]) {
+        let stream = self.fetch.stream;
+        self.fetch.allocated(ids);
+        stream.lock_spare().extend_from_slice(ids);
     }
 }
 
@@ -269,5 +299,47 @@ mod tests {
         stream.finish_pending();
         // A fetch still in flight would hold the position at 1.
         assert_eq!(tracker.get_persisted_upto_position(), 2);
+    }
+
+    #[test]
+    fn a_failed_attempt_leaves_no_spare_ids() {
+        let tracker = tracker();
+        let stream = TxnStream::caches(Arc::clone(&tracker));
+        stream.begin_prefetch().allocate_ids(&[2, 3, 4]);
+        // The attempt failed: its IDs, spare ones included, are finished.
+        stream.finish_pending();
+        assert_eq!(tracker.get_persisted_upto_position(), 4);
+        // So the next attempt must not hand them out.
+        assert!(stream.lock_spare().is_empty());
+    }
+
+    #[test]
+    fn a_dropped_prefetch_ends() {
+        let tracker = tracker();
+        let stream = TxnStream::caches(Arc::clone(&tracker));
+        allocate(&stream, &[2]);
+        // The reads failed, or the room was missing, after `nextval` ran.
+        drop(stream.begin_prefetch());
+        stream.finish_pending();
+        assert_eq!(tracker.get_persisted_upto_position(), 2);
+        assert!(stream.lock_spare().is_empty());
+    }
+
+    #[test]
+    fn a_prefetch_holds_the_position_until_it_allocates() {
+        let tracker = tracker();
+        let stream = TxnStream::caches(Arc::clone(&tracker));
+        let other = TxnStream::caches(Arc::clone(&tracker));
+        // Sent with the reads, and the sequence has answered 2.
+        let prefetch = stream.begin_prefetch();
+        // Meanwhile another fetch on this instance takes 3 and finishes it.
+        allocate(&other, &[3]);
+        other.finish_pending();
+        // The prefetch may still be holding 2, so the position must wait.
+        assert_eq!(tracker.get_persisted_upto_position(), 1);
+        prefetch.allocate_ids(&[2]);
+        assert_eq!(tracker.get_persisted_upto_position(), 1);
+        stream.finish_pending();
+        assert_eq!(tracker.get_persisted_upto_position(), 3);
     }
 }

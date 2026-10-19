@@ -338,15 +338,14 @@ async fn persist_events_txn_steps<'a>(
             ),
         );
     }
+    let prefetch = input.cache_stream.begin_prefetch();
     let mut results = txn.query_many(&queries).await?.into_iter();
     if new_room.is_none() && results.next().is_some_and(|rows| rows.is_empty()) {
         return Err(anyhow!("Room does not exist {room_id}").into());
     }
     let outlier_rows = results.next().unwrap_or_default();
     let redaction_rows = results.next().unwrap_or_default();
-    input
-        .cache_stream
-        .add_prefetched(&results.next().unwrap_or_default())?;
+    prefetch.allocated(&results.next().unwrap_or_default())?;
 
     let events = events::update_outliers(txn, input, events, outlier_rows, effects).await?;
 
