@@ -1601,7 +1601,8 @@ The following parameters should be set in the URL:
 
 The following fields are returned in the JSON response body:
 
-- `status` - string (required) - one of scheduled/active/completed/failed, indicating the status of the redaction job
+- `status` - string (required) - one of `scheduled`/`active`/`complete`/`failed`,
+  indicating the status of the redaction job
 - `failed_redactions` - dictionary (optional) - when the redaction status is `complete`,
   contains the keys of the dict are event ids the process was unable to redact, if any,
   and the values are the corresponding error that caused the redaction to fail
