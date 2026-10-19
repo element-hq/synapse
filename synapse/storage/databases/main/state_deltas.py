@@ -130,58 +130,53 @@ class StateDeltasStore(SQLBaseStore):
         def get_current_state_deltas_txn(
             txn: LoggingTransaction,
         ) -> tuple[int, list[StateDelta]]:
-            # First we group state deltas by `stream_id` and calculate which
-            # groups can be returned without exceeding the provided `limit`.
-            sql_grouped = """
-                SELECT stream_id, COUNT(*) AS c
-                FROM current_state_delta_stream
-                WHERE stream_id > ? AND stream_id <= ?
-                GROUP BY stream_id
-                ORDER BY stream_id
-                LIMIT ?
-            """
+            # Group the deltas by `stream_id`, up to `limit` + 1 groups, and
+            # return the first group and the groups after it that fit in
+            # `limit` rows all together, so that a group is never split. The
+            # first group is always returned, so that the caller always
+            # makes progress. One statement, so that it runs in autocommit.
             group_limit = limit + 1
-            txn.execute(sql_grouped, (prev_stream_id, max_stream_id, group_limit))
-            grouped_rows = txn.fetchall()
-
-            if not grouped_rows:
+            sql = """
+                WITH groups AS (
+                    SELECT stream_id, COUNT(*) AS c
+                    FROM current_state_delta_stream
+                    WHERE stream_id > ? AND stream_id <= ?
+                    GROUP BY stream_id
+                    ORDER BY stream_id
+                    LIMIT ?
+                ), budget AS (
+                    SELECT
+                        stream_id,
+                        CAST(SUM(c) OVER (ORDER BY stream_id) AS BIGINT) AS included_rows,
+                        COUNT(*) OVER () AS group_count,
+                        MIN(stream_id) OVER () AS first_stream_id
+                    FROM groups
+                )
+                SELECT
+                    d.stream_id, d.room_id, d.type, d.state_key, d.event_id,
+                    d.prev_event_id, b.group_count
+                FROM budget AS b
+                INNER JOIN current_state_delta_stream AS d
+                    ON d.stream_id = b.stream_id
+                WHERE b.included_rows <= ? OR b.stream_id = b.first_stream_id
+                ORDER BY d.stream_id ASC
+            """
+            txn.execute(sql, (prev_stream_id, max_stream_id, group_limit, limit))
+            rows = txn.fetchall()
+            if not rows:
                 # Nothing to return in the range; we are up to date through max_stream_id.
                 return max_stream_id, []
 
-            # Always retrieve the first group, at the bare minimum. This ensures the
-            # caller always makes progress, even if a single group exceeds `limit`.
-            fetch_upto_stream_id, included_rows = grouped_rows[0]
+            fetch_upto_stream_id = rows[-1][0]
+            group_count = rows[0][6]
+            included_groups = len({row[0] for row in rows})
 
-            # Determine which other groups we can retrieve at the same time,
-            # without blowing the budget.
-            included_all_groups = True
-            for stream_id, count in grouped_rows[1:]:
-                if included_rows + count > limit:
-                    included_all_groups = False
-                    break
-                included_rows += count
-                fetch_upto_stream_id = stream_id
-
-            # If we retrieved fewer groups than the limit *and* we didn't hit the
-            # `LIMIT ?` cap on the grouping query, we know we've caught up with
-            # the stream.
+            # If we retrieved every group *and* fewer groups than the `LIMIT`
+            # cap on the grouping query, we know we've caught up with the
+            # stream.
             caught_up_with_stream = (
-                included_all_groups and len(grouped_rows) < group_limit
+                included_groups == group_count and group_count < group_limit
             )
-
-            # At this point we should have advanced, or bailed out early above.
-            assert fetch_upto_stream_id != prev_stream_id
-
-            # 2) Fetch the actual rows for only the included stream_id groups.
-            sql_rows = """
-                SELECT stream_id, room_id, type, state_key, event_id, prev_event_id
-                FROM current_state_delta_stream
-                WHERE ? < stream_id AND stream_id <= ?
-                ORDER BY stream_id ASC
-            """
-            txn.execute(sql_rows, (prev_stream_id, fetch_upto_stream_id))
-            rows = txn.fetchall()
-
             clipped_stream_id = (
                 max_stream_id if caught_up_with_stream else fetch_upto_stream_id
             )
@@ -199,7 +194,9 @@ class StateDeltasStore(SQLBaseStore):
             ]
 
         return await self.db_pool.runInteraction(
-            "get_current_state_deltas", get_current_state_deltas_txn
+            "get_current_state_deltas",
+            get_current_state_deltas_txn,
+            db_autocommit=True,
         )
 
     def _get_max_stream_id_in_current_state_deltas_txn(

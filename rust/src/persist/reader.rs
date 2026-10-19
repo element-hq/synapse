@@ -71,7 +71,39 @@ const PREVS_BATCH_SIZE: usize = 100;
 
 /// `chain_links` fetches the links of this many chains per statement, as
 /// `_get_chain_links` does.
-const CHAIN_LINKS_BATCH_SIZE: usize = 1000;
+pub const CHAIN_LINKS_BATCH_SIZE: usize = 1000;
+
+/// Which of the events (`$1`) have a chain position.
+pub const EVENTS_WITH_CHAIN_IDS_SQL: &str =
+    "SELECT event_id FROM event_auth_chains WHERE event_id = ANY($1)";
+
+/// The `event_auth_chain_to_calculate` rows of the rooms (`$1`).
+pub const CHAINS_TO_CALCULATE_SQL: &str = "SELECT event_id, type, state_key
+    FROM event_auth_chain_to_calculate
+    WHERE room_id = ANY($1)";
+
+/// The links from the chains (`$1`) and every chain reached through them.
+pub const CHAIN_LINKS_SQL: &str = "WITH RECURSIVE links(chain_id) AS (
+        SELECT
+            DISTINCT origin_chain_id
+        FROM event_auth_chain_links WHERE origin_chain_id = ANY($1)
+        UNION
+        SELECT
+            target_chain_id
+        FROM event_auth_chain_links
+        INNER JOIN links ON (chain_id = origin_chain_id)
+    )
+    SELECT
+        origin_chain_id, origin_sequence_number,
+        target_chain_id, target_sequence_number
+    FROM links
+    INNER JOIN event_auth_chain_links ON (chain_id = origin_chain_id)";
+
+/// The highest sequence number on each of the chains (`$1`).
+pub const MAX_SEQUENCE_NUMBERS_SQL: &str = "SELECT chain_id, MAX(sequence_number)
+    FROM event_auth_chains
+    WHERE chain_id = ANY($1)
+    GROUP BY chain_id";
 
 /// `EventIdMembership`: the user and membership of a membership event.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -483,12 +515,7 @@ pub async fn events_with_chain_ids(
     let mut found = HashSet::new();
     for batch in event_ids.chunks(SELECT_MANY_BATCH_SIZE) {
         let ids: Vec<&str> = batch.iter().map(|id| &**id).collect();
-        let rows = q
-            .query(
-                "SELECT event_id FROM event_auth_chains WHERE event_id = ANY($1)",
-                &[&ids],
-            )
-            .await?;
+        let rows = q.query(EVENTS_WITH_CHAIN_IDS_SQL, &[&ids]).await?;
         found.extend(first_column_set(&rows)?);
     }
     Ok(found)
@@ -503,13 +530,12 @@ pub async fn chains_to_calculate(
     if room_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let rows = q
-        .query(
-            "SELECT event_id, type, state_key FROM event_auth_chain_to_calculate
-            WHERE room_id = ANY($1)",
-            &[&room_ids],
-        )
-        .await?;
+    let rows = q.query(CHAINS_TO_CALCULATE_SQL, &[&room_ids]).await?;
+    parse_chains_to_calculate(&rows)
+}
+
+/// The rows of [`CHAINS_TO_CALCULATE_SQL`].
+pub fn parse_chains_to_calculate(rows: &[Row]) -> anyhow::Result<Vec<ChainToCalculate>> {
     rows.iter()
         .map(|row| {
             Ok(ChainToCalculate {
@@ -583,39 +609,28 @@ pub async fn chain_links(
         for chain_id in &batch {
             to_fetch.remove(chain_id);
         }
-        let rows = q
-            .query(
-                "WITH RECURSIVE links(chain_id) AS (
-                    SELECT
-                        DISTINCT origin_chain_id
-                    FROM event_auth_chain_links WHERE origin_chain_id = ANY($1)
-                    UNION
-                    SELECT
-                        target_chain_id
-                    FROM event_auth_chain_links
-                    INNER JOIN links ON (chain_id = origin_chain_id)
-                )
-                SELECT
-                    origin_chain_id, origin_sequence_number,
-                    target_chain_id, target_sequence_number
-                FROM links
-                INNER JOIN event_auth_chain_links ON (chain_id = origin_chain_id)",
-                &[&batch],
-            )
-            .await?;
-        for row in rows {
-            let link = ChainLink {
-                origin_chain_id: row.try_get(0)?,
-                origin_sequence_number: row.try_get(1)?,
-                target_chain_id: row.try_get(2)?,
-                target_sequence_number: row.try_get(3)?,
-            };
+        let rows = q.query(CHAIN_LINKS_SQL, &[&batch]).await?;
+        for link in parse_chain_links(&rows)? {
             // A chain reached from this batch needs no fetch of its own.
             to_fetch.remove(&link.origin_chain_id);
             links.push(link);
         }
     }
     Ok(links)
+}
+
+/// The rows of [`CHAIN_LINKS_SQL`].
+pub fn parse_chain_links(rows: &[Row]) -> anyhow::Result<Vec<ChainLink>> {
+    rows.iter()
+        .map(|row| {
+            Ok(ChainLink {
+                origin_chain_id: row.try_get(0)?,
+                origin_sequence_number: row.try_get(1)?,
+                target_chain_id: row.try_get(2)?,
+                target_sequence_number: row.try_get(3)?,
+            })
+        })
+        .collect()
 }
 
 /// The highest sequence number allocated on each of the chains, for
@@ -627,14 +642,12 @@ pub async fn max_sequence_numbers(
     if chain_ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let rows = q
-        .query(
-            "SELECT chain_id, MAX(sequence_number) FROM event_auth_chains
-            WHERE chain_id = ANY($1)
-            GROUP BY chain_id",
-            &[&chain_ids],
-        )
-        .await?;
+    let rows = q.query(MAX_SEQUENCE_NUMBERS_SQL, &[&chain_ids]).await?;
+    parse_max_sequence_numbers(&rows)
+}
+
+/// The rows of [`MAX_SEQUENCE_NUMBERS_SQL`].
+pub fn parse_max_sequence_numbers(rows: &[Row]) -> anyhow::Result<HashMap<i64, i64>> {
     rows.iter()
         .map(|row| Ok((row.try_get(0)?, row.try_get(1)?)))
         .collect()
@@ -647,7 +660,7 @@ fn first_column_vec(rows: &[Row]) -> anyhow::Result<Vec<Arc<str>>> {
         .collect()
 }
 
-fn first_column_set(rows: &[Row]) -> anyhow::Result<HashSet<Arc<str>>> {
+pub(crate) fn first_column_set(rows: &[Row]) -> anyhow::Result<HashSet<Arc<str>>> {
     rows.iter()
         .map(|row| Ok(Arc::from(row.try_get::<_, String>(0)?)))
         .collect()
@@ -1249,9 +1262,9 @@ impl PyPersistReaderForTest {
         let current_state = state_map(current_state);
         let delta = self.run(py, |reader| {
             async move {
-                    state_delta::calculate_state_delta(&reader, &room_id, &current_state).await
-                }
-                .boxed()
+                state_delta::calculate_state_delta(&reader, &room_id, &current_state, true).await
+            }
+            .boxed()
         })?;
         let (to_delete, to_insert, _) = delta_to_py(py, &delta)?;
         Ok((to_delete, to_insert))

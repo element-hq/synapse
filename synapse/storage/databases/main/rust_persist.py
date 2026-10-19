@@ -206,4 +206,6 @@ def _finish_txn_stream_ids(
             id_gen._db.runInteraction,
             "MultiWriterIdGenerator._update_table",
             id_gen._update_stream_positions_table_txn,
+            # One statement: no transaction around it.
+            db_autocommit=True,
         )

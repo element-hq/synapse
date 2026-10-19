@@ -47,7 +47,6 @@ use crate::{
     events::Event,
     state::{StateKey, StateMap},
     storage::events::RedactBehaviour,
-    types::state_filter::StateFilter,
 };
 
 const MEMBER: &str = "m.room.member";
@@ -188,38 +187,78 @@ pub struct SlidingSyncTableChanges {
 /// The reads the step makes.
 #[async_trait]
 pub trait SlidingSyncReads: Sync {
-    /// See [`PersistReader::has_sliding_sync_joined_room`].
-    async fn has_sliding_sync_joined_room(&self, room_id: &str) -> anyhow::Result<bool>;
-
-    /// The stream ordering of the room's last event of one of
-    /// [`DEFAULT_BUMP_EVENT_TYPES`]. See
-    /// [`PersistReader::last_event_pos_in_room`].
-    async fn last_bump_stream_ordering(&self, room_id: &str) -> anyhow::Result<Option<i64>>;
-
-    /// `get_partial_filtered_current_state_ids` for the relevant state.
-    async fn relevant_current_state_ids(&self, room_id: &str) -> anyhow::Result<StateMap>;
+    /// What the step reads about the room, all in one round trip, as none
+    /// of it needs the rest.
+    async fn joined_room_reads(&self, room_id: &str) -> anyhow::Result<JoinedRoomReads>;
 
     /// `get_events`: the state events found, redacted where they have been
     /// and leaving out the rejected ones.
     async fn state_events(&self, event_ids: &[Arc<str>]) -> anyhow::Result<Vec<SlidingSyncEvent>>;
 }
 
+/// What [`SlidingSyncReads::joined_room_reads`] reads.
+#[derive(Debug, Default)]
+pub struct JoinedRoomReads {
+    /// Whether the room has a `sliding_sync_joined_rooms` row. See
+    /// [`PersistReader::has_sliding_sync_joined_room`].
+    pub has_joined_room_row: bool,
+    /// The stream ordering of the room's last event of one of
+    /// [`DEFAULT_BUMP_EVENT_TYPES`]. See
+    /// [`PersistReader::last_event_pos_in_room`].
+    pub last_bump_stream_ordering: Option<i64>,
+    /// `get_partial_filtered_current_state_ids` for the relevant state.
+    pub relevant_current_state_ids: StateMap,
+}
+
 #[async_trait]
 impl SlidingSyncReads for PersistReader<'_> {
-    async fn has_sliding_sync_joined_room(&self, room_id: &str) -> anyhow::Result<bool> {
-        PersistReader::has_sliding_sync_joined_room(self, room_id).await
-    }
-
-    async fn last_bump_stream_ordering(&self, room_id: &str) -> anyhow::Result<Option<i64>> {
-        let last = self
-            .last_event_pos_in_room(room_id, Some(&DEFAULT_BUMP_EVENT_TYPES))
-            .await?;
-        Ok(last.map(|(_, pos)| pos.stream))
-    }
-
-    async fn relevant_current_state_ids(&self, room_id: &str) -> anyhow::Result<StateMap> {
-        let filter = StateFilter::from_types(RELEVANT_STATE_TYPES.map(|t| (t, Some(""))));
-        (**self).current_state_ids(room_id, &filter).await
+    async fn joined_room_reads(&self, room_id: &str) -> anyhow::Result<JoinedRoomReads> {
+        let conn = self.borrow().await?;
+        let bump_types: Vec<&str> = DEFAULT_BUMP_EVENT_TYPES.to_vec();
+        let relevant_types: Vec<&str> = RELEVANT_STATE_TYPES.to_vec();
+        // Three statements on one connection, polled together, so that they
+        // go out in one round trip.
+        let (row, bump, state) = futures::future::try_join3(
+            conn.query(
+                "SELECT room_id FROM sliding_sync_joined_rooms WHERE room_id = $1",
+                &[&room_id],
+            ),
+            conn.query(
+                "SELECT stream_ordering FROM events
+                LEFT JOIN rejections USING (event_id)
+                WHERE room_id = $1
+                    AND type = ANY($2)
+                    AND NOT outlier
+                    AND rejections.event_id IS NULL
+                ORDER BY stream_ordering DESC
+                LIMIT 1",
+                &[&room_id, &bump_types],
+            ),
+            conn.query(
+                "SELECT type, state_key, event_id FROM current_state_events
+                WHERE room_id = $1 AND type = ANY($2) AND state_key = ''",
+                &[&room_id, &relevant_types],
+            ),
+        )
+        .await?;
+        let mut relevant_current_state_ids = StateMap::with_capacity(state.len());
+        for row in &state {
+            let event_type: String = row.try_get(0)?;
+            let state_key: String = row.try_get(1)?;
+            let event_id: String = row.try_get(2)?;
+            relevant_current_state_ids.insert(
+                StateKey(Arc::from(event_type), Arc::from(state_key)),
+                Arc::from(event_id),
+            );
+        }
+        Ok(JoinedRoomReads {
+            has_joined_room_row: !row.is_empty(),
+            last_bump_stream_ordering: match bump.first() {
+                Some(row) => Some(row.try_get(0)?),
+                None => None,
+            },
+            relevant_current_state_ids,
+        })
     }
 
     async fn state_events(&self, event_ids: &[Arc<str>]) -> anyhow::Result<Vec<SlidingSyncEvent>> {
@@ -269,6 +308,13 @@ pub async fn calculate_sliding_sync_table_changes(
         .map(|event| (&*event.event_id, event))
         .collect();
 
+    // What both parts below may need, read once.
+    let joined = if !delta.no_longer_in_room || !delta.to_insert.is_empty() {
+        reads.joined_room_reads(room_id).await?
+    } else {
+        JoinedRoomReads::default()
+    };
+
     // A local user's membership leaves the current state only on a state
     // reset out of the room.
     changes.to_delete_membership_snapshots = delta
@@ -308,7 +354,7 @@ pub async fn calculate_sliding_sync_table_changes(
 
         if !snapshots.is_empty() {
             // The current state as the delta leaves it.
-            let mut state_ids = reads.relevant_current_state_ids(room_id).await?;
+            let mut state_ids = joined.relevant_current_state_ids.clone();
             for key in &delta.to_delete {
                 state_ids.remove(key);
             }
@@ -342,15 +388,14 @@ pub async fn calculate_sliding_sync_table_changes(
         let mut state_ids = StateMap::new();
         // A missing row is inserted in full, so that a row that exists can
         // be relied on.
-        if !reads.has_sliding_sync_joined_room(room_id).await? {
+        if !joined.has_joined_room_row {
             // A remote room that was just joined can have a backfilled
             // last bump event, whose negative stream ordering cannot be
             // compared. The API uses the membership's position instead.
-            changes.joined_room_bump_stamp_to_fully_insert = reads
-                .last_bump_stream_ordering(room_id)
-                .await?
+            changes.joined_room_bump_stamp_to_fully_insert = joined
+                .last_bump_stream_ordering
                 .filter(|stream| *stream > 0);
-            state_ids = reads.relevant_current_state_ids(room_id).await?;
+            state_ids = joined.relevant_current_state_ids;
         }
         for (key, event_id) in &delta.to_insert {
             if is_relevant(key) {
@@ -521,16 +566,12 @@ mod tests {
 
     #[async_trait]
     impl SlidingSyncReads for FakeReads {
-        async fn has_sliding_sync_joined_room(&self, _room_id: &str) -> anyhow::Result<bool> {
-            Ok(self.joined_room_row)
-        }
-
-        async fn last_bump_stream_ordering(&self, _room_id: &str) -> anyhow::Result<Option<i64>> {
-            Ok(self.last_bump)
-        }
-
-        async fn relevant_current_state_ids(&self, _room_id: &str) -> anyhow::Result<StateMap> {
-            Ok(self.current_state.clone())
+        async fn joined_room_reads(&self, _room_id: &str) -> anyhow::Result<JoinedRoomReads> {
+            Ok(JoinedRoomReads {
+                has_joined_room_row: self.joined_room_row,
+                last_bump_stream_ordering: self.last_bump,
+                relevant_current_state_ids: self.current_state.clone(),
+            })
         }
 
         async fn state_events(

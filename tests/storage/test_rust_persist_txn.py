@@ -446,7 +446,9 @@ class _TwinTestBase(unittest.HomeserverTestCase):
 
             return call
 
-        def run_as_background_process(desc: str, func: Any, *args: Any) -> Any:
+        def run_as_background_process(
+            desc: str, func: Any, *args: Any, **kwargs: Any
+        ) -> Any:
             # Only the `stream_positions` updates. The invalidations start
             # others, which Python runs after its transaction unrecorded.
             if desc == "MultiWriterIdGenerator._update_table":
@@ -458,7 +460,7 @@ class _TwinTestBase(unittest.HomeserverTestCase):
                         {},
                     )
                 )
-            return original_run(desc, func, *args)
+            return original_run(desc, func, *args, **kwargs)
 
         original_run = self.hs.run_as_background_process
         with ExitStack() as stack:

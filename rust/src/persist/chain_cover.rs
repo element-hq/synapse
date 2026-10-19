@@ -47,6 +47,8 @@ use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use futures::FutureExt;
 
+use tokio_postgres::types::ToSql;
+
 use super::reader::{self, AuthEventChain, ChainLink, ChainToCalculate};
 use crate::{
     database::postgres::{
@@ -54,6 +56,7 @@ use crate::{
         write::{run_rolled_back_interaction, run_write_interaction, WriteTxn},
     },
     events::{constants::event_type::M_ROOM_CREATE, Event},
+    storage::sync_store::SELECT_MANY_BATCH_SIZE,
 };
 
 /// The sequence `event_chain_id_gen` allocates from.
@@ -142,6 +145,34 @@ pub trait ChainCoverStore: Send + Sync {
 
     /// Allocate `n` new chain IDs.
     async fn next_chain_ids(&self, n: usize) -> anyhow::Result<Vec<i64>>;
+
+    /// [`ChainCoverStore::events_with_chain_ids`] and
+    /// [`ChainCoverStore::chains_to_calculate`] together, in one round trip
+    /// where the store can manage it.
+    async fn chain_cover_inputs(
+        &self,
+        room_id: &str,
+        event_ids: &[Arc<str>],
+    ) -> anyhow::Result<(HashSet<Arc<str>>, Vec<ChainToCalculate>)> {
+        Ok((
+            self.events_with_chain_ids(event_ids).await?,
+            self.chains_to_calculate(room_id).await?,
+        ))
+    }
+
+    /// [`ChainCoverStore::max_sequence_numbers`] and
+    /// [`ChainCoverStore::chain_links`] together, in one round trip where
+    /// the store can manage it.
+    async fn max_sequence_numbers_and_links(
+        &self,
+        chain_ids: &[i64],
+        chains: Vec<i64>,
+    ) -> anyhow::Result<(HashMap<i64, i64>, Vec<ChainLink>)> {
+        Ok((
+            self.max_sequence_numbers(chain_ids).await?,
+            self.chain_links(chains).await?,
+        ))
+    }
 }
 
 #[async_trait]
@@ -215,6 +246,71 @@ impl ChainCoverStore for WriteTxn {
             .map(|row| Ok(row.try_get::<_, i64>(0)?))
             .collect()
     }
+
+    /// The first batch of events with the room's rows in one round trip,
+    /// then the rest of the events as [`reader::events_with_chain_ids`].
+    async fn chain_cover_inputs(
+        &self,
+        room_id: &str,
+        event_ids: &[Arc<str>],
+    ) -> anyhow::Result<(HashSet<Arc<str>>, Vec<ChainToCalculate>)> {
+        let (first, rest) = event_ids.split_at(event_ids.len().min(SELECT_MANY_BATCH_SIZE));
+        let ids: Vec<&str> = first.iter().map(|id| &**id).collect();
+        let rooms: Vec<&str> = vec![room_id];
+        let id_params: [&(dyn ToSql + Sync); 1] = [&ids];
+        let room_params: [&(dyn ToSql + Sync); 1] = [&rooms];
+        let mut results = self
+            .query_many(&[
+                (reader::EVENTS_WITH_CHAIN_IDS_SQL, &id_params),
+                (reader::CHAINS_TO_CALCULATE_SQL, &room_params),
+            ])
+            .await?
+            .into_iter();
+        let mut found = reader::first_column_set(&results.next().unwrap_or_default())?;
+        let to_calculate = reader::parse_chains_to_calculate(&results.next().unwrap_or_default())?;
+        found.extend(reader::events_with_chain_ids(self, rest).await?);
+        Ok((found, to_calculate))
+    }
+
+    /// The sequence numbers with the first batch of chains' links in one
+    /// round trip, then the chains not reached as [`reader::chain_links`].
+    async fn max_sequence_numbers_and_links(
+        &self,
+        chain_ids: &[i64],
+        chains: Vec<i64>,
+    ) -> anyhow::Result<(HashMap<i64, i64>, Vec<ChainLink>)> {
+        let (first, rest) = chains.split_at(chains.len().min(reader::CHAIN_LINKS_BATCH_SIZE));
+        let sequence_params: [&(dyn ToSql + Sync); 1] = [&chain_ids];
+        let link_params: [&(dyn ToSql + Sync); 1] = [&first];
+        let mut queries: Vec<(&str, &[&(dyn ToSql + Sync)])> = Vec::new();
+        if !chain_ids.is_empty() {
+            queries.push((reader::MAX_SEQUENCE_NUMBERS_SQL, &sequence_params));
+        }
+        if !first.is_empty() {
+            queries.push((reader::CHAIN_LINKS_SQL, &link_params));
+        }
+        let mut results = self.query_many(&queries).await?.into_iter();
+        let max_sequence_numbers = if chain_ids.is_empty() {
+            HashMap::new()
+        } else {
+            reader::parse_max_sequence_numbers(&results.next().unwrap_or_default())?
+        };
+        let mut links = if first.is_empty() {
+            Vec::new()
+        } else {
+            reader::parse_chain_links(&results.next().unwrap_or_default())?
+        };
+        if !rest.is_empty() {
+            // A chain reached from the first batch needs no fetch of its own.
+            let reached: HashSet<i64> = links.iter().map(|link| link.origin_chain_id).collect();
+            let rest = rest
+                .iter()
+                .copied()
+                .filter(|chain| !reached.contains(chain));
+            links.extend(reader::chain_links(self, rest).await?);
+        }
+        Ok((max_sequence_numbers, links))
+    }
 }
 
 /// `calculate_chain_cover_index_for_events`: the chain positions and links
@@ -287,7 +383,7 @@ pub async fn calculate_chain_cover_index_for_events_txn(
         .iter()
         .map(|event| Arc::clone(&event.event_id))
         .collect();
-    let already_persisted = store.events_with_chain_ids(&ids).await?;
+    let (already_persisted, out_of_band) = store.chain_cover_inputs(room_id, &ids).await?;
     let state_events: Vec<&ChainCoverEvent> = state_events
         .iter()
         .copied()
@@ -312,7 +408,7 @@ pub async fn calculate_chain_cover_index_for_events_txn(
             .insert(Arc::clone(&event.event_id), auth_events);
     }
     let persisting = ids_of(&state_events);
-    calculate_chain_cover_index(store, room_id, &persisting, graph).await
+    calculate_chain_cover_index(store, room_id, &persisting, graph, out_of_band).await
 }
 
 /// The type, state key and auth events of the events the step looks at.
@@ -332,12 +428,14 @@ fn ids_of(events: &[&ChainCoverEvent]) -> HashSet<Arc<str>> {
 }
 
 /// `_calculate_chain_cover_index` for the events of `persisting`, all in
-/// `room_id`.
+/// `room_id`. `out_of_band` are the room's `event_auth_chain_to_calculate`
+/// rows.
 async fn calculate_chain_cover_index(
     store: &dyn ChainCoverStore,
     room_id: &str,
     persisting: &HashSet<Arc<str>>,
     mut graph: AuthGraph,
+    out_of_band: Vec<ChainToCalculate>,
 ) -> anyhow::Result<HashMap<Arc<str>, NewEventChainLinks>> {
     // Map from event ID to chain ID/sequence number.
     let mut chain_map: HashMap<Arc<str>, Position> = HashMap::new();
@@ -348,7 +446,7 @@ async fn calculate_chain_cover_index(
     // Any events of the room that still need handling. These should be out
     // of band memberships, whose auth chains we didn't have when we first
     // persisted them.
-    for row in store.chains_to_calculate(room_id).await? {
+    for row in out_of_band {
         let auth_events = store.auth_event_ids(&row.event_id).await?;
         to_calculate.insert(Arc::clone(&row.event_id));
         graph
@@ -419,7 +517,14 @@ async fn calculate_chain_cover_index(
         return Ok(HashMap::new());
     }
 
-    let new_positions = allocate_chain_ids(store, &graph, &to_calculate, &chain_map).await?;
+    // The links of every chain seen so far. The chains allocated below are
+    // new, so have none yet.
+    let chains: HashSet<i64> = chain_map.values().map(|(chain_id, _)| *chain_id).collect();
+    let tree = chain_tree(&graph, &to_calculate, &chain_map);
+    let (max_sequence_numbers, links) = store
+        .max_sequence_numbers_and_links(&tree.existing_chains, chains.into_iter().collect())
+        .await?;
+    let new_positions = allocate_chain_ids(store, tree, &chain_map, max_sequence_numbers).await?;
     chain_map.extend(new_positions.iter().map(|(id, pos)| (Arc::clone(id), *pos)));
 
     let mut to_return: HashMap<Arc<str>, NewEventChainLinks> = new_positions
@@ -439,8 +544,7 @@ async fn calculate_chain_cover_index(
     // The existing links of every chain we have seen, so that new links
     // reachable through them are left out.
     let mut chain_links = LinkMap::default();
-    let chains: HashSet<i64> = chain_map.values().map(|(chain_id, _)| *chain_id).collect();
-    for link in store.chain_links(chains.into_iter().collect()).await? {
+    for link in links {
         chain_links.add_link(
             (link.origin_chain_id, link.origin_sequence_number),
             (link.target_chain_id, link.target_sequence_number),
@@ -507,12 +611,21 @@ enum ChainId {
 /// allocated but not persisted. An event extends the chain of its first
 /// auth event with the same type and state key, if that chain has no
 /// event after it yet. Otherwise it starts a new chain.
-async fn allocate_chain_ids(
-    store: &dyn ChainCoverStore,
-    graph: &AuthGraph,
+/// The events to calculate as a tree: each with the auth event whose chain
+/// it would extend, auth events first.
+struct ChainTree<'g> {
+    tree: Vec<(Arc<str>, Option<&'g Arc<str>>)>,
+    /// The existing chains the tree may extend.
+    existing_chains: Vec<i64>,
+}
+
+/// The first half of `_allocate_chain_ids`: which chain each event would
+/// extend, before the chains' sequence numbers are read.
+fn chain_tree<'g>(
+    graph: &'g AuthGraph,
     to_calculate: &HashSet<Arc<str>>,
     chain_map: &HashMap<Arc<str>, Position>,
-) -> anyhow::Result<HashMap<Arc<str>, Position>> {
+) -> ChainTree<'g> {
     // Each event and the auth event whose chain it would extend, auth
     // events first. This turns the auth graph into a tree.
     let mut existing_chains: HashSet<i64> = HashSet::new();
@@ -530,11 +643,22 @@ async fn allocate_chain_ids(
         }
         tree.push((event_id, parent));
     }
+    ChainTree {
+        tree,
+        existing_chains: existing_chains.into_iter().collect(),
+    }
+}
 
-    let existing_chains: Vec<i64> = existing_chains.into_iter().collect();
-    let mut max_sequence_numbers: HashMap<ChainId, i64> = store
-        .max_sequence_numbers(&existing_chains)
-        .await?
+/// The second half of `_allocate_chain_ids`: the positions along the tree,
+/// given `max_sequence_numbers` for its existing chains, with the new
+/// chains' IDs from the sequence in one statement.
+async fn allocate_chain_ids(
+    store: &dyn ChainCoverStore,
+    tree: ChainTree<'_>,
+    chain_map: &HashMap<Arc<str>, Position>,
+    max_sequence_numbers: HashMap<i64, i64>,
+) -> anyhow::Result<HashMap<Arc<str>, Position>> {
+    let mut max_sequence_numbers: HashMap<ChainId, i64> = max_sequence_numbers
         .into_iter()
         .map(|(chain_id, max)| (ChainId::Existing(chain_id), max))
         .collect();
@@ -542,9 +666,9 @@ async fn allocate_chain_ids(
     // Allocate along the tree, with placeholders for new chains, so that the
     // new chain IDs come from the sequence in one statement.
     let mut new_chains = 0;
-    let mut new_positions: Vec<(Arc<str>, (ChainId, i64))> = Vec::with_capacity(tree.len());
+    let mut new_positions: Vec<(Arc<str>, (ChainId, i64))> = Vec::with_capacity(tree.tree.len());
     let mut allocated: HashMap<Arc<str>, (ChainId, i64)> = HashMap::new();
-    for (event_id, parent) in tree {
+    for (event_id, parent) in tree.tree {
         let mut position = None;
         if let Some(auth_id) = parent {
             let (chain_id, sequence_number) = match allocated.get(auth_id) {

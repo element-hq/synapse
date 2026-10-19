@@ -403,7 +403,9 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 # Cast safety: this corresponds to the types returned by the query above.
                 rows.extend(
                     (instance, self._return_factor * stream_id)
-                    for instance, stream_id in cast(Iterable[tuple[str | None, int]], cur)
+                    for instance, stream_id in cast(
+                        Iterable[tuple[str | None, int]], cur
+                    )
                 )
 
             # Sort by stream_id (ascending, lowest -> highest) so that we handle
@@ -511,6 +513,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 self._db.runInteraction,
                 "MultiWriterIdGenerator._update_table",
                 self._update_stream_positions_table_txn,
+                # One statement: no transaction around it.
+                db_autocommit=True,
             )
 
         return self._return_factor * next_id
@@ -558,6 +562,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 self._db.runInteraction,
                 "MultiWriterIdGenerator._update_table",
                 self._update_stream_positions_table_txn,
+                # One statement: no transaction around it.
+                db_autocommit=True,
             )
 
         return [self._return_factor * next_id for next_id in next_ids]

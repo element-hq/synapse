@@ -617,8 +617,15 @@ pub async fn calculate_state_delta(
     reads: &dyn StateDeltaReads,
     room_id: &str,
     current_state: &StateMap,
+    room_has_events: bool,
 ) -> anyhow::Result<DeltaState> {
-    let existing_state = reads.current_state_ids(room_id).await?;
+    // A room with no forward extremities has no events, so no current
+    // state: the chunk creates it. Python reads the empty state.
+    let existing_state = if room_has_events {
+        reads.current_state_ids(room_id).await?
+    } else {
+        StateMap::new()
+    };
 
     let mut to_delete: Vec<StateKey> = existing_state
         .keys()
@@ -709,6 +716,7 @@ async fn delta_from_new_state(
     server_name: &str,
     events: &[NewEvent],
     new_state: NewState,
+    room_has_events: bool,
 ) -> anyhow::Result<Option<DeltaState>> {
     let mut delta = if let Some(delta_ids) = new_state.delta_ids {
         // A known delta only adds or replaces state.
@@ -717,7 +725,7 @@ async fn delta_from_new_state(
             ..DeltaState::default()
         }
     } else if let Some(current_state) = &new_state.current_state {
-        calculate_state_delta(reads, room_id, current_state).await?
+        calculate_state_delta(reads, room_id, current_state, room_has_events).await?
     } else {
         return Ok(None);
     };
@@ -807,7 +815,15 @@ pub async fn calculate_new_forward_extremities_and_state_delta(
     let new_forward_extremities = std::mem::take(&mut new_state.new_latest_event_ids);
     let state_res_stats = new_state.state_res_stats.take();
 
-    let state_delta = delta_from_new_state(reads, room_id, server_name, events, new_state).await?;
+    let state_delta = delta_from_new_state(
+        reads,
+        room_id,
+        server_name,
+        events,
+        new_state,
+        !latest_event_ids.is_empty(),
+    )
+    .await?;
 
     Ok(StateAndExtremities {
         new_forward_extremities: Some(new_forward_extremities),
@@ -871,7 +887,15 @@ pub async fn process_state_dag_forward_extremities_and_state_delta(
     .await?;
     let state_res_stats = new_state.state_res_stats.take();
 
-    let state_delta = delta_from_new_state(reads, room_id, server_name, events, new_state).await?;
+    let state_delta = delta_from_new_state(
+        reads,
+        room_id,
+        server_name,
+        events,
+        new_state,
+        !existing_room_dag.is_empty(),
+    )
+    .await?;
 
     Ok(StateAndExtremities {
         new_forward_extremities: Some(new_room_dag),
@@ -1386,7 +1410,7 @@ mod tests {
             ("m.room.topic", "", "$t2"),
             ("m.room.join_rules", "", "$j"),
         ]);
-        let delta = block_on(calculate_state_delta(&reads, ROOM, &new)).unwrap();
+        let delta = block_on(calculate_state_delta(&reads, ROOM, &new, true)).unwrap();
         assert_eq!(
             delta.to_delete,
             vec![

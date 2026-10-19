@@ -267,7 +267,8 @@ pub async fn calculate_new_extremities(
 
     // Drop the extremities behind soft failed or rejected prev events of
     // the new events. Otherwise they would dangle.
-    for prev in reads.prevs_before_rejected(&new_prevs, true).await? {
+    let prevs_to_check = not_accepted_in_chunk(&new_prevs, events);
+    for prev in reads.prevs_before_rejected(&prevs_to_check, true).await? {
         result.remove(&prev);
     }
 
@@ -357,7 +358,8 @@ pub async fn calculate_new_state_dag_extremities(
 
     // Drop the extremities behind rejected prev state events of the new
     // events, so that they do not dangle.
-    for prev in reads.prevs_before_rejected(&new_prevs, false).await? {
+    let prevs_to_check = not_accepted_in_chunk(&new_prevs, events);
+    for prev in reads.prevs_before_rejected(&prevs_to_check, false).await? {
         result.remove(&prev);
     }
 
@@ -372,6 +374,24 @@ pub async fn calculate_new_state_dag_extremities(
         bail!("No state dag forward extremities left in room {room_id}!");
     }
     Ok(result)
+}
+
+/// The IDs of `event_ids` less the accepted events of the chunk. The read
+/// of rejected and soft failed prev events comes before the chunk is
+/// written, so for an event of the chunk it finds nothing, or an earlier
+/// copy that is accepted too, and either way adds nothing. In a new room,
+/// where every prev event is in the chunk, this saves the read.
+fn not_accepted_in_chunk(event_ids: &[Arc<str>], events: &[NewEvent]) -> Vec<Arc<str>> {
+    let accepted: HashSet<&Arc<str>> = events
+        .iter()
+        .filter(|event| !event.rejected && !event.soft_failed)
+        .map(|event| &event.event_id)
+        .collect();
+    event_ids
+        .iter()
+        .filter(|id| !accepted.contains(id))
+        .cloned()
+        .collect()
 }
 
 /// `_prune_extremities`: after state resolution, drop the extremities

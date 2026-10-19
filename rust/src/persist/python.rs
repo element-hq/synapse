@@ -1120,7 +1120,7 @@ async fn update_current_state(
         let result = async {
             let (state, stats) =
                 state_delta::calculate_current_state(&reader, &resolver, room_id).await?;
-            let delta = state_delta::calculate_state_delta(&reader, room_id, &state).await?;
+            let delta = state_delta::calculate_state_delta(&reader, room_id, &state, true).await?;
             let changes = sliding_sync::calculate_sliding_sync_table_changes(
                 &reader,
                 room_id,
