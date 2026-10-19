@@ -129,7 +129,7 @@ class SlidingSyncExtensionHandler:
                 # The sticky events extension tracks per-room state even while it
                 # isn't enabled on the request, so that re-enabling it doesn't miss anything.
                 # (But only if the MSC4354 experimental feature is enabled)
-                await self._record_sticky_events_rooms_out_of_scope(
+                await self._record_sticky_events_in_out_of_scope_rooms(
                     previous_connection_state=previous_connection_state,
                     new_connection_state=new_connection_state,
                     relevant_room_ids=set(),
@@ -1070,7 +1070,7 @@ class SlidingSyncExtensionHandler:
             # when the extension is re-enabled the client receives the (unexpired)
             # sticky events sent while it was disabled, rather than only those
             # sent after the request's `pos`.
-            await self._record_sticky_events_rooms_out_of_scope(
+            await self._record_sticky_events_in_out_of_scope_rooms(
                 previous_connection_state=previous_connection_state,
                 new_connection_state=new_connection_state,
                 relevant_room_ids=set(),
@@ -1207,7 +1207,7 @@ class SlidingSyncExtensionHandler:
 
                 room_id_to_sticky_events[room_id] = filtered_events_for_room
 
-        await self._record_sticky_events_rooms_out_of_scope(
+        await self._record_sticky_events_in_out_of_scope_rooms(
             previous_connection_state=previous_connection_state,
             new_connection_state=new_connection_state,
             relevant_room_ids=relevant_room_ids,
@@ -1219,7 +1219,7 @@ class SlidingSyncExtensionHandler:
             room_id_to_sticky_events=room_id_to_sticky_events,
         )
 
-    async def _record_sticky_events_rooms_out_of_scope(
+    async def _record_sticky_events_in_out_of_scope_rooms(
         self,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
