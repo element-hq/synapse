@@ -45,6 +45,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use pyo3::PyErr;
 use serde_json::Value;
+use tokio_postgres::types::ToSql;
 
 use self::streams::TxnStream;
 use super::{
@@ -260,29 +261,27 @@ async fn persist_events_txn_steps<'a>(
         // The chunk creates the room: store it, which claims the room ID.
         // The row's lock holds off a delete until we commit, as the share
         // lock below does.
-        let inserted = txn
-            .execute(
-                "INSERT INTO rooms (room_id, room_version, is_public, creator, has_auth_chain_index)
-                VALUES ($1, $2, $3, $4, TRUE)",
-                &[
-                    &room_id,
-                    &create.event.room_version().identifier,
-                    &is_public,
-                    &create.event.sender(),
-                ],
-            )
-            .await;
-        match inserted {
-            Err(WriteError::Constraint { sqlstate, .. }) if sqlstate == "23505" => {
-                return Err(WriteError::Other(anyhow::Error::new(RoomIdCollision(
-                    room_id.to_owned(),
-                ))));
-            }
-            other => other?,
-        };
-    } else {
-        // Protect against a race with deleting the room: the share lock holds
-        // off a delete until we commit.
+        let collided_room_id = room_id.to_owned();
+        txn.execute_later_mapping_error(
+            "INSERT INTO rooms (room_id, room_version, is_public, creator, has_auth_chain_index)
+            VALUES ($1, $2, $3, $4, TRUE)",
+            crate::owned_params![
+                room_id,
+                create.event.room_version().identifier,
+                is_public,
+                create.event.sender()
+            ],
+            Box::new(move |error| match error {
+                WriteError::Constraint { sqlstate, .. } if sqlstate == "23505" => {
+                    WriteError::Other(anyhow::Error::new(RoomIdCollision(collided_room_id)))
+                }
+                error => error,
+            }),
+        );
+    }
+
+    let (Some(first), Some(last)) = (input.events.first(), input.events.last()) else {
+        // Python checks the room before it finds nothing to persist.
         let rows = txn
             .query(
                 "SELECT room_version FROM rooms WHERE room_id = $1 FOR SHARE",
@@ -292,9 +291,6 @@ async fn persist_events_txn_steps<'a>(
         if rows.is_empty() {
             return Err(anyhow!("Room does not exist {room_id}").into());
         }
-    }
-
-    let (Some(first), Some(last)) = (input.events.first(), input.events.last()) else {
         return Err(anyhow!("no events to persist in {room_id}").into());
     };
     let min_stream_order = first.stream_ordering;
@@ -315,12 +311,48 @@ async fn persist_events_txn_steps<'a>(
         })
         .collect();
 
-    events::update_room_depths(txn, room_id, &events, effects).await?;
+    events::update_room_depths(txn, room_id, &events, effects)?;
 
-    let events = events::update_outliers(txn, input, events, effects).await?;
+    // What the chunk must read before its writes, in one round trip, behind
+    // the writes queued so far: whether the room is still there (its share
+    // lock holds off a delete until we commit; a room the chunk creates is
+    // locked by its insert), which events we have, their redactions, and
+    // some cache stream IDs for the invalidations to come.
+    let event_ids: Vec<&str> = events.iter().map(|e| e.event().event_id()).collect();
+    let room_params: [&(dyn ToSql + Sync); 1] = [&room_id];
+    let outlier_params: [&(dyn ToSql + Sync); 1] = [&event_ids];
+    let redaction_params: [&(dyn ToSql + Sync); 2] = [&room_id, &event_ids];
+    let cache_sequence = input.cache_stream.sequence();
+    let nextval_params: [&(dyn ToSql + Sync); 2] = [&cache_sequence, &streams::PREFETCH];
+    let mut queries: Vec<(&str, &[&(dyn ToSql + Sync)])> = vec![
+        (events::OUTLIERS_SQL, &outlier_params),
+        (events::EXISTING_REDACTIONS_SQL, &redaction_params),
+        (streams::NEXTVAL_SQL, &nextval_params),
+    ];
+    if new_room.is_none() {
+        queries.insert(
+            0,
+            (
+                "SELECT room_version FROM rooms WHERE room_id = $1 FOR SHARE",
+                &room_params,
+            ),
+        );
+    }
+    let mut results = txn.query_many(&queries).await?.into_iter();
+    if new_room.is_none() && results.next().is_some_and(|rows| rows.is_empty()) {
+        return Err(anyhow!("Room does not exist {room_id}").into());
+    }
+    let outlier_rows = results.next().unwrap_or_default();
+    let redaction_rows = results.next().unwrap_or_default();
+    input
+        .cache_stream
+        .add_prefetched(&results.next().unwrap_or_default())?;
+
+    let events = events::update_outliers(txn, input, events, outlier_rows, effects).await?;
 
     // From here on, only events we have not seen before.
-    let events = events::apply_existing_redactions(txn, room_id, room_version, events).await?;
+    let (events, redacted) =
+        events::apply_existing_redactions(room_version, events, redaction_rows)?;
     let newly_redacted = events::newly_redacted_event_ids(txn, room_id, &events).await?;
     // Redacted events stop being sticky. A sticky event de-outliered in
     // this chunk does not: its row has this chunk's stream ordering, but its
@@ -353,7 +385,7 @@ async fn persist_events_txn_steps<'a>(
     // From here on, only events that were not rejected.
     let events = events::store_rejections(txn, input, events).await?;
 
-    metadata::update_metadata_tables(txn, input, &events, effects).await?;
+    metadata::update_metadata_tables(txn, input, &events, &redacted, effects).await?;
 
     // Last, as it reads the memberships the metadata step stored.
     if let Some(delta) = &state.state_delta {

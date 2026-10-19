@@ -351,7 +351,7 @@ macro_rules! owned_params {
 
 /// How to turn the error of a queued statement into the one its caller
 /// wants, e.g. a constraint violation into a domain error.
-pub type MapError = fn(WriteError) -> WriteError;
+pub type MapError = Box<dyn FnOnce(WriteError) -> WriteError + Send + Sync>;
 
 /// A statement queued by one of the `*_later` methods.
 struct Queued {
@@ -460,8 +460,8 @@ impl WriteTxn {
     /// requests after it fail only because it aborted the transaction.
     async fn send<'s, T, F>(
         &'s self,
-        sql: Option<&str>,
-        last: impl FnOnce(&'s PooledConnection, Option<tokio_postgres::Statement>) -> F,
+        sqls: &[&str],
+        last: impl FnOnce(&'s PooledConnection, Vec<tokio_postgres::Statement>) -> F,
         context: impl FnOnce() -> String,
     ) -> Result<T, WriteError>
     where
@@ -471,7 +471,11 @@ impl WriteTxn {
         let queued = self.take_queued();
         let mut begin = self.take_begin();
 
-        let sqls: Vec<&str> = queued.iter().map(|q| &*q.sql).chain(sql).collect();
+        let sqls: Vec<&str> = queued
+            .iter()
+            .map(|q| &*q.sql)
+            .chain(sqls.iter().copied())
+            .collect();
         // Each distinct statement once: a batch queues one row per statement.
         let mut by_sql: HashMap<&str, Option<tokio_postgres::Statement>> = HashMap::new();
         for sql in &sqls {
@@ -510,7 +514,7 @@ impl WriteTxn {
             .map(|sql| by_sql[sql].clone().expect("cached or prepared above"));
         let queued_statements: Vec<tokio_postgres::Statement> =
             statements.by_ref().take(queued.len()).collect();
-        let last_statement = statements.next();
+        let last_statements: Vec<tokio_postgres::Statement> = statements.collect();
 
         // tokio-postgres encodes a request's parameters when it is first
         // polled, and if that fails it sends nothing, while the requests
@@ -528,7 +532,7 @@ impl WriteTxn {
                 q.params.iter().map(|p| p.as_ref() as &(dyn ToSql + Sync)),
             )
         }));
-        let requests = join(writes, last(conn, last_statement));
+        let requests = join(writes, last(conn, last_statements));
         let (written, result) = match begin {
             None => requests.await,
             Some(begin) => {
@@ -541,7 +545,7 @@ impl WriteTxn {
             }
         };
 
-        for (q, outcome) in queued.iter().zip(written) {
+        for (q, outcome) in queued.into_iter().zip(written) {
             if let Err(e) = outcome {
                 let error = self.statement_failed(&describe(&q.sql), e);
                 return Err(match q.map_error {
@@ -560,12 +564,39 @@ impl WriteTxn {
         params: &[&(dyn ToSql + Sync)],
     ) -> Result<Vec<Row>, WriteError> {
         self.send(
-            Some(sql),
-            |conn, statement| async move {
-                conn.query(&statement.expect("has a statement"), params)
-                    .await
-            },
+            &[sql],
+            |conn, statements| async move { conn.query(&statements[0], params).await },
             || describe(sql),
+        )
+        .await
+    }
+
+    /// Run several statements that return rows, after the queued writes, all
+    /// in one round trip: their rows, in order. For reads that need nothing
+    /// from each other.
+    pub async fn query_many(
+        &self,
+        queries: &[(&str, &[&(dyn ToSql + Sync)])],
+    ) -> Result<Vec<Vec<Row>>, WriteError> {
+        let sqls: Vec<&str> = queries.iter().map(|(sql, _)| *sql).collect();
+        self.send(
+            &sqls,
+            |conn, statements| async move {
+                let results = join_in_order(
+                    statements
+                        .iter()
+                        .zip(queries)
+                        .map(|(statement, (_, params))| conn.query(statement, params)),
+                )
+                .await;
+                results.into_iter().collect()
+            },
+            || {
+                sqls.iter()
+                    .map(|sql| describe(sql))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            },
         )
         .await
     }
@@ -578,11 +609,8 @@ impl WriteTxn {
         params: &[&(dyn ToSql + Sync)],
     ) -> Result<u64, WriteError> {
         self.send(
-            Some(sql),
-            |conn, statement| async move {
-                conn.execute(&statement.expect("has a statement"), params)
-                    .await
-            },
+            &[sql],
+            |conn, statements| async move { conn.execute(&statements[0], params).await },
             || describe(sql),
         )
         .await
@@ -601,11 +629,11 @@ impl WriteTxn {
             return Ok(0);
         }
         self.send(
-            Some(sql),
-            |conn, statement| async move {
-                let statement = statement.expect("has a statement");
+            &[sql],
+            |conn, statements| async move {
+                let statement = &statements[0];
                 let counts =
-                    join_in_order(rows.iter().map(|params| conn.execute(&statement, params))).await;
+                    join_in_order(rows.iter().map(|params| conn.execute(statement, params))).await;
                 counts.into_iter().sum::<Result<u64, _>>()
             },
             || describe(sql),
@@ -618,7 +646,7 @@ impl WriteTxn {
         if self.queued.lock().expect("not poisoned").is_empty() {
             return Ok(());
         }
-        self.send(None, |_, _| async { Ok(()) }, String::new).await
+        self.send(&[], |_, _| async { Ok(()) }, String::new).await
     }
 
     /// Queue a write whose result nobody reads. It goes out ahead of the
@@ -786,7 +814,7 @@ impl WriteTxn {
             return Ok(());
         }
         self.send(
-            None,
+            &[],
             |conn, _| conn.batch_execute("COMMIT"),
             || "committing".to_owned(),
         )
@@ -1267,6 +1295,48 @@ mod tests {
         teardown(&rt, &pool, &table);
     }
 
+    /// Several reads go out together, behind the queued writes, and come
+    /// back in order.
+    #[test]
+    fn query_many_reads_in_order_behind_queued_writes() {
+        let Some((rt, pool, table)) = setup() else {
+            return;
+        };
+        rt.block_on(async {
+            let seen = run_write_interaction(&pool, "test", |txn, _| {
+                let table = table.clone();
+                async move {
+                    txn.insert_many_later(
+                        &table,
+                        vec![
+                            OwnedColumn::new("id", "text", vec!["a".to_owned(), "b".to_owned()]),
+                            OwnedColumn::new("n", "bigint", vec![1i64, 2]),
+                        ],
+                        None,
+                    )?;
+                    let id = "b";
+                    let by_id: [&(dyn ToSql + Sync); 1] = [&id];
+                    let results = txn
+                        .query_many(&[
+                            (&format!("SELECT n FROM {table} ORDER BY id"), &[]),
+                            (&format!("SELECT n FROM {table} WHERE id = $1"), &by_id),
+                            ("SELECT 42::bigint", &[]),
+                        ])
+                        .await?;
+                    Ok(results
+                        .iter()
+                        .map(|rows| rows.iter().map(|row| row.get::<_, i64>(0)).collect())
+                        .collect::<Vec<Vec<i64>>>())
+                }
+                .boxed()
+            })
+            .await
+            .unwrap();
+            assert_eq!(seen, vec![vec![1, 2], vec![2], vec![42]]);
+        });
+        teardown(&rt, &pool, &table);
+    }
+
     /// A queued write that fails surfaces at the next statement, as itself
     /// (the next statement only fails because it aborted the transaction),
     /// mapped as asked. Nothing is committed.
@@ -1286,12 +1356,12 @@ mod tests {
                     txn.execute_later_mapping_error(
                         format!("INSERT INTO {table} (id, n) VALUES ('a', 2)"),
                         vec![],
-                        |error| match error {
+                        Box::new(|error| match error {
                             WriteError::Constraint { .. } => {
                                 WriteError::Other(anyhow::anyhow!("mapped duplicate"))
                             }
                             other => other,
-                        },
+                        }),
                     );
                     txn.query(&format!("SELECT id FROM {table}"), &[]).await?;
                     Ok(())

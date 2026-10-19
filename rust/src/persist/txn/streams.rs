@@ -34,7 +34,11 @@ use crate::{
 };
 
 /// `_load_next_mult_id_txn`'s statement: `$2` IDs from the sequence `$1`.
-const NEXTVAL_SQL: &str = "SELECT nextval($1::text) FROM generate_series(1, $2::bigint)";
+pub const NEXTVAL_SQL: &str = "SELECT nextval($1::text) FROM generate_series(1, $2::bigint)";
+
+/// How many IDs [`TxnStream::add_prefetched`] is asked for: enough for a
+/// chunk's cache invalidations, as a rule. The rest are finished unused.
+pub const PREFETCH: i64 = 8;
 
 /// A stream's IDs taken by one persist, over all its attempts. An ID the
 /// committed attempt took is handed to Python with the effects. The rest
@@ -46,6 +50,9 @@ pub struct TxnStream {
     sequence: &'static str,
     /// The IDs allocated and neither finished nor handed to Python.
     pending: Mutex<Vec<i64>>,
+    /// Allocated ahead, for [`TxnStream::next_ids`] to hand out before it
+    /// asks the sequence. Also in `pending`.
+    spare: Mutex<Vec<i64>>,
 }
 
 impl TxnStream {
@@ -54,6 +61,7 @@ impl TxnStream {
             tracker,
             sequence,
             pending: Mutex::new(Vec::new()),
+            spare: Mutex::new(Vec::new()),
         }
     }
 
@@ -87,6 +95,24 @@ impl TxnStream {
         self.pending.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn lock_spare(&self) -> std::sync::MutexGuard<'_, Vec<i64>> {
+        self.spare.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The Postgres sequence the IDs come from, for a [`NEXTVAL_SQL`] sent
+    /// with other reads, whose rows go to [`TxnStream::add_prefetched`].
+    pub fn sequence(&self) -> &'static str {
+        self.sequence
+    }
+
+    /// Keep the IDs `rows` of a [`NEXTVAL_SQL`] allocated, for
+    /// [`TxnStream::next_ids`] to hand out without a round trip of its own.
+    pub fn add_prefetched(&self, rows: &[Row]) -> anyhow::Result<()> {
+        let ids = Fetch::begin(self).allocated_rows(rows)?;
+        self.lock_spare().extend(ids);
+        Ok(())
+    }
+
     /// `_load_next_id_txn`: the next ID on the stream, unfinished.
     pub async fn next_id(&self, txn: &WriteTxn) -> Result<i64, WriteError> {
         let ids = self.next_ids(txn, 1).await?;
@@ -98,10 +124,18 @@ impl TxnStream {
     /// `_load_next_mult_id_txn`: the next `n` IDs on the stream,
     /// unfinished.
     pub async fn next_ids(&self, txn: &WriteTxn, n: usize) -> Result<Vec<i64>, WriteError> {
-        let n = i64::try_from(n).map_err(anyhow::Error::new)?;
-        let fetch = Fetch::begin(self);
-        let rows = txn.query(NEXTVAL_SQL, &[&self.sequence, &n]).await?;
-        Ok(fetch.allocated_rows(&rows)?)
+        let mut ids: Vec<i64> = {
+            let mut spare = self.lock_spare();
+            let taken = n.min(spare.len());
+            spare.drain(..taken).collect()
+        };
+        if ids.len() < n {
+            let more = i64::try_from(n - ids.len()).map_err(anyhow::Error::new)?;
+            let fetch = Fetch::begin(self);
+            let rows = txn.query(NEXTVAL_SQL, &[&self.sequence, &more]).await?;
+            ids.extend(fetch.allocated_rows(&rows)?);
+        }
+        Ok(ids)
     }
 
     /// As [`Self::next_ids`], but outside a transaction, as `get_next_mult`

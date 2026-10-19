@@ -51,10 +51,7 @@ use super::{
     sticky,
 };
 use crate::{
-    clock::Clock,
-    database::postgres::pool::ConnectionPool,
-    events::Event,
-    state::EventMap,
+    clock::Clock, database::postgres::pool::ConnectionPool, events::Event, state::EventMap,
 };
 
 /// A chunk of one room's events, in the shapes the steps read.

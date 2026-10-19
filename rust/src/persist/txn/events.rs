@@ -23,6 +23,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use log::{debug, info};
+use tokio_postgres::Row;
 
 use super::{
     edges::{update_backward_extremities, BackwardEvent},
@@ -44,7 +45,7 @@ use crate::{
 /// `_update_room_depths_txn`: move the room's front in the events stream
 /// cache to the chunk's highest stream ordering, unless it was backfilled,
 /// and lower its `min_depth` to the deepest new event if that is lower.
-pub async fn update_room_depths(
+pub fn update_room_depths(
     txn: &WriteTxn,
     room_id: &str,
     events: &[Persisting<'_>],
@@ -69,27 +70,31 @@ pub async fn update_room_depths(
         );
     }
 
-    // `_update_min_depth_for_room_txn`.
-    let rows = txn
-        .query(
-            "SELECT min_depth FROM room_depth WHERE room_id = $1",
-            &[&room_id],
-        )
-        .await?;
-    let min_depth: Option<i64> = match rows.first() {
-        Some(row) => row.try_get(0).map_err(anyhow::Error::new)?,
-        None => None,
-    };
-    if min_depth.is_some_and(|min_depth| depth_update >= min_depth) {
-        return Ok(());
-    }
-    txn.upsert_many_later(
-        "room_depth",
-        vec![OwnedColumn::copy("room_id", "text", &[room_id])],
-        vec![OwnedColumn::copy("min_depth", "bigint", &[depth_update])],
-    )?;
+    // `_update_min_depth_for_room_txn`: Python reads the depth and writes
+    // only a lower one. The condition does the same without the read.
+    txn.execute_later(
+        "INSERT INTO room_depth (room_id, min_depth) VALUES ($1, $2)
+        ON CONFLICT (room_id) DO UPDATE SET min_depth = EXCLUDED.min_depth
+        WHERE room_depth.min_depth IS NULL OR room_depth.min_depth > EXCLUDED.min_depth",
+        crate::owned_params![room_id, depth_update],
+    );
     Ok(())
 }
+
+/// Which of the chunk's events (`$1`) we have, and whether as outliers.
+/// For [`update_outliers`].
+pub const OUTLIERS_SQL: &str = "SELECT event_id, outlier FROM events WHERE event_id = ANY($1)";
+
+/// The redactions in the room (`$1`) of the chunk's events (`$2`), redaction
+/// events included, as `_add_to_cache` counts them. For
+/// [`apply_existing_redactions`].
+pub const EXISTING_REDACTIONS_SQL: &str = "SELECT redactions.event_id, redactions.redacts, \
+    redaction_events.sender, redactions.recheck
+    FROM redactions
+    INNER JOIN events AS redaction_events
+        ON redactions.event_id = redaction_events.event_id
+        AND redaction_events.room_id = $1
+    WHERE redactions.redacts = ANY($2)";
 
 /// `_update_outliers_txn`: drop the events we have already persisted. An
 /// event we have as an outlier, now persisted as a non-outlier, stops being
@@ -104,15 +109,9 @@ pub async fn update_outliers<'a>(
     txn: &WriteTxn,
     input: &TxnInput<'_>,
     events: Vec<Persisting<'a>>,
+    rows: Vec<Row>,
     effects: &mut PersistEffects,
 ) -> Result<Vec<Persisting<'a>>, WriteError> {
-    let event_ids: Vec<&str> = events.iter().map(|e| e.event().event_id()).collect();
-    let rows = txn
-        .query(
-            "SELECT event_id, outlier FROM events WHERE event_id = ANY($1)",
-            &[&event_ids],
-        )
-        .await?;
     let mut have_persisted: HashMap<String, bool> = HashMap::with_capacity(rows.len());
     for row in rows {
         have_persisted.insert(
@@ -202,34 +201,22 @@ struct RedactionInfo<'a> {
 /// `_apply_existing_redaction_txn`: store redacted the events of the chunk
 /// that an earlier event or another event of the chunk redacts. Redaction
 /// events are never redacted here, so that circular redactions work.
-pub async fn apply_existing_redactions<'a>(
-    txn: &WriteTxn,
-    room_id: &str,
+///
+/// `rows` are [`EXISTING_REDACTIONS_SQL`]'s, which may cover events since
+/// dropped. Also returns the events of the chunk a redaction names, applied
+/// or not, redaction events among them, which `_add_to_cache` leaves out of
+/// the event cache.
+pub fn apply_existing_redactions<'a>(
     room_version: &RoomVersion,
     events: Vec<Persisting<'a>>,
-) -> Result<Vec<Persisting<'a>>, WriteError> {
+    rows: Vec<Row>,
+) -> Result<(Vec<Persisting<'a>>, HashSet<String>), WriteError> {
+    let chunk_ids: HashSet<&str> = events.iter().map(|e| e.event().event_id()).collect();
     let event_ids: HashSet<&str> = events
         .iter()
         .filter(|e| e.event().type_() != event_type::M_ROOM_REDACTION)
         .map(|e| e.event().event_id())
         .collect();
-    if event_ids.is_empty() {
-        return Ok(events);
-    }
-
-    let ids: Vec<&str> = event_ids.iter().copied().collect();
-    let rows = txn
-        .query(
-            "SELECT redactions.event_id, redactions.redacts, redaction_events.sender,
-                redactions.recheck
-            FROM redactions
-            INNER JOIN events AS redaction_events
-                ON redactions.event_id = redaction_events.event_id
-                AND redaction_events.room_id = $1
-            WHERE redactions.redacts = ANY($2)",
-            &[&room_id, &ids],
-        )
-        .await?;
     let mut redactions = Vec::with_capacity(rows.len());
     for row in &rows {
         redactions.push(RedactionInfo {
@@ -248,7 +235,7 @@ pub async fn apply_existing_redactions<'a>(
             continue;
         };
         if event_.type_() == event_type::M_ROOM_REDACTION
-            && event_ids.contains(redacts)
+            && chunk_ids.contains(redacts)
             && !event.context().is_rejected()
         {
             redactions.push(RedactionInfo {
@@ -263,12 +250,17 @@ pub async fn apply_existing_redactions<'a>(
         }
     }
 
+    let redacted_targets: HashSet<String> = redactions
+        .iter()
+        .filter(|r| chunk_ids.contains(r.redacts))
+        .map(|r| r.redacts.to_owned())
+        .collect();
     let events_by_id: HashMap<&str, &Persisting<'a>> =
         events.iter().map(|e| (e.event().event_id(), e)).collect();
     // From each redacted event to the event that redacts it.
     let mut redacted_by: HashMap<String, String> = HashMap::new();
     for redaction in &redactions {
-        if redacted_by.contains_key(redaction.redacts) {
+        if redacted_by.contains_key(redaction.redacts) || !event_ids.contains(redaction.redacts) {
             continue;
         }
         let event = events_by_id
@@ -294,7 +286,7 @@ pub async fn apply_existing_redactions<'a>(
     }
     drop(events_by_id);
 
-    events
+    let events = events
         .into_iter()
         .map(|mut event| {
             if let Some(by) = redacted_by.get(event.event().event_id()) {
@@ -307,7 +299,8 @@ pub async fn apply_existing_redactions<'a>(
             }
             Ok(event)
         })
-        .collect()
+        .collect::<Result<Vec<_>, WriteError>>()?;
+    Ok((events, redacted_targets))
 }
 
 fn domain_error(e: impl std::fmt::Display) -> WriteError {

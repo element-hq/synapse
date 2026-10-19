@@ -120,6 +120,11 @@ pub async fn update_backward_extremities(
         .filter(|(e, _)| !e.outlier)
         .flat_map(|(_, prevs)| prevs.iter().map(String::as_str))
         .collect();
+    // A prev event the chunk itself persists is in `events` by now, as the
+    // queued inserts go ahead of the read, so needs no read.
+    for event in events.iter().filter(|e| !e.outlier) {
+        potential.remove(event.event.event_id());
+    }
     if potential.is_empty() {
         return Ok(());
     }

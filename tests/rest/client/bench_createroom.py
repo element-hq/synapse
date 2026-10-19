@@ -92,6 +92,13 @@ class CreateRoomBench(HomeserverTestCase):
         room.register_servlets,
     ]
 
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        # The test default of one entry makes every read after persisting a
+        # database fetch, which no server does.
+        config["event_cache_size"] = 10000
+        return config
+
     def setUp(self) -> None:
         if not os.environ.get("SYNAPSE_BENCH_CREATEROOM"):
             raise SkipTest("set SYNAPSE_BENCH_CREATEROOM to run the benchmark")

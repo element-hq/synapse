@@ -17,8 +17,10 @@
 //! the events themselves are stored. Push actions, redactions, relations
 //! and threads, search, retention, labels, expiry and room members.
 //!
-//! The event cache prefill at its end, `_add_to_cache`, is chosen here and
-//! done by Python, which holds the events.
+//! The event cache prefill at its end, `_add_to_cache`, is chosen here, from
+//! what the transaction knows, and done by Python, which holds the events.
+
+use std::collections::HashSet;
 
 use anyhow::anyhow;
 use serde_json::{Map, Value};
@@ -46,11 +48,13 @@ const LABELS: &str = "org.matrix.labels";
 const SELF_DESTRUCT_AFTER: &str = "org.matrix.self_destruct_after";
 
 /// `_update_metadata_tables_txn` over `events`, the events left once the
-/// rejected ones are stored. `input.events` is the whole chunk.
+/// rejected ones are stored. `input.events` is the whole chunk. `redacted`
+/// are the events of the chunk a redaction names.
 pub async fn update_metadata_tables(
     txn: &WriteTxn,
     input: &TxnInput<'_>,
     events: &[Persisting<'_>],
+    redacted: &HashSet<String>,
     effects: &mut PersistEffects,
 ) -> Result<(), WriteError> {
     set_push_actions(txn, input, events).await?;
@@ -88,37 +92,30 @@ pub async fn update_metadata_tables(
     }
 
     store_room_members(txn, input, events).await?;
-    add_to_cache(txn, events, effects).await
+    add_to_cache(events, redacted, effects);
+    Ok(())
 }
 
 /// `_add_to_cache`: the events to put in the event cache once the
 /// transaction commits, those neither rejected nor redacted. Python puts
 /// them in, from the events it holds.
-async fn add_to_cache(
-    txn: &WriteTxn,
+///
+/// Python reads the rejections and redactions back. Here a new event's
+/// rejection is in its context, and the redactions of the chunk's events in
+/// the room were read for `_apply_existing_redaction_txn`. (Python would
+/// also leave out an event named by a redaction in another room, which
+/// nothing applies.)
+fn add_to_cache(
     events: &[Persisting<'_>],
+    redacted: &HashSet<String>,
     effects: &mut PersistEffects,
-) -> Result<(), WriteError> {
-    let event_ids: Vec<&str> = events.iter().map(|e| e.event().event_id()).collect();
-    let rows = txn
-        .query(
-            "SELECT e.event_id, r.redacts, rej.event_id
-            FROM events AS e
-            LEFT JOIN rejections AS rej USING (event_id)
-            LEFT JOIN redactions AS r ON e.event_id = r.redacts
-            WHERE e.event_id = ANY($1)",
-            &[&event_ids],
-        )
-        .await?;
-    for row in rows {
-        let event_id: String = row.try_get(0).map_err(anyhow::Error::new)?;
-        let redacts: Option<&str> = row.try_get(1).map_err(anyhow::Error::new)?;
-        let rejects: Option<&str> = row.try_get(2).map_err(anyhow::Error::new)?;
-        if redacts.is_none() && rejects.is_none() {
-            effects.add_event_cache_prefill(event_id);
+) {
+    for persisting in events {
+        let event_id = persisting.event().event_id();
+        if !persisting.context().is_rejected() && !redacted.contains(event_id) {
+            effects.add_event_cache_prefill(event_id.to_owned());
         }
     }
-    Ok(())
 }
 
 /// `_set_push_actions_for_event_and_users_txn`: write the push actions of
