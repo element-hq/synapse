@@ -1169,7 +1169,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         # The event is still scheduled, and is sent on its original timeout.
         self.assertEqual(1, len(self._get_delayed_events()))
         self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, False)
-        self.reactor.advance(1)
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, True)
 
     @parameterized.expand(
@@ -1196,7 +1197,8 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
         # The event is still scheduled, and is sent on its original timeout.
         self.assertEqual(1, len(self._get_delayed_events()))
         self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, False)
-        self.reactor.advance(1)
+        # Advance time enough so the delayed event is sent
+        self.reactor.advance(Duration(seconds=1).as_secs())
         self._check_for_delayed_event_in_sync(self.user1_access_token, delay_id, True)
 
     @parameterized.expand(
@@ -1237,13 +1239,15 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
         if action == _UpdateDelayedEventAction.CANCEL:
             self.assertListEqual([], self._get_delayed_events())
-            self.reactor.advance(1)
+            # Advance time enough to confirm that the delayed event was not sent
+            self.reactor.advance(Duration(seconds=1).as_secs())
             self._check_for_delayed_event_in_sync(
                 self.user1_access_token, delay_id, False
             )
         elif action == _UpdateDelayedEventAction.RESTART:
             self.assertEqual(1, len(self._get_delayed_events()))
-            self.reactor.advance(1)
+            # Advance time enough so the delayed event is sent
+            self.reactor.advance(Duration(seconds=1).as_secs())
             self._check_for_delayed_event_in_sync(
                 self.user1_access_token, delay_id, True
             )
