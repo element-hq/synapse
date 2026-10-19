@@ -738,3 +738,97 @@ class EventLoadTracingTestCase(_AgentTestCase):
                 for s in spans
             )
         )
+
+
+class SlidingSyncTracingTestCase(_AgentTestCase):
+    """A sliding sync request Rust computes reports its steps and a span per
+    room under the request's Python span.
+
+    Needs the native Rust Postgres driver:
+
+        SYNAPSE_TEST_RUST_DRIVER=1 POSTGRES=1 run-trial.sh tests.logging.test_rust_tracing
+    """
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def default_config(self) -> dict[str, Any]:
+        config = super().default_config()
+        config.setdefault("experimental_features", {})["rust_sliding_sync"] = "on"
+        return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        hs = self.setup_test_homeserver()
+        if hs.get_sliding_sync_handler()._rust_sliding_sync is None:
+            raise SkipTest("needs the Rust sliding sync handler")
+        return hs
+
+    def prepare_before_tracing(self) -> None:
+        self.user = self.register_user("user", "pass")
+        self.token = self.login("user", "pass")
+        self.rooms = [
+            self.helper.create_room_as(self.user, tok=self.token) for _ in range(2)
+        ]
+
+    def test_sliding_sync_span_tree(self) -> None:
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync",
+            {
+                "lists": {
+                    "all": {
+                        "ranges": [[0, 9]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                    }
+                }
+            },
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        spans = self._received_spans()
+        python_by_id = self._python_spans_by_id()
+
+        def named(name: str) -> "list[ttypes.Span]":
+            return [s for s in spans if s.operationName == name]
+
+        steps = [
+            "sliding_sync.load_connection_state",
+            "sliding_sync.interested_rooms",
+            "sliding_sync.room_entries",
+            "sliding_sync.finish_request",
+            "sliding_sync.encode",
+        ]
+        for step in steps:
+            (span,) = named(step)
+            self.assertIn(
+                "SlidingSyncRestServlet", self._python_ancestors(span, python_by_id)
+            )
+
+        (entries,) = named("sliding_sync.room_entries")
+        rooms = named("sliding_sync.room")
+        self.assertEqual(len(rooms), 2)
+        self.assertEqual(
+            {next(t.vStr for t in s.tags if t.key == "room_id") for s in rooms},
+            set(self.rooms),
+        )
+        for room_span in rooms:
+            self.assertEqual(room_span.parentSpanId, entries.spanId)
+            self.assertEqual(
+                next(t.vStr for t in room_span.tags if t.key == "outcome"), "entry"
+            )
+
+        # The rooms' reads nest under them.
+        room_span_ids = {room_span.spanId for room_span in rooms}
+        self.assertTrue(
+            any(
+                s.operationName == "db.connection" and s.parentSpanId in room_span_ids
+                for s in spans
+            ),
+            [s.operationName for s in spans],
+        )

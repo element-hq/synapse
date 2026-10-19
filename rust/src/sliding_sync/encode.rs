@@ -28,6 +28,7 @@ use crate::events::serialize::{
     serialize_event, BundleRef, SerializeEventConfig, SerializeLookups,
 };
 use crate::events::Event;
+use crate::logging::opentracing::layer::with_py_parent;
 use crate::sliding_sync::result::RoomResult;
 use crate::sliding_sync::room_entry::RoomEntry;
 use crate::sync::relations::Bundle;
@@ -183,8 +184,13 @@ pub fn encode_rooms<'py>(
 ) -> PyResult<Bound<'py, PyBytes>> {
     let unsigned_additions = unsigned_additions.unwrap_or_default();
     let entries: Vec<Arc<RoomEntry>> = rooms.iter().map(|room| room.get().entry.clone()).collect();
-    let encoded =
-        py.detach(|| encode_rooms_json(&entries, time_now_ms, config, &unsigned_additions))?;
+    // On a threadpool thread (`defer_to_thread`), whose logcontext carries
+    // the request's Python span.
+    let encoded = with_py_parent(py, || {
+        let _span =
+            tracing::info_span!("sliding_sync.encode", rooms = entries.len() as u64).entered();
+        py.detach(|| encode_rooms_json(&entries, time_now_ms, config, &unsigned_additions))
+    })?;
     Ok(PyBytes::new(py, &encoded))
 }
 

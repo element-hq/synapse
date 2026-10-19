@@ -45,6 +45,7 @@ use room_lists::filter::NotImplementedFilter;
 use room_lists::interested::{InterestedRooms, ListsSnapshot, PyInterestedRooms};
 use room_lists::lists::UnknownPosition;
 use state::{ConnectionState, ConnectionStateData, InstanceMap};
+use tracing::Instrument;
 
 use crate::caches::lock_ignoring_poison;
 use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
@@ -213,6 +214,7 @@ impl SlidingSyncHandler {
                 let stats = SlidingSyncStats::from_db(&reader.stats());
                 Ok::<_, anyhow::Error>(ConnectionState::new(data, instances, stats))
             }
+            .instrument(tracing::info_span!("sliding_sync.load_connection_state"))
             .await;
             result.map_err(error_to_py)
         }))
@@ -236,6 +238,7 @@ impl SlidingSyncHandler {
             let interested = room_lists::interested::compute_interested_rooms(
                 &reader, &request, &previous, snapshot, now_ms,
             )
+            .instrument(tracing::info_span!("sliding_sync.interested_rooms"))
             .await
             .map_err(error_to_py)?;
             Ok(PyInterestedRooms {
@@ -272,8 +275,10 @@ impl SlidingSyncHandler {
         let now_ms = self.runtime.clock().now_millis() as i64;
         Ok(Box::pin(async move {
             let reader = store.sliding_sync_reader(pool);
+            let span = tracing::info_span!("sliding_sync.room_entries", rooms = rooms.len() as u64);
             let outcomes =
                 room_entry::generate_room_entries(&reader, &request, &instance_ids, now_ms, &rooms)
+                    .instrument(span)
                     .await
                     .map_err(anyhow_to_py)?;
             let stats = SlidingSyncStats::from_db(&reader.stats());
@@ -310,6 +315,7 @@ impl SlidingSyncHandler {
                 &interested,
                 now_ms,
             )
+            .instrument(tracing::info_span!("sliding_sync.finish_request"))
             .await
             .map_err(error_to_py)?;
             Ok((position, SlidingSyncStats::from_db(&reader.stats())))

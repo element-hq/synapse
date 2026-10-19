@@ -28,8 +28,10 @@ use anyhow::{bail, Context};
 use futures::{stream, FutureExt, StreamExt};
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
+use tracing::Instrument;
 
 use crate::events::Event;
+use crate::logging::opentracing::record_error;
 use crate::sliding_sync::config::{RoomSyncConfig, MEMBER};
 use crate::sliding_sync::connection::{HaveSentRoom, RoomLazyMembershipChanges};
 use crate::sliding_sync::request::SlidingSyncRequestData;
@@ -877,8 +879,15 @@ async fn room_outcome(
     context: &RoomContext<'_, '_>,
     input: &RoomInputData,
 ) -> (Arc<str>, RoomOutcome) {
+    let span = tracing::info_span!(
+        "sliding_sync.room",
+        room_id = &*input.membership.room_id,
+        outcome = tracing::field::Empty,
+        error = tracing::field::Empty,
+    );
     let outcome = match AssertUnwindSafe(room_sync_data(context, input))
         .catch_unwind()
+        .instrument(span.clone())
         .await
     {
         Ok(Ok(computed)) => RoomOutcome::Computed(Box::new(computed)),
@@ -888,6 +897,15 @@ async fn room_outcome(
         },
         Err(panic) => RoomOutcome::Error(format!("panicked: {}", panic_message(&*panic))),
     };
+    let outcome_name = match &outcome {
+        RoomOutcome::Computed(_) => "entry",
+        RoomOutcome::Fallback(_) => "fallback",
+        RoomOutcome::Error(_) => "error",
+    };
+    span.record("outcome", outcome_name);
+    if let RoomOutcome::Error(error) = &outcome {
+        record_error(&span, error);
+    }
     (Arc::clone(&input.membership.room_id), outcome)
 }
 
