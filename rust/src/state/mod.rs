@@ -45,12 +45,14 @@ use pyo3::{
     prelude::*,
     types::{PyDict, PyModule, PyTuple},
 };
+use tracing::Instrument;
 
 use crate::caches::{python::PyCacheKey, Cache};
 use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
 use crate::deferred::create_deferred;
 use crate::event_auth::AuthFailure;
 use crate::events::Event;
+use crate::logging::opentracing::record_error;
 use crate::room_versions::{RoomVersion, StateResolutionVersions};
 use crate::runtime::RustRuntime;
 use crate::storage::{caches::StoreCaches, store::Store};
@@ -690,6 +692,56 @@ impl StateResolutionHandler {
 /// [`StateResolutionHandler`]'s deferreds.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resolve_on_pool(
+    pool: &ConnectionPool,
+    handle: tokio::runtime::Handle,
+    caches: Arc<StoreCaches>,
+    cache: &ConflictCache,
+    room_id: &str,
+    room_version: &'static RoomVersion,
+    state_sets: &[Arc<StateMap>],
+    separated: (StateMap, v2::Conflicted),
+    events: EventMap,
+    stats: StateResStats,
+) -> anyhow::Result<ResolveOutput> {
+    let span = tracing::info_span!(
+        "state.resolve",
+        room_id = room_id,
+        state_sets = state_sets.len() as u64,
+        db_ms = tracing::field::Empty,
+        auth_chain_ms = tracing::field::Empty,
+        fallback = tracing::field::Empty,
+        error = tracing::field::Empty,
+    );
+    let output = resolve_on_pool_in_span(
+        pool,
+        handle,
+        caches,
+        cache,
+        room_id,
+        room_version,
+        state_sets,
+        separated,
+        events,
+        stats,
+    )
+    .instrument(span.clone())
+    .await;
+    match &output {
+        Ok(output) => {
+            span.record("db_ms", output.stats.db_time * 1000.0);
+            span.record("auth_chain_ms", output.stats.auth_chain_time * 1000.0);
+        }
+        // Expected: the caller resolves the state in Python instead.
+        Err(err) if err.downcast_ref::<store::NoChainCoverIndex>().is_some() => {
+            span.record("fallback", true);
+        }
+        Err(err) => record_error(&span, err),
+    }
+    output
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn resolve_on_pool_in_span(
     pool: &ConnectionPool,
     handle: tokio::runtime::Handle,
     caches: Arc<StoreCaches>,

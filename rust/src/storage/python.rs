@@ -56,7 +56,9 @@ use pyo3::{
     },
     Bound, IntoPyObject, Py, PyAny, PyClassInitializer, PyErr, PyResult, Python,
 };
+use tracing::Instrument;
 
+use crate::logging::opentracing::record_error;
 use crate::{
     caches::{
         python::{PyCacheKey, RustCache},
@@ -213,6 +215,14 @@ impl RustStore {
         let ids: Vec<Arc<str>> = event_ids.into_iter().map(Arc::from).collect();
         Ok(async move {
             let mut stats = EventLoadStats::default();
+            let span = tracing::info_span!(
+                "events.load",
+                events = ids.len() as u64,
+                reload,
+                cached = tracing::field::Empty,
+                fetched = tracing::field::Empty,
+                error = tracing::field::Empty,
+            );
             let events = async {
                 let querier = PoolQuerier::checkout(&pool).await?;
                 let loader = EventLoader::new(&querier, Some(&store.caches.events));
@@ -222,7 +232,17 @@ impl RustStore {
                     loader.load(&ids, &mut stats).await
                 }
             }
+            .instrument(span.clone())
             .await;
+            match &events {
+                Ok(_) => {
+                    // Events another caller's load read count as cached:
+                    // this load did not read them.
+                    span.record("cached", stats.cached);
+                    span.record("fetched", stats.fetched);
+                }
+                Err(err) => record_error(&span, err),
+            }
             events
                 .map(|events| LoadedEvents {
                     events,

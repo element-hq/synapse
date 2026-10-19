@@ -676,3 +676,65 @@ class SyncTracingTestCase(_AgentTestCase):
         # Encoded on the reactor, under the request's Python span.
         self.assertEqual(encode.traceIdLow, entries.traceIdLow)
         self.assertIn("SyncRestServlet", self._python_ancestors(encode, python_by_id))
+
+
+class EventLoadTracingTestCase(_AgentTestCase):
+    """An event load in Rust reports `events.load` under the caller's Python
+    span, with the event fetched from the database.
+
+    Needs the native Rust Postgres driver:
+
+        SYNAPSE_TEST_RUST_DRIVER=1 POSTGRES=1 run-trial.sh tests.logging.test_rust_tracing
+    """
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        hs = self.setup_test_homeserver()
+        if hs.get_datastores().main._rust_event_loader is None:
+            raise SkipTest("needs the native Rust Postgres driver")
+        return hs
+
+    def prepare_before_tracing(self) -> None:
+        self.user = self.register_user("user", "pass")
+        self.token = self.login("user", "pass")
+        room_id = self.helper.create_room_as(self.user, tok=self.token)
+        self.event_id = self.helper.send(room_id, "hello", tok=self.token)["event_id"]
+
+    def test_event_load_span(self) -> None:
+        store = self.hs.get_datastores().main
+        # Out of the cache, so that the load reads the database.
+        store._invalidate_local_get_event_cache(self.event_id)
+
+        tracer = opentracing.global_tracer()
+        with LoggingContext(name="ctx", server_name="test_server"):
+            with start_active_span("load", tracer=tracer) as scope:
+                self.get_success(store.get_event(self.event_id))
+
+        spans = self._received_spans()
+        trace_id = _signed(_context(scope.span).trace_id)
+        loads = [
+            s
+            for s in spans
+            if s.operationName == "events.load" and s.traceIdLow == trace_id
+        ]
+        self.assertEqual(len(loads), 1, [s.operationName for s in spans])
+        (load,) = loads
+        # Under the caller's span, through the store's own traced calls.
+        ancestors = self._python_ancestors(load, self._python_spans_by_id())
+        self.assertEqual(ancestors[-1], "load", ancestors)
+        tags = {t.key: t.vLong for t in load.tags if t.vType == ttypes.TagType.LONG}
+        self.assertEqual(tags["fetched"], 1)
+        self.assertEqual(tags["events"], 1)
+
+        # Its reads nest under it.
+        self.assertTrue(
+            any(
+                s.operationName == "db.connection" and s.parentSpanId == load.spanId
+                for s in spans
+            )
+        )

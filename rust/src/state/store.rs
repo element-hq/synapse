@@ -576,4 +576,74 @@ mod tracing_tests {
             ]
         );
     }
+
+    /// A resolution that fails reports `state.resolve` marked failed, with
+    /// its reads under it.
+    #[test]
+    fn traced_resolve_failure() {
+        use crate::caches::registry::CacheRegistry;
+        use crate::room_versions::RoomVersion;
+        use crate::state::{conflict_cache_for_test, resolve_on_pool, v2, StateKey, StateMap};
+        use crate::storage::caches::StoreCaches;
+
+        let Some((rt, pool)) = test_pool() else {
+            return;
+        };
+        let registry = CacheRegistry::new();
+        let caches = Arc::new(StoreCaches::new(&registry, 10));
+        let cache = conflict_cache_for_test(10);
+        let key = StateKey::new("m.room.name", "");
+        let state_sets: Vec<Arc<StateMap>> = ["$a", "$b"]
+            .into_iter()
+            .map(|event_id| Arc::new(StateMap::from([(key.clone(), Arc::from(event_id))])))
+            .collect();
+        let separated = v2::separate(&state_sets);
+
+        let (result, spans) = traced(SamplerConfig::Const(true), || {
+            let result = rt.block_on(resolve_on_pool(
+                &pool,
+                rt.handle().clone(),
+                caches,
+                &cache,
+                "!unknown:test",
+                &RoomVersion::V11,
+                &state_sets,
+                separated,
+                Default::default(),
+                Default::default(),
+            ));
+            // The failed store rolls back on a task of its own, which holds
+            // the spans open: wait for it to give the connection back.
+            rt.block_on(async {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    let status = pool.status();
+                    if status.available == status.size {
+                        break;
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "rollback never finished"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            });
+            result
+        });
+        assert!(result.is_err());
+
+        let resolve = spans
+            .iter()
+            .find(|span| span.operation == "state.resolve")
+            .expect("a state.resolve span");
+        assert_eq!(
+            tag(resolve, "room_id"),
+            Some(&TagValue::Str("!unknown:test".into()))
+        );
+        assert_eq!(tag(resolve, "state_sets"), Some(&TagValue::Long(2)));
+        assert_eq!(tag(resolve, "error"), Some(&TagValue::Bool(true)));
+        assert!(spans
+            .iter()
+            .any(|span| span.operation == "db.connection" && span.parent_id == resolve.span_id));
+    }
 }
