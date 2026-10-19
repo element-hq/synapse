@@ -15,7 +15,7 @@
 """Tests for reporting opentracing spans from Rust."""
 
 import socket
-from typing import cast
+from typing import Callable, cast
 
 from twisted.internet.testing import MemoryReactor
 
@@ -27,6 +27,8 @@ from synapse.synapse_rust.opentracing import (
     captured_span_for_test,
     set_tracing_enabled_for_test,
     span_in_blocking_task_for_test,
+    span_in_task_for_test,
+    span_on_thread_for_test,
 )
 from synapse.util.clock import Clock
 
@@ -185,6 +187,9 @@ class EnableRustTracingTestCase(HomeserverTestCase):
             sampler=sampler, reporter=jaeger_client.reporter.InMemoryReporter()
         )
         _enable_rust_tracing(self.hs, config, tracer)
+        # Detach this homeserver's reporter from the process-wide `tracing`
+        # subscriber, so later tests can attach theirs.
+        self.addCleanup(self.hs.get_rust_runtime().shutdown_tracing_for_test)
 
     def test_enable(self) -> None:
         runtime = self.hs.get_rust_runtime()
@@ -221,6 +226,11 @@ class EnableRustTracingTestCase(HomeserverTestCase):
         self.assertEqual(settings[4], "Never")
 
 
+def _signed(value: int) -> int:
+    """An ID as thrift's signed i64 carries it."""
+    return value - (1 << 64) if value >= (1 << 63) else value
+
+
 def _decode_emit_batch(data: bytes) -> "ttypes.Batch":
     """Decode an `emitBatch` datagram the way the Jaeger agent does."""
     protocol = TCompactProtocol(TMemoryBuffer(data))
@@ -253,6 +263,7 @@ class ReporterRoundTripTestCase(HomeserverTestCase):
                 "tags": {"instance": "master"},
             },
             service_name="test service",
+            scope_manager=LogContextScopeManager(),
         )
         tracer = config.create_tracer(
             sampler=ConstSampler(True),
@@ -260,6 +271,10 @@ class ReporterRoundTripTestCase(HomeserverTestCase):
         )
         _enable_rust_tracing(hs, config, tracer)
         self.runtime = hs.get_rust_runtime()
+        # Detach this homeserver's reporter from the process-wide `tracing`
+        # subscriber, so later tests record nothing.
+        self.addCleanup(self.runtime.shutdown_tracing_for_test)
+        self.tracer = tracer
 
     def _receive(self) -> "ttypes.Batch":
         data, _ = self.agent.recvfrom(70_000)
@@ -292,6 +307,58 @@ class ReporterRoundTripTestCase(HomeserverTestCase):
         self.assertEqual(
             [(tag.key, tag.vType, tag.vStr) for tag in span.tags],
             [("db.statement", ttypes.TagType.STRING, "SELECT 1")],
+        )
+
+    def _spans_under_python_span(
+        self, run: "Callable[[], None]"
+    ) -> "tuple[jaeger_client.SpanContext, list[ttypes.Span]]":
+        with LoggingContext(name="ctx", server_name="test_server"):
+            with start_active_span("python", tracer=self.tracer) as scope:
+                run()
+        self.assertTrue(self.runtime.flush_tracing_for_test(5))
+        return _context(scope.span), self._receive().spans
+
+    def test_task_span_has_the_python_parent(self) -> None:
+        parent, spans = self._spans_under_python_span(
+            lambda: span_in_task_for_test(self.runtime, "db.persist_events")
+        )
+
+        (span,) = spans
+        self.assertEqual(span.operationName, "db.persist_events")
+        self.assertEqual(span.traceIdLow, _signed(parent.trace_id))
+        self.assertEqual(span.parentSpanId, _signed(parent.span_id))
+        self.assertEqual(span.flags, parent.flags)
+        self.assertEqual(
+            [(tag.key, tag.vLong) for tag in span.tags], [("db.queued", 3)]
+        )
+        (log,) = span.logs
+        self.assertEqual(
+            [(field.key, field.vStr) for field in log.fields], [("message", "commit")]
+        )
+
+    def test_thread_span_has_the_python_parent(self) -> None:
+        parent, spans = self._spans_under_python_span(
+            lambda: span_on_thread_for_test("state.resolve")
+        )
+
+        (span,) = spans
+        self.assertEqual(span.operationName, "state.resolve")
+        self.assertEqual(span.traceIdLow, _signed(parent.trace_id))
+        self.assertEqual(span.parentSpanId, _signed(parent.span_id))
+
+    def test_unsampled_python_parent(self) -> None:
+        unsampled = _make_tracer(sampled=False)
+        with LoggingContext(name="ctx", server_name="test_server"):
+            with start_active_span("python", tracer=unsampled):
+                span_in_task_for_test(self.runtime, "not sampled")
+        # A sampled span after it, so there is something to wait for.
+        with LoggingContext(name="ctx", server_name="test_server"):
+            with start_active_span("python", tracer=self.tracer):
+                span_in_task_for_test(self.runtime, "sampled")
+        self.assertTrue(self.runtime.flush_tracing_for_test(5))
+
+        self.assertEqual(
+            [span.operationName for span in self._receive().spans], ["sampled"]
         )
 
     def test_metrics(self) -> None:

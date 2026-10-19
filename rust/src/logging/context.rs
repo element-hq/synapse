@@ -1035,6 +1035,14 @@ pub(crate) mod testing {
         )
         .expect("failed to allocate LoggingContext")
     }
+    /// A handle for the sentinel context carrying `span`, as if captured
+    /// while Python had that span active.
+    pub(crate) fn handle_with_span(span: Option<SpanContext>) -> LogContextHandle {
+        LogContextHandle {
+            context: std::sync::Arc::new(None),
+            span,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -22,5 +22,13 @@ def span_in_blocking_task_for_test(
     """The parent span a task run by the `_blocking` entry points sees, in the
     same form as `captured_span_for_test`. For tests."""
 
+def span_in_task_for_test(runtime: RustRuntime, operation: str) -> None:
+    """Run a Rust span named `operation`, tagged `db.queued = 3` with a
+    `commit` log, in a task with the caller's span as parent. For tests."""
+
+def span_on_thread_for_test(operation: str) -> None:
+    """Run a Rust span named `operation` on the calling thread, with the
+    active Python span as parent. For tests."""
+
 def set_tracing_enabled_for_test(enabled: bool) -> None:
     """Turn span capture on or off for the whole process. For tests."""

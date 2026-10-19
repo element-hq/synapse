@@ -23,6 +23,7 @@
 //! Tracing is off unless a homeserver calls `RustRuntime.enable_tracing`.
 //! While it is off, a capture costs one relaxed atomic load.
 
+pub mod layer;
 pub mod reporter;
 pub mod thrift;
 
@@ -149,7 +150,7 @@ pub struct TracerConfig {
 /// A homeserver's tracing: its settings and the reporter sending its spans.
 pub struct Tracer {
     config: TracerConfig,
-    reporter: Reporter,
+    reporter: Arc<Reporter>,
 }
 
 impl Tracer {
@@ -163,7 +164,21 @@ impl Tracer {
                 .map(|(key, value)| Tag::string(key.clone(), value.clone()))
                 .collect(),
         };
-        let reporter = Reporter::start(process, &config.reporting_host, config.reporting_port)?;
+        let reporter = Arc::new(Reporter::start(
+            process,
+            &config.reporting_host,
+            config.reporting_port,
+        )?);
+
+        let sink: Arc<dyn layer::SpanSink> = reporter.clone();
+        let attached = layer::attach_global(layer::LayerTarget::new(&sink, config.sampler.clone()));
+        if !attached {
+            log::warn!(
+                "Another homeserver in this process already reports spans from Rust code; \
+                 it reports this homeserver's too"
+            );
+        }
+
         Ok(Tracer { config, reporter })
     }
 
@@ -180,8 +195,11 @@ impl Tracer {
         &self.reporter
     }
 
-    /// Send the queued spans and stop the reporter, waiting up to `timeout`.
+    /// Stop recording spans for this homeserver, then send the queued ones
+    /// and stop the reporter, waiting up to `timeout`.
     pub fn shutdown(&self, timeout: Duration) {
+        let sink: Arc<dyn layer::SpanSink> = self.reporter.clone();
+        layer::detach_global(&sink);
         self.reporter.shutdown(timeout);
     }
 }
@@ -254,6 +272,37 @@ fn span_to_py<'py>(
     )?))
 }
 
+/// Run a `tracing` span named `operation`, with a `db.queued = 3` tag and a
+/// `commit` log, in a task on the runtime, blocking until it finishes. For
+/// tests of the Python-to-Rust parent handoff.
+#[pyfunction]
+fn span_in_task_for_test(
+    py: Python<'_>,
+    runtime: &Bound<'_, RustRuntime>,
+    operation: String,
+) -> PyResult<()> {
+    use tracing::Instrument;
+
+    runtime.get().block_on_scoped(py, async move {
+        let span = tracing::info_span!("test", otel.name = operation, db.queued = 3_i64);
+        async {
+            tokio::task::yield_now().await;
+            tracing::info!(message = "commit");
+        }
+        .instrument(span)
+        .await
+    })
+}
+
+/// Run a `tracing` span named `operation` on the calling thread under
+/// [`layer::with_py_parent`]. For tests.
+#[pyfunction]
+fn span_on_thread_for_test(py: Python<'_>, operation: String) {
+    layer::with_py_parent(py, || {
+        let _span = tracing::info_span!("test", otel.name = operation).entered();
+    });
+}
+
 /// Turn span capture on or off for this process. For tests, which have no
 /// homeserver with tracing enabled.
 #[pyfunction]
@@ -269,6 +318,8 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
         span_in_blocking_task_for_test,
         &child_module
     )?)?;
+    child_module.add_function(wrap_pyfunction!(span_in_task_for_test, &child_module)?)?;
+    child_module.add_function(wrap_pyfunction!(span_on_thread_for_test, &child_module)?)?;
     child_module.add_function(wrap_pyfunction!(
         set_tracing_enabled_for_test,
         &child_module
