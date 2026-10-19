@@ -21,7 +21,11 @@ from unittest import SkipTest
 from twisted.internet.testing import MemoryReactor
 
 from synapse.logging.context import LoggingContext
-from synapse.logging.opentracing import _enable_rust_tracing, start_active_span
+from synapse.logging.opentracing import (
+    _enable_rust_tracing,
+    start_active_span,
+    start_active_span_follows_from,
+)
 from synapse.logging.rust_tracing_metrics import rust_tracing_collector
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
@@ -29,6 +33,7 @@ from synapse.server import HomeServer
 from synapse.storage.rust_pool import RustConnectionPool
 from synapse.synapse_rust.opentracing import (
     captured_span_for_test,
+    encode_python_span_for_test,
     set_tracing_enabled_for_test,
     span_in_blocking_task_for_test,
     span_in_task_for_test,
@@ -46,6 +51,7 @@ try:
     from jaeger_client.thrift_gen.jaeger import ttypes
     from thrift.protocol.TCompactProtocol import (  # type: ignore[import-untyped]
         TCompactProtocol,
+        TCompactProtocolFactory,
     )
     from thrift.transport.TTransport import (  # type: ignore[import-untyped]
         TMemoryBuffer,
@@ -832,3 +838,152 @@ class SlidingSyncTracingTestCase(_AgentTestCase):
             ),
             [s.operationName for s in spans],
         )
+
+
+def _python_encoding(
+    span: "jaeger_client.Span", service_name: str, process_tags: dict[str, str]
+) -> bytes:
+    """The `emitBatch` message jaeger-client's own reporter sends for `span`,
+    with sequence ID 1."""
+    from jaeger_client import thrift as jaeger_thrift
+    from jaeger_client.thrift_gen.agent import Agent
+
+    process = jaeger_thrift.make_process(service_name, process_tags, 1024)
+    batch = jaeger_thrift.make_jaeger_batch([span], process)
+    buffer = TMemoryBuffer()
+    client = Agent.Client.__new__(Agent.Client)
+    client._transport = buffer
+    client._oprot_factory = TCompactProtocolFactory()
+    client._seqid = 0
+    client.emitBatch(batch)
+    return buffer.getvalue()
+
+
+class PythonSpanEncodingTestCase(TestCase):
+    """The Rust reporter sends Python's spans exactly as jaeger-client's own
+    reporter does."""
+
+    if jaeger_client is None:
+        skip = "Requires jaeger_client"  # type: ignore[unreachable]
+
+    def test_same_bytes(self) -> None:
+        reporter = jaeger_client.reporter.InMemoryReporter()
+        config = jaeger_client.config.Config(
+            config={}, service_name="test", scope_manager=LogContextScopeManager()
+        )
+        tracer = config.create_tracer(sampler=ConstSampler(True), reporter=reporter)
+
+        with LoggingContext(name="ctx", server_name="test_server"):
+            with start_active_span("root", tracer=tracer) as root:
+                root.span.set_tag("string", "value")
+                root.span.set_tag("number", 12)
+                root.span.set_tag("ratio", 0.25)
+                root.span.set_tag("flag", True)
+                root.span.log_kv({"message": "hello", "count": 3})
+                with start_active_span("child", tracer=tracer):
+                    pass
+            with start_active_span_follows_from(
+                "follower", [root.span.context], tracer=tracer
+            ):
+                pass
+
+        # Also IDs at and above 2^63, which thrift carries negative.
+        big = tracer.start_span("big ids")
+        big_context = cast(jaeger_client.SpanContext, big.context)
+        big_context.span_id = (1 << 63) + 5
+        big_context.trace_id = (1 << 100) + 7
+        big.finish()
+
+        # A trace ID from a remote context can be wider than 128 bits:
+        # jaeger-client sends the low 128.
+        wide = tracer.start_span("wide trace id")
+        cast(jaeger_client.SpanContext, wide.context).trace_id = (1 << 130) + 9
+        wide.finish()
+
+        spans = reporter.get_spans()
+        self.assertEqual(len(spans), 5)
+        process_tags = {"hostname": "host", "jaeger.version": "Python-4.8.0"}
+        for span in spans:
+            rust = encode_python_span_for_test(
+                span, "test service", list(process_tags.items())
+            )
+            python = _python_encoding(span, "test service", process_tags)
+            self.assertEqual(rust, python, span.operation_name)
+
+
+class InitTracerTestCase(HomeserverTestCase):
+    """`init_tracer` reports the Python tracer's spans through the Rust
+    reporter."""
+
+    if jaeger_client is None:
+        skip = "Requires jaeger_client"  # type: ignore[unreachable]
+
+    def test_python_spans_go_through_rust(self) -> None:
+        import synapse.logging.opentracing as synapse_opentracing
+
+        self.addCleanup(set_tracing_enabled_for_test, False)
+        previous_tracer = opentracing.global_tracer()
+        self.addCleanup(opentracing.set_global_tracer, previous_tracer)
+
+        agent = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.addCleanup(agent.close)
+        agent.bind(("127.0.0.1", 0))
+        agent.settimeout(5)
+        port = agent.getsockname()[1]
+
+        tracing_config = self.hs.config.tracing
+        tracing_config.opentracer_enabled = True
+        tracing_config.opentracer_whitelist = []
+        tracing_config.jaeger_config = {
+            "sampler": {"type": "const", "param": 1},
+            "local_agent": {"reporting_host": "127.0.0.1", "reporting_port": port},
+        }
+        # `initialize_tracer` initialises jaeger-client once per process.
+        self.addCleanup(setattr, jaeger_client.Config, "_initialized", False)
+        synapse_opentracing.init_tracer(self.hs)
+        runtime = self.hs.get_rust_runtime()
+        self.addCleanup(runtime.shutdown_tracing_for_test)
+
+        tracer = cast(jaeger_client.Tracer, opentracing.global_tracer())
+        self.assertIsInstance(tracer.reporter, synapse_opentracing._RustSpanReporter)
+        with LoggingContext(name="ctx", server_name="test_server"):
+            with start_active_span("from python", tracer=tracer) as scope:
+                span_in_task_for_test(runtime, "from rust")
+        self.assertTrue(runtime.flush_tracing_for_test(5))
+
+        data, _ = agent.recvfrom(70_000)
+        batch = _decode_emit_batch(data)
+        names = {span.operationName for span in batch.spans}
+        self.assertEqual(names, {"from python", "from rust"})
+        self.assertEqual(batch.process.serviceName, tracer.service_name)
+        (rust_span,) = [s for s in batch.spans if s.operationName == "from rust"]
+        self.assertEqual(rust_span.parentSpanId, _signed(_context(scope.span).span_id))
+
+    def test_logging_reporter_is_kept(self) -> None:
+        """With `logging: true`, spans still go to jaeger-client's logging
+        reporter too. A second `init_tracer` in the process is fine."""
+        from jaeger_client.reporter import CompositeReporter, LoggingReporter
+
+        import synapse.logging.opentracing as synapse_opentracing
+
+        self.addCleanup(set_tracing_enabled_for_test, False)
+        previous_tracer = opentracing.global_tracer()
+        self.addCleanup(opentracing.set_global_tracer, previous_tracer)
+        self.addCleanup(setattr, jaeger_client.Config, "_initialized", False)
+
+        tracing_config = self.hs.config.tracing
+        tracing_config.opentracer_enabled = True
+        tracing_config.opentracer_whitelist = []
+        tracing_config.jaeger_config = {
+            "sampler": {"type": "const", "param": 0},
+            "logging": True,
+        }
+        synapse_opentracing.init_tracer(self.hs)
+        self.addCleanup(self.hs.get_rust_runtime().shutdown_tracing_for_test)
+
+        tracer = cast(jaeger_client.Tracer, opentracing.global_tracer())
+        reporter = tracer.reporter
+        assert isinstance(reporter, CompositeReporter)
+        first, second = reporter.reporters
+        self.assertIsInstance(first, synapse_opentracing._RustSpanReporter)
+        self.assertIsInstance(second, LoggingReporter)

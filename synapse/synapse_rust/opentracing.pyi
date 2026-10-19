@@ -10,7 +10,24 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+from typing import Any
+
 from synapse.synapse_rust.runtime import RustRuntime
+
+class PythonSpanReporter:
+    """Reports the Python tracer's finished spans through the homeserver's
+    Rust reporter, which sends them to the Jaeger agent with Rust's own."""
+
+    def __init__(self, runtime: RustRuntime) -> None: ...
+    def report_span(self, span: Any) -> None:
+        """Queue a finished jaeger-client span. Never blocks: the span is
+        dropped if the queue is full or tracing is not enabled."""
+
+def encode_python_span_for_test(
+    span: Any, service_name: str, process_tags: list[tuple[str, str]]
+) -> bytes:
+    """The `emitBatch` message the Rust reporter would send for the finished
+    jaeger-client `span`, with sequence ID 1. For tests."""
 
 def captured_span_for_test() -> tuple[int, int, int, dict[str, str]] | None:
     """The `(trace_id, span_id, flags, baggage)` of the span a Rust task

@@ -24,6 +24,7 @@
 //! While it is off, a capture costs one relaxed atomic load.
 
 pub mod layer;
+pub mod python_reporter;
 pub mod reporter;
 pub mod thrift;
 
@@ -442,6 +443,11 @@ fn set_tracing_enabled_for_test(enabled: bool) {
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "opentracing")?;
+    child_module.add_class::<python_reporter::PythonSpanReporter>()?;
+    child_module.add_function(wrap_pyfunction!(
+        python_reporter::encode_python_span_for_test,
+        &child_module
+    )?)?;
     child_module.add_function(wrap_pyfunction!(captured_span_for_test, &child_module)?)?;
     child_module.add_function(wrap_pyfunction!(
         span_in_blocking_task_for_test,

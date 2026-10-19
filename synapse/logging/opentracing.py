@@ -193,7 +193,6 @@ from typing import (
     overload,
 )
 
-import attr
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
@@ -208,6 +207,7 @@ if TYPE_CHECKING:
 
     from synapse.http.site import SynapseRequest
     from synapse.server import HomeServer
+    from synapse.synapse_rust.opentracing import PythonSpanReporter
 
 # Helper class
 
@@ -264,36 +264,40 @@ except ImportError:
     LogContextScopeManager = None  # type: ignore
 
 
+# jaeger-client 4.7.0 requires that reporters inherit from BaseReporter, which
+# didn't exist before that version.
 try:
-    from rust_python_jaeger_reporter import Reporter
-
-    # jaeger-client 4.7.0 requires that reporters inherit from BaseReporter, which
-    # didn't exist before that version.
-    try:
-        from jaeger_client.reporter import BaseReporter
-    except ImportError:
-
-        class BaseReporter:  # type: ignore[no-redef]
-            pass
-
-    @attr.s(slots=True, frozen=True, auto_attribs=True)
-    class _WrappedRustReporter(BaseReporter):
-        """Wrap the reporter to ensure `report_span` never throws."""
-
-        _reporter: Reporter = attr.Factory(Reporter)
-
-        def set_process(self, *args: Any, **kwargs: Any) -> None:
-            return self._reporter.set_process(*args, **kwargs)
-
-        def report_span(self, span: "opentracing.Span") -> None:
-            try:
-                return self._reporter.report_span(span)
-            except Exception:
-                logger.exception("Failed to report span")
-
-    RustReporter: type[_WrappedRustReporter] | None = _WrappedRustReporter
+    from jaeger_client.reporter import BaseReporter
 except ImportError:
-    RustReporter = None
+
+    class BaseReporter:  # type: ignore[no-redef]
+        pass
+
+
+class _RustSpanReporter(BaseReporter):
+    """Reports the Python tracer's spans through the homeserver's Rust
+    reporter, which also sends the spans of Rust code. Never raises."""
+
+    def __init__(self, reporter: "PythonSpanReporter") -> None:
+        super().__init__()
+        self._reporter = reporter
+        self._logged_failure = False
+
+    def set_process(self, *args: Any, **kwargs: Any) -> None:
+        # The Rust reporter takes the process from `enable_tracing`.
+        pass
+
+    def report_span(self, span: "opentracing.Span") -> None:
+        try:
+            self._reporter.report_span(span)
+        except Exception:
+            # Once with the traceback: a bad span context from a remote
+            # server would otherwise log one per span of its trace.
+            if not self._logged_failure:
+                self._logged_failure = True
+                logger.exception("Failed to report span")
+            else:
+                logger.debug("Failed to report span", exc_info=True)
 
 
 logger = logging.getLogger(__name__)
@@ -462,8 +466,6 @@ def init_tracer(hs: "HomeServer") -> None:
 
     set_homeserver_whitelist(hs.config.tracing.opentracer_whitelist)
 
-    from jaeger_client.metrics.prometheus import PrometheusMetricsFactory
-
     # Instance names are opaque strings but by stripping off the number suffix,
     # we can get something that looks like a "worker type", e.g.
     # "client_reader-1" -> "client_reader" so we don't spread the traces across
@@ -484,29 +486,60 @@ def init_tracer(hs: "HomeServer") -> None:
         config=jaeger_config,
         service_name=f"{hs.config.server.server_name} {instance_name_by_type}",
         scope_manager=LogContextScopeManager(),
-        metrics_factory=PrometheusMetricsFactory(),
+        metrics_factory=_jaeger_metrics_factory(),
     )
 
-    tracer: "JaegerTracer | None"
-    # If we have the rust jaeger reporter available let's use that.
-    if RustReporter:
-        logger.info("Using rust_python_jaeger_reporter library")
-        assert config.sampler is not None
-        tracer = config.create_tracer(RustReporter(), config.sampler)
-        opentracing.set_global_tracer(tracer)
-    else:
-        # `None` if another homeserver in this process already initialised
-        # the global tracer. That homeserver then reports this one's Python
-        # spans too, and this one reports no Rust spans of its own.
-        tracer = config.initialize_tracer()
+    # `None` if another homeserver in this process already initialised the
+    # global tracer. That homeserver then reports this one's Python spans
+    # too, and this one reports no Rust spans of its own.
+    tracer = config.initialize_tracer()
+    if tracer is None:
+        return
 
-    if tracer is not None:
-        try:
-            _enable_rust_tracing(hs, config, tracer)
-        except Exception:
-            # Python tracing works without the Rust side, so do not stop
-            # startup over it.
-            logger.exception("Failed to enable opentracing for Rust code")
+    try:
+        _enable_rust_tracing(hs, config, tracer)
+    except Exception:
+        # Python tracing works without the Rust side, so do not stop startup
+        # over it: jaeger-client's reporter goes on sending Python's spans.
+        logger.exception("Failed to enable opentracing for Rust code")
+        return
+
+    _report_python_spans_in_rust(hs, tracer)
+
+
+def _report_python_spans_in_rust(hs: "HomeServer", tracer: "JaegerTracer") -> None:
+    """Send the Python tracer's spans through the Rust reporter, with Rust's,
+    in place of jaeger-client's reporter. The tracer is otherwise as
+    jaeger-client set it up from the config: its sampler (remote included),
+    throttler and logging reporter."""
+    from jaeger_client.reporter import CompositeReporter
+
+    from synapse.synapse_rust.opentracing import PythonSpanReporter
+
+    rust_reporter = _RustSpanReporter(PythonSpanReporter(hs.get_rust_runtime()))
+    reporter = tracer.reporter
+    if isinstance(reporter, CompositeReporter):
+        # `logging: true`: jaeger-client's reporter and a `LoggingReporter`.
+        reporter.reporters = tuple(
+            rust_reporter if index == 0 else inner
+            for index, inner in enumerate(reporter.reporters)
+        )
+    else:
+        tracer.reporter = rust_reporter
+
+
+_JAEGER_METRICS_FACTORY: Any = None
+
+
+def _jaeger_metrics_factory() -> Any:
+    """One `PrometheusMetricsFactory` per process: each registers its metrics
+    in the global registry, so a second one would clash with the first."""
+    global _JAEGER_METRICS_FACTORY
+    if _JAEGER_METRICS_FACTORY is None:
+        from jaeger_client.metrics.prometheus import PrometheusMetricsFactory
+
+        _JAEGER_METRICS_FACTORY = PrometheusMetricsFactory()
+    return _JAEGER_METRICS_FACTORY
 
 
 def _enable_rust_tracing(

@@ -108,6 +108,16 @@ configure. A Rust span with a Python parent follows the parent's sampling
 decision. A trace that starts in Rust is sampled according to the `const` or
 `probabilistic` sampler. Under any other sampler, such traces are not sampled.
 
+The same reporter also sends the Python spans, in place of jaeger-client's own
+reporter and of the optional `rust_python_jaeger_reporter` package, which is no
+longer used. The rest of `jaeger_config` (the sampler, remote or not, the
+throttler, `logging`) applies as before. Its `reporter_queue_size`,
+`reporter_batch_size` and `reporter_flush_interval` options and jaeger-client's
+`jaeger:reporter_*` metrics no longer apply: the Rust reporter queues up to
+1000 spans, sends a batch at 100 spans, at 65000 bytes or after a second, and
+exports `synapse_rust_tracing_*` metrics instead. If tracing in Rust cannot
+start, jaeger-client's reporter sends the Python spans.
+
 The Rust reporter's counters are exported as Prometheus metrics named
 `synapse_rust_tracing_*`. A growing `synapse_rust_tracing_spans_dropped_total`
 means spans are finishing faster than they can be sent.
