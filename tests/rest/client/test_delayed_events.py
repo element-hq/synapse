@@ -794,7 +794,10 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             access_token=self.user2_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-        self.assert_dict({EventContentFields.MEMBERSHIP: Membership.JOIN}, channel.json_body["content"])
+        self.assert_dict(
+            {EventContentFields.MEMBERSHIP: Membership.JOIN},
+            channel.json_body["content"],
+        )
         self._assert_finalised(delay_id, event_id=channel.json_body["event_id"])
 
     def test_delayed_self_join_fails_on_timeout_if_join_not_allowed(self) -> None:
