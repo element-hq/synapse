@@ -58,6 +58,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyString, PyTuple};
 use pyo3::{intern, PyTraverseError, PyVisit};
 
+use crate::logging::opentracing::{read_active_span, tracing_enabled, SpanContext};
+
 /// Name of the opt-in logger for debugging when the logcontext switches.
 ///
 /// Used as the `debug!` `target:` for the messages emitted below, and exported
@@ -85,17 +87,35 @@ tokio::task_local! {
 
 /// A captured logcontext that can be cloned and read without the GIL. Holds a
 /// [`LoggingContext`] (possibly a Python subclass instance), or `None` for the
-/// sentinel.
+/// sentinel, and the opentracing span that was active on it.
 #[derive(Clone)]
 pub struct LogContextHandle {
     context: std::sync::Arc<Option<Py<LoggingContext>>>,
+    /// The span active when the handle was captured, the parent of spans
+    /// started by the task. Only read when tracing is enabled.
+    span: Option<SpanContext>,
 }
 
 impl LogContextHandle {
-    /// Capture the calling thread's current logcontext.
+    /// Capture the current logcontext and its active span.
+    ///
+    /// Inside a task that already has a handle, this is a copy of that
+    /// handle. The task's span stays the parent: the Python scope on the
+    /// shared context may have moved on since the task was spawned.
     pub fn capture(py: Python<'_>) -> Self {
+        if let Some(handle) = Self::task_current() {
+            return handle;
+        }
+
+        let context = current_context(py);
+        let span = match &context {
+            Some(context) if tracing_enabled() => read_active_span(py, context),
+            _ => None,
+        };
+
         LogContextHandle {
-            context: std::sync::Arc::new(current_context(py)),
+            context: std::sync::Arc::new(context),
+            span,
         }
     }
 
@@ -116,6 +136,12 @@ impl LogContextHandle {
     /// The captured [`LoggingContext`], or `None` if the sentinel was captured.
     pub fn logging_context(&self) -> Option<&Py<LoggingContext>> {
         self.context.as_ref().as_ref()
+    }
+
+    /// The opentracing span that was active when the handle was captured, if
+    /// tracing is enabled and a span was active.
+    pub fn span(&self) -> Option<&SpanContext> {
+        self.span.as_ref()
     }
 }
 
@@ -753,6 +779,11 @@ impl LoggingContext {
 }
 
 impl LoggingContext {
+    /// The opentracing scope active on this context, if any.
+    pub(crate) fn scope(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.scope.as_ref().map(|scope| scope.clone_ref(py))
+    }
+
     /// The context name as an owned Rust string.
     ///
     /// This copies the string data, so it is for error/debug paths only.
@@ -1069,6 +1100,7 @@ mod tests {
 
             let log_context = LogContextHandle {
                 context: Arc::new(Some(task_ctx.clone_ref(py))),
+                span: None,
             };
 
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -1096,6 +1128,41 @@ mod tests {
     }
 
     #[test]
+    fn capture_inside_a_task_keeps_the_task_span() {
+        Python::initialize();
+        Python::attach(|py| {
+            let task_ctx = test_context(py, "TASKCTX");
+            let span = SpanContext {
+                trace_id: 1 << 70,
+                span_id: 42,
+                flags: crate::logging::opentracing::FLAG_SAMPLED,
+                baggage: None,
+            };
+
+            let log_context = LogContextHandle {
+                context: Arc::new(Some(task_ctx.clone_ref(py))),
+                span: Some(span.clone()),
+            };
+
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+
+            rt.block_on(log_context.scope(async {
+                Python::attach(|py| {
+                    let captured = LogContextHandle::capture(py);
+                    assert_eq!(captured.span(), Some(&span));
+                    assert!(captured
+                        .logging_context()
+                        .expect("expected a context")
+                        .bind(py)
+                        .is(task_ctx.bind(py)));
+                });
+            }));
+        });
+    }
+
+    #[test]
     fn swap_during_scoped_poll_leaves_thread_local_untouched() {
         Python::initialize();
         Python::attach(|py| {
@@ -1108,6 +1175,7 @@ mod tests {
 
             let log_context = LogContextHandle {
                 context: Arc::new(Some(task_ctx.clone_ref(py))),
+                span: None,
             };
 
             let rt = tokio::runtime::Builder::new_current_thread()

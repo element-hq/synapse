@@ -303,13 +303,12 @@ impl Persister {
 
     /// Run `future` to completion on the runtime, releasing the GIL. For the
     /// `_blocking` entry points.
-    fn block_on<T: Send>(
+    fn block_on<T: Send + 'static>(
         &self,
         py: Python<'_>,
         future: BoxFuture<'static, PyResult<T>>,
     ) -> PyResult<T> {
-        let handle = self.inner.runtime.tokio_handle()?;
-        py.detach(|| handle.block_on(future))
+        self.inner.runtime.block_on_scoped(py, future)?
     }
 }
 

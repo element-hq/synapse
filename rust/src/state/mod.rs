@@ -814,10 +814,7 @@ impl StateResolutionHandler {
     ) -> PyResult<Bound<'py, PyTuple>> {
         let output = match self.start(py, room_id, room_version, state_sets, event_map)? {
             Started::Done(output) => output,
-            Started::Pending(future) => {
-                let handle = self.runtime.tokio_handle()?;
-                py.detach(|| handle.block_on(future))?
-            }
+            Started::Pending(future) => self.runtime.block_on_scoped(py, future)??,
         };
         output.into_pyobject(py)
     }
@@ -872,10 +869,7 @@ impl StateResolutionHandler {
             self.start_groups(py, room_id, room_version, state_groups, event_map)?;
         let output = match started {
             Started::Done(output) => output,
-            Started::Pending(future) => {
-                let handle = self.runtime.tokio_handle()?;
-                py.detach(|| handle.block_on(future))?
-            }
+            Started::Pending(future) => self.runtime.block_on_scoped(py, future)??,
         };
         StateGroupsOutput::new(output, &groups).into_pyobject(py)
     }

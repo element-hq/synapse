@@ -204,6 +204,8 @@ from synapse.config import ConfigError
 from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
+    from jaeger_client import Tracer as JaegerTracer
+
     from synapse.http.site import SynapseRequest
     from synapse.server import HomeServer
 
@@ -485,6 +487,7 @@ def init_tracer(hs: "HomeServer") -> None:
         metrics_factory=PrometheusMetricsFactory(),
     )
 
+    tracer: "JaegerTracer | None"
     # If we have the rust jaeger reporter available let's use that.
     if RustReporter:
         logger.info("Using rust_python_jaeger_reporter library")
@@ -492,7 +495,44 @@ def init_tracer(hs: "HomeServer") -> None:
         tracer = config.create_tracer(RustReporter(), config.sampler)
         opentracing.set_global_tracer(tracer)
     else:
-        config.initialize_tracer()
+        # `None` if another homeserver in this process already initialised
+        # the global tracer. That homeserver then reports this one's Python
+        # spans too, and this one reports no Rust spans of its own.
+        tracer = config.initialize_tracer()
+
+    if tracer is not None:
+        try:
+            _enable_rust_tracing(hs, config, tracer)
+        except Exception:
+            # Python tracing works without the Rust side, so do not stop
+            # startup over it.
+            logger.exception("Failed to enable opentracing for Rust code")
+
+
+def _enable_rust_tracing(
+    hs: "HomeServer", config: "JaegerConfig", tracer: "JaegerTracer"
+) -> None:
+    """Report spans from Rust to the same Jaeger agent, as the same service."""
+    from jaeger_client.sampler import ConstSampler, ProbabilisticSampler
+
+    sampler = tracer.sampler
+    if type(sampler) is ConstSampler:
+        sampler_type, sampler_param = "const", 1.0 if sampler.decision else 0.0
+    elif type(sampler) is ProbabilisticSampler:
+        sampler_type, sampler_param = "probabilistic", float(sampler.rate)
+    else:
+        # Rate limiting and remote sampling are not implemented in Rust: Rust
+        # never starts a sampled trace of its own under them.
+        sampler_type, sampler_param = type(sampler).__name__, 0.0
+
+    hs.get_rust_runtime().enable_tracing(
+        service_name=tracer.service_name,
+        process_tags=[(str(k), str(v)) for k, v in tracer.tags.items()],
+        reporting_host=config.local_agent_reporting_host,
+        reporting_port=config.local_agent_reporting_port,
+        sampler_type=sampler_type,
+        sampler_param=sampler_param,
+    )
 
 
 # Whitelisting

@@ -40,6 +40,29 @@ class RustRuntime:
         colder than that, so a caller can skip calling again until it wants to
         evict entries read after it."""
 
+    def enable_tracing(
+        self,
+        service_name: str,
+        process_tags: list[tuple[str, str]],
+        reporting_host: str,
+        reporting_port: int,
+        sampler_type: str,
+        sampler_param: float,
+    ) -> None:
+        """Report spans from Rust to the Jaeger agent, as the same service as
+        the Python tracer. Called by `init_tracer`.
+
+        `sampler_type` is `const` or `probabilistic`, with `sampler_param` the
+        decision or rate. Any other type means Rust never starts a sampled
+        trace of its own. A second call is ignored."""
+
+    def tracing_config_for_test(
+        self,
+    ) -> tuple[str, list[tuple[str, str]], str, int, str] | None:
+        """The settings `enable_tracing` stored, as `(service_name,
+        process_tags, reporting_host, reporting_port, sampler)`, or None. For
+        tests."""
+
 def set_virtual_time_msec(millis: int) -> None:
     """Pin the Rust clock to the given time. Only for tests, which run
     against a virtual reactor clock."""

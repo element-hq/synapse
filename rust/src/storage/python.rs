@@ -198,8 +198,7 @@ impl RustStore {
         reload: bool,
     ) -> PyResult<LoadedEvents> {
         let load = self.load(py, event_ids, reload)?;
-        let handle = self.runtime.tokio_handle()?;
-        py.detach(|| handle.block_on(load))
+        self.runtime.block_on_scoped(py, load)?
     }
 
     /// The future that loads `event_ids`, to run on the tokio runtime.
@@ -442,8 +441,7 @@ impl RustStore {
             },
             now_ms,
         )?;
-        let handle = self.runtime.tokio_handle()?;
-        py.detach(|| handle.block_on(store))
+        self.runtime.block_on_scoped(py, store)?
     }
 
     /// The caches that mirror a Python `@cached` function, each with the

@@ -98,6 +98,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     acl::register_module(py, m)?;
     logging::context::register_module(py, m)?;
+    logging::opentracing::register_module(py, m)?;
     caches::python::register_module(py, m)?;
     deferred::register_module(py, m)?;
     database::register_module(py, m)?;

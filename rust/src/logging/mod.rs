@@ -21,3 +21,4 @@
 //! Python logger without an explicit `target:`.
 
 pub mod context;
+pub mod opentracing;

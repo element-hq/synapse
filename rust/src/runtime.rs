@@ -24,8 +24,9 @@
 //! The tokio runtime is shut down with the homeserver, via a handler
 //! registered with `HomeServer.register_sync_shutdown_handler`.
 
+use std::future::Future;
 use std::ops::Deref;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::Context;
@@ -38,6 +39,8 @@ use tokio::runtime::{Handle, Runtime};
 use crate::caches::registry::CacheRegistry;
 use crate::clock::{set_virtual_time_msec, Clock};
 use crate::homeserver::HomeServer;
+use crate::logging::context::LogContextHandle;
+use crate::logging::opentracing::{set_tracing_enabled, SamplerConfig, TracerConfig};
 use crate::reactor::Reactor;
 use crate::twisted_dispatch::{self, TwistedDispatchReader, TwistedDispatcher};
 
@@ -75,6 +78,10 @@ pub struct RustRuntimeInner {
     /// The reactor-facing half of `dispatcher`, registered with the Twisted
     /// reactor via `addReader` until `shutdown`.
     dispatch_reader: Py<TwistedDispatchReader>,
+
+    /// Set by `enable_tracing` when opentracing is enabled for this
+    /// homeserver. See [`crate::logging::opentracing`].
+    tracing: OnceLock<Arc<TracerConfig>>,
 }
 
 impl RustRuntimeInner {
@@ -128,6 +135,39 @@ impl RustRuntimeInner {
                 "the tokio runtime has been shut down",
             )),
         }
+    }
+
+    /// Run `fut` to completion as a task on the runtime, blocking the calling
+    /// thread with the GIL released.
+    ///
+    /// The task runs in the caller's logcontext, with its active span as the
+    /// parent, the same as a task spawned by [`crate::deferred::create_deferred`].
+    /// It runs on a worker thread rather than the calling one, so the calling
+    /// thread never has a task-local logcontext in scope.
+    ///
+    /// For the `_blocking` entry points that tests call in place of the
+    /// deferred ones.
+    pub fn block_on_scoped<F>(&self, py: Python<'_>, fut: F) -> PyResult<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let logcontext = LogContextHandle::capture(py);
+        let handle = self.tokio_handle()?;
+        let task = handle.spawn(logcontext.scope(fut));
+
+        match py.detach(|| handle.block_on(task)) {
+            Ok(output) => Ok(output),
+            Err(err) if err.is_panic() => std::panic::resume_unwind(err.into_panic()),
+            Err(err) => Err(PyRuntimeError::new_err(format!(
+                "blocking task did not finish: {err}"
+            ))),
+        }
+    }
+
+    /// The tracing settings, if opentracing is enabled for this homeserver.
+    pub fn tracer_config(&self) -> Option<&Arc<TracerConfig>> {
+        self.tracing.get()
     }
 
     /// Shut the tokio runtime down, cancelling all in-flight tasks and waiting
@@ -225,6 +265,7 @@ impl RustRuntime {
             caches: CacheRegistry::new(),
             dispatcher,
             dispatch_reader,
+            tracing: OnceLock::new(),
         });
 
         // Shut the tokio runtime down when the homeserver is shut down. The
@@ -245,6 +286,61 @@ impl RustRuntime {
     /// The current time, in milliseconds since the Unix epoch.
     fn time_msec(&self) -> u64 {
         self.inner.clock.now_millis()
+    }
+
+    /// Report spans from Rust to the Jaeger agent alongside Python's. Called
+    /// by `synapse.logging.opentracing.init_tracer` once the Python tracer
+    /// exists, with the settings it computed, so that both report as the
+    /// same service.
+    ///
+    /// `sampler_type` and `sampler_param` decide whether a trace that starts
+    /// in Rust is sampled: `const` and `probabilistic` are implemented, any
+    /// other type never samples such a trace. Rust spans with a Python parent
+    /// follow the parent's decision.
+    ///
+    /// A second call is ignored.
+    #[pyo3(signature = (service_name, process_tags, reporting_host, reporting_port, sampler_type, sampler_param))]
+    fn enable_tracing(
+        &self,
+        service_name: String,
+        process_tags: Vec<(String, String)>,
+        reporting_host: String,
+        reporting_port: u16,
+        sampler_type: &str,
+        sampler_param: f64,
+    ) {
+        let config = TracerConfig {
+            service_name,
+            process_tags,
+            reporting_host,
+            reporting_port,
+            sampler: SamplerConfig::from_type_and_param(sampler_type, sampler_param),
+        };
+
+        if self.inner.tracing.set(Arc::new(config)).is_err() {
+            log::warn!("Rust tracing was already enabled for this homeserver");
+            return;
+        }
+
+        set_tracing_enabled(true);
+    }
+
+    /// The settings `enable_tracing` stored, as `(service_name,
+    /// process_tags, reporting_host, reporting_port, sampler)` with the
+    /// sampler in its debug form, or `None`. For tests.
+    #[allow(clippy::type_complexity)]
+    fn tracing_config_for_test(
+        &self,
+    ) -> Option<(String, Vec<(String, String)>, String, u16, String)> {
+        self.inner.tracing.get().map(|config| {
+            (
+                config.service_name.clone(),
+                config.process_tags.clone(),
+                config.reporting_host.clone(),
+                config.reporting_port,
+                format!("{:?}", config.sampler),
+            )
+        })
     }
 
     /// Evict entries not read for `expiry_secs` from every Rust cache of this
