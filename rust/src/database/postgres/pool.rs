@@ -213,7 +213,11 @@ pub struct PooledClient {
 /// `execute_values`'s literal-spliced statements) can't grow the cache without
 /// limit on a long-lived connection. Those are evicted first, as the least
 /// recently used, so the hot set stays prepared.
-const STATEMENT_CACHE_CAP: NonZeroUsize = NonZeroUsize::new(512).expect("not zero");
+// `Option::expect` is only `const` from Rust 1.83, after our MSRV.
+const STATEMENT_CACHE_CAP: NonZeroUsize = match NonZeroUsize::new(512) {
+    Some(cap) => cap,
+    None => panic!("not zero"),
+};
 
 impl PooledClient {
     /// Fetch the prepared [`Statement`] for `sql`, preparing and caching it on
