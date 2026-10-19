@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-4bf6785a.js";
+            window.path_to_searchindex_js = "searchindex-44f76383.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -17172,8 +17172,8 @@ or until Synapse is restarted (whichever happens first).</p>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code>{
-  "status": "active",
-  "failed_redactions": [],
+  "status": "complete",
+  "failed_redactions": {},
 }
 </code></pre>
 <p><strong>Parameters</strong></p>
@@ -17184,9 +17184,13 @@ or until Synapse is restarted (whichever happens first).</p>
 <p><strong>Response</strong></p>
 <p>The following fields are returned in the JSON response body:</p>
 <ul>
-<li><code>status</code> - string - one of <code>scheduled</code>/<code>active</code>/<code>complete</code>/<code>failed</code>, indicating the status of the redaction job</li>
-<li><code>failed_redactions</code> - dictionary - the keys of the dict are event ids the process was unable to redact, if any, and the values are
-the corresponding error that caused the redaction to fail</li>
+<li><code>status</code> - string (required) - one of <code>scheduled</code>/<code>active</code>/<code>complete</code>/<code>failed</code>,
+indicating the status of the redaction job</li>
+<li><code>failed_redactions</code> - dictionary (optional) - when the redaction status is <code>complete</code>,
+contains the keys of the dict are event ids the process was unable to redact, if any,
+and the values are the corresponding error that caused the redaction to fail</li>
+<li><code>error</code> - string (optional) - when the redaction <code>status</code> is <code>failed</code>, this field will
+contains a description of the error encountered during the redaction process.</li>
 </ul>
 <p><em>Added in Synapse 1.116.0.</em></p>
 <div style="break-before: page; page-break-before: always;"></div>
