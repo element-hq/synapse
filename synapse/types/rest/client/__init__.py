@@ -420,9 +420,9 @@ class SlidingSyncBody(RequestBodyModel):
             enabled: StrictBool = False
             limit: NonNegativeStrictInt = 100
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] | None = ["*"]
+            lists: list[StrictStr] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] | None = ["*"]
+            rooms: list[StrictStr] = ["*"]
 
         class ProfilesExtension(RequestBodyModel):
             """The Profile Updates extension (MSC4262)
