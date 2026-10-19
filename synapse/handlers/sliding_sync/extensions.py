@@ -293,42 +293,40 @@ class SlidingSyncExtensionHandler:
         relevant_room_ids: set[str] = set()
 
         # See what rooms from the room subscriptions we should get account data for
-        if requested_room_ids is not None:
-            for room_id in requested_room_ids:
-                # A wildcard means we process all rooms from the room subscriptions
-                if room_id == "*":
-                    relevant_room_ids.update(actual_room_ids)
-                    break
+        for room_id in requested_room_ids:
+            # A wildcard means we process all rooms from the room subscriptions
+            if room_id == "*":
+                relevant_room_ids.update(actual_room_ids)
+                break
 
-                if room_id in actual_room_ids:
-                    relevant_room_ids.add(room_id)
+            if room_id in actual_room_ids:
+                relevant_room_ids.add(room_id)
 
         # See what rooms from the sliding window lists we should get account data for
-        if requested_lists is not None:
-            for list_key in requested_lists:
-                # Just some typing because we share the variable name in multiple places
-                actual_list: SlidingSyncResult.SlidingWindowList | None = None
+        for list_key in requested_lists:
+            # Just some typing because we share the variable name in multiple places
+            actual_list: SlidingSyncResult.SlidingWindowList | None = None
 
-                # A wildcard means we process rooms from all lists
-                if list_key == "*":
-                    for actual_list in actual_lists.values():
-                        # We only expect a single SYNC operation for any list
-                        assert len(actual_list.ops) == 1
-                        sync_op = actual_list.ops[0]
-                        assert sync_op.op == OperationType.SYNC
-
-                        relevant_room_ids.update(sync_op.room_ids)
-
-                    break
-
-                actual_list = actual_lists.get(list_key)
-                if actual_list is not None:
+            # A wildcard means we process rooms from all lists
+            if list_key == "*":
+                for actual_list in actual_lists.values():
                     # We only expect a single SYNC operation for any list
                     assert len(actual_list.ops) == 1
                     sync_op = actual_list.ops[0]
                     assert sync_op.op == OperationType.SYNC
 
                     relevant_room_ids.update(sync_op.room_ids)
+
+                break
+
+            actual_list = actual_lists.get(list_key)
+            if actual_list is not None:
+                # We only expect a single SYNC operation for any list
+                assert len(actual_list.ops) == 1
+                sync_op = actual_list.ops[0]
+                assert sync_op.op == OperationType.SYNC
+
+                relevant_room_ids.update(sync_op.room_ids)
 
         return relevant_room_ids
 
