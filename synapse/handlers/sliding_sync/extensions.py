@@ -1135,6 +1135,7 @@ class SlidingSyncExtensionHandler:
 
         # Build the groups of rooms to read sticky events for and their stream
         # position to read from.
+        # [(set of appliable rooms, from_token), ...]
         groups: list[tuple[AbstractSet[str], MultiWriterStreamToken]] = []
         if initial_rooms:
             # Read from the start of the stream to get all unexpired sticky
@@ -1152,6 +1153,8 @@ class SlidingSyncExtensionHandler:
             groups.append((live_rooms, from_token.stream_token.sticky_events_key))
 
         now = self.clock.time_msec()
+
+        # Now build a list of events to send, limited by the requested limit
         remaining_limit = min(
             sticky_events_request.limit, StickyEvent.MAX_EVENTS_IN_SYNC
         )
