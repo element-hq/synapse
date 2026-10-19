@@ -46,7 +46,6 @@ use std::{
 use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use futures::FutureExt;
-
 use tokio_postgres::types::ToSql;
 
 use super::reader::{self, AuthEventChain, ChainLink, ChainToCalculate};
