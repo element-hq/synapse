@@ -636,6 +636,18 @@ impl Event {
 }
 
 impl Event {
+    /// The `room_id` field of the event's JSON, as Python's `event.get("room_id")`
+    /// reads it: absent for the create event of a room version whose room
+    /// ID is derived from it, unlike [`Event::room_id`].
+    pub fn room_id_field(&self) -> Option<&str> {
+        match &*self.parsed_event.specific_fields {
+            EventFormatEnum::V1(format) => Some(&format.room_id),
+            EventFormatEnum::V2V3(format) => Some(&format.room_id),
+            EventFormatEnum::V4(format) => format.room_id.as_deref_opt(),
+            EventFormatEnum::VMSC4242(format) => format.room_id.as_deref_opt(),
+        }
+    }
+
     /// Assemble an event from its parsed JSON and the state Synapse keeps
     /// alongside it, computing the event ID and room ID as the room version
     /// requires.

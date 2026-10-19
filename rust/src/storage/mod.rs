@@ -15,6 +15,7 @@
 
 pub mod caches;
 pub mod db;
+pub mod event_filter_sql;
 pub mod events;
 pub mod federation_store;
 pub mod native_pool;

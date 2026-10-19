@@ -58,7 +58,9 @@ use crate::events::Event;
 use crate::logging::opentracing::{db_query_span, traced_query};
 use crate::state::{StateKey, StateMap};
 use crate::storage::caches::StoreCaches;
+use crate::storage::event_filter_sql::filter_to_sql;
 use crate::storage::events::{EventLoadStats, EventLoader, Querier, RedactBehaviour};
+use crate::sync::filter::Filter;
 use crate::types::state_filter::{state_map_to_py, StateFilter};
 use crate::types::stream_token::{
     filter_results, filter_results_by_stream, generate_next_token, generate_pagination_bounds,
@@ -1099,10 +1101,39 @@ impl<'a> SyncReader<'a> {
         limit: i64,
         order: PaginationOrder,
     ) -> anyhow::Result<(Vec<Event>, RoomStreamToken, bool)> {
+        self.paginate_room_events_filtered(
+            room_id, from_token, to_token, direction, limit, order, None,
+        )
+        .await
+    }
+
+    /// [`SyncReader::paginate_room_events`] with the SQL of `event_filter`
+    /// (`filter_to_clause`) in the query, as `/messages` pages. The events
+    /// are not checked against the filter: the caller does that, as the
+    /// Python does. `event_filter` must not have `related_by_senders` or
+    /// `related_by_rel_types`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn paginate_room_events_filtered(
+        &self,
+        room_id: &str,
+        from_token: &RoomStreamToken,
+        to_token: Option<&RoomStreamToken>,
+        direction: Direction,
+        limit: i64,
+        order: PaginationOrder,
+        event_filter: Option<&Filter>,
+    ) -> anyhow::Result<(Vec<Event>, RoomStreamToken, bool)> {
         let borrowed = self.borrow().await?;
         let (rows, next_token, limited) = self
             .paginate_rows(
-                &borrowed, room_id, from_token, to_token, direction, limit, order,
+                &borrowed,
+                room_id,
+                from_token,
+                to_token,
+                direction,
+                limit,
+                order,
+                event_filter,
             )
             .await?;
         let ids: Vec<Arc<str>> = rows.into_iter().map(|row| row.event_id).collect();
@@ -1124,6 +1155,7 @@ impl<'a> SyncReader<'a> {
         direction: Direction,
         limit: i64,
         order: PaginationOrder,
+        event_filter: Option<&Filter>,
     ) -> anyhow::Result<(Vec<EventRow>, RoomStreamToken, bool)> {
         // Without rows, the token is the end of the range asked for.
         let no_rows = || {
@@ -1171,7 +1203,15 @@ impl<'a> SyncReader<'a> {
             };
             clauses.push(bound_clause(bound, columns, to, &mut bound_params));
         }
-        let bounds = clauses.join(" AND ");
+        let mut bounds = clauses.join(" AND ");
+        // The filter's parameters follow the room, the bounds and the
+        // limit.
+        let filter_sql = event_filter
+            .map(|filter| filter_to_sql(filter, bound_params.len() + 3))
+            .unwrap_or_default();
+        if !filter_sql.clause.is_empty() {
+            bounds = format!("{bounds} AND {}", filter_sql.clause);
+        }
         let order_by = match order {
             PaginationOrder::Stream => format!("stream_ordering {sort}"),
             PaginationOrder::Topological => {
@@ -1180,12 +1220,14 @@ impl<'a> SyncReader<'a> {
         };
         // Twice the limit, as the rows are filtered below.
         let requested_limit = 2 * limit;
+        let distinct = if filter_sql.distinct { "DISTINCT " } else { "" };
         let sql = format!(
-            "SELECT event_id, instance_name, topological_ordering, stream_ordering
-            FROM events
+            "SELECT {distinct}event_id, instance_name, topological_ordering, stream_ordering
+            FROM events{joins}
             WHERE room_id = $1 AND NOT outlier AND {bounds}
             ORDER BY {order_by} LIMIT ${}",
-            bound_params.len() + 2
+            bound_params.len() + 2,
+            joins = filter_sql.joins,
         );
         let mut params: Vec<&(dyn ToSql + Sync)> = vec![&room_id];
         params.extend(
@@ -1194,6 +1236,12 @@ impl<'a> SyncReader<'a> {
                 .map(|value| value as &(dyn ToSql + Sync)),
         );
         params.push(&requested_limit);
+        params.extend(
+            filter_sql
+                .params
+                .iter()
+                .map(|value| &**value as &(dyn ToSql + Sync)),
+        );
         let fetched = borrowed.query(&sql, &params).await?;
 
         let mut limited = fetched.len() as i64 >= requested_limit;
@@ -1334,6 +1382,7 @@ impl<'a> SyncReader<'a> {
                 Direction::Backwards,
                 limit,
                 PaginationOrder::Topological,
+                None,
             )
             .await?;
         rows.reverse();

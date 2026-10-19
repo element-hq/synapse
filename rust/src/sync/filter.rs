@@ -45,7 +45,7 @@ pub trait Filterable {
     fn room_id(&self) -> Option<&str>;
     fn event_type(&self) -> Option<&str>;
     /// The event's labels (`org.matrix.labels` in its content).
-    fn labels(&self) -> Vec<&str>;
+    fn labels(&self) -> Labels<'_>;
     /// The `rel_type` of the event's relation, if it is an event with a
     /// valid one. Only events have relations.
     fn rel_type(&self) -> Option<&str>;
@@ -64,15 +64,17 @@ impl Filterable for Event {
         Some(Event::sender(self))
     }
 
+    /// The `room_id` of the event's JSON, as the Python reads it: a
+    /// version 12 create event has none, so a `rooms` filter drops it.
     fn room_id(&self) -> Option<&str> {
-        Some(Event::room_id(self))
+        self.room_id_field()
     }
 
     fn event_type(&self) -> Option<&str> {
         Some(self.type_())
     }
 
-    fn labels(&self) -> Vec<&str> {
+    fn labels(&self) -> Labels<'_> {
         labels_of(self.content().get_field(LABELS_FIELD))
     }
 
@@ -107,8 +109,8 @@ impl Filterable for Presence<'_> {
         Some(PRESENCE_EDU_TYPE)
     }
 
-    fn labels(&self) -> Vec<&str> {
-        Vec::new()
+    fn labels(&self) -> Labels<'_> {
+        Labels::List(Vec::new())
     }
 
     fn rel_type(&self) -> Option<&str> {
@@ -144,7 +146,7 @@ impl Filterable for Value {
         self.get("type").and_then(Value::as_str)
     }
 
-    fn labels(&self) -> Vec<&str> {
+    fn labels(&self) -> Labels<'_> {
         labels_of(self.content().and_then(|c| c.get(LABELS_FIELD)))
     }
 
@@ -173,13 +175,44 @@ impl JsonContent for Value {
     }
 }
 
-/// The string entries of a `labels` list. The Python checks `v in labels`
-/// on whatever the list holds, so only string labels can match a string.
-fn labels_of(labels: Option<&Value>) -> Vec<&str> {
-    labels
-        .and_then(Value::as_array)
-        .map(|labels| labels.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default()
+/// An event's `org.matrix.labels`, as the Python's `v in labels` reads
+/// whatever the field holds. Nothing validates it.
+pub enum Labels<'a> {
+    /// A list: a label matches an equal string entry. Only string entries
+    /// can equal a string.
+    List(Vec<&'a str>),
+    /// A string: a label matches a substring of it.
+    Text(&'a str),
+    /// An object: a label matches one of its keys.
+    Keys(Vec<&'a str>),
+    /// Anything else, such as `null` or a number, on which the Python's `in`
+    /// raises. Nothing matches it here.
+    Unmatchable,
+}
+
+impl Labels<'_> {
+    /// The Python's `label in labels`, with nothing matching where it
+    /// raises.
+    pub fn contains(&self, label: &str) -> bool {
+        match self {
+            Labels::List(labels) | Labels::Keys(labels) => labels.contains(&label),
+            Labels::Text(text) => text.contains(label),
+            Labels::Unmatchable => false,
+        }
+    }
+}
+
+/// See [`Labels`]. A missing field is an empty list.
+fn labels_of(labels: Option<&Value>) -> Labels<'_> {
+    match labels {
+        None => Labels::List(Vec::new()),
+        Some(Value::Array(labels)) => {
+            Labels::List(labels.iter().filter_map(Value::as_str).collect())
+        }
+        Some(Value::String(text)) => Labels::Text(text),
+        Some(Value::Object(object)) => Labels::Keys(object.keys().map(String::as_str).collect()),
+        Some(_) => Labels::Unmatchable,
+    }
 }
 
 /// `relation_from_event`'s `rel_type`: a relation needs a string `rel_type`
@@ -354,7 +387,7 @@ impl Filter {
         }) && self.check_field(&self.not_types, self.types.as_deref(), |v| {
             matches_wildcard(event_type, v)
         }) && self.check_field(&self.not_labels, self.labels.as_deref(), |v| {
-            labels.contains(&v)
+            labels.contains(v)
         }) && self.check_field(&self.not_rel_types, self.rel_types.as_deref(), |v| {
             rel_type == Some(v)
         });
@@ -369,6 +402,35 @@ impl Filter {
         }
 
         true
+    }
+
+    /// Whether the Python's `_check` raises on `event`: the event's labels
+    /// are of a type `in` does not take, and the check gets as far as the
+    /// labels with a label to look for. [`Filter::check`] answers `false`
+    /// there.
+    pub fn check_raises<E: Filterable>(&self, event: &E) -> bool {
+        if event.is_presence() || !matches!(event.labels(), Labels::Unmatchable) {
+            return false;
+        }
+        let has_label_to_find = !self.not_labels.is_empty()
+            || self
+                .labels
+                .as_ref()
+                .is_some_and(|labels| !labels.is_empty());
+        if !has_label_to_find {
+            return false;
+        }
+        // The rooms, senders and types are checked before the labels.
+        let room_id = event.room_id();
+        let sender = event.sender();
+        let event_type = event.event_type();
+        self.check_field(&self.not_rooms, self.rooms.as_deref(), |v| {
+            room_id == Some(v)
+        }) && self.check_field(&self.not_senders, self.senders.as_deref(), |v| {
+            sender == Some(v)
+        }) && self.check_field(&self.not_types, self.types.as_deref(), |v| {
+            matches_wildcard(event_type, v)
+        })
     }
 
     /// `_check_fields` for one field: reject on any disallowed match, then

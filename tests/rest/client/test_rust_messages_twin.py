@@ -14,6 +14,7 @@
 """`/messages` answered by Python and by the Rust handler, compared."""
 
 import json
+import random
 import urllib.parse
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, patch
@@ -35,6 +36,46 @@ import tests.utils
 from tests import unittest
 from tests.server import _BlockingRustCalls
 from tests.test_utils.event_injection import inject_event
+
+# Filters on each field the page query and the event check read, alone.
+# The room ID of `ROOM` is put in when the room exists.
+ROOM = "<room>"
+FILTERS: list[JsonDict] = [
+    {"types": ["m.room.message"]},
+    {"types": ["m.room.*"]},
+    {"types": ["m.room.message", "m.reaction"]},
+    {"types": []},
+    {"not_types": ["m.room.member", "m.reaction"]},
+    {"not_types": ["m.room.m*"]},
+    {"not_types": ["*"]},
+    {"senders": ["@bob:test"]},
+    {"senders": []},
+    {"not_senders": ["@bob:test"]},
+    {"rooms": [ROOM]},
+    {"rooms": ["!other:test"]},
+    {"not_rooms": [ROOM]},
+    {"contains_url": True},
+    {"contains_url": False},
+    {"org.matrix.labels": ["#a"]},
+    {"org.matrix.labels": ["#a", "#b"]},
+    {"org.matrix.labels": []},
+    {"org.matrix.not_labels": ["#a"]},
+    # A string label matches by substring and an object one by key.
+    {"org.matrix.labels": ["a"]},
+    {"org.matrix.not_labels": ["#c"]},
+    {"org.matrix.not_labels": ["c"]},
+    # LIKE metacharacters go into the SQL unescaped on both sides.
+    {"types": ["m.room._essage"]},
+    {"types": ["m.%"]},
+    {"types": ["m.*.message"]},
+    {"not_types": ["m.room.m%"]},
+    {"org.matrix.msc3874.rel_types": []},
+    {"org.matrix.msc3874.rel_types": ["m.thread"]},
+    {"org.matrix.msc3874.not_rel_types": ["m.thread"]},
+    {"org.matrix.msc3874.not_rel_types": ["m.thread", "m.annotation"]},
+    {"related_by_senders": []},
+    {"types": ["m.room.message"], "lazy_load_members": True},
+]
 
 
 def _normalise(body: JsonDict) -> JsonDict:
@@ -78,7 +119,11 @@ class RustMessagesTwinTestCase(unittest.HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        config["experimental_features"] = {"rust_messages": "on"}
+        config["experimental_features"] = {
+            "rust_messages": "on",
+            # MSC3874 adds `rel_types` and `not_rel_types` to filters.
+            "msc3874_enabled": True,
+        }
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -602,3 +647,113 @@ class RustMessagesTwinTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(reads), 2)
         self.assertEqual(backfill.call_count, 1)
         self.assertTrue(body["chunk"])
+
+    def _room_for_filters(self) -> str:
+        """A room with events of the kinds the filters pick between: types,
+        senders, URLs, labels and relations."""
+        room_id = self._room_with_messages(4)
+        self.helper.send_state(
+            room_id, "m.room.topic", {"topic": "filters"}, tok=self.alice_tok
+        )
+        for sender_tok, content in (
+            (self.bob_tok, {"msgtype": "m.image", "body": "a", "url": "mxc://a/b"}),
+            (
+                self.alice_tok,
+                {"msgtype": "m.text", "body": "a", "org.matrix.labels": ["#a"]},
+            ),
+            (
+                self.bob_tok,
+                {"msgtype": "m.text", "body": "b", "org.matrix.labels": ["#a", "#b"]},
+            ),
+            (
+                self.alice_tok,
+                {"msgtype": "m.text", "body": "c", "org.matrix.labels": ["#b"]},
+            ),
+            (
+                self.bob_tok,
+                {"msgtype": "m.text", "body": "d", "org.matrix.labels": "#abc"},
+            ),
+            (
+                self.alice_tok,
+                {"msgtype": "m.text", "body": "e", "org.matrix.labels": {"#c": 1}},
+            ),
+            (self.bob_tok, {"msgtype": "m.file", "body": "f", "url": 5}),
+        ):
+            self.helper.send_event(room_id, "m.room.message", content, tok=sender_tok)
+        root = self.helper.send(room_id, "root", tok=self.alice_tok)["event_id"]
+        self._relate(room_id, self.bob_tok, "m.thread", root)
+        self._relate(room_id, self.alice_tok, "m.thread", root)
+        self._relate(room_id, self.bob_tok, "m.annotation", root, "m.reaction", key="x")
+        self.helper.send(room_id, "last", tok=self.bob_tok)
+        return room_id
+
+    def _with_room(self, filter_json: JsonDict, room_id: str) -> JsonDict:
+        return {
+            key: [room_id if v == ROOM else v for v in value]
+            if isinstance(value, list)
+            else value
+            for key, value in filter_json.items()
+        }
+
+    def test_filters(self) -> None:
+        """Each filter field alone, walked both ways."""
+        room_id = self._room_for_filters()
+        for filter_json in FILTERS:
+            filter_json = self._with_room(filter_json, room_id)
+            for direction in ("b", "f"):
+                self._walk(
+                    room_id, self.bob_tok, dir=direction, limit=3, filter=filter_json
+                )
+
+    def test_random_filters(self) -> None:
+        """Random combinations of the fields, walked both ways."""
+        room_id = self._room_for_filters()
+        rng = random.Random(4)
+        for _ in range(12):
+            filter_json: JsonDict = {}
+            for part in rng.sample(FILTERS, rng.randint(2, 4)):
+                filter_json.update(self._with_room(part, room_id))
+            for direction in ("b", "f"):
+                self._walk(
+                    room_id,
+                    self.bob_tok,
+                    dir=direction,
+                    limit=rng.choice([1, 2, 5]),
+                    filter=filter_json,
+                )
+
+    def test_relation_filter_stays_in_python(self) -> None:
+        room_id = self._room_for_filters()
+        rust_reads = Mock(wraps=self.rust._handler)
+        with patch.object(self.rust, "_handler", rust_reads):
+            self._get(
+                room_id,
+                self.bob_tok,
+                {"dir": "b", "filter": {"related_by_rel_types": ["m.thread"]}},
+            )
+        rust_reads.get_messages_blocking.assert_not_called()
+
+    def test_unmatchable_labels_fall_back(self) -> None:
+        """Labels of a type Python's `in` raises on: Python answers, as it
+        did before, and a page without a label filter stays in Rust. Only
+        `not_labels` reaches the check: a `labels` filter's SQL leaves the
+        event out first."""
+        room_id = self._room_with_messages(1)
+        self.helper.send_event(
+            room_id,
+            "m.room.message",
+            {"msgtype": "m.text", "body": "x", "org.matrix.labels": None},
+            tok=self.alice_tok,
+        )
+        self._twin(room_id, self.alice_tok, dir="b", limit=5)
+        self.handler._rust_messages_strict = False
+        before = self._count("fallback")
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id}/messages?dir=b&filter="
+            + urllib.parse.quote(json.dumps({"org.matrix.not_labels": ["#a"]})),
+            access_token=self.alice_tok,
+        )
+        self.assertEqual(self._count("fallback"), before + 1)
+        # Python raises on it, as before.
+        self.assertEqual(channel.code, 500, channel.json_body)

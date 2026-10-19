@@ -92,29 +92,43 @@ rust_messages_counter = Counter(
 
 
 def _rust_supports_filter(event_filter: Filter | None) -> bool:
-    """Whether the Rust `/messages` handler can apply `event_filter`: it
-    applies none, so the filter must keep every event. `lazy_load_members`
-    is supported.
+    """Whether the Rust `/messages` handler can apply `event_filter`.
 
-    An empty list keeps no event, so the allow lists must be absent rather
-    than empty.
+    It cannot filter on relations (`related_by_senders`,
+    `related_by_rel_types`), which need a join and a lookup. Malformed fields,
+    such as a string where a list of strings goes, also stay in Python, which
+    reads them in ways the Rust parsing does not copy.
     """
     if event_filter is None:
         return True
-    return (
-        event_filter.types is None
-        and not event_filter.not_types
-        and event_filter.senders is None
-        and not event_filter.not_senders
-        and event_filter.rooms is None
-        and not event_filter.not_rooms
-        and event_filter.contains_url is None
-        and event_filter.labels is None
-        and not event_filter.not_labels
-        and event_filter.related_by_senders is None
-        and event_filter.related_by_rel_types is None
-        and event_filter.rel_types is None
-        and not event_filter.not_rel_types
+    if event_filter.related_by_senders or event_filter.related_by_rel_types:
+        return False
+
+    def is_str_list(value: object) -> bool:
+        return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+    for nullable in (
+        event_filter.types,
+        event_filter.senders,
+        event_filter.rooms,
+        event_filter.labels,
+        event_filter.rel_types,
+        event_filter.related_by_senders,
+        event_filter.related_by_rel_types,
+    ):
+        if nullable is not None and not is_str_list(nullable):
+            return False
+    for listed in (
+        event_filter.not_types,
+        event_filter.not_senders,
+        event_filter.not_rooms,
+        event_filter.not_labels,
+        event_filter.not_rel_types,
+    ):
+        if not is_str_list(listed):
+            return False
+    return event_filter.contains_url is None or isinstance(
+        event_filter.contains_url, bool
     )
 
 
@@ -616,7 +630,7 @@ class PaginationHandler:
                 to_room_key=to_room_key,
                 leave_key=leave_key,
                 is_peeking=member_event_id is None,
-                lazy_load_members=bool(event_filter and event_filter.lazy_load_members),
+                event_filter=event_filter,
             )
             if rust_result is not None:
                 return rust_result
@@ -839,7 +853,7 @@ class PaginationHandler:
         to_room_key: RoomStreamToken | None,
         leave_key: RoomStreamToken | None,
         is_peeking: bool,
-        lazy_load_members: bool,
+        event_filter: Filter | None,
     ) -> tuple[GetMessagesResult | None, bool]:
         """The rest of `get_messages` through the Rust handler, from the page
         query on. Python still backfills.
@@ -863,11 +877,13 @@ class PaginationHandler:
                 direction=pagin_config.direction.value,
                 limit=pagin_config.limit,
                 is_peeking=is_peeking,
-                lazy_load_members=lazy_load_members,
+                lazy_load_members=bool(event_filter and event_filter.lazy_load_members),
+                event_filter=event_filter.filter_json if event_filter else None,
                 ignored_users=await self.store.ignored_users(user_id),
                 is_server_admin=is_server_admin,
                 return_soft_failed_events=client_config.return_soft_failed_events,
                 return_policy_server_spammy_events=client_config.return_policy_server_spammy_events,
+                msc3874_enabled=self.hs.config.experimental.msc3874_enabled,
                 msc4354_enabled=self.hs.config.experimental.msc4354_enabled,
             )
 

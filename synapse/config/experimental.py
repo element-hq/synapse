@@ -403,8 +403,9 @@ class ExperimentalConfig(Config):
         # Postgres driver.
         #  - "off": the Python implementation.
         #  - "on": Rust, falling back to Python for the requests Rust cannot
-        #    compute: event filters other than `lazy_load_members`, the admin
-        #    API, `event_format: federation` and partial state rooms.
+        #    compute: filters on relations (`related_by_senders`,
+        #    `related_by_rel_types`), the admin API, `event_format: federation`
+        #    and partial state rooms.
         rust_messages = experimental.get("rust_messages", "off")
         if rust_messages is True:
             rust_messages = "on"

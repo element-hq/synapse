@@ -19,8 +19,14 @@
 //! `synapse.handlers.pagination.PaginationHandler.get_messages` when
 //! `rust_messages` is on. It computes the page of a room's events the user
 //! may see, with their bundled aggregations and the lazy-loaded members.
-//! Python keeps the auth checks, the token handling before the page, and
+//! Rust works out the topological position of a live `from` token and
+//! clamps it to a departed user's leave. Python keeps the auth checks and
 //! the backfill, which [`MessagesResult::needs_backfill`] asks for.
+//!
+//! The client's event filter goes into the page query
+//! ([`crate::storage::event_filter_sql`]) and is then checked on each event
+//! ([`Filter::check`]), as in the Python. Filters on relations stay in
+//! Python.
 //!
 //! It shares the v2 sync handler's [`SyncStore`], so the two read through
 //! the same caches, and reuses the sync handler's visibility check
@@ -39,6 +45,7 @@ use pyo3::{
     prelude::*,
     types::{PyDict, PyList, PyModule},
 };
+use serde_json::Value;
 use tracing::Instrument;
 
 use crate::database::postgres::pool::{ConnectionPool, PyConnectionPool};
@@ -49,6 +56,7 @@ use crate::runtime::RustRuntime;
 use crate::storage::events::RedactBehaviour;
 use crate::storage::sync_store::{anyhow_to_py, PaginationOrder, SyncReader, SyncStore};
 use crate::sync::client_events::{filter_events_for_client, ClientFilterContext};
+use crate::sync::filter::{Filter, FilterFlags};
 use crate::sync::relations::{bundled_aggregations, Bundle};
 use crate::sync::request::{bundles_to_py, filtered_to_py};
 use crate::sync::room::Fallback;
@@ -87,6 +95,9 @@ pub struct MessagesRequestData {
     /// were sent: a world-readable room.
     pub is_peeking: bool,
     pub lazy_load_members: bool,
+    /// The request's event filter, if it has one. It has no
+    /// `related_by_senders` or `related_by_rel_types`: Python serves those.
+    pub event_filter: Option<Filter>,
     pub client_filter: ClientFilterContext,
 }
 
@@ -99,7 +110,7 @@ pub struct MessagesRequest {
 #[pymethods]
 impl MessagesRequest {
     #[new]
-    #[pyo3(signature = (*, room_id, user_id, from_key, to_key, leave_key, direction, limit, is_peeking, lazy_load_members, ignored_users, is_server_admin, return_soft_failed_events, return_policy_server_spammy_events, msc4354_enabled))]
+    #[pyo3(signature = (*, room_id, user_id, from_key, to_key, leave_key, direction, limit, is_peeking, lazy_load_members, event_filter, ignored_users, is_server_admin, return_soft_failed_events, return_policy_server_spammy_events, msc3874_enabled, msc4354_enabled))]
     #[allow(clippy::too_many_arguments)]
     fn py_new(
         room_id: &str,
@@ -111,12 +122,36 @@ impl MessagesRequest {
         limit: i64,
         is_peeking: bool,
         lazy_load_members: bool,
+        event_filter: Option<&Bound<'_, PyAny>>,
         ignored_users: HashSet<String>,
         is_server_admin: bool,
         return_soft_failed_events: bool,
         return_policy_server_spammy_events: bool,
+        msc3874_enabled: bool,
         msc4354_enabled: bool,
     ) -> PyResult<Self> {
+        let event_filter = event_filter
+            .map(|json| -> PyResult<Filter> {
+                // A filter Rust cannot read, such as one with an integer
+                // out of range anywhere in it, is left to Python.
+                let json: Value = pythonize::depythonize(json).map_err(|e| {
+                    RustMessagesFallback::new_err(format!("unreadable filter: {e}"))
+                })?;
+                let flags = FilterFlags {
+                    msc3874_enabled,
+                    ..FilterFlags::default()
+                };
+                Ok(Filter::new(Some(&json), flags))
+            })
+            .transpose()?;
+        if event_filter
+            .as_ref()
+            .is_some_and(Filter::needs_relation_check)
+        {
+            return Err(PyValueError::new_err(
+                "filters on relations are not supported",
+            ));
+        }
         let direction = Direction::parse(direction)
             .ok_or_else(|| PyValueError::new_err(format!("unknown direction {direction:?}")))?;
         let admin_policy = is_server_admin.then_some(SoftFailedPolicy {
@@ -134,6 +169,7 @@ impl MessagesRequest {
                 limit,
                 is_peeking,
                 lazy_load_members,
+                event_filter,
                 client_filter: ClientFilterContext {
                     user_id: Arc::from(user_id),
                     ignored_users: Arc::new(ignored_users.into_iter().map(Arc::from).collect()),
@@ -317,14 +353,16 @@ pub async fn get_messages(
         }
     }
 
+    let event_filter = request.event_filter.as_ref();
     let (events, next_key, limited) = reader
-        .paginate_room_events(
+        .paginate_room_events_filtered(
             room_id,
             &from_key,
             request.to_key.as_ref(),
             request.direction,
             request.limit,
             PaginationOrder::Topological,
+            event_filter,
         )
         .instrument(tracing::info_span!("messages.page"))
         .await?;
@@ -344,7 +382,23 @@ pub async fn get_messages(
         return Ok(result);
     }
 
-    let events: Vec<Arc<Event>> = events.into_iter().map(Arc::new).collect();
+    // The SQL does not apply every field of the filter, so each event is
+    // checked against it, as the Python does. Where the Python check raises,
+    // Python answers.
+    if let Some(filter) = event_filter {
+        if let Some(event) = events.iter().find(|event| filter.check_raises(*event)) {
+            return Err(Fallback(format!(
+                "the filter check raises on the labels of {}",
+                event.event_id()
+            ))
+            .into());
+        }
+    }
+    let events: Vec<Arc<Event>> = events
+        .into_iter()
+        .filter(|event| event_filter.is_none_or(|filter| filter.check(event)))
+        .map(Arc::new)
+        .collect();
     let filtered = filter_events_for_client(
         reader,
         &request.client_filter,

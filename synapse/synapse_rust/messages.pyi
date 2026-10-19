@@ -18,7 +18,7 @@ from twisted.internet.defer import Deferred
 
 from synapse.events import EventBase
 from synapse.handlers.relations import BundledAggregations
-from synapse.types import RoomStreamToken
+from synapse.types import JsonMapping, RoomStreamToken
 
 class RustMessagesFallback(Exception):
     """The request is one Rust leaves to Python."""
@@ -39,12 +39,16 @@ class MessagesRequest:
         limit: int,
         is_peeking: bool,
         lazy_load_members: bool,
+        event_filter: JsonMapping | None,
         ignored_users: Set[str],
         is_server_admin: bool,
         return_soft_failed_events: bool,
         return_policy_server_spammy_events: bool,
+        msc3874_enabled: bool,
         msc4354_enabled: bool,
-    ) -> None: ...
+    ) -> None:
+        """`event_filter` is the filter's JSON. It may not filter on
+        relations (`related_by_senders`, `related_by_rel_types`)."""
     def with_curr_topo(self, curr_topo: int) -> "MessagesRequest":
         """This request with the topological position of its `from` token
         known, so that reading the page again does not work it out again."""

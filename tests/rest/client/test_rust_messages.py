@@ -94,25 +94,46 @@ class RustMessagesDispatchTestCase(unittest.HomeserverTestCase):
             [("m.room.member", self.user)],
         )
 
-    def test_event_filter_in_python(self) -> None:
-        """Rust applies no event filter, so a request with one is served by
-        Python, without counting it."""
-        counts = [self._count(r) for r in ("rust", "fallback", "error")]
+    def test_event_filter_in_rust(self) -> None:
+        before = self._count("rust")
         body = self._messages(filter={"types": ["m.room.message"]})
+        self.assertEqual(self._count("rust"), before + 1)
+        self.assertEqual([e["event_id"] for e in body["chunk"]], [self.event_id])
+
+    def test_empty_allow_list_in_rust(self) -> None:
+        """An empty allow list keeps no event."""
+        before = self._count("rust")
+        body = self._messages(filter={"senders": []})
+        self.assertEqual(self._count("rust"), before + 1)
+        self.assertEqual(body["chunk"], [])
+
+    def test_relation_filter_in_python(self) -> None:
+        """Filters on relations are served by Python, without counting them."""
+        counts = [self._count(r) for r in ("rust", "fallback", "error")]
+        self._messages(filter={"related_by_rel_types": ["m.thread"]})
         self.assertEqual(
             [self._count(r) for r in ("rust", "fallback", "error")], counts
         )
-        self.assertEqual(
-            [e["event_id"] for e in body["chunk"]],
-            [self.event_id],
-        )
 
-    def test_empty_allow_list_in_python(self) -> None:
-        """An empty allow list keeps no event: Python serves it."""
+    def test_out_of_range_integer_in_filter(self) -> None:
+        """An integer out of range in a field Python ignores is no error,
+        even in strict mode."""
+        before = self._count("error")
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/messages?dir=b&filter="
+            + urllib.parse.quote('{"limit": 18446744073709551616000}'),
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(self._count("error"), before)
+
+    def test_malformed_filter_in_python(self) -> None:
+        """A field Python reads in its own way, such as a string where a list
+        goes, is served by Python."""
         before = self._count("rust")
-        body = self._messages(filter={"senders": []})
+        self._messages(filter={"not_types": "m.room.member"})
         self.assertEqual(self._count("rust"), before)
-        self.assertEqual(body["chunk"], [])
 
     def test_stream_token_converted_in_rust(self) -> None:
         """A `from` token without a topological part is converted by Rust,
