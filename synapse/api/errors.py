@@ -574,6 +574,16 @@ class StoreError(SynapseError):
     """An error raised when there was a problem storing some data."""
 
 
+class RoomIdCollisionError(StoreError):
+    """A new room's ID is already taken, found when its events are persisted.
+
+    The creator may try again under a fresh ID.
+    """
+
+    def __init__(self, room_id: str):
+        super().__init__(500, f"Room ID {room_id} is already in use")
+
+
 class InvalidCaptchaError(SynapseError):
     def __init__(
         self,

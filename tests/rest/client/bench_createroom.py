@@ -136,6 +136,9 @@ class CreateRoomBench(HomeserverTestCase):
         body = dict(body)
         if "room_alias_name" in body:
             body["room_alias_name"] = f"bench-{i}"
+        # Rooms created in the same fake millisecond get the same v12 room ID,
+        # which is retried, so give each room its own.
+        self.reactor.advance(0.001)
         channel = self.make_request("POST", "/createRoom", body, access_token=self.tok)
         self.assertEqual(channel.code, 200, channel.result)
 

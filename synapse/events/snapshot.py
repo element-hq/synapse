@@ -148,6 +148,11 @@ class EventContext(UnpersistedEventContextBase):
             with the event; before any other persister, or another worker, gets
             the event, ``stage_push_actions`` moves them to the staging table and
             clears this. Not serialized.
+
+        new_room_is_public: Set on the create event's context when the batch
+            creates the room. The persister inserts the room's ``rooms`` row,
+            with this visibility, rather than expecting one; a row already
+            there fails the batch with ``RoomIdCollisionError``.
     """
 
     _storage: "StorageControllers"
@@ -161,6 +166,7 @@ class EventContext(UnpersistedEventContextBase):
     partial_state: bool = False
     _state_map_before_event: StateMap[str] | None = None
     push_actions: list[PushActionRow] | None = None
+    new_room_is_public: bool | None = None
 
     @staticmethod
     def with_state(
@@ -211,6 +217,7 @@ class EventContext(UnpersistedEventContextBase):
             ),
             "app_service_id": self.app_service.id if self.app_service else None,
             "partial_state": self.partial_state,
+            "new_room_is_public": self.new_room_is_public,
         }
 
     @staticmethod
@@ -238,6 +245,7 @@ class EventContext(UnpersistedEventContextBase):
             ),
             rejected=input["rejected"],
             partial_state=input.get("partial_state", False),
+            new_room_is_public=input.get("new_room_is_public"),
         )
 
         app_service_id = input["app_service_id"]

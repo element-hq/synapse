@@ -62,6 +62,7 @@ from synapse.api.errors import (
     LimitExceededError,
     NotFoundError,
     PartialStateConflictError,
+    RoomIdCollisionError,
     StoreError,
     SynapseError,
 )
@@ -297,13 +298,15 @@ class RoomCreationHandler:
             creation_event_with_context = await self._generate_create_event_for_room_id(
                 requester,
                 creation_content,
-                old_room_is_public,
                 new_version,
             )
             (create_event, _) = creation_event_with_context
             new_room_id = create_event.room_id
         else:
             new_room_id = self._generate_room_id()
+        # The room is stored with its first events, so building them must not
+        # read its version back.
+        self.store.get_room_version_id.prefill((new_room_id,), new_version.identifier)
 
         # Try several times, it could fail with PartialStateConflictError
         # in _upgrade_room, cf comment in except block.
@@ -408,22 +411,12 @@ class RoomCreationHandler:
 
         logger.info("Creating new room %s to replace %s", new_room_id, old_room_id)
 
-        # We've already stored the room if we have the create event
-        if not creation_event_with_context:
-            # create the new room. may raise a `StoreError` in the exceedingly unlikely
-            # event of a room ID collision.
-            await self.store.store_room(
-                room_id=new_room_id,
-                room_creator_user_id=user_id,
-                is_public=old_room[0],
-                room_version=new_version,
-            )
-
         await self.clone_existing_room(
             requester,
             old_room_id=old_room_id,
             new_room_id=new_room_id,
             new_room_version=new_version,
+            is_public=old_room[0],
             tombstone_event_id=tombstone_event.event_id,
             additional_creators=additional_creators,
             creation_event_with_context=creation_event_with_context,
@@ -597,6 +590,7 @@ class RoomCreationHandler:
         new_room_version: RoomVersion,
         tombstone_event_id: str,
         additional_creators: list[str] | None,
+        is_public: bool,
         creation_event_with_context: tuple[
             EventBase, synapse.events.snapshot.UnpersistedEventContextBase
         ]
@@ -767,6 +761,7 @@ class RoomCreationHandler:
             invite_list=[],
             initial_state=initial_state,
             creation_content=creation_content,
+            is_public=is_public,
             creation_event_with_context=creation_event_with_context,
         )
 
@@ -1082,6 +1077,38 @@ class RoomCreationHandler:
         creator_join_profile: JsonDict | None = None,
         ignore_forced_encryption: bool = False,
     ) -> tuple[str, RoomAlias | None, int]:
+        """Creates a new room. See `_create_room`.
+
+        The room's ID is claimed when its first events are persisted, so a
+        collision (a v12+ room with the same create event, or a random ID
+        already in use) surfaces then, and the creation is run again under a
+        fresh ID.
+        """
+        attempt = 0
+        while True:
+            try:
+                return await self._create_room(
+                    requester,
+                    config,
+                    ratelimit=ratelimit and attempt == 0,
+                    creator_join_profile=creator_join_profile,
+                    ignore_forced_encryption=ignore_forced_encryption,
+                    attempt=attempt,
+                )
+            except RoomIdCollisionError:
+                attempt += 1
+                if attempt >= 5:
+                    raise StoreError(500, "Couldn't generate a unique room ID.")
+
+    async def _create_room(
+        self,
+        requester: Requester,
+        config: JsonDict,
+        ratelimit: bool,
+        creator_join_profile: JsonDict | None,
+        ignore_forced_encryption: bool,
+        attempt: int,
+    ) -> tuple[str, RoomAlias | None, int]:
         """Creates a new room.
 
         Args:
@@ -1099,6 +1126,7 @@ class RoomCreationHandler:
                 `avatar_url` and/or `displayname`.
             ignore_forced_encryption:
                 Ignore encryption forced by `encryption_enabled_by_default_for_room_type` setting.
+            attempt: how many earlier attempts collided on their room ID.
 
         Returns:
             A 3-tuple containing:
@@ -1106,9 +1134,11 @@ class RoomCreationHandler:
                 - if requested, the room alias, otherwise None; and
                 - the `stream_id` of the last persisted event.
         Raises:
+            RoomIdCollisionError:
+                if the room ID is already in use.
             SynapseError:
-                if the room ID couldn't be stored, 3pid invitation config
-                validation failed, or something went horribly wrong.
+                if 3pid invitation config validation failed, or something went
+                horribly wrong.
             ResourceLimitError:
                 if server is blocked to some resource being
                 exceeded
@@ -1296,18 +1326,14 @@ class RoomCreationHandler:
             creation_event_with_context = await self._generate_create_event_for_room_id(
                 requester,
                 creation_content,
-                is_public,
                 room_version,
+                attempt=attempt,
             )
             (create_event, _) = creation_event_with_context
             room_id = create_event.room_id
         else:
-            room_id = await self._generate_and_create_room_id(
-                creator_id=user_id,
-                is_public=is_public,
-                room_version=room_version,
-            )
-        # The room is in the database now, so building its events need not
+            room_id = self._generate_room_id()
+        # The room is stored with its first events, so building them must not
         # read its version back.
         self.store.get_room_version_id.prefill((room_id,), room_version.identifier)
 
@@ -1328,7 +1354,7 @@ class RoomCreationHandler:
                 user_id, room_id, room_aliases
             ):
                 # allow room creation to continue but do not publish room
-                await self.store.set_room_is_public(room_id, False)
+                is_public = False
 
         directory_handler = self.hs.get_directory_handler()
         if room_alias:
@@ -1388,26 +1414,33 @@ class RoomCreationHandler:
             else:
                 remaining_invites = []
 
-        (
-            last_stream_id,
-            last_sent_event_id,
-            depth,
-            invites_sent,
-        ) = await self._send_events_for_new_room(
-            requester,
-            room_id,
-            room_version,
-            room_config=config,
-            invite_list=invite_list,
-            initial_state=initial_state,
-            creation_content=creation_content,
-            room_alias=room_alias,
-            power_level_content_override=power_level_content_override,
-            creator_join_profile=creator_join_profile,
-            ignore_forced_encryption=ignore_forced_encryption,
-            creation_event_with_context=creation_event_with_context,
-            batched_invites=batched_invites,
-        )
+        try:
+            (
+                last_stream_id,
+                last_sent_event_id,
+                depth,
+                invites_sent,
+            ) = await self._send_events_for_new_room(
+                requester,
+                room_id,
+                room_version,
+                room_config=config,
+                invite_list=invite_list,
+                initial_state=initial_state,
+                creation_content=creation_content,
+                is_public=is_public,
+                room_alias=room_alias,
+                power_level_content_override=power_level_content_override,
+                creator_join_profile=creator_join_profile,
+                ignore_forced_encryption=ignore_forced_encryption,
+                creation_event_with_context=creation_event_with_context,
+                batched_invites=batched_invites,
+            )
+        except RoomIdCollisionError:
+            # The alias must not point at whoever owns the room ID.
+            if room_alias:
+                await self.store.delete_room_alias(room_alias)
+            raise
         # Invites the batch could not include, e.g. as they fail the auth
         # rules, are sent on their own and fail as before.
         remaining_invites = [
@@ -1476,80 +1509,50 @@ class RoomCreationHandler:
         self,
         creator: Requester,
         creation_content: JsonDict,
-        is_public: bool,
         room_version: RoomVersion,
+        attempt: int = 0,
     ) -> tuple[EventBase, synapse.events.snapshot.UnpersistedEventContextBase]:
-        """Create the create event for a v12+ room and store the room, retrying on room ID collision.
-
-        In v12+ rooms the room ID is derived from the create event, so this
-        builds the create event, stores the room under the resulting ID, and
-        retries with a slightly older `origin_server_ts` if that ID is already taken.
+        """Create the create event for a v12+ room, whose room ID it defines.
 
         Args:
             creator: The user creating the room.
             creation_content: The content for the create event.
-            is_public: Whether the room is published to the room directory.
             room_version: The version of the room being created.
+            attempt: how many earlier create events collided on their room ID.
 
         Returns:
             A tuple of the create event and its unpersisted event context, for
             `_send_events_for_new_room` to persist with the rest of the room.
-
-        Raises:
-            StoreError: if a unique room ID could not be generated after several
-                attempts.
         """
         # In v12+ rooms, the room ID is the reference hash of the create event,
         # so two rooms whose create events have identical content collide on the
         # same room ID. This happens in practice when the same user creates
         # several rooms at once (e.g. concurrent /createRoom requests with the
         # same config), as the only entropy in the create event is
-        # `origin_server_ts`, which has millisecond resolution.
-        #
-        # Retry a few times on collision, perturbing `origin_server_ts`
-        # so the create event hashes to a fresh room ID. This mirrors the
-        # collision handling in `_generate_and_create_room_id` used for
-        # older room versions.
-        attempts = 0
-        while attempts < 5:
-            event_dict: JsonDict = {
-                "content": creation_content,
-                "sender": creator.user.to_string(),
-                "type": EventTypes.Create,
-                "state_key": "",
-            }
-            if attempts > 0:
-                # Bump the timestamp to give the create event (and hence the
-                # room ID it hashes to) different content from the colliding one.
-                event_dict["origin_server_ts"] = (
-                    self.clock.time_msec() + random.randint(1, 10)
-                )
-
-            (
-                creation_event,
-                creation_context,
-            ) = await self.event_creation_handler.create_event(
-                creator,
-                event_dict,
-                prev_event_ids=[],
-                depth=1,
-                state_map={},
-                for_batch=True,
+        # `origin_server_ts`, which has millisecond resolution. The collision
+        # surfaces when the room's events are persisted, and `create_room`
+        # tries again.
+        event_dict: JsonDict = {
+            "content": creation_content,
+            "sender": creator.user.to_string(),
+            "type": EventTypes.Create,
+            "state_key": "",
+        }
+        if attempt > 0:
+            # Bump the timestamp to give the create event (and hence the
+            # room ID it hashes to) different content from the colliding one.
+            event_dict["origin_server_ts"] = self.clock.time_msec() + random.randint(
+                1, 10
             )
-            try:
-                await self.store.store_room(
-                    room_id=creation_event.room_id,
-                    room_creator_user_id=creator.user.to_string(),
-                    is_public=is_public,
-                    room_version=room_version,
-                )
-            except StoreError:
-                attempts += 1
-                continue
 
-            return (creation_event, creation_context)
-
-        raise StoreError(500, "Couldn't generate a unique room ID.")
+        return await self.event_creation_handler.create_event(
+            creator,
+            event_dict,
+            prev_event_ids=[],
+            depth=1,
+            state_map={},
+            for_batch=True,
+        )
 
     async def _send_events_for_new_room(
         self,
@@ -1560,6 +1563,7 @@ class RoomCreationHandler:
         invite_list: list[str],
         initial_state: MutableStateMap,
         creation_content: JsonMapping,
+        is_public: bool,
         room_alias: RoomAlias | None = None,
         power_level_content_override: JsonDict | None = None,
         creator_join_profile: JsonDict | None = None,
@@ -1715,6 +1719,13 @@ class RoomCreationHandler:
                 )
             )
             events_to_send.clear()
+
+            if last_persisted_event is None:
+                # The first batch creates the room: its persistence stores
+                # the room, and so claims the room ID.
+                (create_event, create_context) = events_and_context[0]
+                assert create_event.type == EventTypes.Create
+                create_context.new_room_is_public = is_public
 
             last_persisted_event = (
                 await self.event_creation_handler.handle_new_client_event(
@@ -2210,9 +2221,8 @@ class RoomCreationHandler:
         Room IDs look like "!opaque_id:domain" and are case-sensitive as per the spec
         at https://spec.matrix.org/v1.2/appendices/#room-ids-and-event-ids.
 
-        Does not check for collisions with existing rooms or prevent future calls from
-        returning the same room ID. To ensure the uniqueness of a new room ID, use
-        `_generate_and_create_room_id` instead.
+        Does not check for collisions with existing rooms: persisting the
+        room's first events claims the ID, and fails if it is taken.
 
         Synapse's room IDs are 18 [a-zA-Z] characters long, which comes out to around
         102 bits.
@@ -2222,29 +2232,6 @@ class RoomCreationHandler:
         """
         random_string = stringutils.random_string(18)
         return RoomIdWithDomain(random_string, self.hs.hostname).to_string()
-
-    async def _generate_and_create_room_id(
-        self,
-        creator_id: str,
-        is_public: bool,
-        room_version: RoomVersion,
-    ) -> str:
-        # autogen room IDs and try to create it. We may clash, so just
-        # try a few times till one goes through, giving up eventually.
-        attempts = 0
-        while attempts < 5:
-            try:
-                gen_room_id = self._generate_room_id()
-                await self.store.store_room(
-                    room_id=gen_room_id,
-                    room_creator_user_id=creator_id,
-                    is_public=is_public,
-                    room_version=room_version,
-                )
-                return gen_room_id
-            except StoreError:
-                attempts += 1
-        raise StoreError(500, "Couldn't generate a room ID.")
 
 
 class RoomContextHandler:

@@ -36,7 +36,9 @@ use super::{
     reader::{self, PersistReader, PyDelta, PySlidingSync},
     sliding_sync,
     state_delta::{self, NativeStateResolver, StateResFallback},
-    txn::{self, json, streams::TxnStream, PartialStateConflict, TxnEvent, TxnInput},
+    txn::{
+        self, json, streams::TxnStream, PartialStateConflict, RoomIdCollision, TxnEvent, TxnInput,
+    },
 };
 use crate::{
     database::postgres::{
@@ -1517,6 +1519,11 @@ pub fn persist_error_to_py(e: anyhow::Error) -> PyErr {
             Ok(err) | Err(err) => err,
         };
     }
+    if let Some(collision) = e.downcast_ref::<RoomIdCollision>() {
+        return match py_room_id_collision_error(&collision.0) {
+            Ok(err) | Err(err) => err,
+        };
+    }
     if let Some(missing) = e.downcast_ref::<MissingPrevStateEvents>() {
         return SynapseError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1536,6 +1543,17 @@ fn py_partial_state_conflict_error() -> PyResult<PyErr> {
             .import("synapse.api.errors")?
             .getattr("PartialStateConflictError")?
             .call0()?;
+        Ok(PyErr::from_value(error))
+    })
+}
+
+/// A `RoomIdCollisionError`, as the Python transaction raises.
+fn py_room_id_collision_error(room_id: &str) -> PyResult<PyErr> {
+    crate::gil::with_gil("persist_room_id_collision", |py| {
+        let error = py
+            .import("synapse.api.errors")?
+            .getattr("RoomIdCollisionError")?
+            .call1((room_id,))?;
         Ok(PyErr::from_value(error))
     })
 }

@@ -795,7 +795,7 @@ class RoomsCreateTestCase(RoomBase):
     def _expected_create_room_txn_count(self) -> int:
         """The Python transactions a plain room creation runs. The state groups
         are written in Rust on the native driver, outside them."""
-        count = 8
+        count = 7
         if self.hs.get_datastores().state._rust_state_group_writer is not None:
             count -= 1
         return count

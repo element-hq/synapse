@@ -53,7 +53,7 @@ use crate::{
         pool::ConnectionPool,
         write::{run_rolled_back_interaction, run_write_interaction, WriteTxn},
     },
-    events::Event,
+    events::{constants::event_type::M_ROOM_CREATE, Event},
 };
 
 /// The sequence `event_chain_id_gen` allocates from.
@@ -273,8 +273,12 @@ pub async fn calculate_chain_cover_index_for_events_txn(
     state_events: &[&ChainCoverEvent],
 ) -> anyhow::Result<HashMap<Arc<str>, NewEventChainLinks>> {
     // We ignore legacy rooms that we aren't filling the chain cover index
-    // for.
-    if !store.has_auth_chain_index(room_id).await? {
+    // for. A room whose create event is among the events is new, or being
+    // joined, and has the index, though its `rooms` row may not be stored yet.
+    let has_create_event = state_events
+        .iter()
+        .any(|event| &*event.event_type == M_ROOM_CREATE && event.state_key.is_empty());
+    if !has_create_event && !store.has_auth_chain_index(room_id).await? {
         return Ok(HashMap::new());
     }
 

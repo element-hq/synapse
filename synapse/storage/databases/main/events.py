@@ -46,7 +46,7 @@ from synapse.api.constants import (
     ProfileUpdateAction,
     RelationTypes,
 )
-from synapse.api.errors import PartialStateConflictError
+from synapse.api.errors import PartialStateConflictError, RoomIdCollisionError
 from synapse.api.room_versions import RoomVersions
 from synapse.events import (
     EventBase,
@@ -1010,16 +1010,23 @@ class PersistEventsStore:
         # See: docs/auth_chain_difference_algorithm.md
 
         # We ignore legacy rooms that we aren't filling the chain cover index
-        # for.
-        row = self.db_pool.simple_select_one_txn(
-            txn,
-            table="rooms",
-            keyvalues={"room_id": room_id},
-            retcols=("room_id", "has_auth_chain_index"),
-            allow_none=True,
+        # for. A room whose create event is among the events is new, or being
+        # joined, and has the index, though its `rooms` row may not be stored
+        # yet.
+        has_create_event = any(
+            event.type == EventTypes.Create and event.state_key == ""
+            for event in state_events
         )
-        if row is None or row[1] is False:
-            return {}
+        if not has_create_event:
+            row = self.db_pool.simple_select_one_txn(
+                txn,
+                table="rooms",
+                keyvalues={"room_id": room_id},
+                retcols=("room_id", "has_auth_chain_index"),
+                allow_none=True,
+            )
+            if row is None or row[1] is False:
+                return {}
 
         # Filter out events that we've already calculated.
         rows = self.db_pool.simple_select_many_txn(
@@ -1331,6 +1338,30 @@ class PersistEventsStore:
         min_stream_order = events_and_contexts[0][0].internal_metadata.stream_ordering
         max_stream_order = events_and_contexts[-1][0].internal_metadata.stream_ordering
         room_version = events_and_contexts[0][0].room_version
+
+        new_room = [
+            (event, context.new_room_is_public)
+            for event, context in events_and_contexts
+            if context.new_room_is_public is not None
+        ]
+        if new_room:
+            # The batch creates the room: store it, which also claims the
+            # room ID. The row then serves the existence check below.
+            (create_event, is_public) = new_room[0]
+            try:
+                self.db_pool.simple_insert_txn(
+                    txn,
+                    "rooms",
+                    {
+                        "room_id": room_id,
+                        "creator": create_event.sender,
+                        "is_public": is_public,
+                        "room_version": room_version.identifier,
+                        "has_auth_chain_index": True,
+                    },
+                )
+            except self.database_engine.module.IntegrityError:
+                raise RoomIdCollisionError(room_id)
 
         # We check that the room still exists for events we're trying to
         # persist. This is to protect against races with deleting a room.

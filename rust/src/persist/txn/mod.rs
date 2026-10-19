@@ -177,6 +177,19 @@ impl std::fmt::Display for PartialStateConflict {
 
 impl std::error::Error for PartialStateConflict {}
 
+/// The chunk creates a room whose ID is already taken. Python raises
+/// `RoomIdCollisionError`, and the creator tries again under a fresh ID.
+#[derive(Debug)]
+pub struct RoomIdCollision(pub String);
+
+impl std::fmt::Display for RoomIdCollision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Room ID {} is already in use", self.0)
+    }
+}
+
+impl std::error::Error for RoomIdCollision {}
+
 /// An error reading an event's fields through the Python-facing accessors.
 fn metadata_error(e: PyErr) -> WriteError {
     WriteError::Other(anyhow::Error::new(e))
@@ -239,16 +252,46 @@ async fn persist_events_txn_steps<'a>(
 ) -> Result<(), WriteError> {
     let room_id = input.room_id;
 
-    // Protect against a race with deleting the room: the share lock holds
-    // off a delete until we commit.
-    let rows = txn
-        .query(
-            "SELECT room_version FROM rooms WHERE room_id = $1 FOR SHARE",
-            &[&room_id],
-        )
-        .await?;
-    if rows.is_empty() {
-        return Err(anyhow!("Room does not exist {room_id}").into());
+    let new_room = input
+        .events
+        .iter()
+        .find_map(|event| Some((event, event.context.new_room_is_public?)));
+    if let Some((create, is_public)) = new_room {
+        // The chunk creates the room: store it, which claims the room ID.
+        // The row's lock holds off a delete until we commit, as the share
+        // lock below does.
+        let inserted = txn
+            .execute(
+                "INSERT INTO rooms (room_id, room_version, is_public, creator, has_auth_chain_index)
+                VALUES ($1, $2, $3, $4, TRUE)",
+                &[
+                    &room_id,
+                    &create.event.room_version().identifier,
+                    &is_public,
+                    &create.event.sender(),
+                ],
+            )
+            .await;
+        match inserted {
+            Err(WriteError::Constraint { sqlstate, .. }) if sqlstate == "23505" => {
+                return Err(WriteError::Other(anyhow::Error::new(RoomIdCollision(
+                    room_id.to_owned(),
+                ))));
+            }
+            other => other?,
+        };
+    } else {
+        // Protect against a race with deleting the room: the share lock holds
+        // off a delete until we commit.
+        let rows = txn
+            .query(
+                "SELECT room_version FROM rooms WHERE room_id = $1 FOR SHARE",
+                &[&room_id],
+            )
+            .await?;
+        if rows.is_empty() {
+            return Err(anyhow!("Room does not exist {room_id}").into());
+        }
     }
 
     let (Some(first), Some(last)) = (input.events.first(), input.events.last()) else {

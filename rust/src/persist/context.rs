@@ -53,6 +53,10 @@ pub struct PersistContext {
     /// the event's own columns, when the push rules were evaluated on this
     /// worker. `None` when they are in the staging table, or there are none.
     pub push_actions: Option<Vec<PushActionRow>>,
+    /// Set on the create event when the chunk creates the room: the
+    /// transaction inserts the `rooms` row, with this visibility, and the
+    /// chunk fails with [`super::txn::RoomIdCollision`] if one is there.
+    pub new_room_is_public: Option<bool>,
 }
 
 /// `(user_id, actions, notif, highlight, unread, thread_id)`: Python's
@@ -94,6 +98,9 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PersistContext {
 
         Ok(PersistContext {
             push_actions,
+            new_room_is_public: context
+                .getattr(intern!(py, "new_room_is_public"))?
+                .extract()?,
             rejected: context.getattr(intern!(py, "rejected"))?.extract()?,
             state_group: context.getattr(intern!(py, "_state_group"))?.extract()?,
             state_group_before_event: context
