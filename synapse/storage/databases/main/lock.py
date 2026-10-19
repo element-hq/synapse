@@ -532,7 +532,8 @@ class Lock:
             },
             desc="drop_lock",
         )
-        if wait:
+        if wait or self._hs.is_shutting_down():
+            # No background process can start once shutdown has begun.
             await delete
         else:
             self._hs.run_as_background_process("Lock.release", lambda: delete)

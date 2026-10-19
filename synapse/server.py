@@ -371,6 +371,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         # For every server we spawn in the process, track it in the metrics
         synapse_server_name_info.labels(**{SERVER_NAME_LABEL: self.hostname}).set(1)
 
+    def is_shutting_down(self) -> bool:
+        """Whether `shutdown` has been called. Background processes can no
+        longer be started."""
+        return self._is_shutdown
+
     def run_as_background_process(
         self,
         desc: "LiteralString",

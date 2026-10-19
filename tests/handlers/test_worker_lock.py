@@ -59,6 +59,28 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         self.get_success(d2)
         self.get_success(lock2.__aexit__(None, None, None))
 
+    def test_release_in_background_while_shutting_down(self) -> None:
+        """A lock released in the background once shutdown has begun is still
+        released, without failing the caller."""
+        lock = self.worker_lock_handler.acquire_read_write_lock(
+            "name", "key", write=False, release_in_background=True
+        )
+        self.get_success(lock.__aenter__())
+
+        # `shutdown` sets this first, then waits for the rest to stop.
+        self.hs._is_shutdown = True
+        try:
+            self.get_success(lock.__aexit__(None, None, None))
+        finally:
+            self.hs._is_shutdown = False
+
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "worker_read_write_locks", {"lock_name": "name"}, ["token"]
+            )
+        )
+        self.assertEqual(rows, [])
+
     def test_timeouts_for_lock_locally(self) -> None:
         """
         Test that we regularly retry to reacquire locks.
