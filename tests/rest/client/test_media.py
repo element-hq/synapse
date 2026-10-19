@@ -79,7 +79,7 @@ from tests.media.test_media_storage import (
     small_png_with_transparency,
 )
 from tests.server import FakeChannel, FakeTransport, ThreadedMemoryReactorClock
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_PNG, list_stored_media_files
 from tests.unittest import override_config
 
 try:
@@ -1605,7 +1605,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
 
 # We test this here because this endpoint must still work
-# even if lxml is not installed.
+# even if beautifulsoup4 is not installed.
 class URLPreviewDisabledTests(unittest.HomeserverTestCase):
     servlets = [
         admin.register_servlets,
@@ -1625,26 +1625,12 @@ class URLPreviewDisabledTests(unittest.HomeserverTestCase):
             "experimental_features": {"msc4452_enabled": False},
         }
     )
-    def test_disabled_previews(self) -> None:
-        """Tests that disabling URL previews gives back a sane response."""
-        channel = self.make_request(
-            "GET",
-            "/_matrix/client/v1/media/preview_url?url=" + quote("http://example.com"),
-            access_token=self.tok,
-        )
-        self.assertEqual(channel.code, 404, channel.result)
-        self.assertEqual(
-            channel.json_body,
-            {"errcode": "M_UNRECOGNIZED", "error": "Unrecognized request"},
-        )
-
     @override_config(
         {
             "url_preview_enabled": False,
-            "experimental_features": {"msc4452_enabled": True},
         }
     )
-    def test_disabled_previews_with_msc4452(self) -> None:
+    def test_disabled_previews(self) -> None:
         """Tests that disabling URL previews gives back a sane response."""
         channel = self.make_request(
             "GET",
@@ -3019,6 +3005,46 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         channel = self.upload_media(800)
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+
+    def test_over_limit_does_not_store_file(self) -> None:
+        """An upload that is rejected for exceeding the limit must not leave an
+        orphaned file on disk. Regression test for
+        https://github.com/element-hq/synapse/issues/18915)."""
+
+        files_at_start = list_stored_media_files(self.hs)
+
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        # Assert the file listing is working for a successful upload
+        files_after_upload = list_stored_media_files(self.hs)
+        self.assertGreater(len(files_after_upload), len(files_at_start))
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+
+        # The rejected upload should not have written anything to disk.
+        self.assertEqual(list_stored_media_files(self.hs), files_after_upload)
+
+    def test_malformed_request_rejected_before_limit_check(self) -> None:
+        """A malformed request is rejected as such even when the user is over
+        their limit, i.e. the limit is checked after the rest of the request has
+        been validated."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        # We are now over the daily limit, but an invalid filename should still
+        # be reported as a bad request rather than a limit being exceeded.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload?filename=%ff",
+            content=b"0" * 800,
+            access_token=self.tok,
+            shorthand=False,
+            content_type=b"text/plain",
+        )
+        self.assertEqual(channel.code, 400, channel.json_body)
 
     def test_under_daily_limit(self) -> None:
         """Test that uploading media under the daily limit fails."""

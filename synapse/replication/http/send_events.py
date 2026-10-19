@@ -64,7 +64,7 @@ class ReplicationSendEventsRestServlet(ReplicationEndpoint):
 
         200 OK
 
-        { "stream_id": 12345, "event_id": "$abcdef..." }
+        { "stream_id": 12345, "event_id": "$abcdef...", "received_ts": 424242 }
 
     Responds with a 409 when a `PartialStateConflictError` is raised due to an event
     context that needs to be recomputed due to the un-partial stating of a room.
@@ -171,6 +171,7 @@ class ReplicationSendEventsRestServlet(ReplicationEndpoint):
             200,
             {
                 "stream_id": last_event.internal_metadata.stream_ordering,
+                "received_ts": last_event.internal_metadata.received_ts,
                 "event_id": last_event.event_id,
             },
         )
