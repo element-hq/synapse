@@ -22,6 +22,8 @@ use pythonize::{pythonize, PythonizeError};
 use serde::Serialize;
 use ulid::Ulid;
 
+use crate::identifier::OpaqueIdentifier;
+
 /// The maximum number of transaction IDs we remember per session, so that the
 /// memory used by a session stays bounded even if a client sends a large number
 /// of requests. MSC4388 exchanges only need a handful of sends, so in practice
@@ -48,7 +50,7 @@ pub struct Session {
     sequence: u64,
     /// The outcome of each `PUT` seen for this session, keyed by the
     /// transaction ID used, oldest first. Used to make retries idempotent.
-    transactions: VecDeque<(String, PutOutcome)>,
+    transactions: VecDeque<(OpaqueIdentifier, PutOutcome)>,
     last_modified: SystemTime,
     expires: SystemTime,
 }
@@ -132,7 +134,7 @@ impl Session {
     /// answered with the same response rather than being re-evaluated.
     pub fn send(
         &mut self,
-        txn_id: &str,
+        txn_id: &OpaqueIdentifier,
         sequence_token: &str,
         data: String,
         now: SystemTime,
@@ -148,7 +150,7 @@ impl Session {
             PutOutcome::ConcurrentWrite
         };
 
-        self.record_transaction(txn_id.to_owned(), outcome.clone());
+        self.record_transaction(txn_id.clone(), outcome.clone());
 
         outcome
     }
@@ -162,7 +164,7 @@ impl Session {
 
     /// The outcome of a previous `PUT` made with the given transaction ID, if
     /// we have seen it for this session.
-    fn transaction_outcome(&self, txn_id: &str) -> Option<&PutOutcome> {
+    fn transaction_outcome(&self, txn_id: &OpaqueIdentifier) -> Option<&PutOutcome> {
         self.transactions
             .iter()
             .find(|(id, _)| id == txn_id)
@@ -171,7 +173,7 @@ impl Session {
 
     /// Record the outcome of a `PUT` against the transaction ID it used, so
     /// that a retry with the same transaction ID gets the same response.
-    fn record_transaction(&mut self, txn_id: String, outcome: PutOutcome) {
+    fn record_transaction(&mut self, txn_id: OpaqueIdentifier, outcome: PutOutcome) {
         self.transactions.push_back((txn_id, outcome));
         while self.transactions.len() > MAX_RECORDED_TRANSACTIONS {
             self.transactions.pop_front();

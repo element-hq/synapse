@@ -32,6 +32,7 @@ use crate::{
     errors::{NotFoundError, SynapseError},
     homeserver::HomeServer,
     http::http_request_from_twisted,
+    identifier::OpaqueIdentifier,
     msc4388_rendezvous::session::{GetResponse, PostResponse, PutOutcome, PutResponse},
     runtime::RustRuntime,
 };
@@ -288,20 +289,15 @@ impl MSC4388RendezvousHandler {
         // The transaction ID is recorded against the session, so we enforce the
         // opaque identifier grammar (including its 255 byte limit) that MSC4388
         // requires of it, to keep the memory used by a session bounded.
-        if txn_id.is_empty()
-            || txn_id.len() > 255
-            || !txn_id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
-        {
-            return Err(SynapseError::new(
+        let txn_id = OpaqueIdentifier::try_from(txn_id).map_err(|_| {
+            SynapseError::new(
                 StatusCode::BAD_REQUEST,
                 "Invalid transaction ID".to_owned(),
                 "M_INVALID_PARAM",
                 None,
                 None,
-            ));
-        }
+            )
+        })?;
 
         let request = http_request_from_twisted(twisted_request)?;
         // parse JSON body
@@ -333,7 +329,7 @@ impl MSC4388RendezvousHandler {
 
         // The session performs the compare-and-swap, and remembers the outcome
         // against the transaction ID so that retries are idempotent.
-        match session.send(txn_id, &sequence_token, data, now) {
+        match session.send(&txn_id, &sequence_token, data, now) {
             PutOutcome::Accepted(sequence_token) => Ok((200, PutResponse::new(sequence_token))),
             PutOutcome::ConcurrentWrite => Err(SynapseError::new(
                 StatusCode::CONFLICT,
