@@ -78,6 +78,7 @@ from synapse.federation.federation_base import (
 )
 from synapse.federation.federation_client import InvalidResponseError
 from synapse.handlers.pagination import PURGE_PAGINATION_LOCK_NAME
+from synapse.handlers.worker_lock import INBOUND_EVENT_HANDLING_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
@@ -700,7 +701,21 @@ class FederationHandler:
             # impossible.
             await self.store.clean_room_for_join(room_id)
 
+        # The room's servers may send us events while we join: its resident server
+        # typically sends one right after it accepted our join, before we have
+        # persisted it. `room_queues` queues them, but only if this process handles
+        # them; a worker that handles inbound federation would drop them, as we're
+        # not in the room yet. So we hold the room's inbound event lock: they wait
+        # in the staging area until the join is done.
+        inbound_event_lock = None
         try:
+            if not is_host_joined:
+                lock = self._worker_locks.acquire_lock(
+                    INBOUND_EVENT_HANDLING_LOCK_NAME, room_id
+                )
+                await lock.__aenter__()
+                inbound_event_lock = lock
+
             # Try the host we successfully got a response to /make_join/
             # request first.
             host_list = list(target_hosts)
@@ -906,6 +921,16 @@ class FederationHandler:
             logger.debug("Finished joining %s to %s", joinee, room_id)
             return event.event_id, max_stream_id
         finally:
+            if inbound_event_lock is not None:
+                await inbound_event_lock.__aexit__(None, None, None)
+                # Only the holder of the lock handles staged events: hand over
+                # the ones that arrived meanwhile.
+                self.hs.run_as_background_process(
+                    "handle_staged_events_after_join",
+                    self.hs.get_federation_server().handle_staged_events_in_room,
+                    room_id,
+                )
+
             room_queue = self._federation_event_handler.room_queues[room_id]
             del self._federation_event_handler.room_queues[room_id]
 

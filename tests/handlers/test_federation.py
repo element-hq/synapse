@@ -37,13 +37,21 @@ from synapse.api.errors import (
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.federation.federation_client import SendJoinResult
+from synapse.federation.transport.server import (
+    Authenticator,
+    register_servlets as register_federation_servlets,
+)
+from synapse.replication.http import ReplicationRestResource
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventCacheEntry
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
+from tests.federation._remote_join import RemoteJoinHelper
+from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.test_utils.event_builders import make_test_event, make_test_pdu_event
 
 logger = logging.getLogger(__name__)
@@ -420,6 +428,146 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(r[(EventTypes.Member, other_user)], join_event.event_id)
 
         return join_event
+
+
+class EventsDuringRemoteJoinTestCase(unittest.FederatingHomeserverTestCase):
+    """
+    The resident server sends an event over federation while we are still joining
+    the room: right after it accepted our `/send_join`, before we have persisted the
+    join.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self._federation_http_client = Mock()
+        return self.setup_test_homeserver(
+            federation_http_client=self._federation_http_client
+        )
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.store = hs.get_datastores().main
+        self.user_id = self.register_user("alice", "password")
+        self.tok = self.login("alice", "password")
+
+    def _join_while_the_resident_sends_a_message(self) -> EventBase:
+        """Join a remote room; returns the message it sent during the join."""
+        helper = RemoteJoinHelper(self, self._federation_http_client)
+        federation_server = self.hs.get_federation_server()
+        sent: list[EventBase] = []
+
+        async def send_message(join_event: EventBase) -> None:
+            message = helper.make_remote_message(join_event, "Welcome!")
+            sent.append(message)
+            await federation_server.on_incoming_transaction(
+                self.OTHER_SERVER_NAME,
+                "txn-during-join",
+                self.hs.hostname,
+                {
+                    "origin": self.OTHER_SERVER_NAME,
+                    "origin_server_ts": self.clock.time_msec(),
+                    "pdus": [message.get_pdu_json()],
+                    "edus": [],
+                },
+            )
+            # Give the inbound event handling time to run while the join is still
+            # in flight.
+            await self.clock.sleep(Duration(seconds=1))
+
+        helper.join(self.user_id, self.tok, on_send_join=send_message)
+        self.reactor.advance(1)
+        return sent[0]
+
+    def _assert_persisted(self, event: EventBase) -> None:
+        self.assertIsNotNone(
+            self.get_success(self.store.get_event(event.event_id, allow_none=True)),
+            "the event sent during the join was dropped",
+        )
+
+    def test_event_during_join(self) -> None:
+        """The event waits for the join and is persisted after it."""
+        message = self._join_while_the_resident_sends_a_message()
+        self._assert_persisted(message)
+
+
+class EventsDuringRemoteJoinWithWorkersTestCase(
+    BaseMultiWorkerStreamTestCase, unittest.FederatingHomeserverTestCase
+):
+    """
+    As `EventsDuringRemoteJoinTestCase`, with a worker that handles inbound
+    federation while the main process joins. The worker doesn't see the main
+    process's `room_queues`: without the join holding the room's inbound event lock,
+    it drops the event, as we're not in the room yet.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self._federation_http_client = Mock()
+        return self.setup_test_homeserver(
+            federation_http_client=self._federation_http_client
+        )
+
+    def create_test_resource(self) -> ReplicationRestResource:
+        resource = super().create_test_resource()
+        # The federation API too: the remote server invites us before the join.
+        register_federation_servlets(
+            self.hs,
+            resource=resource,
+            authenticator=Authenticator(self.hs),
+            ratelimiter=self.hs.get_federation_ratelimiter(),
+        )
+        return resource
+
+    def test_event_during_join_handled_by_a_worker(self) -> None:
+        worker_hs = self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {"worker_name": "federation_inbound1"},
+            federation_http_client=Mock(),
+        )
+        user_id = self.register_user("alice", "password")
+        tok = self.login("alice", "password")
+
+        helper = RemoteJoinHelper(self, self._federation_http_client)
+        sent: list[EventBase] = []
+
+        async def send_message(join_event: EventBase) -> None:
+            message = helper.make_remote_message(join_event, "Welcome!")
+            sent.append(message)
+            await worker_hs.get_federation_server().on_incoming_transaction(
+                self.OTHER_SERVER_NAME,
+                "txn-during-join",
+                self.hs.hostname,
+                {
+                    "origin": self.OTHER_SERVER_NAME,
+                    "origin_server_ts": self.clock.time_msec(),
+                    "pdus": [message.get_pdu_json()],
+                    "edus": [],
+                },
+            )
+            await self.clock.sleep(Duration(seconds=1))
+
+        helper.join(user_id, tok, on_send_join=send_message)
+        self.reactor.advance(1)
+        self.replicate()
+
+        self.assertIsNotNone(
+            self.get_success(
+                self.hs.get_datastores().main.get_event(
+                    sent[0].event_id, allow_none=True
+                )
+            ),
+            "the event sent during the join was dropped",
+        )
 
 
 class EventFromPduTestCase(TestCase):
