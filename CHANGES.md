@@ -2,13 +2,13 @@
 
 ## Features
 
+- Advertise support for Matrix v1.16. ([\#20333](https://github.com/element-hq/synapse/issues/20333))
+- Advertise support for Matrix v1.17. ([\#20334](https://github.com/element-hq/synapse/issues/20334))
 - [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Add a dedicated endpoint for scheduling delayed events. ([\#19354](https://github.com/element-hq/synapse/issues/19354))
 - Require authentication for the [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140) delayed event management endpoints, restrict them to the requesting user's own delayed events, and allow guests to use them. ([\#20257](https://github.com/element-hq/synapse/issues/20257))
 - [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Reject requests to schedule a delayed event that the sender could not send at that time, such as in a room they are not joined to, unless the event changes their own membership. ([\#20266](https://github.com/element-hq/synapse/issues/20266))
 - Stabilise [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222): support the stable `use_state_after` query parameter and `state_after` response field on `/sync`, as per Matrix v1.16, and remove the `msc4222_enabled` experimental config flag. ([\#20170](https://github.com/element-hq/synapse/issues/20170))
 - Add the `m.preview_url` capability (stabilizes support for MSC4452). ([\#20298](https://github.com/element-hq/synapse/issues/20298))
-- Advertise support for Matrix v1.16. ([\#20333](https://github.com/element-hq/synapse/issues/20333))
-- Advertise support for Matrix v1.17. ([\#20334](https://github.com/element-hq/synapse/issues/20334))
 - Catch up historical [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) to remote homeservers that are newly joining the room. ([\#20337](https://github.com/element-hq/synapse/issues/20337))
 - In legacy sync, lazy-load the memberships of the senders of [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354). ([\#20362](https://github.com/element-hq/synapse/issues/20362))
 
