@@ -455,7 +455,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 AND notif_count != 0
                 AND (
                     (
-                        -- The row does not know which receipt it is relative to,
+                        -- The row does not account for any read receipt,
                         last_receipt_stream_ordering IS NULL
                         -- but its counts reach past the user's latest receipt,
                         AND stream_ordering > {max_clause}
@@ -686,7 +686,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 WHERE room_id = ? AND user_id = ?
                 AND (
                     (
-                        -- The row does not know which receipt it is relative to,
+                        -- The row does not account for any read receipt,
                         last_receipt_stream_ordering IS NULL
                         -- but its counts reach past the user's latest receipt
                         -- for the thread (threaded, else unthreaded or join),
