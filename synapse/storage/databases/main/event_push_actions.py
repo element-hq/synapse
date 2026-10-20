@@ -348,19 +348,32 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         return 0
 
     def _pruned_upto_stream_ordering(self) -> int:
-        """Approximately the highest stream ordering whose (rotated) rows in
-        `event_push_actions` may already have been deleted by
-        `_remove_old_push_actions_that_have_rotated`.
+        """An approximation of the stream ordering up to which
+        `_remove_old_push_actions_that_have_rotated` has deleted push actions.
 
-        Counting from `event_push_actions` only gives a complete answer above this
-        point; below it we have to keep relying on `event_push_summary`.
+        `_get_unread_counts_by_pos_txn` and `_get_unread_counts_by_room_for_user_txn`
+        use it to decide what to do with an `event_push_summary` row that does not
+        account for the user's receipt. If the receipt points at an event after it,
+        the push actions after the receipt should all still be in
+        `event_push_actions`, so the summary row is ignored and the count is
+        recomputed from them. If the receipt points at an event at or before it, a
+        recount could miss deleted push actions, so the summary row is used as it
+        is, even if stale, and the next rotation corrects it.
 
-        This is a heuristic rather than an exact bound: `stream_ordering_day_ago` is
-        a per-process value refreshed every ten minutes, while the deletion may be
-        running on another worker, so this can lag reality by roughly that much. The
-        cost of getting it wrong is the same bounded staleness we already accept
-        elsewhere here -- a summary row trusted for up to one rotation cycle longer
-        than it strictly had to be -- so being approximate is fine.
+        It does not exactly match what has been deleted. The deletion runs on the
+        background worker and stops at that worker's `stream_ordering_day_ago`,
+        while this returns the calling process's own copy. Each process refreshes
+        its copy every ten minutes on its own timer, so the two can be up to ten
+        minutes of events apart, in either direction:
+
+        - Later than the deletion's cutoff: a receipt in between is treated as too
+          old, and a stale summary row is used for one more rotation cycle.
+        - Earlier than the deletion's cutoff: a receipt in between is recounted from
+          push actions that are partly gone, so the count comes out too low. If the
+          receipt pass has not applied that receipt yet, it recounts from the same
+          rows and stores the same low count (the limitation described in the
+          module docstring). Otherwise the low count lasts until this process next
+          refreshes its copy past the receipt, at most ten minutes later.
         """
         # Populated synchronously in `__init__`.
         assert self.stream_ordering_day_ago is not None
