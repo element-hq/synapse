@@ -1,0 +1,5 @@
+# Configuration for htmltest, which we run in CI to check that links aren't broken in the built documentation.
+# See all config options: https://github.com/wjdp/htmltest#wrench-configuration
+
+# Don't check external links, as that requires network access and is slow.
+CheckExternal: false
