@@ -611,24 +611,39 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         if unthreaded_receipt_stream_ordering is not None:
             from_stream_ordering = unthreaded_receipt_stream_ordering
         else:
-            # If the user has no unthreaded receipt in the room, count from their
-            # latest join event instead. If they are not joined there is nothing to
-            # count.
-            event_id = self.db_pool.simple_select_one_onecol_txn(
-                txn=txn,
-                table="local_current_membership",
-                keyvalues={
-                    "room_id": room_id,
-                    "user_id": user_id,
-                    "membership": Membership.JOIN,
-                },
-                retcol="event_id",
-                allow_none=True,
+            # If the user has no unthreaded receipt in the room, count from the join
+            # event that started their current stay in the room: the first join
+            # event with no other membership event (leave, ban, invite, knock) after
+            # it. Their latest join event is not that point, since a display name or
+            # avatar change sends a new one. If they are not joined there is nothing
+            # to count.
+            txn.execute(
+                """
+                SELECT MIN(je.stream_ordering)
+                FROM local_current_membership AS c
+                INNER JOIN room_memberships AS j
+                    ON j.room_id = c.room_id
+                    AND j.user_id = c.user_id
+                    AND j.membership = ?
+                INNER JOIN events AS je ON je.event_id = j.event_id
+                WHERE c.room_id = ? AND c.user_id = ? AND c.membership = ?
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM room_memberships AS o
+                        INNER JOIN events AS oe ON oe.event_id = o.event_id
+                        WHERE o.room_id = c.room_id
+                            AND o.user_id = c.user_id
+                            AND o.membership != ?
+                            AND oe.stream_ordering > je.stream_ordering
+                    )
+                """,
+                (Membership.JOIN, room_id, user_id, Membership.JOIN, Membership.JOIN),
             )
-            if event_id is None:
+            row = txn.fetchone()
+            if row is None or row[0] is None:
                 return RoomNotifCounts.empty()
 
-            from_stream_ordering = self.get_stream_id_for_event_txn(txn, event_id)
+            from_stream_ordering = row[0]
 
         main_counts = NotifCounts()
         thread_counts: dict[str, NotifCounts] = {}
