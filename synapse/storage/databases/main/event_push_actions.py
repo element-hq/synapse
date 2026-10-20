@@ -600,7 +600,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             user_id: The user ID to get unread counts for.
             unthreaded_receipt_stream_ordering: The stream ordering of the user's latest
                 unthreaded receipt in the room, or None if they have none. In that case
-                we count from the user's latest membership event instead.
+                we count from the user's latest join event instead.
 
         Returns:
             A RoomNotifCounts object containing the notification count, the
@@ -612,7 +612,8 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             from_stream_ordering = unthreaded_receipt_stream_ordering
         else:
             # If the user has no unthreaded receipt in the room, count from their
-            # join instead. If they are not joined there is nothing to count.
+            # latest join event instead. If they are not joined there is nothing to
+            # count.
             event_id = self.db_pool.simple_select_one_onecol_txn(
                 txn=txn,
                 table="local_current_membership",
@@ -669,17 +670,17 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         # rotated push actions older than a day, so for an older receipt we keep using
         # the (possibly stale) summary and let the next rotation correct it instead.
         if unthreaded_receipt_stream_ordering is None:
-            # `from_stream_ordering` is the user's membership event rather than a
-            # receipt, so a row stamped with a receipt at or before it can never
-            # match. That happens when the receipt is for an event from before the
-            # user's latest join, e.g. they read back into history they can see, or
-            # they rejoined the room. There is no newer receipt for the row to be out
-            # of date with respect to, and nothing will ever recalculate it, so keep
-            # it rather than recounting push actions that may already have been
-            # deleted.
+            # `from_stream_ordering` is the user's latest join event rather than a
+            # receipt, so a row stamped with a threaded receipt at or before it can
+            # never match. That happens when the receipt predates that event: they
+            # read back into history they can see, rejoined the room, or changed
+            # their display name or avatar (which sends a new join event). There is
+            # no newer receipt for the row to be out of date with respect to, and
+            # nothing will ever recalculate it, so keep it rather than recounting
+            # push actions that may already have been deleted.
             unreconcilable_clause = """
                     -- Or the row is relative to a receipt this query cannot see
-                    -- (one from before the user's latest join): keep it.
+                    -- (one from before the user's latest join event): keep it.
                     OR (
                         last_receipt_stream_ordering IS NOT NULL
                         AND threaded_receipt_stream_ordering IS NULL
