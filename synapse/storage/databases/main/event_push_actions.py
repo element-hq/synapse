@@ -1762,17 +1762,30 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             (ReceiptTypes.READ, ReceiptTypes.READ_PRIVATE),
         )
 
+        receipts_applied_upto = self.db_pool.simple_select_one_onecol_txn(
+            txn,
+            table="event_push_summary_last_receipt_stream_id",
+            keyvalues={},
+            retcol="stream_id",
+        )
+
         # Calculate the new counts that should be upserted into event_push_summary.
         #
         # A row we insert here has to record which receipt its counts are relative to,
         # otherwise `_get_unread_counts_by_pos_txn` has no way of telling whether the
-        # row predates the user's receipt. `_handle_new_receipts_for_notifs_txn` ran
-        # first, so barring a receipt that landed in the gap between the two phases
-        # (which self-heals on the next rotation, at the cost of overcounting it until
-        # then) the user's latest receipt for the thread is what the counts below are
-        # relative to: rows we are updating keep the value it stamped (their counts
-        # have not been recalculated since), and rows we are inserting get the latest
-        # receipt, or NULL if the user has never sent one in the room.
+        # row predates the user's receipt. Rows we are updating keep the value
+        # `_handle_new_receipts_for_notifs_txn` stamped, since their counts have not
+        # been recalculated since. Rows we are inserting get the user's latest receipt
+        # for the thread among those that pass has applied (everything up to
+        # `receipts_applied_upto`), or NULL if there is none.
+        #
+        # The receipt pass runs immediately before this transaction in
+        # `_rotate_notifs`, so that is normally the user's latest receipt. A receipt
+        # created in between has not had the push actions it covers deleted yet, so
+        # the counts below still include them, and stamping it would make the readers
+        # trust an overcount. Left relative to the previous receipt (or NULL), the row
+        # is treated as out of date and recounted from the push actions until the next
+        # cycle applies the receipt.
         def _sql(count_column: str, action_column: str) -> str:
             return f"""
             SELECT user_id, room_id, thread_id,
@@ -1787,6 +1800,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                             AND r.room_id = upd.room_id
                             AND (r.thread_id IS NULL OR r.thread_id = upd.thread_id)
                             AND {receipt_types_clause}
+                            AND r.stream_id <= ?
                     )
                 )
             FROM (
@@ -1807,6 +1821,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
 
         args = (
             *receipt_types_args,
+            receipts_applied_upto,
             old_rotate_stream_ordering,
             rotate_to_stream_ordering,
         )

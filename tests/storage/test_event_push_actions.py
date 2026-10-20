@@ -762,6 +762,73 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         )
         self.assertEqual(aggregate_counts.get(room_id, 0), 2)
 
+    def test_count_aggregation_receipt_between_receipt_pass_and_rotation(
+        self,
+    ) -> None:
+        """
+        A read receipt that arrives after `_handle_new_receipts_for_notifs_txn` has
+        run but before `_rotate_notifs_before_txn` in the same `_rotate_notifs` cycle
+        has not had the push actions it covers deleted yet. Rotation must not stamp a
+        new summary row with it: the row's counts still include the events the
+        receipt cleared, and the readers would trust them until the next cycle.
+        """
+        user_id, _, _, other_token, room_id = self._create_users_and_room()
+
+        first = self._send_message(room_id, other_token)
+        self._send_message(room_id, other_token)
+
+        # The receipt lands, and rotation runs before the receipt pass has seen it.
+        self.get_success(
+            self.store.insert_receipt(
+                room_id,
+                "m.read",
+                user_id=user_id,
+                event_ids=[first],
+                thread_id=None,
+                data={},
+            )
+        )
+        self.get_success(
+            self.store.db_pool.runInteraction("rotate", self.store._rotate_notifs_txn)
+        )
+
+        def _counts() -> tuple[int, int]:
+            counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-unread-counts",
+                    self.store._get_unread_counts_by_receipt_txn,
+                    room_id,
+                    user_id,
+                )
+            )
+            aggregate_counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-aggregate-unread-counts",
+                    self.store._get_unread_counts_by_room_for_user_txn,
+                    user_id,
+                )
+            )
+            return counts.main_timeline.notify_count, aggregate_counts.get(room_id, 0)
+
+        # The row counts both events, so it must not claim to account for the receipt.
+        row = self.get_success(
+            self.store.db_pool.simple_select_one(
+                table="event_push_summary",
+                keyvalues={
+                    "user_id": user_id,
+                    "room_id": room_id,
+                    "thread_id": MAIN_TIMELINE,
+                },
+                retcols=("notif_count", "last_receipt_stream_ordering"),
+            )
+        )
+        self.assertEqual(row, (2, None))
+        self.assertEqual(_counts(), (1, 1))
+
+        # The next cycle applies the receipt.
+        self.get_success(self.store._rotate_notifs())
+        self.assertEqual(_counts(), (1, 1))
+
     def test_count_aggregation_receipt_before_join_survives_pruning(self) -> None:
         """
         Regression test: a summary row stamped with a receipt from before the user's
