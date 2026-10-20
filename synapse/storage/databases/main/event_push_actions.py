@@ -80,7 +80,6 @@ receipt.
 """
 
 import logging
-import sys
 from collections import defaultdict
 from typing import (
     TYPE_CHECKING,
@@ -363,12 +362,8 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         elsewhere here -- a summary row trusted for up to one rotation cycle longer
         than it strictly had to be -- so being approximate is fine.
         """
-        if self.stream_ordering_day_ago is None:
-            # `stream_ordering_day_ago` is populated synchronously in `__init__`, so
-            # in practice this doesn't happen; if it somehow did we'd rather never
-            # prefer `event_push_actions` over the summary.
-            return sys.maxsize
-
+        # Populated synchronously in `__init__`.
+        assert self.stream_ordering_day_ago is not None
         return self.stream_ordering_day_ago
 
     async def get_unread_counts_by_room_for_user(self, user_id: str) -> dict[str, int]:
