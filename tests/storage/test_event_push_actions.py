@@ -22,7 +22,7 @@
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import MAIN_TIMELINE, RelationTypes
+from synapse.api.constants import MAIN_TIMELINE, EventContentFields, RelationTypes
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -482,7 +482,10 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         """Send a message, optionally into a thread and/or mentioning a user."""
         content: JsonDict = {
             "msgtype": "m.text",
-            "body": highlight_for if highlight_for is not None else "msg",
+            "body": "msg",
+            EventContentFields.MENTIONS: {"user_ids": [highlight_for]}
+            if highlight_for is not None
+            else {},
         }
         if thread_root is not None:
             content["m.relates_to"] = {
