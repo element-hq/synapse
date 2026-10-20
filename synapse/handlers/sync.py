@@ -291,6 +291,17 @@ class JoinedSyncResult:
             # else in the result, we don't need to send it.
         )
 
+    def lazy_loading_members_user_ids(self) -> set[str]:
+        """
+        Return the set of User IDs that are in-scope for lazy-loading in this
+        joined room sync result.
+
+        This is the set of all the senders of timeline events and MSC4354 sticky events.
+        """
+        return {e.event.sender for e in self.timeline.events} | {
+            e.event.sender for e in self.sticky
+        }
+
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class ArchivedSyncResult:
@@ -1253,6 +1264,7 @@ class SyncHandler:
         self,
         room_id: str,
         batch: TimelineBatch,
+        sticky_events: Sequence[FilteredEvent],
         sync_config: SyncConfig,
         since_token: StreamToken | None,
         end_token: StreamToken,
@@ -1318,8 +1330,11 @@ class SyncHandler:
 
                 # Membership events to fetch that can be found in the room state, or in
                 # the case of partial state rooms, the auth events of timeline events.
-                members_to_fetch = set()
+                #
+                # Fetch the members of MSC4354 sticky events
+                members_to_fetch = {event.event.sender for event in sticky_events}
                 first_event_by_sender_map = {}
+
                 for event in batch.events:
                     # Build the map from user IDs to the first timeline event they sent.
                     if event.event.sender not in first_event_by_sender_map:
@@ -1723,11 +1738,12 @@ class SyncHandler:
             #       any earlier delta for it is stale. That batch ends the
             #       timeline, so we look up the keys in the timeline in state
             #       groups, which still have the state at `end_token`.
-            #     - has no delta at all if it is new.
-            #       TODO: Recover it.
+            #     - has no delta at all if it is new, so we also look up all the
+            #       keys in the timeline (see below).
             #    Keys that only changed earlier keep their earlier delta, and
             #    other keys need no update.
-            cleared_state_keys: set[tuple[str, str]] = set()
+            own_membership_key = (EventTypes.Member, sync_config.user.to_string())
+            state_keys_to_look_up: set[tuple[str, str]] = set()
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
                 if delta.event_id is None:
@@ -1735,11 +1751,8 @@ class SyncHandler:
                     #  - it is in the timeline (see above).
                     #  - OR it is the user's own membership, in case a filter
                     #    removed their leave from the timeline.
-                    if key in timeline_state or key == (
-                        EventTypes.Member,
-                        sync_config.user.to_string(),
-                    ):
-                        cleared_state_keys.add(key)
+                    if key in timeline_state or key == own_membership_key:
+                        state_keys_to_look_up.add(key)
                     continue
 
                 # Note that deltas are in stream ordering, so if there are
@@ -1747,13 +1760,21 @@ class SyncHandler:
                 # the latest one.
                 delta_state_ids[key] = delta.event_id
                 changed_keys.add(key)
-                cleared_state_keys.discard(key)
+                state_keys_to_look_up.discard(key)
 
-            if cleared_state_keys:
+            if own_membership_key in state_keys_to_look_up:
+                # The server left the room in this window. It only wrote deltas
+                # for the keys that were in the room state before the batch that
+                # made it leave, so the keys that batch added have no delta at
+                # all. Look up all the keys in the timeline: the ones with a delta
+                # are already in the set.
+                state_keys_to_look_up.update(timeline_state)
+
+            if state_keys_to_look_up:
                 state_at_end = await self._state_storage_controller.get_state_ids_at(
                     room_id,
                     stream_position=end_token,
-                    state_filter=StateFilter.from_types(cleared_state_keys),
+                    state_filter=StateFilter.from_types(state_keys_to_look_up),
                     # Don't wait for the full state. Partial state has every state
                     # event except remote memberships, and any remote membership
                     # we look up here is from an event in the timeline, which we
@@ -1796,15 +1817,15 @@ class SyncHandler:
         if is_linear_timeline and not batch.limited:
             state_ids: StateMap[str] = {}
             if lazy_load_members:
-                if members_to_fetch and batch.events:
+                if members_to_fetch:
                     # We're lazy-loading, so the client might need some more
-                    # member events to understand the events in this timeline.
+                    # member events to understand the events in this timeline and/or sticky section.
                     # So we fish out all the member events corresponding to the
-                    # timeline here. The caller will then dedupe any redundant
+                    # timeline and/or sticky section here. The caller will then dedupe any redundant
                     # ones.
 
-                    state_ids = (
-                        await self._state_storage_controller.get_state_ids_for_event(
+                    if batch.events:
+                        state_ids = await self._state_storage_controller.get_state_ids_for_event(
                             batch.events[0].event.event_id,
                             # we only want members!
                             state_filter=StateFilter.from_types(
@@ -1813,7 +1834,23 @@ class SyncHandler:
                             ),
                             await_full_state=False,
                         )
-                    )
+                    else:
+                        # If we don't have any events in the timeline then this means we have members
+                        # to fetch for the sake of sticky events.
+                        # It's still the case that we should return the state at the 'start' of the timeline,
+                        # which in this case is the same as the end, so use the `end_token` to get state.
+                        state_ids = (
+                            await self._state_storage_controller.get_state_ids_at(
+                                room_id,
+                                end_token,
+                                # we only want members!
+                                state_filter=StateFilter.from_types(
+                                    (EventTypes.Member, member)
+                                    for member in members_to_fetch
+                                ),
+                                await_full_state=False,
+                            )
+                        )
             # A linear, non-gappy timeline means the only changes to the `state`
             # are lazy-loaded members.
             return state_ids, set()
@@ -2535,9 +2572,9 @@ class SyncHandler:
                     include_users.add(invited.invite.sender)
             # joined
             for joined in sync_result_builder.joined:
-                for timeline_event in joined.timeline.events:
-                    if self._is_mine_id(timeline_event.event.sender):
-                        include_users.add(timeline_event.event.sender)
+                for sender in joined.lazy_loading_members_user_ids():
+                    if self._is_mine_id(sender):
+                        include_users.add(sender)
             # knocked
             for knocked in sync_result_builder.knocked:
                 if self._is_mine_id(knocked.knock.sender):
@@ -3494,10 +3531,34 @@ class SyncHandler:
             ):
                 return
 
+            sticky_events: list[FilteredEvent] = []
+            if room_builder.rtype == "joined" and sticky_event_ids:
+                # As per MSC4354:
+                # Remove sticky events that are already in the timeline, else we will needlessly duplicate
+                # events.
+                # There is no purpose in including sticky events in the sticky section if they're already in
+                # the timeline, as either way the client becomes aware of them.
+                # This is particularly important given the risk of sticky events spam since
+                # anyone can send sticky events, so halving the bandwidth on average for each sticky
+                # event is helpful.
+                timeline_event_id_set = {ev.event.event_id for ev in batch.events}
+                # Must preserve sticky event stream order
+                sticky_event_ids = [
+                    e for e in sticky_event_ids if e not in timeline_event_id_set
+                ]
+                if sticky_event_ids:
+                    # Fetch and filter the sticky events
+                    sticky_events = await filter_and_transform_events_for_client(
+                        self._storage_controllers,
+                        sync_result_builder.sync_config.user.to_string(),
+                        await self.store.get_events_as_list(sticky_event_ids),
+                    )
+
             if not room_builder.out_of_band:
                 state = await self.compute_state_delta(
                     room_id,
                     batch,
+                    sticky_events,
                     sync_config,
                     since_token,
                     room_builder.end_token,
@@ -3538,28 +3599,7 @@ class SyncHandler:
 
             if room_builder.rtype == "joined":
                 unread_notifications: dict[str, int] = {}
-                sticky_events: list[FilteredEvent] = []
-                if sticky_event_ids:
-                    # As per MSC4354:
-                    # Remove sticky events that are already in the timeline, else we will needlessly duplicate
-                    # events.
-                    # There is no purpose in including sticky events in the sticky section if they're already in
-                    # the timeline, as either way the client becomes aware of them.
-                    # This is particularly important given the risk of sticky events spam since
-                    # anyone can send sticky events, so halving the bandwidth on average for each sticky
-                    # event is helpful.
-                    timeline_event_id_set = {ev.event.event_id for ev in batch.events}
-                    # Must preserve sticky event stream order
-                    sticky_event_ids = [
-                        e for e in sticky_event_ids if e not in timeline_event_id_set
-                    ]
-                    if sticky_event_ids:
-                        # Fetch and filter the sticky events
-                        sticky_events = await filter_and_transform_events_for_client(
-                            self._storage_controllers,
-                            sync_result_builder.sync_config.user.to_string(),
-                            await self.store.get_events_as_list(sticky_event_ids),
-                        )
+
                 room_sync = JoinedSyncResult(
                     room_id=room_id,
                     timeline=batch,

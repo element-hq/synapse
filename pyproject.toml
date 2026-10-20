@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.163.0"
+version = "1.164.0rc1"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -129,7 +129,6 @@ postgres = [
 ]
 saml2 = [
     "pysaml2>=4.5.0",
-    "lxml-stubs>=0.4.0",
 
     # Transitive dependencies from pysaml2
     # These dependencies aren't directly required by Synapse.
@@ -188,7 +187,6 @@ all = [
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
     # saml2
     "pysaml2>=4.5.0",
-    "lxml-stubs>=0.4.0",
     # oidc and jwt
     "authlib>=0.15.1",
     # url-preview
