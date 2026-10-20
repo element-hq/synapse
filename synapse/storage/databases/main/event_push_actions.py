@@ -92,7 +92,7 @@ import attr
 
 from twisted.internet.task import LoopingCall
 
-from synapse.api.constants import MAIN_TIMELINE, ReceiptTypes
+from synapse.api.constants import MAIN_TIMELINE, Membership, ReceiptTypes
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -611,15 +611,21 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         if unthreaded_receipt_stream_ordering is not None:
             from_stream_ordering = unthreaded_receipt_stream_ordering
         else:
-            # If the user has no unthreaded receipt in the room, retrieve the stream
-            # ordering for the latest membership event from this user in this room
-            # (which we assume is a join).
+            # If the user has no unthreaded receipt in the room, count from their
+            # join instead. If they are not joined there is nothing to count.
             event_id = self.db_pool.simple_select_one_onecol_txn(
                 txn=txn,
                 table="local_current_membership",
-                keyvalues={"room_id": room_id, "user_id": user_id},
+                keyvalues={
+                    "room_id": room_id,
+                    "user_id": user_id,
+                    "membership": Membership.JOIN,
+                },
                 retcol="event_id",
+                allow_none=True,
             )
+            if event_id is None:
+                return RoomNotifCounts.empty()
 
             from_stream_ordering = self.get_stream_id_for_event_txn(txn, event_id)
 
