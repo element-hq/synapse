@@ -1,0 +1,1 @@
+Improve memory usage of `get_server_acl_for_room` cache by not compiling regex for non-glob entries on a rooms server ACL and instead using a hashset for those.
