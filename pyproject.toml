@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.163.0rc1"
+version = "1.164.0rc1"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -128,7 +128,6 @@ postgres = [
 ]
 saml2 = [
     "pysaml2>=4.5.0",
-    "lxml-stubs>=0.4.0",
 
     # Transitive dependencies from pysaml2
     # These dependencies aren't directly required by Synapse.
@@ -152,11 +151,18 @@ opentracing = [
     "tornado>=6.0",  # via jaeger-client
 ]
 jwt = ["authlib"]
-# hiredis is not a *strict* dependency, but it makes things much faster.
-# (if it is not installed, we fall back to slow code.)
-# txredisapi 1.4.12 is the first release to accept a `username` kwarg for
-# Redis ACL auth: https://github.com/IlyaSkriblovsky/txredisapi/releases/tag/1.4.12
-redis = ["txredisapi>=1.4.12", "hiredis>=0.3"]
+redis = [
+    # txredisapi 1.4.12 is the first release to accept a `username` kwarg for
+    # Redis ACL auth: https://github.com/IlyaSkriblovsky/txredisapi/releases/tag/1.4.12
+    #
+    # FIXME: 1.6.0 introduces a number of incompatible breaking changes that will
+    # require updates to our own code, see
+    # https://github.com/element-hq/synapse/issues/20347#issuecomment-6154861014
+    "txredisapi>=1.4.12,<1.6.0",
+    # hiredis is not a *strict* dependency, but it makes things much faster.
+    # (if it is not installed, we fall back to slow code.)
+    "hiredis>=0.3"
+]
 # Required to use experimental `caches.track_memory_usage` config option.
 cache-memory = ["pympler>=1.0"]
 # If this is updated, don't forget to update the equivalent lines in
@@ -180,7 +186,6 @@ all = [
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
     # saml2
     "pysaml2>=4.5.0",
-    "lxml-stubs>=0.4.0",
     # oidc and jwt
     "authlib>=0.15.1",
     # url-preview
@@ -190,7 +195,7 @@ all = [
     # opentracing
     "jaeger-client>=4.2.0", "opentracing>=2.2.0",
     # redis
-    "txredisapi>=1.4.12", "hiredis>=0.3",
+    "txredisapi>=1.4.12,<1.6.0", "hiredis>=0.3",
     # cache-memory
     # 1.0 added support for python 3.10, our current minimum supported python version
     "pympler>=1.0",
