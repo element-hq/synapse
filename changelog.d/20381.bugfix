@@ -1,1 +1,1 @@
-Fix [broken linearizer](https://github.com/element-hq/synapse/issues/18422) and enforce [55e4d27](https://github.com/element-hq/synapse/commit/55e4d27b36fd69a3cf3eceecbd42706579ef2dc7).
+Fix a bug introduced in Synapse 1.75.0 that broke the mechanism intended to linearise events which were concurrently sent on the same worker. The increased forking of the room DAG could exacerbate performance problems.
