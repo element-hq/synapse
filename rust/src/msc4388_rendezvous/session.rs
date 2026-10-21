@@ -46,6 +46,11 @@ pub struct Session {
     /// keyed by the transaction ID used, oldest first. Used to make retries
     /// idempotent.
     ///
+    /// Ideally we would keep only the latest transaction ID and response per
+    /// sender. However, we cannot tell the senders apart, so we keep a bounded
+    /// history instead. A retry is only wrongly rejected if more than
+    /// `MAX_RECORDED_TRANSACTIONS` successful writes happen in between.
+    ///
     /// Rejected writes are not recorded: the counter only ever advances, so a
     /// retry of a rejected `PUT` would be rejected again anyway, and leaving
     /// them out means a stream of failed writes cannot evict the record of a
