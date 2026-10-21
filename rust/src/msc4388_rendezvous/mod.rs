@@ -33,7 +33,7 @@ use crate::{
     homeserver::HomeServer,
     http::http_request_from_twisted,
     identifier::OpaqueIdentifier,
-    msc4388_rendezvous::session::{GetResponse, PostResponse, PutOutcome, PutResponse},
+    msc4388_rendezvous::session::{ConcurrentWrite, GetResponse, PostResponse, PutResponse},
     runtime::RustRuntime,
 };
 
@@ -327,11 +327,11 @@ impl MSC4388RendezvousHandler {
             .filter(|s| !s.expired(now))
             .ok_or_else(NotFoundError::new)?;
 
-        // The session performs the compare-and-swap, and remembers the outcome
+        // The session performs the compare-and-swap, and remembers the result
         // against the transaction ID so that retries are idempotent.
         match session.send(&txn_id, &sequence_token, data, now) {
-            PutOutcome::Accepted(sequence_token) => Ok((200, PutResponse::new(sequence_token))),
-            PutOutcome::ConcurrentWrite => Err(SynapseError::new(
+            Ok(sequence_token) => Ok((200, PutResponse::new(sequence_token))),
+            Err(ConcurrentWrite) => Err(SynapseError::new(
                 StatusCode::CONFLICT,
                 "sequence_token does not match".to_owned(),
                 "IO_ELEMENT_MSC4388_CONCURRENT_WRITE",

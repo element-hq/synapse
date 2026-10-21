@@ -335,12 +335,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             channel.json_body["errcode"], "IO_ELEMENT_MSC4388_CONCURRENT_WRITE"
         )
 
-        # ...and retrying it replays that error, even with a now-valid
-        # sequence token.
+        # ...and retrying it gets the same error.
         channel = self.make_request(
             "PUT",
             send_endpoint(rendezvous_id, "txn2"),
-            {"sequence_token": updated_sequence_token, "data": "something=else"},
+            {"sequence_token": initial_sequence_token, "data": "something=else"},
             access_token=None,
         )
         self.assertEqual(channel.code, 409)
@@ -363,6 +362,65 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
         self.assertNotEqual(channel.json_body["sequence_token"], updated_sequence_token)
+
+    @override_config(
+        {
+            "disable_registration": True,
+            "matrix_authentication_service": {
+                "enabled": True,
+                "secret": "secret_value",
+                "endpoint": "https://issuer",
+            },
+            "experimental_features": {
+                "msc4388_mode": "open",
+            },
+        }
+    )
+    def test_rendezvous_put_rejected_writes_are_not_recorded(self) -> None:
+        """
+        Only successful PUTs are recorded against their transaction ID, so a
+        large number of rejected writes cannot push the record of a successful
+        one out of the bounded per-session history and turn a legitimate retry
+        into a spurious concurrent write error.
+        """
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        rendezvous_id = channel.json_body["id"]
+        initial_sequence_token = channel.json_body["sequence_token"]
+
+        channel = self.make_request(
+            "PUT",
+            send_endpoint(rendezvous_id, "txn1"),
+            {"sequence_token": initial_sequence_token, "data": "foo=baz"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        updated_sequence_token = channel.json_body["sequence_token"]
+
+        # More rejected writes than the server remembers transactions for.
+        for i in range(150):
+            channel = self.make_request(
+                "PUT",
+                send_endpoint(rendezvous_id, f"rejected{i}"),
+                {"sequence_token": initial_sequence_token, "data": "something=else"},
+                access_token=None,
+            )
+            self.assertEqual(channel.code, 409)
+
+        # The original PUT can still be retried idempotently.
+        channel = self.make_request(
+            "PUT",
+            send_endpoint(rendezvous_id, "txn1"),
+            {"sequence_token": initial_sequence_token, "data": "foo=baz"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
 
     @override_config(
         {

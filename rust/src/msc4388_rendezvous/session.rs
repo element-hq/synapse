@@ -30,16 +30,10 @@ use crate::identifier::OpaqueIdentifier;
 /// this is never reached.
 const MAX_RECORDED_TRANSACTIONS: usize = 100;
 
-/// The recorded outcome of a `PUT` request, so that a retry using the same
-/// transaction ID can be answered without re-evaluating the compare-and-swap.
-#[derive(Clone)]
-pub enum PutOutcome {
-    /// The payload was accepted, advancing the session to this sequence token.
-    Accepted(String),
-    /// The supplied `sequence_token` did not match, so the payload was
-    /// rejected as a concurrent write.
-    ConcurrentWrite,
-}
+/// The supplied `sequence_token` did not match the session's current one, so
+/// the payload was rejected as a concurrent write.
+#[derive(Debug)]
+pub struct ConcurrentWrite;
 
 /// A single session, containing data, metadata, and expiry information.
 pub struct Session {
@@ -48,9 +42,15 @@ pub struct Session {
     /// Counter incremented on each successful write, whose decimal
     /// representation is the `sequence_token`, as recommended by MSC4388.
     sequence: u64,
-    /// The outcome of each `PUT` seen for this session, keyed by the
-    /// transaction ID used, oldest first. Used to make retries idempotent.
-    transactions: VecDeque<(OpaqueIdentifier, PutOutcome)>,
+    /// The sequence token returned by each successful `PUT` to this session,
+    /// keyed by the transaction ID used, oldest first. Used to make retries
+    /// idempotent.
+    ///
+    /// Rejected writes are not recorded: the counter only ever advances, so a
+    /// retry of a rejected `PUT` would be rejected again anyway, and leaving
+    /// them out means a stream of failed writes cannot evict the record of a
+    /// successful one.
+    transactions: VecDeque<(OpaqueIdentifier, String)>,
     last_modified: SystemTime,
     expires: SystemTime,
 }
@@ -129,30 +129,32 @@ impl Session {
     }
 
     /// Handle a send (`PUT`) for this session: perform the compare-and-swap
-    /// against the supplied `sequence_token`, recording the outcome against
-    /// the transaction ID so that a retry using the same transaction ID is
-    /// answered with the same response rather than being re-evaluated.
+    /// against the supplied `sequence_token`, recording the resulting sequence
+    /// token against the transaction ID so that a retry using the same
+    /// transaction ID is answered with the same response rather than being
+    /// re-evaluated.
+    ///
+    /// Returns the new sequence token if the payload was accepted.
     pub fn send(
         &mut self,
         txn_id: &OpaqueIdentifier,
         sequence_token: &str,
         data: String,
         now: SystemTime,
-    ) -> PutOutcome {
-        if let Some(outcome) = self.transaction_outcome(txn_id) {
-            return outcome.clone();
+    ) -> Result<String, ConcurrentWrite> {
+        if let Some(recorded) = self.transaction_outcome(txn_id) {
+            return Ok(recorded.clone());
         }
 
-        let outcome = if self.sequence_token() == sequence_token {
-            self.update(data, now);
-            PutOutcome::Accepted(self.sequence_token())
-        } else {
-            PutOutcome::ConcurrentWrite
-        };
+        if self.sequence_token() != sequence_token {
+            return Err(ConcurrentWrite);
+        }
 
-        self.record_transaction(txn_id.clone(), outcome.clone());
+        self.update(data, now);
+        let new_sequence_token = self.sequence_token();
+        self.record_transaction(txn_id.clone(), new_sequence_token.clone());
 
-        outcome
+        Ok(new_sequence_token)
     }
 
     /// Update the session with new data and last modified time.
@@ -162,19 +164,20 @@ impl Session {
         self.last_modified = now;
     }
 
-    /// The outcome of a previous `PUT` made with the given transaction ID, if
-    /// we have seen it for this session.
-    fn transaction_outcome(&self, txn_id: &OpaqueIdentifier) -> Option<&PutOutcome> {
+    /// The sequence token returned by a previous successful `PUT` made with
+    /// the given transaction ID, if we have seen one for this session.
+    fn transaction_outcome(&self, txn_id: &OpaqueIdentifier) -> Option<&String> {
         self.transactions
             .iter()
             .find(|(id, _)| id == txn_id)
-            .map(|(_, outcome)| outcome)
+            .map(|(_, sequence_token)| sequence_token)
     }
 
-    /// Record the outcome of a `PUT` against the transaction ID it used, so
-    /// that a retry with the same transaction ID gets the same response.
-    fn record_transaction(&mut self, txn_id: OpaqueIdentifier, outcome: PutOutcome) {
-        self.transactions.push_back((txn_id, outcome));
+    /// Record the sequence token returned by a successful `PUT` against the
+    /// transaction ID it used, so that a retry with the same transaction ID
+    /// gets the same response.
+    fn record_transaction(&mut self, txn_id: OpaqueIdentifier, sequence_token: String) {
+        self.transactions.push_back((txn_id, sequence_token));
         while self.transactions.len() > MAX_RECORDED_TRANSACTIONS {
             self.transactions.pop_front();
         }
