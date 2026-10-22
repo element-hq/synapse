@@ -1738,11 +1738,12 @@ class SyncHandler:
             #       any earlier delta for it is stale. That batch ends the
             #       timeline, so we look up the keys in the timeline in state
             #       groups, which still have the state at `end_token`.
-            #     - has no delta at all if it is new.
-            #       TODO: Recover it.
+            #     - has no delta at all if it is new, so we also look up all the
+            #       keys in the timeline (see below).
             #    Keys that only changed earlier keep their earlier delta, and
             #    other keys need no update.
-            cleared_state_keys: set[tuple[str, str]] = set()
+            own_membership_key = (EventTypes.Member, sync_config.user.to_string())
+            state_keys_to_look_up: set[tuple[str, str]] = set()
             for delta in deltas:
                 key = (delta.event_type, delta.state_key)
                 if delta.event_id is None:
@@ -1750,11 +1751,8 @@ class SyncHandler:
                     #  - it is in the timeline (see above).
                     #  - OR it is the user's own membership, in case a filter
                     #    removed their leave from the timeline.
-                    if key in timeline_state or key == (
-                        EventTypes.Member,
-                        sync_config.user.to_string(),
-                    ):
-                        cleared_state_keys.add(key)
+                    if key in timeline_state or key == own_membership_key:
+                        state_keys_to_look_up.add(key)
                     continue
 
                 # Note that deltas are in stream ordering, so if there are
@@ -1762,13 +1760,21 @@ class SyncHandler:
                 # the latest one.
                 delta_state_ids[key] = delta.event_id
                 changed_keys.add(key)
-                cleared_state_keys.discard(key)
+                state_keys_to_look_up.discard(key)
 
-            if cleared_state_keys:
+            if own_membership_key in state_keys_to_look_up:
+                # The server left the room in this window. It only wrote deltas
+                # for the keys that were in the room state before the batch that
+                # made it leave, so the keys that batch added have no delta at
+                # all. Look up all the keys in the timeline: the ones with a delta
+                # are already in the set.
+                state_keys_to_look_up.update(timeline_state)
+
+            if state_keys_to_look_up:
                 state_at_end = await self._state_storage_controller.get_state_ids_at(
                     room_id,
                     stream_position=end_token,
-                    state_filter=StateFilter.from_types(cleared_state_keys),
+                    state_filter=StateFilter.from_types(state_keys_to_look_up),
                     # Don't wait for the full state. Partial state has every state
                     # event except remote memberships, and any remote membership
                     # we look up here is from an event in the timeline, which we
