@@ -334,6 +334,15 @@ class ContentRepositoryConfig(Config):
                 local_media_lifetime
             )
 
+        self.media_retention_keep_local_media_below_filesize = 0
+        keep_local_media_below_filesize = media_retention.get(
+            "keep_local_media_below_filesize"
+        )
+        if keep_local_media_below_filesize is not None:
+            self.media_retention_keep_local_media_below_filesize = self.parse_size(
+                keep_local_media_below_filesize
+            )
+
         self.media_retention_remote_media_lifetime_ms = None
         remote_media_lifetime = media_retention.get("remote_media_lifetime")
         if remote_media_lifetime is not None:

@@ -2403,12 +2403,15 @@ This setting has the following sub-options:
 
 * `local_media_lifetime`: Duration without access to a local media resource after which it will be purged. If the media has never been accessed, the media's creation time is used instead. Both thumbnails and the original media will be removed. If unset or null, local media will not be purged. Defaults to `null`.
 
+* `keep_local_media_below_filesize`: Size in bytes (either a plain number or a value such as `10M`) below which local media will be kept, even if it is older than `local_media_lifetime`. Only local media larger than this size is purged. This option only has an effect when `local_media_lifetime` is set. Defaults to `0`, which means no media is spared.
+
 * `remote_media_lifetime`: Duration without access to a remote media resource after which it will be purged. If the media has never been accessed, the media's creation time is used instead. Both thumbnails and the original media will be removed. If unset or null, remote media will not be purged. Defaults to `null`.
 
 Example configuration:
 ```yaml
 media_retention:
   local_media_lifetime: 90d
+  keep_local_media_below_filesize: 10M
   remote_media_lifetime: 14d
 ```
 ---
