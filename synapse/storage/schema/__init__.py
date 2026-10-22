@@ -182,6 +182,9 @@ Changes in SCHEMA_VERSION = 95
     - MSC4140: Stop using the `delayed_events_stream_pos` table, now that
       delayed state events are no longer canceled by more recent state events
       sent from a different user.
+    - MSC4140: Add columns to the `delayed_events` table to keep track of delayed events
+      that have been sent, cancelled, or failed to be sent due to an error.
+    - MSC4140: Add an index on `delayed_events` to rank finalised delayed events per user.
     - `event_edges.is_state` is no longer read from (it has not been written to since SCHEMA_VERSION 72).
 """
 

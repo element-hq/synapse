@@ -29,6 +29,7 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
 from synapse.config._base import Config, read_file
 from synapse.types import JsonDict, StrSequence
+from synapse.util.duration import Duration
 
 
 @cache
@@ -249,6 +250,48 @@ class ExperimentalConfig(Config):
 
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
+
+        # The portion of MSC4140 related to retention of delayed events for lookup
+        # after they have been finalised, i.e. sent, cancelled, or failed to be sent.
+        # Finalised delayed events past their retention are pruned every 5 minutes.
+
+        # How long a finalised delayed event may be retained for.
+        # 0 disables retention.
+        finalised_retention_period_ms = self.parse_duration(
+            experimental.get("msc4140_finalised_retention_period", "7d")
+        )
+        if finalised_retention_period_ms < 0:
+            raise ConfigError(
+                "'msc4140_finalised_retention_period' must be a non-negative duration",
+                ("experimental", "msc4140_finalised_retention_period"),
+            )
+        self.msc4140_finalised_retention_period = Duration(
+            milliseconds=finalised_retention_period_ms
+        )
+
+        # The maximum number of finalised delayed events retained per user.
+        # 0 disables retention.
+        self.msc4140_finalised_retention_limit_per_user: int = experimental.get(
+            "msc4140_finalised_retention_limit_per_user", 1000
+        )
+        if (
+            not isinstance(self.msc4140_finalised_retention_limit_per_user, int)
+            or self.msc4140_finalised_retention_limit_per_user < 0
+        ):
+            raise ConfigError(
+                "'msc4140_finalised_retention_limit_per_user' must be a non-negative integer",
+                ("experimental", "msc4140_finalised_retention_limit_per_user"),
+            )
+
+        # Since setting either config to 0 disables finalised retention,
+        # set both to 0 if either of them are 0, so that it doesn't make
+        # a difference which of them had been explicitly set to 0.
+        if (
+            not self.msc4140_finalised_retention_period
+            or not self.msc4140_finalised_retention_limit_per_user
+        ):
+            self.msc4140_finalised_retention_period = Duration()
+            self.msc4140_finalised_retention_limit_per_user = 0
 
         # MSC4143: Matrix RTC Transport using Livekit Backend
         self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
