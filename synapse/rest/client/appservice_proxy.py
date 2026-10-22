@@ -35,7 +35,10 @@ def _make_proxy_callback(
     appservice: ApplicationService,
 ) -> ServletCallback:
     async def _proxy(request: SynapseRequest, **kwargs: str) -> None:
-        requester = await hs.get_auth().get_user_by_req(request)
+        assert appservice.proxy_prefix is not None
+        requester = await hs.get_auth().get_user_by_req(
+            request, allow_guest=appservice.proxy_prefix.allow_guests
+        )
 
         await ratelimiter.ratelimit(requester)
 
@@ -69,7 +72,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
 
         pattern = re.compile(
             r"^/_matrix/client/(?:unstable/[^/]+|v[^/]+)/%s(/.*)?$"
-            % (re.escape(appservice.proxy_prefix),)
+            % (re.escape(appservice.proxy_prefix.path_prefix),)
         )
         callback = _make_proxy_callback(hs, ratelimiter, appservice)
 
