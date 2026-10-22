@@ -1,3 +1,13 @@
+# Synapse 1.164.0rc2 (2026-10-22)
+
+## Internal Changes
+
+- Update `certifi` to `2026.10.19` to address [GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2). This only affects TLS connections made by the Sentry SDK when `sentry` is configured, SAML, and a couple utility scripts; federation and Synapse's other outbound HTTP requests use the system trust store. ([\#20387](https://github.com/element-hq/synapse/issues/20387))
+- Bump `rustls-webpki` to `0.103.16` to actively distrust [compromised eMudhra intermediate CA certificates](https://emudhra.we-have-a-problem.com/). ([\#20392](https://github.com/element-hq/synapse/issues/20392))
+
+
+
+
 # Synapse 1.164.0rc1 (2026-10-20)
 
 ## Features
