@@ -147,6 +147,7 @@ class FederationServer(FederationBase):
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self._federation_callbacks = hs.get_module_api_callbacks().federation
         self._federation_event_handler = hs.get_federation_event_handler()
+        self._event_creation_handler = hs.get_event_creation_handler()
         self.state = hs.get_state_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
         self._room_member_handler = hs.get_room_member_handler()
@@ -1254,20 +1255,21 @@ class FederationServer(FederationBase):
             logger.warning("%s", errmsg)
             raise SynapseError(403, errmsg, Codes.FORBIDDEN)
 
-        try:
-            return await self._federation_event_handler.on_send_membership_event(
-                origin, event
-            )
-        except PartialStateConflictError:
-            # The room was un-partial stated while we were persisting the event.
-            # Try once more, with full state this time.
-            logger.info(
-                "Room %s was un-partial stated during `on_send_membership_event`, trying again.",
-                room_id,
-            )
-            return await self._federation_event_handler.on_send_membership_event(
-                origin, event
-            )
+        async with self._event_creation_handler.limiter.queue(room_id):
+            try:
+                return await self._federation_event_handler.on_send_membership_event(
+                    origin, event
+                )
+            except PartialStateConflictError:
+                # The room was un-partial stated while we were persisting the event.
+                # Try once more, with full state this time.
+                logger.info(
+                    "Room %s was un-partial stated during `on_send_membership_event`, trying again.",
+                    room_id,
+                )
+                return await self._federation_event_handler.on_send_membership_event(
+                    origin, event
+                )
 
     async def on_event_auth(
         self, origin: str, room_id: str, event_id: str
