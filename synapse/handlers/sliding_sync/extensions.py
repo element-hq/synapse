@@ -100,10 +100,11 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        all_interested_room_ids: set[str],
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        sticky_events_response: SlidingSyncResult.Extensions.StickyEventsExtension
+        | None,
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions:
@@ -114,20 +115,18 @@ class SlidingSyncExtensionHandler:
             previous_connection_state: Snapshot of the current per-connection state
             new_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state during this request.
-            all_interested_room_ids: The IDs of all rooms that the client is interested in,
-                even if they don't appear in the current limited window.
-                See `SlidingSyncInterestedRooms.all_rooms`.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
             actual_room_response_map: A map of room ID to room results in the the
                 Sliding Sync response.
+            sticky_events_response: The response of the sticky events extension.
             to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
 
         if sync_config.extensions is None:
-            return SlidingSyncResult.Extensions()
+            return SlidingSyncResult.Extensions(sticky_events=sticky_events_response)
 
         to_device_coro = None
         if sync_config.extensions.to_device is not None:
@@ -197,19 +196,6 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
-        sticky_events_coro = None
-        if (
-            sync_config.extensions.sticky_events is not Absent
-            and self._enable_sticky_events
-        ):
-            sticky_events_coro = self.get_sticky_events_extension_response(
-                sync_config=sync_config,
-                sticky_events_request=sync_config.extensions.sticky_events,
-                all_interested_room_ids=all_interested_room_ids,
-                to_token=to_token,
-                from_token=from_token,
-            )
-
         profiles_coro = None
         if sync_config.extensions.profiles is not Absent and self._enable_profiles:
             profiles_coro = self.get_profiles_extension_response(
@@ -229,7 +215,6 @@ class SlidingSyncExtensionHandler:
             receipts_response,
             typing_response,
             thread_subs_response,
-            sticky_events_response,
             profiles_response,
         ) = await gather_optional_coroutines(
             to_device_coro,
@@ -238,7 +223,6 @@ class SlidingSyncExtensionHandler:
             receipts_coro,
             typing_coro,
             thread_subs_coro,
-            sticky_events_coro,
             profiles_coro,
         )
 
@@ -1025,12 +1009,15 @@ class SlidingSyncExtensionHandler:
     async def get_sticky_events_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        sticky_events_request: SlidingSyncConfig.Extensions.StickyEventsExtension,
         all_interested_room_ids: set[str],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions.StickyEventsExtension | None:
-        if not sticky_events_request.enabled:
+        if not self._enable_sticky_events or sync_config.extensions is None:
+            return None
+
+        sticky_events_request = sync_config.extensions.sticky_events
+        if sticky_events_request is Absent or not sticky_events_request.enabled:
             return None
         now = self.clock.time_msec()
         # If there is no `since` token specified, start from the beginning of the stream

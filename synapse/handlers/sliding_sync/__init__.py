@@ -15,7 +15,7 @@
 import itertools
 import logging
 from itertools import chain
-from typing import TYPE_CHECKING, AbstractSet, Mapping
+from typing import TYPE_CHECKING, AbstractSet, Mapping, Sequence
 
 import attr
 from prometheus_client import Histogram
@@ -296,6 +296,32 @@ class SlidingSyncHandler:
 
         new_connection_state = previous_connection_state.get_mutable()
 
+        # Compute sticky events (MSC4354) before the rooms so that the memberships
+        # of sticky senders can be lazy-loaded as part of `required_state` (MSC4480).
+        sticky_events_response = (
+            await self.extensions.get_sticky_events_extension_response(
+                sync_config=sync_config,
+                all_interested_room_ids=interested_rooms.all_rooms,
+                to_token=to_token,
+                from_token=from_token,
+            )
+        )
+        sticky_events_by_room: Mapping[str, list[FilteredEvent]] = {}
+        if sticky_events_response is not None:
+            sticky_events_by_room = sticky_events_response.room_id_to_sticky_events
+
+        # Joined rooms whose config lazy-loads room members.
+        lazy_member_room_ids = {
+            room_id
+            for room_id, room_sync_config in relevant_room_map.items()
+            if room_membership_for_user_map[room_id].membership == Membership.JOIN
+            and StateValues.LAZY
+            in room_sync_config.required_state_map.get(EventTypes.Member, ())
+        }
+        rooms_to_send_map = dict(relevant_rooms_to_send_map)
+        for room_id in sticky_events_by_room.keys() & lazy_member_room_ids:
+            rooms_to_send_map.setdefault(room_id, relevant_room_map[room_id])
+
         @trace
         @tag_args
         async def handle_room(room_id: str) -> None:
@@ -304,7 +330,7 @@ class SlidingSyncHandler:
                 previous_connection_state=previous_connection_state,
                 new_connection_state=new_connection_state,
                 room_id=room_id,
-                room_sync_config=relevant_rooms_to_send_map[room_id],
+                room_sync_config=rooms_to_send_map[room_id],
                 room_membership_for_user_at_to_token=room_membership_for_user_map[
                     room_id
                 ],
@@ -313,22 +339,22 @@ class SlidingSyncHandler:
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
                 newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
+                sticky_events=sticky_events_by_room.get(room_id, []),
             )
 
             # Filter out empty room results during incremental sync
             if room_sync_result or not from_token:
                 rooms[room_id] = room_sync_result
 
-        if relevant_rooms_to_send_map:
+        if rooms_to_send_map:
             with start_active_span("sliding_sync.generate_room_entries"):
-                await concurrently_execute(handle_room, relevant_rooms_to_send_map, 20)
+                await concurrently_execute(handle_room, rooms_to_send_map, 20)
 
         extensions = await self.extensions.get_extensions_response(
             sync_config=sync_config,
             actual_lists=lists,
             previous_connection_state=previous_connection_state,
             new_connection_state=new_connection_state,
-            all_interested_room_ids=interested_rooms.all_rooms,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
             # send regardless of whether they have an event update or not. The
@@ -336,6 +362,7 @@ class SlidingSyncHandler:
             # account data, read receipts, typing indicators, to-device messages, etc).
             actual_room_ids=set(relevant_room_map.keys()),
             actual_room_response_map=rooms,
+            sticky_events_response=sticky_events_response,
             from_token=from_token,
             to_token=to_token,
         )
@@ -382,9 +409,7 @@ class SlidingSyncHandler:
                     unsent_room_ids, from_token.stream_token.room_key
                 )
 
-            new_connection_state.rooms.record_sent_rooms(
-                relevant_rooms_to_send_map.keys()
-            )
+            new_connection_state.rooms.record_sent_rooms(rooms_to_send_map.keys())
 
             connection_position = await self.connection_store.record_new_state(
                 sync_config=sync_config,
@@ -586,6 +611,7 @@ class SlidingSyncHandler:
         newly_joined: bool,
         newly_left: bool,
         is_dm: bool,
+        sticky_events: Sequence[FilteredEvent] = (),
     ) -> SlidingSyncResult.RoomResult:
         """
         Fetch room data for the sync response.
@@ -604,6 +630,7 @@ class SlidingSyncHandler:
             newly_joined: If the user has newly joined the room
             newly_left: If the user has newly left the room
             is_dm: Whether the room is a DM room
+            sticky_events: The sticky events (MSC4354) being returned for the room
         """
         user = sync_config.user
 
@@ -1119,8 +1146,14 @@ class SlidingSyncHandler:
                                             timeline_event.event.state_key
                                         )
 
+                            # As are the senders of the sticky events (MSC4354).
+                            timeline_membership.update(
+                                sticky_event.event.sender
+                                for sticky_event in sticky_events
+                            )
+
                             # The client needs to know the membership of everyone in
-                            # the timeline we're returning.
+                            # the timeline and sticky events we're returning.
                             lazy_load_user_ids.update(timeline_membership)
 
                             # Update the required state filter so we pick up the new
