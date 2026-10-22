@@ -29,7 +29,12 @@ from typing import (
 )
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
-from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
+from synapse.metrics import (
+    SERVER_NAME_LABEL,
+    event_processing_positions,
+    known_rooms_gauge,
+    locally_joined_rooms_gauge,
+)
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import JsonMapping
 from synapse.util.duration import Duration
@@ -94,7 +99,8 @@ class StatsHandler:
 
     async def _unsafe_process(self) -> None:
         # If self.pos is None then means we haven't fetched it from DB
-        if self.pos is None:
+        initial_run = self.pos is None
+        if initial_run:
             self.pos = await self.store.get_stats_positions()
             room_max_stream_ordering = self.store.get_room_max_stream_ordering()
             if self.pos > room_max_stream_ordering:
@@ -107,6 +113,9 @@ class StatsHandler:
                     room_max_stream_ordering,
                 )
                 self.pos = room_max_stream_ordering
+
+        assert self.pos is not None
+        refresh_room_metrics = initial_run
 
         # Loop round handling deltas until we're up to date
 
@@ -131,6 +140,12 @@ class StatsHandler:
             if deltas:
                 logger.debug("Handling %d state deltas", len(deltas))
                 room_deltas, user_deltas = await self._handle_deltas(deltas)
+                # If any of the deltas are create or member events, refresh the room counts
+                if any(
+                    d.event_type in (EventTypes.Create, EventTypes.Member)
+                    for d in deltas
+                ):
+                    refresh_room_metrics = True
             else:
                 room_deltas = {}
                 user_deltas = {}
@@ -152,6 +167,9 @@ class StatsHandler:
             ).set(max_pos)
 
             self.pos = max_pos
+
+        if refresh_room_metrics:
+            await self.refresh_room_metrics()
 
     async def _handle_deltas(
         self, deltas: Iterable[StateDelta]
@@ -320,3 +338,13 @@ class StatsHandler:
             await self.store.update_room_state(room_id, state)
 
         return room_to_stats_deltas, user_to_stats_deltas
+
+    async def refresh_room_metrics(self) -> None:
+        """Refresh the room count metrics"""
+        if not self.stats_enabled:
+            return
+        known, locally_joined = await self.store.get_room_stats()
+        known_rooms_gauge.labels(**{SERVER_NAME_LABEL: self.server_name}).set(known)
+        locally_joined_rooms_gauge.labels(**{SERVER_NAME_LABEL: self.server_name}).set(
+            locally_joined
+        )
