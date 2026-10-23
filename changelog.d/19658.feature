@@ -1,0 +1,1 @@
+Optionally intercept harmful room directory searches with error messages through policyserv. See new "Safety Policy" configuration for details.
