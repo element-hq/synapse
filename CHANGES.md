@@ -1,3 +1,21 @@
+# Synapse 1.163.2 (2026-10-23)
+
+## Internal Changes
+
+- Bump `pillow` to `13.0.0` to address [critical security vulnerabilties](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html#security). You must use Python >= 3.11 to take advantage of this version bump. ([\#20398](https://github.com/element-hq/synapse/issues/20398))
+
+
+
+
+# Synapse 1.164.0rc3 (2026-10-23)
+
+## Internal Changes
+
+- Bump `pillow` to `13.0.0` to address [critical security vulnerabilties](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html#security). You must use Python >= 3.11 to take advantage of this version bump. ([\#20399](https://github.com/element-hq/synapse/issues/20399))
+
+
+
+
 # Synapse 1.163.1 (2026-10-22)
 
 ## Internal Changes
