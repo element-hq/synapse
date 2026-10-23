@@ -15,6 +15,10 @@ classifiers = [
 
 # Mandatory Dependencies
 dependencies = [
+    # `automat` < 22.10.0 builds code objects positionally, which breaks on Python 3.11.
+    # `automat` doesn't have a changelog but Python 3.11 support was tracked by
+    # https://github.com/glyph/automat/issues/135
+    "automat>=22.10.0", # via twisted
     # we use the TYPE_CHECKER.redefine method added in jsonschema 3.0.0
     "jsonschema>=3.0.0",
     # 0.25.0 is the first version to support Python 3.14.
