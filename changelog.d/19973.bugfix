@@ -1,0 +1,1 @@
+Fix bug where Synapse could refuse to start with an `IncorrectDatabaseSetup` error about `stream_positions` being inconsistent with a stream sequence, even though the sequence had just been automatically repaired.
