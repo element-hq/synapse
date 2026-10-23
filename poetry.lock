@@ -3611,4 +3611,4 @@ url-preview = ["beautifulsoup4"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11.0,<4.0.0"
-content-hash = "a8baafeaa42143694923b8a0c65f6f2abc2a1fa7561c9d8621bfeffdab21d658"
+content-hash = "060acfa06e9b79b3d05c5d44a591dba5acf57f1264a88ea9e0b79795192fc413"
