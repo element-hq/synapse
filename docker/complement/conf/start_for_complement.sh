@@ -27,6 +27,9 @@ case "$SYNAPSE_COMPLEMENT_DATABASE" in
     export POSTGRES_USER=postgres
     export POSTGRES_HOST=localhost
 
+    # Disable synchronous commit for potential performance gains
+    export __PRIVATE_SYNAPSE_DISABLE_SYNCHRONOUS_COMMIT=1
+
     # configure supervisord to start postgres
     export START_POSTGRES=true
     ;;
