@@ -62,17 +62,19 @@ class MasUpsertDeviceResource(MasBaseResource):
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
+        user_id_str = str(user_id)
 
-        # Check the user exists
-        user = await self.store.get_user_by_id(user_id=str(user_id))
-        if user is None:
-            raise NotFoundError("User not found")
+        async with self.device_handler.device_management_linearizer.queue(user_id_str):
+            # Check the user exists
+            user = await self.store.get_user_by_id(user_id=user_id_str)
+            if user is None:
+                raise NotFoundError("User not found")
 
-        inserted = await self.device_handler.upsert_device(
-            user_id=str(user_id),
-            device_id=body.device_id,
-            display_name=body.display_name,
-        )
+            inserted = await self.device_handler.upsert_device(
+                user_id=user_id_str,
+                device_id=body.device_id,
+                display_name=body.display_name,
+            )
 
         return HTTPStatus.CREATED if inserted else HTTPStatus.OK, {}
 
@@ -103,16 +105,18 @@ class MasDeleteDeviceResource(MasBaseResource):
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
+        user_id_str = str(user_id)
 
-        # Check the user exists
-        user = await self.store.get_user_by_id(user_id=str(user_id))
-        if user is None:
-            raise NotFoundError("User not found")
+        async with self.device_handler.device_management_linearizer.queue(user_id_str):
+            # Check the user exists
+            user = await self.store.get_user_by_id(user_id=user_id_str)
+            if user is None:
+                raise NotFoundError("User not found")
 
-        await self.device_handler.delete_devices(
-            user_id=str(user_id),
-            device_ids=[body.device_id],
-        )
+            await self.device_handler.delete_devices(
+                user_id=user_id_str,
+                device_ids=[body.device_id],
+            )
 
         return HTTPStatus.NO_CONTENT, {}
 
@@ -144,17 +148,19 @@ class MasUpdateDeviceDisplayNameResource(MasBaseResource):
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
+        user_id_str = str(user_id)
 
-        # Check the user exists
-        user = await self.store.get_user_by_id(user_id=str(user_id))
-        if user is None:
-            raise NotFoundError("User not found")
+        async with self.device_handler.device_management_linearizer.queue(user_id_str):
+            # Check the user exists
+            user = await self.store.get_user_by_id(user_id=user_id_str)
+            if user is None:
+                raise NotFoundError("User not found")
 
-        await self.device_handler.update_device(
-            user_id=str(user_id),
-            device_id=body.device_id,
-            content={"display_name": body.display_name},
-        )
+            await self.device_handler.update_device(
+                user_id=user_id_str,
+                device_id=body.device_id,
+                content={"display_name": body.display_name},
+            )
 
         return HTTPStatus.OK, {}
 
@@ -186,64 +192,66 @@ class MasSyncDevicesResource(MasBaseResource):
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
+        user_id_str = str(user_id)
 
-        # Check the user exists
-        user = await self.store.get_user_by_id(user_id=str(user_id))
-        if user is None:
-            raise NotFoundError("User not found")
+        async with self.device_handler.device_management_linearizer.queue(user_id_str):
+            # Check the user exists
+            user = await self.store.get_user_by_id(user_id=user_id_str)
+            if user is None:
+                raise NotFoundError("User not found")
 
-        current_devices = await self.store.get_devices_by_user(user_id=str(user_id))
-        current_devices_list = set(current_devices.keys())
-        target_device_list = set(body.devices)
+            current_devices = await self.store.get_devices_by_user(user_id=user_id_str)
+            current_devices_list = set(current_devices.keys())
+            target_device_list = set(body.devices)
 
-        # Exclude the dehydrated device (MSC3814): it has no MAS session, so MAS
-        # never lists it in the target set and the reconciliation below would
-        # otherwise treat it as extra and delete it. This mirrors the admin
-        # devices API and MAS's own legacy device-sync path, which both skip it.
-        dehydrated_device = await self.device_handler.get_dehydrated_device(
-            user_id=str(user_id)
-        )
-        if dehydrated_device is not None:
-            current_devices_list.discard(dehydrated_device[0])
-
-        to_add = target_device_list - current_devices_list
-        to_delete = current_devices_list - target_device_list
-
-        # Log what we're about to do to make it easier to debug if it stops
-        # mid-way, as this can be a long operation if there are a lot of devices
-        # to delete or to add.
-        if to_add and to_delete:
-            logger.info(
-                "Syncing %d devices for user %s will add %d devices and delete %d devices",
-                len(target_device_list),
-                user_id,
-                len(to_add),
-                len(to_delete),
+            # Exclude the dehydrated device (MSC3814): it has no MAS session, so MAS
+            # never lists it in the target set and the reconciliation below would
+            # otherwise treat it as extra and delete it. This mirrors the admin
+            # devices API and MAS's own legacy device-sync path, which both skip it.
+            dehydrated_device = await self.device_handler.get_dehydrated_device(
+                user_id=user_id_str
             )
-        elif to_add:
-            logger.info(
-                "Syncing %d devices for user %s will add %d devices",
-                len(target_device_list),
-                user_id,
-                len(to_add),
-            )
-        elif to_delete:
-            logger.info(
-                "Syncing %d devices for user %s will delete %d devices",
-                len(target_device_list),
-                user_id,
-                len(to_delete),
-            )
+            if dehydrated_device is not None:
+                current_devices_list.discard(dehydrated_device[0])
 
-        if to_delete:
-            await self.device_handler.delete_devices(
-                user_id=str(user_id), device_ids=to_delete
-            )
+            to_add = target_device_list - current_devices_list
+            to_delete = current_devices_list - target_device_list
 
-        for device_id in to_add:
-            await self.device_handler.upsert_device(
-                user_id=str(user_id),
-                device_id=device_id,
-            )
+            # Log what we're about to do to make it easier to debug if it stops
+            # mid-way, as this can be a long operation if there are a lot of devices
+            # to delete or to add.
+            if to_add and to_delete:
+                logger.info(
+                    "Syncing %d devices for user %s will add %d devices and delete %d devices",
+                    len(target_device_list),
+                    user_id,
+                    len(to_add),
+                    len(to_delete),
+                )
+            elif to_add:
+                logger.info(
+                    "Syncing %d devices for user %s will add %d devices",
+                    len(target_device_list),
+                    user_id,
+                    len(to_add),
+                )
+            elif to_delete:
+                logger.info(
+                    "Syncing %d devices for user %s will delete %d devices",
+                    len(target_device_list),
+                    user_id,
+                    len(to_delete),
+                )
+
+            if to_delete:
+                await self.device_handler.delete_devices(
+                    user_id=user_id_str, device_ids=to_delete
+                )
+
+            for device_id in to_add:
+                await self.device_handler.upsert_device(
+                    user_id=user_id_str,
+                    device_id=device_id,
+                )
 
         return 200, {}
