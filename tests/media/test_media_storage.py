@@ -844,8 +844,6 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             HttpResponseException(404, "NOT FOUND", unknown_endpoint)
         )
 
-        self.pump()
-
         # There should now be another request to the r0 URL.
         self.assertEqual(len(self.fetches), 2)
         self.assertEqual(self.fetches[1][1], "example.com")
