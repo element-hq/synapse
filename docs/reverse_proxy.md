@@ -76,7 +76,9 @@ server {
         proxy_pass http://localhost:8008;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Host $host:$server_port;
+        # If clients reach Synapse on a non-default port, use `$http_host` instead
+        # so the port is kept, and include that port in `public_baseurl`.
+        proxy_set_header Host $host;
 
         # Nginx by default only allows file uploads up to 1M in size
         # Increase client_max_body_size to match max_upload_size defined in homeserver.yaml

@@ -1,3 +1,40 @@
+# Synapse 1.163.2 (2026-10-23)
+
+## Internal Changes
+
+- Bump `pillow` to `13.0.0` to address [critical security vulnerabilties](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html#security). You must use Python >= 3.11 to take advantage of this version bump. ([\#20398](https://github.com/element-hq/synapse/issues/20398))
+
+
+
+
+# Synapse 1.164.0rc3 (2026-10-23)
+
+## Internal Changes
+
+- Bump `pillow` to `13.0.0` to address [critical security vulnerabilties](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html#security). You must use Python >= 3.11 to take advantage of this version bump. ([\#20399](https://github.com/element-hq/synapse/issues/20399))
+
+
+
+
+# Synapse 1.163.1 (2026-10-22)
+
+## Internal Changes
+
+- Update `certifi` to `2026.10.19` to address [GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2). This only affects TLS connections made by the Sentry SDK when `sentry` is configured, SAML, and a couple utility scripts; federation and Synapse's other outbound HTTP requests use the system trust store. ([\#20387](https://github.com/element-hq/synapse/issues/20387))
+- Bump `rustls-webpki` to `0.103.16` to actively distrust [compromised eMudhra intermediate CA certificates](https://emudhra.we-have-a-problem.com/). ([\#20392](https://github.com/element-hq/synapse/issues/20392))
+
+
+
+# Synapse 1.164.0rc2 (2026-10-22)
+
+## Internal Changes
+
+- Update `certifi` to `2026.10.19` to address [GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2). This only affects TLS connections made by the Sentry SDK when `sentry` is configured, SAML, and a couple utility scripts; federation and Synapse's other outbound HTTP requests use the system trust store. ([\#20387](https://github.com/element-hq/synapse/issues/20387))
+- Bump `rustls-webpki` to `0.103.16` to actively distrust [compromised eMudhra intermediate CA certificates](https://emudhra.we-have-a-problem.com/). ([\#20392](https://github.com/element-hq/synapse/issues/20392))
+
+
+
+
 # Synapse 1.164.0rc1 (2026-10-20)
 
 ## Features
@@ -53,6 +90,7 @@
 - Speed up push rule evaluation by not checking rules for the sender. ([\#20315](https://github.com/element-hq/synapse/issues/20315))
 - Require a strictly positive stickiness duration for [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354). ([\#20350](https://github.com/element-hq/synapse/issues/20350))
 - Remove unused `lxml` packaging and type-stub dependencies, and update URL-preview tests to check for BeautifulSoup instead. ([\#20356](https://github.com/element-hq/synapse/issues/20356))
+
 
 
 
