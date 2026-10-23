@@ -2,7 +2,7 @@
 
 ## Internal Changes
 
-- Bump `pillow` to `13.0.0` to address [critical security vulnerabilties](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html#security). ([\#20398](https://github.com/element-hq/synapse/issues/20398))
+- Bump `pillow` to `13.0.0` to address [critical security vulnerabilties](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html#security). You must use Python >= 3.11 to take advantage of this version bump. ([\#20398](https://github.com/element-hq/synapse/issues/20398))
 
 
 
