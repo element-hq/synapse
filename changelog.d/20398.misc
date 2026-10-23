@@ -1,0 +1,1 @@
+Bump `pillow` to `13.0.0` to address [critical security vulnerabilties](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html#security).
