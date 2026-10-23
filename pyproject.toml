@@ -59,7 +59,9 @@ dependencies = [
     "sortedcontainers>=2.0.5",
     "pymacaroons>=0.13.0",
     "msgpack>=0.5.2",
-    "phonenumbers>=8.2.0",
+    # 8.8.0 is the first release that is compatible with Python 3.11.
+    # Previous versions run into `re.error: global flags not at the start of the expression`
+    "phonenumbers>=8.8.0",
     # we use GaugeHistogramMetric, which was added in prom-client 0.4.0.
     # `Gauge.clear()` was added in 0.10.0.
     "prometheus-client>=0.10.0",
