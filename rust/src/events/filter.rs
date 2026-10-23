@@ -28,6 +28,7 @@ pub fn event_visible_to_server_py(
     sender: String,
     target_server_name: String,
     history_visibility: String,
+    sticky: bool,
     erased_senders: HashMap<String, bool>,
     partial_state_invisible: bool,
     memberships: Vec<(String, String)>, // (state_key, membership)
@@ -36,6 +37,7 @@ pub fn event_visible_to_server_py(
         sender,
         target_server_name,
         history_visibility,
+        sticky,
         erased_senders,
         partial_state_invisible,
         memberships,
@@ -44,19 +46,23 @@ pub fn event_visible_to_server_py(
 }
 
 /// Return whether the target server is allowed to see the event.
+/// The target server is assumed to currently be in the room.
 ///
 /// For a fully stated room, the target server is allowed to see an event E if:
 ///   - the state at E has world readable or shared history vis, OR
-///   - the state at E says that the target server is in the room.
+///   - the state at E says that the target server is in the room, OR
+///   - E is an unexpired sticky event.
 ///
 /// For a partially stated room, the target server is allowed to see E if:
 ///   - E was created by this homeserver, AND:
 ///       - the partial state at E has world readable or shared history vis, OR
-///       - the partial state at E says that the target server is in the room.
+///       - the partial state at E says that the target server is in the room, OR
+///       - E is an unexpired sticky event.
 pub fn event_visible_to_server(
     sender: String,
     target_server_name: String,
     history_visibility: String,
+    sticky: bool,
     erased_senders: HashMap<String, bool>,
     partial_state_invisible: bool,
     memberships: Vec<(String, String)>, // (state_key, membership)
@@ -69,6 +75,10 @@ pub fn event_visible_to_server(
 
     if partial_state_invisible {
         return Ok(false);
+    }
+
+    if sticky {
+        return Ok(true);
     }
 
     if history_visibility != HISTORY_VISIBILITY_INVITED
