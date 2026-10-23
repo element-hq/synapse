@@ -21,6 +21,7 @@
 
 //! An implementation of Matrix server ACL rules.
 
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
@@ -46,12 +47,39 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     Ok(())
 }
 
+#[derive(Debug, Clone, Default)]
+struct AclList {
+    exact: HashSet<String>,
+    patterns: Vec<Regex>,
+}
+
+impl AclList {
+    fn new(entries: &[PyBackedStr]) -> Result<Self, Error> {
+        let mut list = AclList::default();
+        for entry in entries {
+            let entry: &str = entry;
+            if entry.is_ascii() && !entry.contains(['*', '?']) {
+                list.exact.insert(entry.to_ascii_lowercase());
+            } else {
+                list.patterns
+                    .push(glob_to_regex(entry, GlobMatchType::Whole)?);
+            }
+        }
+        Ok(list)
+    }
+
+    fn matches(&self, server_name: &str, lowercased: Option<&str>) -> bool {
+        lowercased.is_some_and(|l| self.exact.contains(l))
+            || self.patterns.iter().any(|e| e.is_match(server_name))
+    }
+}
+
 #[derive(Debug, Clone)]
 #[pyclass(frozen, skip_from_py_object)]
 pub struct ServerAclEvaluator {
     allow_ip_literals: bool,
-    allow: Vec<Regex>,
-    deny: Vec<Regex>,
+    allow: AclList,
+    deny: AclList,
 }
 
 #[pymethods]
@@ -62,14 +90,8 @@ impl ServerAclEvaluator {
         allow: Vec<PyBackedStr>,
         deny: Vec<PyBackedStr>,
     ) -> Result<Self, Error> {
-        let allow = allow
-            .iter()
-            .map(|s| glob_to_regex(s, GlobMatchType::Whole))
-            .collect::<Result<_, _>>()?;
-        let deny = deny
-            .iter()
-            .map(|s| glob_to_regex(s, GlobMatchType::Whole))
-            .collect::<Result<_, _>>()?;
+        let allow = AclList::new(&allow)?;
+        let deny = AclList::new(&deny)?;
 
         Ok(ServerAclEvaluator {
             allow_ip_literals,
@@ -93,13 +115,17 @@ impl ServerAclEvaluator {
             }
         }
 
+        let lowercased = server_name
+            .is_ascii()
+            .then(|| server_name.to_ascii_lowercase());
+
         // next, check the deny list
-        if self.deny.iter().any(|e| e.is_match(server_name)) {
+        if self.deny.matches(server_name, lowercased.as_deref()) {
             return false;
         }
 
         // then the allow list.
-        if self.allow.iter().any(|e| e.is_match(server_name)) {
+        if self.allow.matches(server_name, lowercased.as_deref()) {
             return true;
         }
 
