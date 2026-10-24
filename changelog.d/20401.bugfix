@@ -1,0 +1,1 @@
+Fix a bug where an error from the identity server during a third-party invite caused Synapse to return a 500 error instead of passing the error to the client. Contributed by @RaphaelFakhri.
