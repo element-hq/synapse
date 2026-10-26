@@ -51,7 +51,7 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.config = hs.config.serverannouncements
         self.creator = self.config.room_management_mxid
         self.room_config = ServerAnnouncementRoom(
-            id="updates",
+            config_id="updates",
             room_name="Server Updates",
             room_topic="News",
             room_avatar_url="mxc://test/avatar",
@@ -113,7 +113,7 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
     def test_multiple_rooms_including_empty_allowlist(self) -> None:
         """Test that configuring multiple rooms works."""
         self.config.rooms.append(
-            attr.evolve(self.room_config, id="maintenance", allowed_user_ids=[])
+            attr.evolve(self.room_config, config_id="maintenance", allowed_user_ids=[])
         )
         first = self._reconcile()
         second = self.get_success(

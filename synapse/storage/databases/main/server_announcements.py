@@ -25,11 +25,11 @@ class ServerAnnouncementsStore(SQLBaseStore):
     invalidation for mapping and avatar changes.
     """
 
-    async def get_server_announcement_room(self, announcement_id: str) -> str | None:
+    async def get_server_announcement_room(self, config_id: str) -> str | None:
         """Return the room for an announcement ID, if one has been stored."""
         return await self.db_pool.simple_select_one_onecol(
             table="server_announcement_rooms",
-            keyvalues={"id": announcement_id},
+            keyvalues={"id": config_id},
             retcol="room_id",
             allow_none=True,
             desc="get_server_announcement_room",
@@ -46,22 +46,22 @@ class ServerAnnouncementsStore(SQLBaseStore):
         )
 
     async def store_server_announcement_room(
-        self, announcement_id: str, room_id: str
+        self, config_id: str, room_id: str
     ) -> None:
         """Store a new mapping."""
         await self.db_pool.simple_insert(
             table="server_announcement_rooms",
-            values={"id": announcement_id, "room_id": room_id},
+            values={"id": config_id, "room_id": room_id},
             desc="store_server_announcement_room",
         )
 
     async def get_server_announcement_avatar(
-        self, announcement_id: str
+        self, config_id: str
     ) -> tuple[str, str, str] | None:
         """Return the cached avatar's (path, SHA-256 hex digest, MXC URI), if complete."""
         row = await self.db_pool.simple_select_one(
             table="server_announcement_rooms",
-            keyvalues={"id": announcement_id},
+            keyvalues={"id": config_id},
             retcols=("avatar_path", "avatar_sha256", "avatar_mxc"),
             allow_none=True,
             desc="get_server_announcement_avatar",
@@ -76,7 +76,7 @@ class ServerAnnouncementsStore(SQLBaseStore):
         return path, sha256, mxc
 
     async def store_server_announcement_avatar(
-        self, announcement_id: str, path: str, sha256: str, mxc: str
+        self, config_id: str, path: str, sha256: str, mxc: str
     ) -> None:
         """Store an uploaded avatar for an existing announcement room mapping.
 
@@ -85,7 +85,7 @@ class ServerAnnouncementsStore(SQLBaseStore):
         """
         await self.db_pool.simple_update_one(
             table="server_announcement_rooms",
-            keyvalues={"id": announcement_id},
+            keyvalues={"id": config_id},
             updatevalues={
                 "avatar_path": path,
                 "avatar_sha256": sha256,

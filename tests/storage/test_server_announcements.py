@@ -32,7 +32,7 @@ class ServerAnnouncementsStoreTestCase(HomeserverTestCase):
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:
         self.store = homeserver.get_datastores().main
-        self.announcement_id = "news"
+        self.config_id = "news"
         self.room_id = "!announcements:test"
         self.avatar = ("/avatars/news.png", "a" * 64, "mxc://test/avatar")
 
@@ -47,14 +47,10 @@ class ServerAnnouncementsStoreTestCase(HomeserverTestCase):
     def _store_room(self) -> None:
         """Create a server announcement room mapping."""
         self.get_success(
-            self.store.store_server_announcement_room(
-                self.announcement_id, self.room_id
-            )
+            self.store.store_server_announcement_room(self.config_id, self.room_id)
         )
         self.get_success(
-            self.store.store_server_announcement_avatar(
-                self.announcement_id, *self.avatar
-            )
+            self.store.store_server_announcement_avatar(self.config_id, *self.avatar)
         )
 
     @parameterized.expand([("standard", False), ("force", True)])
@@ -68,17 +64,15 @@ class ServerAnnouncementsStoreTestCase(HomeserverTestCase):
         # Read before purging to check that another store sees deletions too.
         reader = self._new_store()
         self.assertEqual(
-            self.get_success(reader.get_server_announcement_room(self.announcement_id)),
+            self.get_success(reader.get_server_announcement_room(self.config_id)),
             self.room_id,
         )
         self.assertEqual(
             self.get_success(reader.get_server_announcement_id(self.room_id)),
-            self.announcement_id,
+            self.config_id,
         )
         self.assertEqual(
-            self.get_success(
-                reader.get_server_announcement_avatar(self.announcement_id)
-            ),
+            self.get_success(reader.get_server_announcement_avatar(self.config_id)),
             self.avatar,
         )
 
@@ -105,34 +99,30 @@ class ServerAnnouncementsStoreTestCase(HomeserverTestCase):
 
         # Check that the announcement room exists.
         self.assertIsNone(
-            self.get_success(reader.get_server_announcement_room(self.announcement_id))
+            self.get_success(reader.get_server_announcement_room(self.config_id))
         )
         self.assertIsNone(
             self.get_success(reader.get_server_announcement_id(self.room_id))
         )
         self.assertIsNone(
-            self.get_success(
-                reader.get_server_announcement_avatar(self.announcement_id)
-            )
+            self.get_success(reader.get_server_announcement_avatar(self.config_id))
         )
 
         # Check that the same announcement `id` can then be re-used.
         replacement_room_id = self.helper.create_room_as(self.user_id)
         self.get_success(
             self.store.store_server_announcement_room(
-                self.announcement_id, replacement_room_id
+                self.config_id, replacement_room_id
             )
         )
         self.assertEqual(
-            self.get_success(reader.get_server_announcement_room(self.announcement_id)),
+            self.get_success(reader.get_server_announcement_room(self.config_id)),
             replacement_room_id,
         )
         self.assertEqual(
             self.get_success(reader.get_server_announcement_id(replacement_room_id)),
-            self.announcement_id,
+            self.config_id,
         )
         self.assertIsNone(
-            self.get_success(
-                reader.get_server_announcement_avatar(self.announcement_id)
-            )
+            self.get_success(reader.get_server_announcement_avatar(self.config_id))
         )

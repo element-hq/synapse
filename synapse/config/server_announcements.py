@@ -145,7 +145,7 @@ from ._base import Config, ConfigError
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class ServerAnnouncementRoom:
-    id: str
+    config_id: str
     room_name: str
     room_topic: str | None
     room_avatar_url: str | None
@@ -336,7 +336,7 @@ class ServerAnnouncementsConfig(Config):
 
             self.rooms.append(
                 ServerAnnouncementRoom(
-                    id=room_unique_identifier,
+                    config_id=room_unique_identifier,
                     room_name=room_name,
                     room_topic=room_topic,
                     room_avatar_url=room_avatar_url,

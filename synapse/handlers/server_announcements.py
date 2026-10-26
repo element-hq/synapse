@@ -74,7 +74,7 @@ class ServerAnnouncementsHandler:
             except Exception:
                 logger.exception(
                     "Failed to reconcile server announcement room with announcement id '%s'",
-                    room.id,
+                    room.config_id,
                 )
                 raise
 
@@ -114,7 +114,7 @@ class ServerAnnouncementsHandler:
                 )
 
         # Check whether this room already exists.
-        room_id = await self._store.get_server_announcement_room(room.id)
+        room_id = await self._store.get_server_announcement_room(room.config_id)
         if room_id is None:
             # Create the room.
             version = self._hs.config.server.default_room_version
@@ -148,10 +148,10 @@ class ServerAnnouncementsHandler:
                 # We definitely don't want these rooms to be encrypted.
                 ignore_forced_encryption=True,
             )
-            await self._store.store_server_announcement_room(room.id, room_id)
+            await self._store.store_server_announcement_room(room.config_id, room_id)
             logger.info(
                 "Created server announcement room '%s' with matrix room ID '%s'",
-                room.id,
+                room.config_id,
                 room_id,
             )
 
@@ -162,7 +162,7 @@ class ServerAnnouncementsHandler:
         )
         if create_event is None:
             raise ConfigError(
-                f"Announcement room {room.id} ({room_id}) has no create event; "
+                f"Announcement room {room.config_id} ({room_id}) has no create event; "
                 "purge the room before reconciling it again",
                 ("experimental_features", "server_announcements", "rooms"),
             )
@@ -171,15 +171,20 @@ class ServerAnnouncementsHandler:
             # We don't want announcement room events to federate to other homeservers.
             # If this room is somehow federating, then we shouldn't use it.
             raise ConfigError(
-                f'Announcement room {room.id} ({room_id}) has "m.federate": true '
+                f'Announcement room {room.config_id} ({room_id}) has "m.federate": true '
                 "in its create event. Please create another room (with a new id)",
-                ("experimental_features", "server_announcements", "rooms", room.id),
+                (
+                    "experimental_features",
+                    "server_announcements",
+                    "rooms",
+                    room.config_id,
+                ),
             )
 
         # Check that this room was created by the expected management mxid.
         if create_event.sender != self._creator:
             raise ConfigError(
-                f"Announcement room {room.id} ({room_id}) was created by "
+                f"Announcement room {room.config_id} ({room_id}) was created by "
                 f"{create_event.sender}, not {self._creator}. Restore "
                 "experimental_features.server_announcements.room_management_localpart "
                 "or purge the room to recreate it",
