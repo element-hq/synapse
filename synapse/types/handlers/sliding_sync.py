@@ -48,7 +48,7 @@ from synapse.types import (
     ThreadSubscriptionsToken,
     UserID,
 )
-from synapse.types.rest.client import SlidingSyncBody, SlidingSyncStickyEventsToken
+from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -426,7 +426,7 @@ class SlidingSyncResult:
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
         class StickyEventsExtension:
-            """The Sticky Events extension (MSC4354)
+            """The Sticky Events extension (MSC4354 / MSC4480)
 
             Attributes:
                 room_id_to_sticky_events: map (room_id -> [unexpired_sticky_events])
@@ -437,7 +437,6 @@ class SlidingSyncResult:
             """
 
             room_id_to_sticky_events: Mapping[str, list[FilteredEvent]]
-            next_batch: SlidingSyncStickyEventsToken
 
             def __bool__(self) -> bool:
                 return bool(self.room_id_to_sticky_events)
@@ -772,8 +771,10 @@ class HaveSentRoomFlag(Enum):
 
     The valid state changes here are:
         NEVER -> LIVE
+        NEVER -> PREVIOUSLY (when only part of the room's data was sent, e.g. due to a limit)
         LIVE -> PREVIOUSLY
         PREVIOUSLY -> LIVE
+        PREVIOUSLY -> PREVIOUSLY (with a later token, when more of the data was sent)
     """
 
     # The room has never been sent down (or we have forgotten we have sent it
@@ -889,6 +890,20 @@ class MutableRoomStatusMap(RoomStatusMap[T]):
 
             self._statuses[room_id] = HaveSentRoom.live()
 
+    def record_partially_sent_rooms(
+        self, room_ids: StrCollection, last_token: T
+    ) -> None:
+        """Record that we have sent these rooms in the response, but only up to
+        `last_token` (exclusive of anything after it).
+
+        Used for Sticky Events, which are implicitly paginated by the server.
+        But this is not necessarily a good pattern to follow for future work,
+        so consider alternatives.
+        See: https://github.com/matrix-org/matrix-spec-proposals/pull/4480#discussion_r4165887827
+        """
+        for room_id in room_ids:
+            self._statuses[room_id] = HaveSentRoom.previously(last_token)
+
     def record_unsent_rooms(self, room_ids: StrCollection, from_token: T) -> None:
         """Record that we have not sent these rooms in the response, but there
         have been updates.
@@ -935,6 +950,7 @@ class PerConnectionState:
         room_configs: Map from room_id to the `RoomSyncConfig` of all
             rooms that we have previously sent down.
         account_data: The status of each room for the account_data stream.
+        sticky_events: The status of each room for the sticky events stream.
     """
 
     last_used_ts: int | None = None
@@ -942,6 +958,7 @@ class PerConnectionState:
     rooms: RoomStatusMap[RoomStreamToken] = attr.Factory(RoomStatusMap)
     receipts: RoomStatusMap[MultiWriterStreamToken] = attr.Factory(RoomStatusMap)
     account_data: RoomStatusMap[int] = attr.Factory(RoomStatusMap)
+    sticky_events: RoomStatusMap[MultiWriterStreamToken] = attr.Factory(RoomStatusMap)
 
     room_configs: Mapping[str, RoomSyncConfig] = attr.Factory(dict)
 
@@ -954,6 +971,7 @@ class PerConnectionState:
             rooms=self.rooms.get_mutable(),
             receipts=self.receipts.get_mutable(),
             account_data=self.account_data.get_mutable(),
+            sticky_events=self.sticky_events.get_mutable(),
             room_configs=ChainMap({}, room_configs),
         )
 
@@ -963,6 +981,7 @@ class PerConnectionState:
             rooms=self.rooms.copy(),
             receipts=self.receipts.copy(),
             account_data=self.account_data.copy(),
+            sticky_events=self.sticky_events.copy(),
             room_configs=dict(self.room_configs),
         )
 
@@ -971,6 +990,7 @@ class PerConnectionState:
             len(self.account_data)
             + len(self.rooms)
             + len(self.receipts)
+            + len(self.sticky_events)
             + len(self.room_configs)
         )
 
@@ -1047,6 +1067,7 @@ class MutablePerConnectionState(PerConnectionState):
     rooms: MutableRoomStatusMap[RoomStreamToken]
     receipts: MutableRoomStatusMap[MultiWriterStreamToken]
     account_data: MutableRoomStatusMap[int]
+    sticky_events: MutableRoomStatusMap[MultiWriterStreamToken]
 
     room_configs: ChainMap[str, RoomSyncConfig]
 
@@ -1067,6 +1088,7 @@ class MutablePerConnectionState(PerConnectionState):
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
             or bool(self.account_data.get_updates())
+            or bool(self.sticky_events.get_updates())
             or bool(self.get_room_config_updates())
             or any(
                 change.has_updates(clock)
