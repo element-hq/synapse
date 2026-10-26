@@ -76,8 +76,11 @@ class ThreadCPUMetrics(Collector):
         self._totals: Counter[tuple[str, str]] = Counter()
 
     def register_threadpool(self, name: str, threadpool: ThreadPool) -> None:
-        """Report the threads of `threadpool` as the type `threadpool_<name>`."""
-        self._threadpools[threadpool] = name
+        """Report the threads of `threadpool` as the type `threadpool_<name>`.
+
+        A threadpool keeps the name it was first registered under.
+        """
+        self._threadpools.setdefault(threadpool, name)
 
     def register_thread(self, thread_type: str, thread: threading.Thread) -> None:
         """Report `thread` as the type `thread_type`."""
