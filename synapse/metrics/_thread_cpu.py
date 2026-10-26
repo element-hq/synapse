@@ -65,6 +65,7 @@ class ThreadCPUMetrics(Collector):
             pass
 
         self._threadpools: "WeakKeyDictionary[ThreadPool, str]" = WeakKeyDictionary()
+        self._threads: "WeakKeyDictionary[threading.Thread, str]" = WeakKeyDictionary()
 
         # Guards the fields below, as the metrics listener may scrape from any
         # thread.
@@ -78,10 +79,18 @@ class ThreadCPUMetrics(Collector):
         """Report the threads of `threadpool` as the type `threadpool_<name>`."""
         self._threadpools[threadpool] = name
 
-    def _threadpool_thread_types(self) -> dict[int, str]:
-        """Map the native IDs of registered threadpool threads to their thread
-        type."""
+    def register_thread(self, thread_type: str, thread: threading.Thread) -> None:
+        """Report `thread` as the type `thread_type`."""
+        self._threads[thread] = thread_type
+
+    def _registered_thread_types(self) -> dict[int, str]:
+        """Map the native IDs of registered threads and threadpool threads to
+        their thread type."""
         types: dict[int, str] = {}
+        for thread, thread_type in list(self._threads.items()):
+            if thread.native_id is not None and thread.is_alive():
+                types[thread.native_id] = thread_type
+
         for threadpool, name in list(self._threadpools.items()):
             # Twisted never removes exited threads from `threads`. The kernel
             # may have given their IDs to new threads.
@@ -91,22 +100,22 @@ class ThreadCPUMetrics(Collector):
 
         return types
 
-    def _thread_type(self, tid: int, threadpool_types: dict[int, str]) -> str:
+    def _thread_type(self, tid: int, registered_types: dict[int, str]) -> str:
         """Work out the thread type to report a thread's CPU time under.
 
         Args:
             tid: The thread's native ID.
-            threadpool_types: The output of `_threadpool_thread_types`.
+            registered_types: The output of `_registered_thread_types`.
 
         Returns:
-            `main`, `threadpool_<name>`, `tokio` or `other`.
+            `main`, a registered type, `tokio` or `other`.
         """
         if tid == os.getpid():
             return "main"
 
-        threadpool_type = threadpool_types.get(tid)
-        if threadpool_type is not None:
-            return threadpool_type
+        registered_type = registered_types.get(tid)
+        if registered_type is not None:
+            return registered_type
 
         try:
             with open(f"/proc/self/task/{tid}/comm") as f:
@@ -128,7 +137,7 @@ class ThreadCPUMetrics(Collector):
         except OSError:
             return
 
-        threadpool_types = self._threadpool_thread_types()
+        registered_types = self._registered_thread_types()
 
         with self._lock:
             last_seen: dict[int, _ThreadSample] = {}
@@ -153,7 +162,7 @@ class ThreadCPUMetrics(Collector):
                 else:
                     prev_utime = prev_stime = 0
 
-                thread_type = self._thread_type(tid, threadpool_types)
+                thread_type = self._thread_type(tid, registered_types)
                 self._totals[(thread_type, "user")] += utime - prev_utime
                 self._totals[(thread_type, "system")] += stime - prev_stime
 
