@@ -1,0 +1,1 @@
+Remove `$server_port` from the `Host` header in the nginx reverse proxy example, as it can cause an SSO redirect loop.

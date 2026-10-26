@@ -1,2 +1,0 @@
-Reject setting `null` profile field values (following [an optional clause in the specification](https://spec.matrix.org/v1.19/client-server-api/#put_matrixclientv3profileuseridkeyname:~:text=Servers%20MAY%20reject%20null%20values%2E)), in order to avoid clients accidentally harming interoperability.
-
