@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-910936a4.js";
+            window.path_to_searchindex_js = "searchindex-ff55c022.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -411,7 +411,7 @@ and mounting it to <code>/var/synapse</code> should be taken into consideration.
 <p>System requirements:</p>
 <ul>
 <li>POSIX-compliant system (tested on Linux &amp; OS X)</li>
-<li>Python 3.10 or later, up to Python 3.13.</li>
+<li>Python 3.11 or later, up to Python 3.14.</li>
 <li>At least 1GB of free RAM if you want to join large public rooms like #matrix:matrix.org</li>
 </ul>
 <p>If building on an uncommon architecture for which pre-built wheels are
@@ -2128,6 +2128,13 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11640"><a class="header" href="#upgrading-to-v11640">Upgrading to v1.164.0</a></h1>
+<h2 id="python-311-is-now-required"><a class="header" href="#python-311-is-now-required">Python 3.11+ is now required</a></h2>
+<p>The minimum supported Python version has been increased from v3.10 to v3.11.
+You will need Python 3.11+ to run Synapse v1.164.0.</p>
+<p>If you use current versions of the
+<a href="#docker-images-and-ansible-playbooks">matrixorg/synapse</a>
+Docker images, no action is required.</p>
 <h1 id="upgrading-to-v11630"><a class="header" href="#upgrading-to-v11630">Upgrading to v1.163.0</a></h1>
 <h2 id="limit_profile_requests_to_users_who_share_rooms-now-requires-require_auth_for_profile_requests"><a class="header" href="#limit_profile_requests_to_users_who_share_rooms-now-requires-require_auth_for_profile_requests"><code>limit_profile_requests_to_users_who_share_rooms</code> now requires <code>require_auth_for_profile_requests</code></a></h2>
 <p>The shared-room check enabled by
