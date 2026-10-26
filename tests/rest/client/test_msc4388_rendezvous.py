@@ -215,7 +215,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
 
     def test_rendezvous_public(self) -> None:
         """
-        Test the MSC4108 rendezvous endpoint, including:
+        Test the MSC4388 rendezvous endpoint, including:
             - Creating a session
             - Getting the data back
             - Updating the data
@@ -779,7 +779,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         """
         Test that the data max length is restricted.
         """
-        too_long_data = "a" * 5000  # MSC4108 specifies 4KB max length
+        too_long_data = "a" * 5000  # MSC4388 specifies 4KB max length
 
         channel = self.make_request(
             "POST",
