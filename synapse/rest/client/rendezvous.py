@@ -82,16 +82,25 @@ class MSC4388CreateRendezvousServlet(RestServlet):
             hs.config.experimental.msc4388_requires_authentication
         )
 
-    async def on_GET(self, request: SynapseRequest) -> tuple[int, Any]:
-        if self.require_authentication:
+    async def _check_auth(self, request: SynapseRequest) -> None:
+        """Authenticate the request as required by MSC4388.
+
+        Authentication is optional when the server does not require it, but an
+        access token which is supplied must still be valid: the MSC requires
+        that an invalid or expired token gets the usual error response, rather
+        than the request being treated as unauthenticated, so that the client
+        can tell that its token needs refreshing.
+        """
+        if self.require_authentication or self.auth.has_access_token(request):
             # This will raise if the user is not authenticated or the token needs a refresh
             await self.auth.get_user_by_req(request)
+
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, Any]:
+        await self._check_auth(request)
         return HTTPStatus.OK, {"create_available": True}
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, Any]:
-        if self.require_authentication:
-            # This will raise if the user is not authenticated or the token needs a refresh
-            await self.auth.get_user_by_req(request)
+        await self._check_auth(request)
         return self._handler.handle_post(request)
 
 

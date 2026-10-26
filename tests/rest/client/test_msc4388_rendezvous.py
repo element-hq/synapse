@@ -175,6 +175,44 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         channel = self.make_request("POST", rz_endpoint, {}, access_token=None)
         self.assertEqual(channel.code, 404)
 
+    def test_rendezvous_public_with_access_token(self) -> None:
+        """
+        Test that when authentication is not required, a valid access token is
+        accepted but an invalid one is rejected rather than ignored.
+        """
+        self.setup_mock_oauth()
+        alice_token = self.register_oauth_user("alice", "device1")
+
+        # Discovery and creating a session should work with a valid token
+        channel = self.make_request("GET", rz_endpoint, {}, access_token=alice_token)
+        self.assertEqual(channel.code, 200)
+        self.assertTrue(channel.json_body.get("create_available"))
+
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=alice_token,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # Discovery and creating a session should fail with an invalid token,
+        # rather than the request being treated as unauthenticated
+        channel = self.make_request(
+            "GET", rz_endpoint, {}, access_token="invalid_token"
+        )
+        self.assertEqual(channel.code, 401)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
+
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token="invalid_token",
+        )
+        self.assertEqual(channel.code, 401)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
+
     def test_rendezvous_public(self) -> None:
         """
         Test the MSC4108 rendezvous endpoint, including:
@@ -476,12 +514,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
     @override_config({"experimental_features": {"msc4388_mode": "authenticated"}})
     def test_rendezvous_requires_authentication(self) -> None:
         """
-        Test the MSC4108 rendezvous endpoint when configured with the mode authenticated, including:
-            - Creating a session
-            - Getting the data back
-            - Updating the data
-            - Deleting the data
-            - Sequence token handling
+        Test the MSC4388 rendezvous endpoint when configured with the mode
+        authenticated: discovery and creating a session require authentication,
+        but using the session does not.
+
+        The rest of the session lifecycle is covered by test_rendezvous_public.
         """
         self.setup_mock_oauth()
         alice_token = self.register_oauth_user("alice", "device1")
@@ -514,64 +551,16 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         rendezvous_id = channel.json_body["id"]
         sequence_token = channel.json_body["sequence_token"]
-        self.assertGreater(channel.json_body["expires_in_ms"], 0)
 
-        session_endpoint = rz_endpoint + f"/{rendezvous_id}"
-
-        # We can get the data back without authentication
+        # The other device can use the session without authentication
         channel = self.make_request(
             "GET",
-            session_endpoint,
+            rz_endpoint + f"/{rendezvous_id}",
             access_token=None,
         )
-
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=bar")
         self.assertEqual(channel.json_body["sequence_token"], sequence_token)
-        self.assertGreater(channel.json_body["expires_in_ms"], 0)
-
-        # We can update the data without authentication
-        channel = self.make_request(
-            "PUT",
-            send_endpoint(rendezvous_id, "txn1"),
-            {"sequence_token": sequence_token, "data": "foo=baz"},
-            access_token=None,
-        )
-
-        self.assertEqual(channel.code, 200)
-        new_sequence_token = channel.json_body["sequence_token"]
-
-        # We should get the updated data without authentication
-        channel = self.make_request(
-            "GET",
-            session_endpoint,
-            access_token=None,
-        )
-
-        self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["data"], "foo=baz")
-        self.assertEqual(channel.json_body["sequence_token"], new_sequence_token)
-        self.assertGreater(channel.json_body["expires_in_ms"], 0)
-
-        # We can delete the data without authentication
-        channel = self.make_request(
-            "DELETE",
-            session_endpoint,
-            access_token=None,
-        )
-
-        self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body, {})
-
-        # If we try to get the data again, it should fail
-        channel = self.make_request(
-            "GET",
-            session_endpoint,
-            access_token=None,
-        )
-
-        self.assertEqual(channel.code, 404)
-        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
 
     def test_expiration(self) -> None:
         """
