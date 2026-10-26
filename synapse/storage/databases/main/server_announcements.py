@@ -29,7 +29,7 @@ class ServerAnnouncementsStore(SQLBaseStore):
         """Return the room for an announcement ID, if one has been stored."""
         return await self.db_pool.simple_select_one_onecol(
             table="server_announcement_rooms",
-            keyvalues={"id": config_id},
+            keyvalues={"config_id": config_id},
             retcol="room_id",
             allow_none=True,
             desc="get_server_announcement_room",
@@ -40,7 +40,7 @@ class ServerAnnouncementsStore(SQLBaseStore):
         return await self.db_pool.simple_select_one_onecol(
             table="server_announcement_rooms",
             keyvalues={"room_id": room_id},
-            retcol="id",
+            retcol="config_id",
             allow_none=True,
             desc="get_server_announcement_id",
         )
@@ -51,7 +51,7 @@ class ServerAnnouncementsStore(SQLBaseStore):
         """Store a new mapping."""
         await self.db_pool.simple_insert(
             table="server_announcement_rooms",
-            values={"id": config_id, "room_id": room_id},
+            values={"config_id": config_id, "room_id": room_id},
             desc="store_server_announcement_room",
         )
 
@@ -61,7 +61,7 @@ class ServerAnnouncementsStore(SQLBaseStore):
         """Return the cached avatar's (path, SHA-256 hex digest, MXC URI), if complete."""
         row = await self.db_pool.simple_select_one(
             table="server_announcement_rooms",
-            keyvalues={"id": config_id},
+            keyvalues={"config_id": config_id},
             retcols=("avatar_path", "avatar_sha256", "avatar_mxc"),
             allow_none=True,
             desc="get_server_announcement_avatar",
@@ -85,7 +85,7 @@ class ServerAnnouncementsStore(SQLBaseStore):
         """
         await self.db_pool.simple_update_one(
             table="server_announcement_rooms",
-            keyvalues={"id": config_id},
+            keyvalues={"config_id": config_id},
             updatevalues={
                 "avatar_path": path,
                 "avatar_sha256": sha256,

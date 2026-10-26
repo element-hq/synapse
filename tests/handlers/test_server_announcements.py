@@ -187,8 +187,8 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
     @parameterized.expand([(False,), (True,)])
     def test_admin_deletion_and_recreation(self, replacement: bool) -> None:
         """Check that when an announcement room is removed from configuration and
-        purged, that a new room is created if the same announcement `id` is configured
-        once again.
+        purged, that a new room is created if the same announcement room `id` is
+        configured once again.
 
         Basically this tests the "re-use `id` but in a new room" flow.
         """
@@ -228,7 +228,7 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
             )
         self.reactor.advance(1)
 
-        # Check that configuring the same announcement `id` creates a fresh room.
+        # Check that configuring the same announcement room `id` creates a fresh room.
         self.assertNotEqual(self._reconcile(), old_room_id)
 
     def test_invite_and_auto_join_appear_only_as_joined_in_sync(self) -> None:

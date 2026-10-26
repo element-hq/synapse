@@ -108,7 +108,7 @@ class ServerAnnouncementsStoreTestCase(HomeserverTestCase):
             self.get_success(reader.get_server_announcement_avatar(self.config_id))
         )
 
-        # Check that the same announcement `id` can then be re-used.
+        # Check that the same announcement room `id` can then be re-used.
         replacement_room_id = self.helper.create_room_as(self.user_id)
         self.get_success(
             self.store.store_server_announcement_room(
