@@ -523,18 +523,38 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.setup_mock_oauth()
         alice_token = self.register_oauth_user("alice", "device1")
 
-        # Discovery should fail due to lack of authentication
+        # Discovery should say that we can't create a session without
+        # authentication, rather than returning an error
         channel = self.make_request("GET", rz_endpoint, {}, access_token=None)
-        self.assertEqual(channel.code, 401)
+        self.assertEqual(channel.code, 200)
+        self.assertIs(channel.json_body.get("create_available"), False)
 
-        # Creating a session should fail without authentication:
+        # Creating a session should be forbidden without authentication
         channel = self.make_request(
             "POST",
             rz_endpoint,
             {"data": "foo=bar"},
             access_token=None,
         )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+        # Discovery and creating a session should fail with an invalid token,
+        # so that the client can tell that it needs to refresh its token
+        channel = self.make_request(
+            "GET", rz_endpoint, {}, access_token="invalid_token"
+        )
         self.assertEqual(channel.code, 401)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
+
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token="invalid_token",
+        )
+        self.assertEqual(channel.code, 401)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
 
         # Discovery should succeed with authentication
         channel = self.make_request("GET", rz_endpoint, {}, access_token=alice_token)

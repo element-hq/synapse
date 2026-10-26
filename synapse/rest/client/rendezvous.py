@@ -24,6 +24,7 @@ from http import HTTPStatus
 from http.client import TEMPORARY_REDIRECT
 from typing import TYPE_CHECKING, Any
 
+from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer, respond_with_redirect
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
@@ -82,25 +83,36 @@ class MSC4388CreateRendezvousServlet(RestServlet):
             hs.config.experimental.msc4388_requires_authentication
         )
 
-    async def _check_auth(self, request: SynapseRequest) -> None:
-        """Authenticate the request as required by MSC4388.
+    async def _can_create(self, request: SynapseRequest) -> bool:
+        """Whether the requester is permitted by server policy to create a
+        rendezvous session.
 
-        Authentication is optional when the server does not require it, but an
-        access token which is supplied must still be valid: the MSC requires
-        that an invalid or expired token gets the usual error response, rather
-        than the request being treated as unauthenticated, so that the client
-        can tell that its token needs refreshing.
+        An access token which is supplied must be valid, even if authentication
+        is not required: the MSC requires that an invalid or expired token gets
+        the usual error response, rather than the request being treated as
+        unauthenticated, so that the client can tell that its token needs
+        refreshing rather than that server policy does not permit it to create
+        a session.
         """
-        if self.require_authentication or self.auth.has_access_token(request):
-            # This will raise if the user is not authenticated or the token needs a refresh
+        if self.auth.has_access_token(request):
+            # This will raise if the token is invalid or needs a refresh
             await self.auth.get_user_by_req(request)
+            return True
+
+        return not self.require_authentication
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, Any]:
-        await self._check_auth(request)
-        return HTTPStatus.OK, {"create_available": True}
+        # A requester which is not permitted to create a session is told so in
+        # the response, rather than by an error.
+        return HTTPStatus.OK, {"create_available": await self._can_create(request)}
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, Any]:
-        await self._check_auth(request)
+        if not await self._can_create(request):
+            raise SynapseError(
+                HTTPStatus.FORBIDDEN,
+                "Authentication is required to create a rendezvous session",
+                Codes.FORBIDDEN,
+            )
         return self._handler.handle_post(request)
 
 
