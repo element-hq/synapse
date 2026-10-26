@@ -59,7 +59,7 @@
 //! kind, etc, etc.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Error};
 use log::warn;
@@ -84,7 +84,6 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<PushRules>()?;
     child_module.add_class::<FilteredPushRules>()?;
     child_module.add_class::<PushRuleEvaluator>()?;
-    child_module.add_function(wrap_pyfunction!(get_base_rule_ids, m)?)?;
 
     m.add_submodule(&child_module)?;
 
@@ -95,11 +94,6 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
         .set_item("synapse.synapse_rust.push", child_module)?;
 
     Ok(())
-}
-
-#[pyfunction]
-fn get_base_rule_ids() -> HashSet<&'static str> {
-    base_rules::BASE_RULES_BY_ID.keys().copied().collect()
 }
 
 /// A single push rule for a user.

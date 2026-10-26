@@ -135,6 +135,20 @@ Synapse will now refuse to start with that combination. If you have
 either also set `require_auth_for_profile_requests: true`, or remove the option to
 keep the behaviour you have today.
 
+## Privacy-preserving `/requestToken` responses are now enabled by default
+
+The default value of `request_token_inhibit_3pid_errors` has changed from `false`
+to `true`. Synapse will now conceal whether an email address is associated with an
+account when responding to `/requestToken` requests, unless the setting is
+explicitly configured as `false`.
+
+Administrators who rely on the previous responses can retain them by adding the
+following to their configuration:
+
+```yaml
+request_token_inhibit_3pid_errors: false
+```
+
 # Upgrading to v1.161.0
 
 ## Deprecation of `matrix_rtc.livekit_service_url`
