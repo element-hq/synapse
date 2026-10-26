@@ -21,9 +21,8 @@ incomplete.
 ## server_announcements
 
 This feature allows homeserver admins to create and manage "announcement" rooms. These
-rooms will be visible to *all* users on the homeserver. These are real rooms, which a
-configured list of users may join, where the events are streamed to all users when they
-fetch events from the homeserver.
+rooms and their events will be visible to all users on the homeserver, except those
+listed in the room's `excluded_user_ids`.
 
 Read-only users don't *actually* join announcement rooms, but they will see it in their
 room list.
@@ -76,6 +75,15 @@ Options for each entry:
   Each must be a valid, local user; remote users are not supported because these
   rooms are not federated. Defaults to an empty list, allowing no users to send
   announcements. Sender accounts must already exist and must not be deactivated.
+* `excluded_user_ids` (array): Full Matrix user IDs excluded from automatically
+  receiving announcements from this room, for example appservice users or audit
+  bots.
+
+  Each must be a valid, local user. Defaults to an empty list (excluding nobody).
+
+  Accounts do not need to exist yet. Users on this list may still view announcement
+  rooms manually (as they are world-readable). But they will not automatically receive
+  announcement events.
 
 The internal room manager user (which is used to create announcement rooms and update
 their room state) is configured with `room_management_localpart` below. It is a
@@ -122,6 +130,8 @@ Example configuration:
             room_avatar_url: mxc://example.com/oumMVlgDnLYFaPVkExemNVVZ
             allowed_user_ids:
               - "@alice:example.com"
+            excluded_user_ids:
+              - "@audit_bot:example.com"
 
           - id: maintenance
             room_name: Maintenance announcements
@@ -151,6 +161,7 @@ class ServerAnnouncementRoom:
     room_avatar_url: str | None
     room_avatar_path: str | None
     allowed_user_ids: list[str]
+    excluded_user_ids: list[str] = attr.ib(factory=list)
 
 
 class ServerAnnouncementsConfig(Config):
@@ -334,6 +345,27 @@ class ServerAnnouncementsConfig(Config):
                         user_config_path,
                     )
 
+            excluded_user_ids = room.get("excluded_user_ids", [])
+            if not isinstance(excluded_user_ids, list):
+                raise ConfigError(
+                    "Must be a list", config_path + ("excluded_user_ids",)
+                )
+
+            for excluded_user_index, user_id in enumerate(excluded_user_ids):
+                user_config_path = config_path + (
+                    "excluded_user_ids",
+                    f"<item {excluded_user_index}>",
+                )
+                if not isinstance(user_id, str) or not UserID.is_valid_strict(user_id):
+                    raise ConfigError(
+                        "Must be a valid Matrix user ID", user_config_path
+                    )
+                if UserID.from_string(user_id).domain != server_name:
+                    raise ConfigError(
+                        "Must be a local user: server announcement rooms are not federated",
+                        user_config_path,
+                    )
+
             self.rooms.append(
                 ServerAnnouncementRoom(
                     config_id=room_unique_identifier,
@@ -342,5 +374,6 @@ class ServerAnnouncementsConfig(Config):
                     room_avatar_url=room_avatar_url,
                     room_avatar_path=room_avatar_path,
                     allowed_user_ids=list(allowed_user_ids),
+                    excluded_user_ids=list(excluded_user_ids),
                 )
             )
