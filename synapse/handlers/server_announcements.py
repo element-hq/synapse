@@ -108,15 +108,9 @@ class ServerAnnouncementsHandler:
         for user_id in room.allowed_user_ids:
             user = await self._store.get_user_by_id(user_id)
             if user is None or user.is_deactivated:
-                raise ConfigError(
-                    f"Announcement sender {user_id} must be an existing, active local user",
-                    (
-                        "experimental_features",
-                        "server_announcements",
-                        "rooms",
-                        room.id,
-                        "allowed_user_ids",
-                    ),
+                logger.warning(
+                    "Announcement sender %s must be an existing, active local user",
+                    user_id,
                 )
 
         # Check whether this room already exists.
