@@ -312,9 +312,10 @@ impl MSC4388RendezvousHandler {
                 )
             })?;
 
-        let sequence_token: String = put_request.sequence_token;
-
-        let data: String = put_request.data;
+        let PutRequest {
+            sequence_token,
+            data,
+        } = put_request;
 
         self.check_data_length(&data)?;
 
