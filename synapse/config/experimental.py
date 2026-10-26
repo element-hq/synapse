@@ -28,6 +28,7 @@ import attr
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
 from synapse.config._base import Config, read_file
+from synapse.config.ratelimiting import RatelimitSettings
 from synapse.types import JsonDict, StrSequence
 
 
@@ -246,6 +247,29 @@ class ExperimentalConfig(Config):
                 "MSC4388 requires matrix_authentication_service to be enabled",
                 ("experimental", "msc4388_enabled"),
             )
+
+        # MSC4388 requests are ratelimited by client IP address, as most are
+        # unauthenticated: only discovery and creating a session may carry an
+        # access token, and even then it is not used for ratelimiting.
+        #
+        # Creating a session is limited more strictly than other requests, as
+        # there is a cap on the number of concurrent sessions, and creating new
+        # sessions beyond it evicts the oldest ones. A client using these
+        # defaults can hold at most around 20 live sessions at once, as each
+        # session expires after 2 minutes.
+        self.msc4388_rc_create = RatelimitSettings.parse(
+            experimental,
+            "msc4388_rc_create",
+            defaults={"per_second": 0.1, "burst_count": 10},
+        )
+        # Every other rendezvous request: discovery, and receiving, sending or
+        # cancelling on a session. This needs to allow for both devices polling
+        # for new payloads, possibly from behind the same IP address.
+        self.msc4388_rc_requests = RatelimitSettings.parse(
+            experimental,
+            "msc4388_rc_requests",
+            defaults={"per_second": 5, "burst_count": 20},
+        )
 
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)

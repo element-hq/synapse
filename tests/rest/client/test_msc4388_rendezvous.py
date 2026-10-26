@@ -81,6 +81,10 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
         config["experimental_features"] = {
             "msc4388_mode": "open",
+            # Effectively disable ratelimiting, as some tests make a large
+            # number of requests, unless the test configures it.
+            "msc4388_rc_create": {"per_second": 10000, "burst_count": 10000},
+            "msc4388_rc_requests": {"per_second": 10000, "burst_count": 10000},
             **(config.get("experimental_features") or {}),
         }
 
@@ -919,3 +923,128 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(channel.code, 200)
+
+    @override_config(
+        {
+            "experimental_features": {
+                "msc4388_rc_create": {"per_second": 0.1, "burst_count": 2},
+            },
+        }
+    )
+    def test_create_ratelimited(self) -> None:
+        """
+        Test that creating a session is ratelimited, separately from other
+        requests.
+        """
+        for _ in range(2):
+            channel = self.make_request(
+                "POST",
+                rz_endpoint,
+                {"data": "foo=bar"},
+                access_token=None,
+            )
+            self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 429)
+        self.assertEqual(channel.json_body["errcode"], "M_LIMIT_EXCEEDED")
+
+        # Other requests are not affected
+        channel = self.make_request("GET", rz_endpoint, {}, access_token=None)
+        self.assertEqual(channel.code, 200)
+
+        # Once enough time has passed, a session can be created again
+        self.reactor.advance(10)
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+
+    @override_config(
+        {
+            "experimental_features": {
+                "msc4388_rc_requests": {"per_second": 0.1, "burst_count": 4},
+            },
+        }
+    )
+    def test_requests_ratelimited(self) -> None:
+        """
+        Test that discovery, and receiving, sending and cancelling on a session
+        share a ratelimit.
+        """
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        rendezvous_id = channel.json_body["id"]
+        sequence_token = channel.json_body["sequence_token"]
+        session_endpoint = rz_endpoint + f"/{rendezvous_id}"
+
+        # Use up the burst with one request to each endpoint
+        channel = self.make_request("GET", rz_endpoint, {}, access_token=None)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request("GET", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "PUT",
+            send_endpoint(rendezvous_id, "txn1"),
+            {"sequence_token": sequence_token, "data": "foo=baz"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        sequence_token = channel.json_body["sequence_token"]
+
+        channel = self.make_request("GET", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 200)
+
+        # Now every one of them is ratelimited
+        channel = self.make_request("GET", rz_endpoint, {}, access_token=None)
+        self.assertEqual(channel.code, 429)
+        self.assertEqual(channel.json_body["errcode"], "M_LIMIT_EXCEEDED")
+
+        channel = self.make_request("GET", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 429)
+        self.assertEqual(channel.json_body["errcode"], "M_LIMIT_EXCEEDED")
+
+        channel = self.make_request(
+            "PUT",
+            send_endpoint(rendezvous_id, "txn2"),
+            {"sequence_token": sequence_token, "data": "foo=qux"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 429)
+        self.assertEqual(channel.json_body["errcode"], "M_LIMIT_EXCEEDED")
+
+        channel = self.make_request("DELETE", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 429)
+        self.assertEqual(channel.json_body["errcode"], "M_LIMIT_EXCEEDED")
+
+        # Creating a session is not affected
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # Once enough time has passed, requests are accepted again, and the
+        # ratelimited PUT did not change the payload
+        self.reactor.advance(10)
+        channel = self.make_request("GET", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["data"], "foo=baz")
+        self.assertEqual(channel.json_body["sequence_token"], sequence_token)
