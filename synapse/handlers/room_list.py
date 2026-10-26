@@ -64,6 +64,7 @@ class RoomListHandler:
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname  # nb must be called this for @cached
         self.store = hs.get_datastores().main
+        self._server_policy_handler = hs.get_server_policy_handler()
         self._storage_controllers = hs.get_storage_controllers()
         self.hs = hs
         self.enable_room_list_search = hs.config.roomdirectory.enable_room_list_search
@@ -117,6 +118,10 @@ class RoomListHandler:
             bool(search_filter),
             network_tuple,
         )
+
+        if search_filter:
+            query = search_filter.get(PublicRoomsFilterFields.GENERIC_SEARCH_TERM, "")
+            await self._server_policy_handler.assert_neutral_search_query(query)
 
         capped_limit: int = (
             MAX_PUBLIC_ROOMS_IN_RESPONSE
@@ -472,6 +477,9 @@ class RoomListHandler:
             return {"chunk": [], "total_room_count_estimate": 0}
 
         if search_filter:
+            query = search_filter.get(PublicRoomsFilterFields.GENERIC_SEARCH_TERM, "")
+            await self._server_policy_handler.assert_neutral_search_query(query)
+
             # Searching across federation is defined in MSC2197.
             # However, the remote homeserver may or may not actually support it.
             # So we first try an MSC2197 remote-filtered search, then fall back

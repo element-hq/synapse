@@ -374,6 +374,7 @@ class BaseHttpClient:
         uri: str,
         data: bytes | None = None,
         headers: Headers | None = None,
+        timeout: int | None = None,
     ) -> IResponse:
         """
         Args:
@@ -381,6 +382,7 @@ class BaseHttpClient:
             uri: URI to query.
             data: Data to send in the request body, if applicable.
             headers: Request headers.
+            timeout: Request timeout in seconds, or None to use the default timeout.
 
         Returns:
             Response object, once the headers have been read.
@@ -429,6 +431,7 @@ class BaseHttpClient:
                     # Avoid buffering the body in treq since we do not reuse
                     # response bodies.
                     unbuffered=True,
+                    timeout=timeout,
                     **self._extra_treq_args,
                 )
 
@@ -894,6 +897,7 @@ class ReplicationClient(BaseHttpClient):
         uri: str,
         data: bytes | None = None,
         headers: Headers | None = None,
+        timeout: int | None = None,
     ) -> IResponse:
         """
         Make a request, differs from BaseHttpClient.request in that it does not use treq.
@@ -903,6 +907,7 @@ class ReplicationClient(BaseHttpClient):
             uri: URI to query.
             data: Data to send in the request body, if applicable.
             headers: Request headers.
+            timeout: Timeout in seconds for the request. If None, use default timeout.
 
         Returns:
             Response object, once the headers have been read.
@@ -961,7 +966,7 @@ class ReplicationClient(BaseHttpClient):
                 # (Updated url https://github.com/twisted/twisted/issues/9534)
                 request_deferred = timeout_deferred(
                     deferred=request_deferred,
-                    timeout=60,
+                    timeout=timeout if timeout is not None else 60,
                     clock=self.hs.get_clock(),
                 )
 
