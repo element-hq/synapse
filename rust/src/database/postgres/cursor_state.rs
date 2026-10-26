@@ -42,7 +42,7 @@ use std::{mem, pin::Pin};
 
 use futures::{
     stream::{Fuse, FusedStream},
-    StreamExt, TryStreamExt,
+    FutureExt, StreamExt, TryStreamExt,
 };
 use pyo3::{
     exceptions::PyRuntimeError,
@@ -134,9 +134,9 @@ pub enum CursorQueryState<S = PgRowStream> {
         description: Vec<String>,
     },
     /// The result set has been fully consumed and its end reported. A fetch
-    /// returned [`None`], or [`CursorQueryState::fetch_all`] or
-    /// [`CursorQueryState::rowcount`] drained the stream. A further `fetch_*`
-    /// is an error. `rowcount` still returns the count.
+    /// returned [`None`] or an empty batch, or [`CursorQueryState::fetch_all`]
+    /// or [`CursorQueryState::rowcount`] drained the stream. A further
+    /// `fetch_*` is an error. `rowcount` still returns the count.
     Closed {
         /// Column names of the result set, carried over from
         /// [`CursorQueryState::Active`]. See the TODO there.
@@ -189,6 +189,36 @@ impl<S: CursorRowStream> CursorQueryState<S> {
             }
         };
         self.reset_on_err(row).map(Some)
+    }
+
+    /// Fetch the next batch of rows.
+    ///
+    /// Blocks until the first row is available, then adds any further rows that
+    /// are already buffered without blocking again. `capacity` sizes the
+    /// returned buffer and does not cap the batch. This lets Python iterate a
+    /// large result set without a call per row ([`Self::fetch_one`]) and
+    /// without waiting for the whole result set ([`Self::fetch_all`]).
+    ///
+    /// An empty batch reports exhaustion and moves the cursor to
+    /// [`Self::Closed`], so a subsequent fetch is an error. A batch that
+    /// reaches the end of the stream still returns the rows it has, so the
+    /// empty batch always comes from a later call. If reading or converting a
+    /// row fails, the cursor is reset to [`Self::Idle`] and the error surfaced
+    /// to Python.
+    pub fn fetch_next_batch<'py>(
+        &mut self,
+        py: Python<'py>,
+        capacity: usize,
+    ) -> PyResult<Vec<Bound<'py, PyTuple>>> {
+        let Self::Active { stream, handle, .. } = self else {
+            return Err(self.fetch_after_end_err());
+        };
+
+        let batch = pull_ready_batch(stream, py, capacity, handle);
+        if matches!(&batch, Ok(rows) if rows.is_empty()) {
+            self.close_drained();
+        }
+        self.reset_on_err(batch)
     }
 
     /// Collect every remaining row into a [`Vec`], draining the stream.
@@ -283,6 +313,38 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     }
 }
 
+/// Block for the first row, then add any rows that are already buffered
+/// without blocking again.
+///
+/// Returns an empty batch only if the stream was already exhausted. If the
+/// stream ends after the first row, this returns the rows collected so far. The
+/// next call then returns the empty batch, because the fused stream keeps
+/// yielding [`None`].
+///
+/// A stream error part way through discards the rows collected so far.
+fn pull_ready_batch<'py, S: CursorRowStream>(
+    stream: &mut S,
+    py: Python<'py>,
+    capacity: usize,
+    handle: &Handle,
+) -> PyResult<Vec<Bound<'py, PyTuple>>> {
+    let first = match Pin::new(&mut *stream).block_on_next(py, handle) {
+        Some(row) => row.map_err(S::stream_err)?,
+        None => return Ok(Vec::new()),
+    };
+
+    let mut buffer = Vec::with_capacity(capacity);
+    buffer.push(S::row_to_py(py, &first)?);
+
+    // `now_or_never` returns `None` when the next row is not buffered yet, and
+    // `Some(None)` at the end of the stream. Either way the batch is done.
+    while let Some(Some(row)) = stream.next().now_or_never() {
+        buffer.push(S::row_to_py(py, &row.map_err(S::stream_err)?)?);
+    }
+
+    Ok(buffer)
+}
+
 /// Consume and discard every row of a stream, and return the first stream
 /// error. Used to reach the affected-row count, which Postgres sends after the
 /// last row.
@@ -298,8 +360,10 @@ mod tests {
     //! These tests drive the state machine with an in-memory [`FakeStream`]
     //! instead of a live [`RowStream`], so they need no Postgres server. Rows
     //! are integer tuples, enough to check that values pass through
-    //! [`CursorRowStream::row_to_py`]. The `block_on*` helpers themselves are
-    //! tested in [`crate::database::postgres::helpers`].
+    //! [`CursorRowStream::row_to_py`]. A fake stream can also return
+    //! [`Poll::Pending`], for the partial-batch and blocking paths of
+    //! [`CursorQueryState::fetch_next_batch`]. The `block_on*` helpers
+    //! themselves are tested in [`crate::database::postgres::helpers`].
 
     use std::{
         collections::VecDeque,
@@ -350,6 +414,11 @@ mod tests {
         Unconvertible,
         /// A stream error that is ready now.
         Err(&'static str),
+        /// One poll that returns [`Poll::Pending`]. It models a row that is not
+        /// buffered yet. The stream wakes itself, so a blocking poll makes
+        /// progress. A single [`FutureExt::now_or_never`] poll still sees
+        /// `Pending`.
+        Pending,
     }
 
     /// An in-memory stream that plays back its steps and then ends. Once
@@ -363,11 +432,15 @@ mod tests {
     impl futures::Stream for FakeStream {
         type Item = Result<FakeRow, FakeError>;
 
-        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             match self.steps.pop_front() {
                 Some(Step::Row(cells)) => Poll::Ready(Some(Ok(FakeRow::Cells(cells)))),
                 Some(Step::Unconvertible) => Poll::Ready(Some(Ok(FakeRow::Unconvertible))),
                 Some(Step::Err(msg)) => Poll::Ready(Some(Err(FakeError(msg)))),
+                Some(Step::Pending) => {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
                 None => Poll::Ready(None),
             }
         }
@@ -623,6 +696,11 @@ mod tests {
             assert!(matches!(state, CursorQueryState::Idle));
 
             let mut state = active_with_steps(&rows, Some(0));
+            let err = state.fetch_next_batch(py, 100).unwrap_err();
+            assert!(err.to_string().contains("unconvertible"), "{err}");
+            assert!(matches!(state, CursorQueryState::Idle));
+
+            let mut state = active_with_steps(&rows, Some(0));
             let err = state.fetch_all(py).unwrap_err();
             assert!(err.to_string().contains("unconvertible"), "{err}");
             assert!(matches!(state, CursorQueryState::Idle));
@@ -705,6 +783,178 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("no active query"));
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // fetch_next_batch
+    // ------------------------------------------------------------------
+
+    /// [`CursorQueryState::fetch_next_batch`] returns every ready row but
+    /// leaves the cursor [`CursorQueryState::Active`] when it reaches the end
+    /// of the stream. The next call returns the empty batch and closes the
+    /// cursor.
+    #[test]
+    fn fetch_next_batch_returns_ready_rows_then_defers_the_empty_report() {
+        Python::initialize();
+        Python::attach(|py| {
+            // Every row is ready, so the first batch takes the whole result
+            // set.
+            let mut state = active_with(&[&[1], &[2], &[3]], Some(0));
+            let batch = state.fetch_next_batch(py, 100).unwrap();
+            assert_eq!(batch.len(), 3);
+            assert_tuple(&batch[0], &[1]);
+            assert_tuple(&batch[2], &[3]);
+
+            // The cursor stays `Active` even though the batch reached the end
+            // of the stream.
+            assert!(matches!(state, CursorQueryState::Active { .. }));
+
+            // The next call returns the empty batch and closes the cursor.
+            assert!(state.fetch_next_batch(py, 100).unwrap().is_empty());
+            assert!(matches!(state, CursorQueryState::Closed { .. }));
+
+            // A further fetch raises the "already exhausted" error.
+            assert!(state
+                .fetch_next_batch(py, 100)
+                .unwrap_err()
+                .to_string()
+                .contains("exhausted"));
+        });
+    }
+
+    /// [`CursorQueryState::fetch_next_batch`] on a result set with no rows
+    /// returns an empty batch and closes the cursor in the same call.
+    #[test]
+    fn fetch_next_batch_empty_stream_reports_exhaustion_immediately() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut state = active_with(&[], Some(0));
+            assert!(state.fetch_next_batch(py, 100).unwrap().is_empty());
+            assert!(matches!(state, CursorQueryState::Closed { .. }));
+        });
+    }
+
+    /// The `capacity` passed to [`CursorQueryState::fetch_next_batch`] only
+    /// sizes the buffer. The batch holds every ready row, even when there are
+    /// more than `capacity`.
+    #[test]
+    fn fetch_next_batch_capacity_is_a_hint_not_a_limit() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut state = active_with(&[&[1], &[2], &[3]], Some(0));
+            let batch = state.fetch_next_batch(py, 1).unwrap();
+            assert_eq!(batch.len(), 3);
+        });
+    }
+
+    /// [`CursorQueryState::fetch_next_batch`] on a cursor that has run no query
+    /// raises the "no active query" error.
+    #[test]
+    fn fetch_next_batch_without_query_errors() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut state = CursorQueryState::<FakeStream>::default();
+            assert!(state
+                .fetch_next_batch(py, 100)
+                .unwrap_err()
+                .to_string()
+                .contains("no active query"));
+        });
+    }
+
+    /// A stream error on the first row of
+    /// [`CursorQueryState::fetch_next_batch`] is raised and resets the cursor
+    /// to [`CursorQueryState::Idle`].
+    #[test]
+    fn fetch_next_batch_error_resets_to_idle() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut state = active_with_steps(&[Step::Err("splat")], Some(0));
+
+            let err = state.fetch_next_batch(py, 100).unwrap_err();
+            assert!(err.to_string().contains("splat"), "{err}");
+            assert!(matches!(state, CursorQueryState::Idle));
+        });
+    }
+
+    /// A stream error after the first row of a batch is raised. The rows
+    /// collected so far are discarded, and the cursor resets to
+    /// [`CursorQueryState::Idle`].
+    #[test]
+    fn fetch_next_batch_error_after_first_row_discards_buffer_and_resets() {
+        Python::initialize();
+        Python::attach(|py| {
+            // The first row is fine, but the stream errors while the batch is
+            // still being collected. Both items are ready at once.
+            let mut state = active_with_steps(&[Step::Row(&[1]), Step::Err("midway")], Some(0));
+
+            let err = state.fetch_next_batch(py, 100).unwrap_err();
+            assert!(err.to_string().contains("midway"), "{err}");
+            assert!(matches!(state, CursorQueryState::Idle));
+        });
+    }
+
+    /// [`CursorQueryState::fetch_next_batch`] after
+    /// [`CursorQueryState::fetch_one`] returns only the remaining rows.
+    #[test]
+    fn fetch_next_batch_interleaves_with_fetch_one() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut state = active_with(&[&[1], &[2], &[3]], Some(0));
+            assert_tuple_opt(state.fetch_one(py).unwrap(), &[1]);
+            let batch = state.fetch_next_batch(py, 100).unwrap();
+            assert_eq!(batch.len(), 2);
+            assert_tuple(&batch[0], &[2]);
+            assert_tuple(&batch[1], &[3]);
+        });
+    }
+
+    /// [`CursorQueryState::fetch_next_batch`] stops at the first row that is
+    /// not ready yet. The cursor stays [`CursorQueryState::Active`], and the
+    /// next call returns the rows after it.
+    #[test]
+    fn fetch_next_batch_returns_partial_batch_when_next_is_not_ready() {
+        Python::initialize();
+        Python::attach(|py| {
+            // Row 1 is ready. One poll then returns `Pending`, and row 3 is
+            // ready after it.
+            let mut state =
+                active_with_steps(&[Step::Row(&[1]), Step::Pending, Step::Row(&[3])], Some(0));
+
+            // The first batch stops at the `Pending` poll, so it holds only
+            // row 1. The cursor stays `Active`.
+            let batch = state.fetch_next_batch(py, 100).unwrap();
+            assert_eq!(batch.len(), 1);
+            assert_tuple(&batch[0], &[1]);
+            assert!(matches!(state, CursorQueryState::Active { .. }));
+
+            // The second batch gets row 3.
+            let batch = state.fetch_next_batch(py, 100).unwrap();
+            assert_eq!(batch.len(), 1);
+            assert_tuple(&batch[0], &[3]);
+
+            // The third call reaches the end and returns the empty batch.
+            assert!(state.fetch_next_batch(py, 100).unwrap().is_empty());
+            assert!(matches!(state, CursorQueryState::Closed { .. }));
+        });
+    }
+
+    /// [`CursorQueryState::fetch_next_batch`] waits for a first row that is not
+    /// ready yet, then returns it with the rows ready behind it.
+    #[test]
+    fn fetch_next_batch_blocks_for_a_pending_first_row() {
+        Python::initialize();
+        Python::attach(|py| {
+            // The first poll returns `Pending`, so `block_on_next` has to block
+            // for the first row.
+            let mut state =
+                active_with_steps(&[Step::Pending, Step::Row(&[1]), Step::Row(&[2])], Some(0));
+
+            let batch = state.fetch_next_batch(py, 100).unwrap();
+            assert_eq!(batch.len(), 2);
+            assert_tuple(&batch[0], &[1]);
+            assert_tuple(&batch[1], &[2]);
         });
     }
 }
