@@ -27,9 +27,9 @@ use std::str::FromStr;
 
 use anyhow::Error;
 use pyo3::{prelude::*, pybacked::PyBackedStr};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 
-use crate::push::utils::{glob_to_regex, GlobMatchType};
+use crate::push::utils::glob_to_pattern;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -53,24 +53,54 @@ struct AclList {
     patterns: Vec<Regex>,
 }
 
+const ACL_REGEX_SIZE_LIMIT: usize = 1 << 20;
+
+fn build_patterns(globs: &[String]) -> Result<Vec<Regex>, Error> {
+    if globs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pattern = format!(r"\A(?:{})\z", globs.join("|"));
+    match RegexBuilder::new(&pattern)
+        .case_insensitive(true)
+        .size_limit(ACL_REGEX_SIZE_LIMIT)
+        .build()
+    {
+        Ok(re) => Ok(vec![re]),
+        Err(regex::Error::CompiledTooBig(_)) if globs.len() > 1 => {
+            let (a, b) = globs.split_at(globs.len() / 2);
+            let mut out = build_patterns(a)?;
+            out.extend(build_patterns(b)?);
+            Ok(out)
+        }
+        Err(regex::Error::CompiledTooBig(_)) => Ok(vec![RegexBuilder::new(&pattern)
+            .case_insensitive(true)
+            .build()?]),
+        Err(e) => Err(e.into()),
+    }
+}
+
 impl AclList {
     fn new(entries: &[PyBackedStr]) -> Result<Self, Error> {
-        let mut list = AclList::default();
+        let mut exact = HashSet::new();
+        let mut globs = Vec::new();
         for entry in entries {
             let entry: &str = entry;
             if entry.is_ascii() && !entry.contains(['*', '?']) {
-                list.exact.insert(entry.to_ascii_lowercase());
+                exact.insert(entry.to_ascii_lowercase());
             } else {
-                list.patterns
-                    .push(glob_to_regex(entry, GlobMatchType::Whole)?);
+                globs.push(glob_to_pattern(entry));
             }
         }
-        Ok(list)
+
+        Ok(AclList {
+            exact,
+            patterns: build_patterns(&globs)?,
+        })
     }
 
     fn matches(&self, server_name: &str, lowercased: Option<&str>) -> bool {
         lowercased.is_some_and(|l| self.exact.contains(l))
-            || self.patterns.iter().any(|e| e.is_match(server_name))
+            || self.patterns.iter().any(|p| p.is_match(server_name))
     }
 }
 
