@@ -61,6 +61,7 @@ from twisted.web.server import Request
 # This module is imported for its side effects; flake8 needn't warn that it's unused.
 import synapse.metrics._reactor_metrics  # noqa: F401
 from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
+from synapse.metrics._thread_cpu import thread_cpu_metrics
 from synapse.metrics._types import Collector
 from synapse.synapse_rust import get_rustc_version
 from synapse.types import StrSequence
@@ -764,6 +765,8 @@ def register_threadpool(*, name: str, server_name: str, threadpool: ThreadPool) 
     threadpool_total_working_threads.labels(
         name=name, **{SERVER_NAME_LABEL: server_name}
     ).set_function(lambda: len(threadpool.working))
+
+    thread_cpu_metrics.register_threadpool(name, threadpool)
 
 
 class MetricsResource(Resource):
