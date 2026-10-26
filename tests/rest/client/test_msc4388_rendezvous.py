@@ -48,6 +48,8 @@ class RendezvousDisabledTestCase(unittest.HomeserverTestCase):
     servlets = [rendezvous.register_servlets]
 
     def test_disabled(self) -> None:
+        channel = self.make_request("GET", rz_endpoint, {}, access_token=None)
+        self.assertEqual(channel.code, 404)
         channel = self.make_request("POST", rz_endpoint, {}, access_token=None)
         self.assertEqual(channel.code, 404)
 
