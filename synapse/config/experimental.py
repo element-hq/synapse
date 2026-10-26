@@ -248,6 +248,19 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4388_enabled"),
             )
 
+        # How long a rendezvous session lasts before it expires. MSC4388
+        # recommends at least 2 minutes for usability, to allow the user time to
+        # complete the sign in including any extra steps such as MFA, and at
+        # most 5 minutes for security.
+        self.msc4388_session_ttl_ms = self.parse_duration(
+            experimental.get("msc4388_session_ttl", "2m")
+        )
+        if not 2 * 60 * 1000 <= self.msc4388_session_ttl_ms <= 5 * 60 * 1000:
+            raise ConfigError(
+                "msc4388_session_ttl must be between 2 and 5 minutes",
+                ("experimental", "msc4388_session_ttl"),
+            )
+
         # MSC4388 requests are ratelimited by client IP address, as most are
         # unauthenticated: only discovery and creating a session may carry an
         # access token, and even then it is not used for ratelimiting.
@@ -255,8 +268,8 @@ class ExperimentalConfig(Config):
         # Creating a session is limited more strictly than other requests, as
         # there is a cap on the number of concurrent sessions, and creating new
         # sessions beyond it evicts the oldest ones. A client using these
-        # defaults can hold at most around 20 live sessions at once, as each
-        # session expires after 2 minutes.
+        # defaults can hold at most around 20 live sessions at once with the
+        # default session TTL of 2 minutes, or 40 with the maximum of 5 minutes.
         self.msc4388_rc_create = RatelimitSettings.parse(
             experimental,
             "msc4388_rc_create",

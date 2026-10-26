@@ -622,6 +622,34 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 404)
 
+    @override_config({"experimental_features": {"msc4388_session_ttl": "5m"}})
+    def test_configured_ttl(self) -> None:
+        """
+        Test that sessions expire after the configured TTL.
+        """
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["expires_in_ms"], 5 * 60 * 1000)
+        session_endpoint = rz_endpoint + "/" + channel.json_body["id"]
+
+        # The session is still there after the default TTL of 2 minutes...
+        self.reactor.advance(120)
+        channel = self.make_request("GET", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 200)
+        # (allowing for the time taken by the requests)
+        self.assertLessEqual(channel.json_body["expires_in_ms"], 3 * 60 * 1000)
+        self.assertGreater(channel.json_body["expires_in_ms"], 3 * 60 * 1000 - 1000)
+
+        # ...but is gone after the configured TTL of 5 minutes
+        self.reactor.advance(180)
+        channel = self.make_request("GET", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 404)
+
     def test_delete_expired(self) -> None:
         """
         Test that deleting a session which has expired, but has not yet been

@@ -15,6 +15,7 @@
 import yaml
 from parameterized import parameterized
 
+from synapse.config import ConfigError
 from synapse.config._base import RootConfig
 from synapse.config.experimental import ExperimentalConfig
 from synapse.config.homeserver import HomeServerConfig
@@ -56,9 +57,39 @@ class ExperimentalConfigTestCase(unittest.TestCase):
 
         _read_config(config_values)
 
+    @parameterized.expand(
+        [
+            ["default", None, 2 * 60 * 1000],
+            ["minimum", "2m", 2 * 60 * 1000],
+            ["maximum", "5m", 5 * 60 * 1000],
+            ["milliseconds", 200000, 200000],
+        ]
+    )
+    def test_msc4388_session_ttl(
+        self, test_description: str, ttl: str | int | None, expected_ms: int
+    ) -> None:
+        """
+        Test that the MSC4388 session TTL is parsed as a duration.
+        """
+        experimental_features = {} if ttl is None else {"msc4388_session_ttl": ttl}
+        config = _read_config({"experimental_features": experimental_features})
+        self.assertEqual(config.msc4388_session_ttl_ms, expected_ms)
 
-def _read_config(config_values: JsonDict) -> None:
-    ExperimentalConfig(RootConfig()).read_config(
+    @parameterized.expand([["too_short", "119s"], ["too_long", "301s"]])
+    def test_msc4388_session_ttl_out_of_range(
+        self, test_description: str, ttl: str
+    ) -> None:
+        """
+        Test that an MSC4388 session TTL outside of the range recommended by the
+        MSC is rejected.
+        """
+        with self.assertRaises(ConfigError):
+            _read_config({"experimental_features": {"msc4388_session_ttl": ttl}})
+
+
+def _read_config(config_values: JsonDict) -> ExperimentalConfig:
+    config = ExperimentalConfig(RootConfig())
+    config.read_config(
         yaml.safe_load(
             HomeServerConfig().generate_config(
                 config_dir_path="CONFDIR",
@@ -69,3 +100,4 @@ def _read_config(config_values: JsonDict) -> None:
         | config_values,
         allow_secrets_in_config=False,
     )
+    return config
