@@ -347,8 +347,16 @@ impl MSC4388RendezvousHandler {
         py: Python<'py>,
         id: &str,
     ) -> PyResult<(u8, Bound<'py, PyDict>)> {
+        let now = self.runtime.clock().now();
+
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
-        let _session = self.sessions.remove(&id).ok_or_else(NotFoundError::new)?;
+        // An expired session may not have been evicted yet, but it should be
+        // treated as if it no longer exists.
+        let _session = self
+            .sessions
+            .remove(&id)
+            .filter(|s| !s.expired(now))
+            .ok_or_else(NotFoundError::new)?;
 
         // Respond with an empty JSON object, as is the convention for endpoints
         // with no response body to return.

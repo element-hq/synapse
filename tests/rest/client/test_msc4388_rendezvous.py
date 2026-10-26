@@ -607,6 +607,43 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 404)
 
+    def test_delete_expired(self) -> None:
+        """
+        Test that deleting a session which has expired, but has not yet been
+        evicted, fails as if the session did not exist.
+        """
+        # Offset the session from the eviction interval (60 seconds), so that
+        # it expires between two eviction runs
+        self.reactor.advance(30)
+
+        # Start a new session
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        session_endpoint = rz_endpoint + "/" + channel.json_body["id"]
+
+        # Advance the clock to just before the TTL of entries (2 minutes). Any
+        # overdue eviction run happens at the end of an advance, so it does so
+        # while the session is still live.
+        self.reactor.advance(119)
+
+        # Then advance the clock to the TTL, which is before the next eviction
+        # run
+        self.reactor.advance(1)
+
+        # Deleting the session should fail as it has expired
+        channel = self.make_request(
+            "DELETE",
+            session_endpoint,
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
+
     def test_capacity(self) -> None:
         """
         Test that the soft capacity limit is enforced on the rendezvous sessions, as old
