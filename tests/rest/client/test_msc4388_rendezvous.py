@@ -25,7 +25,7 @@ from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.rest import admin
 from synapse.rest.client import login, rendezvous
 from synapse.server import HomeServer
-from synapse.types import UserID
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -39,6 +39,19 @@ def send_endpoint(rendezvous_id: str, txn_id: str) -> str:
     return f"{rz_endpoint}/{rendezvous_id}/{txn_id}"
 
 
+class RendezvousDisabledTestCase(unittest.HomeserverTestCase):
+    """
+    Test that the experimental MSC4388 rendezvous endpoint is disabled by
+    default.
+    """
+
+    servlets = [rendezvous.register_servlets]
+
+    def test_disabled(self) -> None:
+        channel = self.make_request("POST", rz_endpoint, {}, access_token=None)
+        self.assertEqual(channel.code, 404)
+
+
 class RendezvousServletTestCase(unittest.HomeserverTestCase):
     """
     Test the experimental MSC4388 rendezvous endpoint.
@@ -49,6 +62,29 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         rendezvous.register_servlets,
     ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+
+        # By default, tests run with MAS and MSC4388 in open mode. Tests can
+        # override individual experimental features, as `override_config`
+        # replaces `experimental_features` wholesale, so the defaults are
+        # merged in here.
+        config.setdefault("disable_registration", True)
+        config.setdefault(
+            "matrix_authentication_service",
+            {
+                "enabled": True,
+                "secret": "secret_value",
+                "endpoint": "https://issuer",
+            },
+        )
+        config["experimental_features"] = {
+            "msc4388_mode": "open",
+            **(config.get("experimental_features") or {}),
+        }
+
+        return config
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.hs = self.setup_test_homeserver()
@@ -124,10 +160,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         # Generate an access token for the device
         return "mock_token_" + username + "_" + device_id
 
-    def test_disabled(self) -> None:
-        channel = self.make_request("POST", rz_endpoint, {}, access_token=None)
-        self.assertEqual(channel.code, 404)
-
     @override_config(
         {
             "experimental_features": {
@@ -143,19 +175,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         channel = self.make_request("POST", rz_endpoint, {}, access_token=None)
         self.assertEqual(channel.code, 404)
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_rendezvous_public(self) -> None:
         """
         Test the MSC4108 rendezvous endpoint, including:
@@ -253,19 +272,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_rendezvous_put_is_idempotent(self) -> None:
         """
         A PUT which reuses a transaction ID the server has already seen for the
@@ -363,19 +369,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertNotEqual(channel.json_body["sequence_token"], updated_sequence_token)
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_rendezvous_put_rejected_writes_are_not_recorded(self) -> None:
         """
         Only successful PUTs are recorded against their transaction ID, so a
@@ -422,19 +415,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_rendezvous_put_transaction_id(self) -> None:
         """
         The transaction ID must be supplied in the path and comply with the
@@ -492,19 +472,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "authenticated",
-            },
-        }
-    )
+    @override_config({"experimental_features": {"msc4388_mode": "authenticated"}})
     def test_rendezvous_requires_authentication(self) -> None:
         """
         Test the MSC4108 rendezvous endpoint when configured with the mode authenticated, including:
@@ -603,19 +571,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_expiration(self) -> None:
         """
         Test that entries are evicted after a TTL.
@@ -650,19 +605,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 404)
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_capacity(self) -> None:
         """
         Test that the soft capacity limit is enforced on the rendezvous sessions, as old
@@ -721,19 +663,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 404)
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_hard_capacity(self) -> None:
         """
         Test that the hard capacity limit is enforced on the rendezvous sessions, as old
@@ -779,19 +708,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 404)
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_data_type(self) -> None:
         """
         Test that the data field is restricted to string.
@@ -831,19 +747,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             self.assertEqual(channel.code, 400)
             self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_max_length(self) -> None:
         """
         Test that the data max length is restricted.
@@ -892,19 +795,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             ("Sec-Fetch-Site", "none"),
         ]
     )
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_rendezvous_rejects_unsafe_get_requests(
         self, header_name: str, header_value: str
     ) -> None:
@@ -942,19 +832,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
 
-    @override_config(
-        {
-            "disable_registration": True,
-            "matrix_authentication_service": {
-                "enabled": True,
-                "secret": "secret_value",
-                "endpoint": "https://issuer",
-            },
-            "experimental_features": {
-                "msc4388_mode": "open",
-            },
-        }
-    )
     def test_rendezvous_allows_from_browser_fetch(self) -> None:
         """
         We check that the GET policy does allow for an expected browser fetch
