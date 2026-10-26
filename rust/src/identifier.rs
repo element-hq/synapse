@@ -23,6 +23,7 @@ use std::{fmt, ops::Deref};
 pub enum IdentifierError {
     IncorrectSigil,
     MissingColon,
+    InvalidOpaqueIdentifier,
 }
 
 impl fmt::Display for IdentifierError {
@@ -248,5 +249,121 @@ impl Deref for EventID {
 impl fmt::Display for EventID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+/// A string which complies with the [opaque identifier grammar] from the
+/// Matrix specification: between 1 and 255 bytes of `[A-Za-z0-9._~-]`.
+///
+/// This grammar is shared by several kinds of identifier, such as transaction
+/// IDs, so this type only says that the string is well-formed, not what it
+/// identifies.
+///
+/// [opaque identifier grammar]: https://spec.matrix.org/v1.19/appendices/#opaque-identifiers
+#[derive(Clone, Debug, PartialEq)]
+pub struct OpaqueIdentifier(String);
+
+impl OpaqueIdentifier {
+    /// Returns whether the given string complies with the opaque identifier
+    /// grammar.
+    fn is_valid(s: &str) -> bool {
+        !s.is_empty()
+            && s.len() <= 255
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
+    }
+}
+
+impl TryFrom<&str> for OpaqueIdentifier {
+    type Error = IdentifierError;
+
+    /// Will try creating an `OpaqueIdentifier` from the provided `&str`.
+    /// Can fail if the string does not comply with the opaque identifier grammar.
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        if !Self::is_valid(s) {
+            return Err(IdentifierError::InvalidOpaqueIdentifier);
+        }
+
+        Ok(OpaqueIdentifier(s.to_string()))
+    }
+}
+
+impl TryFrom<String> for OpaqueIdentifier {
+    type Error = IdentifierError;
+
+    /// Will try creating an `OpaqueIdentifier` from the provided `String`.
+    /// Can fail if the string does not comply with the opaque identifier grammar.
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        if !Self::is_valid(&s) {
+            return Err(IdentifierError::InvalidOpaqueIdentifier);
+        }
+
+        Ok(OpaqueIdentifier(s))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for OpaqueIdentifier {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s: String = serde::Deserialize::deserialize(deserializer)?;
+        OpaqueIdentifier::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Deref for OpaqueIdentifier {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl fmt::Display for OpaqueIdentifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IdentifierError, OpaqueIdentifier};
+
+    #[test]
+    fn opaque_identifier_accepts_valid() {
+        for valid in ["a", "txn1", "AZaz09-._~", &"a".repeat(255)] {
+            let id = OpaqueIdentifier::try_from(valid).unwrap();
+            assert_eq!(&*id, valid);
+            assert_eq!(id.to_string(), valid);
+        }
+    }
+
+    #[test]
+    fn opaque_identifier_rejects_invalid() {
+        for invalid in [
+            "",
+            &"a".repeat(256),
+            "txn!1",
+            "txn=1",
+            "txn 1",
+            "txn/1",
+            "txn%201",
+            // Non-ASCII, even where it looks alphanumeric.
+            "txné",
+        ] {
+            assert_eq!(
+                OpaqueIdentifier::try_from(invalid),
+                Err(IdentifierError::InvalidOpaqueIdentifier),
+                "{invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn opaque_identifier_deserialize() {
+        let id: OpaqueIdentifier = serde_json::from_str(r#""txn1""#).unwrap();
+        assert_eq!(&*id, "txn1");
+        assert!(serde_json::from_str::<OpaqueIdentifier>(r#""txn!1""#).is_err());
     }
 }

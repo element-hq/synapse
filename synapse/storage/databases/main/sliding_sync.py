@@ -374,6 +374,15 @@ class SlidingSyncStore(SQLBaseStore):
                 (have_sent_room.status.value, have_sent_room.last_token)
             )
 
+        for (
+            room_id,
+            have_sent_room,
+        ) in per_connection_state.sticky_events._statuses.items():
+            key_values.append((connection_position, "sticky_events", room_id))
+            value_values.append(
+                (have_sent_room.status.value, have_sent_room.last_token)
+            )
+
         self.db_pool.simple_upsert_many_txn(
             txn,
             table="sliding_sync_connection_streams",
@@ -596,6 +605,7 @@ class SlidingSyncStore(SQLBaseStore):
         rooms: dict[str, HaveSentRoom[str]] = {}
         receipts: dict[str, HaveSentRoom[str]] = {}
         account_data: dict[str, HaveSentRoom[str]] = {}
+        sticky_events: dict[str, HaveSentRoom[str]] = {}
 
         receipt_rows = self.db_pool.simple_select_list_txn(
             txn,
@@ -618,6 +628,8 @@ class SlidingSyncStore(SQLBaseStore):
                 receipts[room_id] = have_sent_room
             elif stream == "account_data":
                 account_data[room_id] = have_sent_room
+            elif stream == "sticky_events":
+                sticky_events[room_id] = have_sent_room
             else:
                 # For forwards compatibility we ignore unknown streams, as in
                 # future we want to be able to easily add more stream types.
@@ -628,6 +640,7 @@ class SlidingSyncStore(SQLBaseStore):
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
+            sticky_events=RoomStatusMap(sticky_events),
             room_configs=room_configs,
             room_lazy_membership={},
         )
@@ -810,6 +823,7 @@ class PerConnectionStateDB:
     rooms: "RoomStatusMap[str]"
     receipts: "RoomStatusMap[str]"
     account_data: "RoomStatusMap[str]"
+    sticky_events: "RoomStatusMap[str]"
 
     room_configs: Mapping[str, "RoomSyncConfig"]
 
@@ -856,11 +870,24 @@ class PerConnectionStateDB:
             for room_id, status in per_connection_state.account_data.get_updates().items()
         }
 
+        sticky_events = {
+            room_id: HaveSentRoom(
+                status=status.status,
+                last_token=(
+                    await status.last_token.to_string(store)
+                    if status.last_token is not None
+                    else None
+                ),
+            )
+            for room_id, status in per_connection_state.sticky_events.get_updates().items()
+        }
+
         log_kv(
             {
                 "rooms": rooms,
                 "receipts": receipts,
                 "account_data": account_data,
+                "sticky_events": sticky_events,
                 "room_configs": per_connection_state.room_configs.maps[0],
             }
         )
@@ -870,6 +897,7 @@ class PerConnectionStateDB:
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
+            sticky_events=RoomStatusMap(sticky_events),
             room_configs=per_connection_state.room_configs.maps[0],
             room_lazy_membership=per_connection_state.room_lazy_membership,
         )
@@ -910,10 +938,23 @@ class PerConnectionStateDB:
             for room_id, status in self.account_data._statuses.items()
         }
 
+        sticky_events = {
+            room_id: HaveSentRoom(
+                status=status.status,
+                last_token=(
+                    await MultiWriterStreamToken.parse(store, status.last_token)
+                    if status.last_token is not None
+                    else None
+                ),
+            )
+            for room_id, status in self.sticky_events._statuses.items()
+        }
+
         return PerConnectionState(
             last_used_ts=self.last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
+            sticky_events=RoomStatusMap(sticky_events),
             room_configs=self.room_configs,
         )

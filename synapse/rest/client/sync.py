@@ -1248,7 +1248,6 @@ class SlidingSyncRestServlet(RestServlet):
 
         return {
             "rooms": rooms_out,
-            "next_batch": sticky_events.next_batch.serialise(),
         }
 
 

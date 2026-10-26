@@ -273,6 +273,57 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         )
         return cast(list[tuple[int, str, str]], txn.fetchall())
 
+    async def get_rooms_with_sticky_events_between(
+        self,
+        room_ids: Collection[str],
+        *,
+        from_token: MultiWriterStreamToken,
+        to_token: MultiWriterStreamToken,
+    ) -> set[str]:
+        """Given a set of room IDs, find out which of them have sticky events
+        in the `sticky_events` table (which may be expired and awaiting cleanup)
+        with sticky stream positions after `from_token` and at or before `to_token`.
+
+        Bounds: from_token < ... <= to_token
+
+        Args:
+            room_ids: The room IDs to check.
+            from_token: The sticky stream position to check from (exclusive).
+            to_token: The sticky stream position to check to (inclusive).
+        Returns:
+            The subset of `room_ids` that have sticky events in the range.
+        """
+        if len(room_ids) == 0 or to_token.is_before_or_eq(from_token):
+            return set()
+
+        def _get_rooms_with_sticky_events_between_txn(
+            txn: LoggingTransaction,
+        ) -> set[str]:
+            room_id_in_list_clause, room_id_in_list_values = make_in_list_sql_clause(
+                txn.database_engine, "room_id", room_ids
+            )
+            stream_clause, stream_values = make_multiwriter_sharded_token_bounds_sql(
+                self.database_engine,
+                stream_id_column="stream_id",
+                instance_name_column="instance_name",
+                from_token_exclusive=from_token,
+                to_token_inclusive=to_token,
+            )
+            txn.execute(
+                f"""
+                SELECT DISTINCT room_id
+                FROM sticky_events
+                WHERE {stream_clause} AND {room_id_in_list_clause}
+                """,
+                (*stream_values, *room_id_in_list_values),
+            )
+            return {room_id for (room_id,) in txn}
+
+        return await self.db_pool.runInteraction(
+            "get_rooms_with_sticky_events_between",
+            _get_rooms_with_sticky_events_between_txn,
+        )
+
     async def get_updated_sticky_events(
         self, *, from_id: int, to_id: int, limit: int
     ) -> list[StickyEventUpdate]:
