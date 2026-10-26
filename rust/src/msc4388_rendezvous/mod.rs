@@ -20,7 +20,7 @@ use std::{
 use http::StatusCode;
 use pyo3::{
     pyclass, pymethods,
-    types::{PyAnyMethods, PyModule, PyModuleMethods},
+    types::{PyAnyMethods, PyDict, PyModule, PyModuleMethods},
     Bound, Py, PyAny, PyResult, Python,
 };
 use serde::Deserialize;
@@ -342,11 +342,17 @@ impl MSC4388RendezvousHandler {
         }
     }
 
-    fn handle_delete(&mut self, id: &str) -> PyResult<(u8, ())> {
+    fn handle_delete<'py>(
+        &mut self,
+        py: Python<'py>,
+        id: &str,
+    ) -> PyResult<(u8, Bound<'py, PyDict>)> {
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let _session = self.sessions.remove(&id).ok_or_else(NotFoundError::new)?;
 
-        Ok((200, ()))
+        // Respond with an empty JSON object, as is the convention for endpoints
+        // with no response body to return.
+        Ok((200, PyDict::new(py)))
     }
 }
 

@@ -261,6 +261,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body, {})
 
         # If we try to get the data again, it should fail
         channel = self.make_request(
@@ -560,6 +561,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body, {})
 
         # If we try to get the data again, it should fail
         channel = self.make_request(
