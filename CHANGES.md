@@ -1,3 +1,9 @@
+# Synapse 1.164.0 (2026-10-27)
+
+No significant changes since 1.164.0rc3.
+
+
+
 # Synapse 1.163.2 (2026-10-23)
 
 ## Internal Changes
@@ -100,6 +106,7 @@
 ## Bugfixes
 
 - Fix Synapse failing to start with Redis enabled when installed using pip (avoid incompatible breaking changes in `txredisapi@1.6.0`). ([\#20354](https://github.com/element-hq/synapse/issues/20354))
+
 
 
 
