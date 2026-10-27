@@ -169,6 +169,8 @@ class SlidingSyncResult:
                 as sync v2)
             highlight_count: The number of unread notifications for this room with the highlight
                 flag set. (same as sync v2)
+            synthetic_join: Whether to add the user's synthetic join to the
+                `required_state` of a server announcement room they are not a member of.
         """
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -201,6 +203,7 @@ class SlidingSyncResult:
         invited_count: int | None
         notification_count: int
         highlight_count: int
+        synthetic_join: bool
 
         def __bool__(self) -> bool:
             """Are there any updates that should be returned immediately to
@@ -218,6 +221,7 @@ class SlidingSyncResult:
                 or self.invited_count is not None
                 # We need to let the client know if there are any new events
                 or bool(self.required_state)
+                or self.synthetic_join
                 or bool(self.timeline_events)
                 or bool(self.stripped_state)
             )

@@ -37,6 +37,10 @@ from synapse.api.constants import (
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.events import StrippedStateEvent
+from synapse.handlers.server_announcements import (
+    SERVER_ANNOUNCEMENT_EVENT_TYPES,
+    make_synthetic_join_event_id,
+)
 from synapse.logging.opentracing import start_active_span, trace
 from synapse.storage.databases.main.sliding_sync import UPDATE_INTERVAL_LAST_USED_TS
 from synapse.storage.databases.main.state import (
@@ -161,6 +165,12 @@ class SlidingSyncInterestedRooms:
     The set of rooms the user consider as direct-message (DM) rooms
     """
 
+    server_announcement_room_ids: AbstractSet[str]
+    """
+    The set of server announcement rooms the user is not a member of, which
+    `room_membership_for_user_map` lists as joined with a synthetic join
+    """
+
     @staticmethod
     def empty() -> "SlidingSyncInterestedRooms":
         return SlidingSyncInterestedRooms(
@@ -172,6 +182,7 @@ class SlidingSyncInterestedRooms:
             newly_joined_rooms=set(),
             newly_left_rooms=set(),
             dm_room_ids=set(),
+            server_announcement_room_ids=set(),
         )
 
 
@@ -224,6 +235,58 @@ class SlidingSyncRoomLists:
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
         self._clock = hs.get_clock()
+
+    async def _get_server_announcement_rooms(
+        self,
+        user_id: str,
+        room_ids_with_membership: AbstractSet[str],
+        to_token: StreamToken,
+    ) -> dict[str, RoomsForUserSlidingSync]:
+        """Return the server announcement rooms to list as joined for a user who
+        is not a member of them.
+
+        A room is only returned once it holds an announcement at `to_token`. Its
+        membership points at the user's synthetic join and at the position of
+        the latest announcement.
+
+        Args:
+            user_id: The syncing user.
+            room_ids_with_membership: The rooms the user already has a membership
+                in, which are left out.
+            to_token: The point in the stream to sync up to.
+        """
+        rooms: dict[str, RoomsForUserSlidingSync] = {}
+        for room_id in await self.store.get_server_announcement_room_ids():
+            if room_id in room_ids_with_membership:
+                continue
+            if room_id in self.rooms_to_exclude_globally:
+                continue
+
+            last_announcement = (
+                await self.store.get_last_event_pos_in_room_before_stream_ordering(
+                    room_id, to_token.room_key, SERVER_ANNOUNCEMENT_EVENT_TYPES
+                )
+            )
+            if last_announcement is None:
+                continue
+            _, event_pos = last_announcement
+
+            room_type = await self.store.get_room_type(room_id)
+            rooms[room_id] = RoomsForUserSlidingSync(
+                room_id=room_id,
+                sender=user_id,
+                membership=Membership.JOIN,
+                event_id=make_synthetic_join_event_id(room_id, user_id),
+                event_pos=event_pos,
+                room_version_id=await self.store.get_room_version_id(room_id),
+                has_known_state=room_type is not ROOM_UNKNOWN_SENTINEL,
+                room_type=None if isinstance(room_type, StateSentinel) else room_type,
+                is_encrypted=await self.get_is_encrypted_for_room_at_token(
+                    room_id, to_token.room_key
+                ),
+            )
+
+        return rooms
 
     async def compute_interested_rooms(
         self,
@@ -477,6 +540,11 @@ class SlidingSyncRoomLists:
         for room_id in self.rooms_to_exclude_globally:
             room_membership_for_user_map.pop(room_id, None)
 
+        server_announcement_room_map = await self._get_server_announcement_rooms(
+            user_id, room_membership_for_user_map.keys(), to_token
+        )
+        room_membership_for_user_map.update(server_announcement_room_map)
+
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
         if sync_config.lists:
@@ -659,6 +727,7 @@ class SlidingSyncRoomLists:
             newly_joined_rooms=newly_joined_room_ids,
             newly_left_rooms=set(newly_left_room_map),
             dm_room_ids=dm_room_ids,
+            server_announcement_room_ids=server_announcement_room_map.keys(),
         )
 
     async def _compute_interested_rooms_fallback(
@@ -677,6 +746,11 @@ class SlidingSyncRoomLists:
         ) = await self.get_room_membership_for_user_at_to_token(
             sync_config.user, to_token, from_token
         )
+
+        server_announcement_room_map = await self._get_server_announcement_rooms(
+            sync_config.user.to_string(), room_membership_for_user_map.keys(), to_token
+        )
+        room_membership_for_user_map.update(server_announcement_room_map)
 
         dm_room_ids = await self._get_dm_rooms_for_user(sync_config.user.to_string())
 
@@ -847,6 +921,7 @@ class SlidingSyncRoomLists:
             newly_joined_rooms=newly_joined_room_ids,
             newly_left_rooms=newly_left_room_ids,
             dm_room_ids=dm_room_ids,
+            server_announcement_room_ids=server_announcement_room_map.keys(),
         )
 
     async def _filter_relevant_rooms_to_send(

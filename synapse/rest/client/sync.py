@@ -1047,6 +1047,16 @@ class SlidingSyncRestServlet(RestServlet):
                 )
                 serialized_rooms[room_id]["required_state"] = serialized_required_state
 
+            if room_result.synthetic_join:
+                create_event = await self.store.get_create_event_for_room(room_id)
+                serialized_rooms[room_id].setdefault("required_state", []).append(
+                    make_synthetic_join_event(
+                        room_id,
+                        requester.user.to_string(),
+                        create_event.origin_server_ts,
+                    )
+                )
+
             # This will be omitted for invite/knock rooms with `stripped_state`
             if (
                 room_result.timeline_events is not None
