@@ -19,7 +19,7 @@
 #
 #
 import logging
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from netaddr import IPSet
 from signedjson.key import (
@@ -34,6 +34,7 @@ from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersion
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import EventBase, make_event_from_dict
+from synapse.federation.sender.per_destination_queue import PerDestinationQueue
 from synapse.handlers.typing import TypingWriterHandler
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
 from synapse.rest.admin import register_servlets_for_client_rest_resource
@@ -45,6 +46,7 @@ from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import get_clock
+from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +262,77 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
 
         self.assertTrue(sent_on_1)
         self.assertTrue(sent_on_2)
+
+    @override_config({"experimental_features": {"msc4354_enabled": True}})
+    def test_new_server_joined_command_sent_to_federation_sender(self) -> None:
+        """
+        Tests that the NEW_SERVER_JOINED replication command is sent to the federation sender
+        when a server newly joins a room.
+        """
+        worker_hs = self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {
+                "worker_name": "federation_sender1",
+                "federation_sender_instances": ["federation_sender1"],
+            },
+        )
+
+        user = self.register_user("user", "pass")
+        token = self.login("user", "pass")
+
+        with patch.object(
+            worker_hs.get_notifier(), "notify_new_server_joined"
+        ) as mock_notify:
+            room_id = self.create_room_with_remote_server(user, token)
+
+        mock_notify.assert_called_once_with(server="other_server", room_id=room_id)
+
+    @override_config({"experimental_features": {"msc4354_enabled": True}})
+    def test_new_server_joined_handled_by_one_shard(self) -> None:
+        """
+        Tests that the NEW_SERVER_JOINED replication command is handled by exactly one
+        shard, when sharded federation senders are in use.
+        """
+        shard_config = {
+            "federation_sender_instances": [
+                "federation_sender1",
+                "federation_sender2",
+            ],
+        }
+        self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {"worker_name": "federation_sender1", **shard_config},
+        )
+        self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {"worker_name": "federation_sender2", **shard_config},
+        )
+
+        user = self.register_user("user", "pass")
+        token = self.login("user", "pass")
+
+        # These destinations are known to hash to different shards.
+        expected_shards = {
+            "other_server_0": "federation_sender1",
+            "other_server_3": "federation_sender2",
+        }
+
+        with patch.object(
+            PerDestinationQueue, "notify_sticky_event_backlog", autospec=True
+        ) as mock_notify:
+            for server_name, expected_instance in expected_shards.items():
+                mock_notify.reset_mock()
+
+                self.create_room_with_remote_server(user, token, server_name)
+                self.replicate()
+
+                # Assert that exactly one federation sender notified its per-destination queue
+                # about the potential sticky event backlog from the newly-joining server.
+                notified = [
+                    (call.args[0]._instance_name, call.args[0]._destination)
+                    for call in mock_notify.call_args_list
+                ]
+                self.assertEqual(notified, [(expected_instance, server_name)])
 
     def create_fake_event_from_remote_server(
         self, remote_server_name: str, event_dict: JsonDict, room_version: RoomVersion
