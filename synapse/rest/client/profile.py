@@ -23,7 +23,9 @@
 
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
+
+from pydantic import Field
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, SynapseError
@@ -332,17 +334,16 @@ class ProfileQueryRestServlet(RestServlet):
     CATEGORY = "Profile requests"
 
     class PostBody(RequestBodyModel):
-        users: list[str]
+        users: Annotated[
+            list[str], Field(min_length=1, max_length=PROFILE_QUERY_MAX_TARGET_USERS)
+        ]
         """
         List of user IDs to query profiles for.
-        用 min length constraint 1
-        用 max length constraint 100
         """
 
-        fields: list[str] | AbsentType = Absent
+        fields: Annotated[list[str], Field(min_length=1)] | AbsentType = Absent
         """
         If specified, the profile fields to return.
-        用 min length constraint 1
 
         If absent, return whole profiles.
         """
@@ -377,25 +378,8 @@ class ProfileQueryRestServlet(RestServlet):
 
         content = parse_and_validate_json_object_from_request(request, self.PostBody)
 
-        users = content.users
-        if not users:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "`users` must be a non-empty list of user ID strings.",
-                Codes.INVALID_PARAM,
-            )
-        target_users = set(users)
-
-        if content.fields is not Absent and not content.fields:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "`fields`, if given, must be a non-empty list of strings.",
-                Codes.INVALID_PARAM,
-            )
+        target_users = set(content.users)
         field_names = set(content.fields) if content.fields is not Absent else None
-
-        # Limit the amount of users pulled in one go
-        target_users = set(list(target_users)[:PROFILE_QUERY_MAX_TARGET_USERS])
 
         for user_id in target_users:
             if not UserID.is_valid(user_id):
