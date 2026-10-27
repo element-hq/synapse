@@ -1,0 +1,1 @@
+Deliver server announcement rooms to users who are not members of them in legacy `/sync`.
