@@ -2361,6 +2361,15 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(self._timeline_ids(room), [event_id])
 
+    def test_initial_sync_after_leaving(self) -> None:
+        """A former member who left on their own gets a single, synthetic join
+        on initial sync, even when their real leave is among the recent events.
+        """
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+        self._announce("hello")
+
+        self._assert_delivered(self._sync(self.former_tok), self.former)
+
     def test_lazy_loaded_members(self) -> None:
         """The synthetic join is sent when members are lazy-loaded."""
         self._announce("hello")
