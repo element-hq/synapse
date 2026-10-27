@@ -55,6 +55,8 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
 
         self.announcer = self.register_user("announcer", "pass")
         self.announcer_tok = self.login("announcer", "pass")
+        self.former = self.register_user("former", "pass")
+        self.former_tok = self.login("former", "pass")
         self.bob = self.register_user("bob", "pass")
         self.bob_tok = self.login("bob", "pass")
 
@@ -66,7 +68,7 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
                 room_topic="News from the server",
                 room_avatar_url=None,
                 room_avatar_path=None,
-                allowed_user_ids=[self.announcer],
+                allowed_user_ids=[self.announcer, self.former],
             )
         ]
         self.handler = hs.get_server_announcements_handler()
@@ -114,7 +116,13 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         """
         self.assertIn(self.room_id, self._list_room_ids(response))
         room = response["rooms"][self.room_id]
+        self._assert_synthetic_join(room, user_id)
+        return room
 
+    def _assert_synthetic_join(self, room: JsonDict, user_id: str) -> None:
+        """Assert that the `required_state` of `room` holds a synthetic join for
+        `user_id` as their only membership.
+        """
         own_memberships = [
             event
             for event in room["required_state"]
@@ -127,7 +135,6 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
             membership,
         )
         self.assertEqual(membership["content"], {"membership": Membership.JOIN})
-        return room
 
     def test_new_connection_delivers_announcements(self) -> None:
         """A new connection gets an announcement room with its most recent
@@ -202,3 +209,89 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
             },
             exact=True,
         )
+
+    def test_self_left_member(self) -> None:
+        """A member who left the room themselves gets later announcements as a
+        non-member, with the synthetic join instead of their leave.
+        """
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+        event_id = self._announce("hello")
+
+        response, _ = self.do_sync(self._sync_body(), tok=self.former_tok)
+
+        room = self._assert_delivered(response, self.former)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+
+    def test_stays_in_list(self) -> None:
+        """An announcement room already sent on a connection stays in the list
+        when nothing new was announced.
+        """
+        self._announce("hello")
+        _, pos = self.do_sync(self._sync_body(), tok=self.bob_tok)
+
+        response, _ = self.do_sync(self._sync_body(), since=pos, tok=self.bob_tok)
+        self.assertEqual(response["lists"]["foo-list"]["count"], 1)
+        self.assertIn(self.room_id, self._list_room_ids(response))
+
+    def test_ordered_like_other_rooms(self) -> None:
+        """An announcement room is ordered among the user's own rooms by its
+        latest activity.
+        """
+        own_room_id = self.helper.create_room_as(self.bob, tok=self.bob_tok)
+        self._announce("hello")
+        sync_body = self._sync_body()
+        sync_body["lists"]["foo-list"]["ranges"] = [[0, 0]]
+
+        response, pos = self.do_sync(sync_body, tok=self.bob_tok)
+        self.assertEqual(
+            response["lists"]["foo-list"]["ops"][0]["room_ids"], [self.room_id]
+        )
+
+        self.helper.send(own_room_id, "hi", tok=self.bob_tok)
+        response, pos = self.do_sync(sync_body, since=pos, tok=self.bob_tok)
+        self.assertEqual(
+            response["lists"]["foo-list"]["ops"][0]["room_ids"], [own_room_id]
+        )
+
+        self._announce("again")
+        response, _ = self.do_sync(sync_body, since=pos, tok=self.bob_tok)
+        self.assertEqual(
+            response["lists"]["foo-list"]["ops"][0]["room_ids"], [self.room_id]
+        )
+
+    def test_room_subscription(self) -> None:
+        """Subscribing to an announcement room directly delivers it with the
+        synthetic join.
+        """
+        event_id = self._announce("hello")
+        sync_body = {
+            "room_subscriptions": {
+                self.room_id: {
+                    "required_state": [[EventTypes.Member, StateValues.ME]],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+
+        response, _ = self.do_sync(sync_body, tok=self.bob_tok)
+
+        room = response["rooms"][self.room_id]
+        self._assert_synthetic_join(room, self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+
+    def test_room_subscription_without_announcement(self) -> None:
+        """Subscribing to an announcement room without any announcement delivers
+        nothing.
+        """
+        sync_body = {
+            "room_subscriptions": {
+                self.room_id: {
+                    "required_state": [[EventTypes.Member, StateValues.ME]],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+
+        response, _ = self.do_sync(sync_body, tok=self.bob_tok)
+
+        self.assertNotIn(self.room_id, response.get("rooms", {}))

@@ -748,7 +748,17 @@ class SlidingSyncRoomLists:
         )
 
         server_announcement_room_map = await self._get_server_announcement_rooms(
-            sync_config.user.to_string(), room_membership_for_user_map.keys(), to_token
+            sync_config.user.to_string(),
+            {
+                room_id
+                for room_id, room_membership_for_user in room_membership_for_user_map.items()
+                if filter_membership_for_sync(
+                    user_id=sync_config.user.to_string(),
+                    room_membership_for_user=room_membership_for_user,
+                    newly_left=room_id in newly_left_room_ids,
+                )
+            },
+            to_token,
         )
         room_membership_for_user_map.update(server_announcement_room_map)
 
