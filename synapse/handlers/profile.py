@@ -1078,7 +1078,7 @@ class ProfileHandler:
             target_users: The owners of the queried profiles.
             requester: The user querying for the profile.
         """
-        if not len(target_users):
+        if not target_users:
             return set()
 
         if not self.hs.config.server.limit_profile_requests_to_users_who_share_rooms:

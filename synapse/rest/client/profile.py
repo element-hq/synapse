@@ -90,7 +90,7 @@ async def _auth_and_ratelimit_profile_lookup(
 
 class ProfileRestServlet(RestServlet):
     PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)$", v1=True)
-    CATEGORY = "Event sending requests"
+    CATEGORY = "Profile requests"
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -327,7 +327,7 @@ class ProfileQueryRestServlet(RestServlet):
         unstable=True,
         releases=(),
     )
-    CATEGORY = "Event sending requests"
+    CATEGORY = "Profile requests"
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
