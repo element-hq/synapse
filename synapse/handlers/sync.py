@@ -3305,19 +3305,79 @@ class SyncHandler:
 
             room_entries.append(entry)
 
-        announcement_room_to_events = await self.store.get_room_events_stream_for_rooms(
-            room_ids=sync_result_builder.announcement_room_ids,
+        room_entries.extend(
+            await self._get_announcement_room_entries(
+                sync_result_builder, sync_result_builder.announcement_room_ids
+            )
+        )
+
+        return _RoomChanges(
+            room_entries,
+            invited,
+            knocked,
+            newly_joined_rooms,
+            newly_left_rooms,
+        )
+
+    async def _get_announcement_room_entries(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        room_ids: AbstractSet[str],
+    ) -> list["RoomSyncResultBuilder"]:
+        """Returns entries for the given announcement rooms that have an
+        announcement to show, i.e. a non-state event.
+
+        On an incremental sync, only announcements since the `since_token` count,
+        unless `full_state` is set, in which case a room is also included if its
+        most recent events hold an announcement. On an initial sync, a room is
+        included if its most recent events hold an announcement.
+
+        Args:
+            sync_result_builder
+            room_ids: The announcement rooms to consider.
+        """
+        since_token = sync_result_builder.since_token
+        now_token = sync_result_builder.now_token
+        timeline_limit = (
+            sync_result_builder.sync_config.filter_collection.timeline_limit()
+        )
+
+        room_to_events = await self.store.get_room_events_stream_for_rooms(
+            room_ids=room_ids,
             from_key=now_token.room_key,
-            to_key=since_token.room_key,
+            to_key=since_token.room_key if since_token else None,
             limit=timeline_limit + 1,
             direction=Direction.BACKWARDS,
         )
+        announced_room_ids = {
+            room_id
+            for room_id, (events, _, _) in room_to_events.items()
+            if not all(event.is_state() for event in events)
+        }
 
-        for room_id, (events, start_key, _) in announcement_room_to_events.items():
-            if all(event.is_state() for event in events):
-                continue
+        if since_token and sync_result_builder.full_state:
+            recent_room_to_events = await self.store.get_room_events_stream_for_rooms(
+                room_ids=room_ids - announced_room_ids,
+                from_key=now_token.room_key,
+                limit=timeline_limit + 1,
+                direction=Direction.BACKWARDS,
+            )
+            announced_room_ids.update(
+                room_id
+                for room_id, (events, _, _) in recent_room_to_events.items()
+                if not all(event.is_state() for event in events)
+            )
 
-            events.reverse()
+        room_entries = []
+        for room_id in announced_room_ids:
+            if room_id in room_to_events:
+                events, start_key, _ = room_to_events[room_id]
+                events.reverse()
+                upto_token = now_token.copy_and_replace(StreamKeyType.ROOM, start_key)
+            else:
+                assert since_token is not None
+                events = []
+                upto_token = since_token
 
             room_entries.append(
                 RoomSyncResultBuilder(
@@ -3327,20 +3387,12 @@ class SyncHandler:
                     newly_joined=False,
                     full_state=True,
                     since_token=since_token,
-                    upto_token=now_token.copy_and_replace(
-                        StreamKeyType.ROOM, start_key
-                    ),
+                    upto_token=upto_token,
                     end_token=now_token,
                 )
             )
 
-        return _RoomChanges(
-            room_entries,
-            invited,
-            knocked,
-            newly_joined_rooms,
-            newly_left_rooms,
-        )
+        return room_entries
 
     async def _get_room_changes_for_initial_sync(
         self,
@@ -3424,6 +3476,18 @@ class SyncHandler:
                         end_token=leave_token,
                     )
                 )
+
+        room_ids_in_response = (
+            {entry.room_id for entry in room_entries}
+            | {result.room_id for result in invited}
+            | {result.room_id for result in knocked}
+        )
+        room_entries.extend(
+            await self._get_announcement_room_entries(
+                sync_result_builder,
+                sync_result_builder.announcement_room_ids - room_ids_in_response,
+            )
+        )
 
         return _RoomChanges(room_entries, invited, knocked, [], [])
 
