@@ -20,7 +20,7 @@ from synapse.api.constants import EventTypes, Membership
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.handlers.server_announcements import SYNTHETIC_JOIN_EVENT_ID_PREFIX
 from synapse.handlers.sliding_sync import StateValues
-from synapse.rest.client import login, room, sync
+from synapse.rest.client import devices, login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -48,13 +48,14 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         login.register_servlets,
         room.register_servlets,
         sync.register_servlets,
+        devices.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
 
         self.announcer = self.register_user("announcer", "pass")
-        self.announcer_tok = self.login("announcer", "pass")
+        self.announcer_tok = self.login("announcer", "pass", device_id="ANNOUNCER")
         self.former = self.register_user("former", "pass")
         self.former_tok = self.login("former", "pass")
         self.bob = self.register_user("bob", "pass")
@@ -295,3 +296,47 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         response, _ = self.do_sync(sync_body, tok=self.bob_tok)
 
         self.assertNotIn(self.room_id, response.get("rooms", {}))
+
+    def test_no_unread_counts(self) -> None:
+        """An announcement mentioning a non-member does not count as unread for
+        them.
+        """
+        self.helper.send_event(
+            self.room_id,
+            EventTypes.Message,
+            {
+                "msgtype": "m.text",
+                "body": f"Hello {self.bob}",
+                "m.mentions": {"user_ids": [self.bob]},
+            },
+            tok=self.announcer_tok,
+        )
+
+        response, _ = self.do_sync(self._sync_body(), tok=self.bob_tok)
+
+        room = self._assert_delivered(response, self.bob)
+        self.assertEqual(room["notification_count"], 0)
+        self.assertEqual(room["highlight_count"], 0)
+
+    def test_no_device_list_changes(self) -> None:
+        """Device changes of members in an announcement room are not sent to
+        non-members.
+        """
+        self._announce("hello")
+        sync_body = {**self._sync_body(), "extensions": {"e2ee": {"enabled": True}}}
+        _, pos = self.do_sync(sync_body, tok=self.bob_tok)
+
+        channel = self.make_request(
+            "PUT",
+            "/devices/ANNOUNCER",
+            {"display_name": "New Device Name"},
+            access_token=self.announcer_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        response, _ = self.do_sync(sync_body, since=pos, tok=self.bob_tok)
+
+        self.assertNotIn(
+            self.announcer,
+            response["extensions"]["e2ee"].get("device_lists", {}).get("changed", []),
+        )
