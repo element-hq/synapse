@@ -2343,7 +2343,7 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
 
     def test_removed_member(self) -> None:
         """A member removed from the room by the config first gets their leave,
-        then later announcements as a non-member.
+        then later announcements as a non-member, on initial sync too.
         """
         since = self._sync(self.former_tok)["next_batch"]
 
@@ -2360,6 +2360,9 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
             self._sync(self.former_tok, response["next_batch"]), self.former
         )
         self.assertEqual(self._timeline_ids(room), [event_id])
+
+        room = self._assert_delivered(self._sync(self.former_tok), self.former)
+        self.assertEqual(self._timeline_ids(room)[-1], event_id)
 
     def test_initial_sync_after_leaving(self) -> None:
         """A former member who left on their own gets a single, synthetic join
