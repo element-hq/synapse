@@ -1,0 +1,1 @@
+Fix the `stream_ordering` bigint migration being unable to complete on PostgreSQL databases created before schema version 60.
