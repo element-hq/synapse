@@ -31,12 +31,14 @@ from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
+    parse_and_validate_json_object_from_request,
     parse_boolean,
     parse_json_object_from_request,
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.types import JsonDict, Requester, UserID
+from synapse.types import Absent, AbsentType, JsonDict, Requester, UserID
+from synapse.types.rest import RequestBodyModel
 from synapse.util.stringutils import is_namedspaced_grammar
 
 if TYPE_CHECKING:
@@ -329,6 +331,22 @@ class ProfileQueryRestServlet(RestServlet):
     )
     CATEGORY = "Profile requests"
 
+    class PostBody(RequestBodyModel):
+        users: list[str]
+        """
+        List of user IDs to query profiles for.
+        用 min length constraint 1
+        用 max length constraint 100
+        """
+
+        fields: list[str] | AbsentType = Absent
+        """
+        If specified, the profile fields to return.
+        用 min length constraint 1
+
+        If absent, return whole profiles.
+        """
+
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
@@ -357,32 +375,24 @@ class ProfileQueryRestServlet(RestServlet):
                 Codes.MISSING_TOKEN,
             )
 
-        content = parse_json_object_from_request(request)
-        users = content.get("users")
-        if (
-            not isinstance(users, list)
-            or not users
-            or not all(isinstance(user_id, str) for user_id in users)
-        ):
+        content = parse_and_validate_json_object_from_request(request, self.PostBody)
+
+        users = content.users
+        if not users:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "`users` must be a non-empty list of user ID strings.",
                 Codes.INVALID_PARAM,
             )
         target_users = set(users)
-        field_names = content.get("fields")
-        if field_names is not None and (
-            not isinstance(field_names, list)
-            or not field_names
-            or not all(isinstance(field_name, str) for field_name in field_names)
-        ):
+
+        if content.fields is not Absent and not content.fields:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "`fields`, if given, must be a non-empty list of strings.",
                 Codes.INVALID_PARAM,
             )
-        if field_names is not None:
-            field_names = set(field_names)
+        field_names = set(content.fields) if content.fields is not Absent else None
 
         # Limit the amount of users pulled in one go
         target_users = set(list(target_users)[:PROFILE_QUERY_MAX_TARGET_USERS])
