@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-e0929ee6.js";
+            window.path_to_searchindex_js = "../../searchindex-4218e036.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-64310643.js"></script>
@@ -1123,7 +1123,7 @@ For more details, see the <a href="../../setup/forward_proxy.html">forward proxy
 </code></pre>
 <hr>
 <h3 id="request_token_inhibit_3pid_errors"><a class="header" href="#request_token_inhibit_3pid_errors"><code>request_token_inhibit_3pid_errors</code></a></h3>
-<p><em>(boolean)</em> Inhibits the <code>/requestToken</code> endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (<code>sid</code>) to clients. Defaults to <code>false</code>.</p>
+<p><em>(boolean)</em> Inhibits the <code>/requestToken</code> endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (<code>sid</code>) to clients. Defaults to <code>true</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">request_token_inhibit_3pid_errors: true
 </code></pre>
@@ -1958,7 +1958,7 @@ For more details, see the <a href="../../setup/forward_proxy.html">forward proxy
 <hr>
 <h3 id="rc_delayed_event_mgmt"><a class="header" href="#rc_delayed_event_mgmt"><code>rc_delayed_event_mgmt</code></a></h3>
 <p><em>(object)</em> Ratelimiting settings for delayed event management.</p>
-<p>This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client’s account, or its source IP when requests are unauthenticated.</p>
+<p>This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client’s account.</p>
 <p>Attempts to create or send delayed events are ratelimited not by this setting, but by <code>rc_message</code>.</p>
 <p>Setting this to a high value allows clients to make delayed event management requests often (such as repeatedly restarting a delayed event with a short timeout, or restarting several different delayed events all at once) without the risk of being ratelimited.</p>
 <p>This setting has the following sub-options:</p>
