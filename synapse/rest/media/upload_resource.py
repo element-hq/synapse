@@ -22,6 +22,7 @@
 
 import logging
 import re
+from io import SEEK_END
 from typing import IO, TYPE_CHECKING
 
 from synapse.api.errors import Codes, SynapseError
@@ -59,11 +60,20 @@ class BaseUploadServlet(RestServlet):
     ) -> tuple[int, str | None, str]:
         raw_content_length = request.getHeader("Content-Length")
         if raw_content_length is None:
-            raise SynapseError(msg="Request must specify a Content-Length", code=400)
-        try:
-            content_length = int(raw_content_length)
-        except ValueError:
-            raise SynapseError(msg="Content-Length value is invalid", code=400)
+            transfer_encoding = request.getHeader("Transfer-Encoding")
+            if transfer_encoding is None or transfer_encoding.lower() != "chunked":
+                raise SynapseError(
+                    msg="Request must specify a Content-Length", code=400
+                )
+
+            assert request.content is not None
+            content_length = request.content.seek(0, SEEK_END)
+            request.content.seek(0)
+        else:
+            try:
+                content_length = int(raw_content_length)
+            except ValueError:
+                raise SynapseError(msg="Content-Length value is invalid", code=400)
         if content_length > self.max_upload_size:
             raise SynapseError(
                 msg="Upload request body is too large",
