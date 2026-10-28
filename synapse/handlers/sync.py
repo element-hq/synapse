@@ -2371,8 +2371,8 @@ class SyncHandler:
             )
             if room_id not in mutable_joined_room_ids
             and room_id not in mutable_rooms_to_exclude
-            and last_membership_by_room_id.get(room_id, Membership.LEAVE)
-            in (Membership.LEAVE, Membership.BAN)
+            and last_membership_by_room_id.get(room_id)
+            in (None, Membership.LEAVE, Membership.BAN)
         )
 
         sync_result_builder = SyncResultBuilder(
