@@ -23,11 +23,14 @@ from http import HTTPStatus
 from io import BytesIO
 from unittest.mock import Mock
 
+from pydantic import BaseModel, StrictInt, StrictStr, model_validator
+
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.servlet import (
     RestServlet,
     parse_json_object_from_request,
     parse_json_value_from_request,
+    validate_json_object,
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
@@ -143,3 +146,81 @@ class TestRestServletCancellation(unittest.HomeserverTestCase):
             expect_cancellation=False,
             expected_body={"result": True},
         )
+
+
+class PydanticErrorFormatingTestCase(unittest.TestCase):
+    """Tests the formatting of pydantic error messages.
+
+    The default pydantic error messages are not user-friendly and leak internal
+    details. A custom error formatter is surprisingly tricky to get right and so
+    we add tests for the various cases. We do not care about the exact wording
+    though.
+    """
+
+    class TestModel(BaseModel):
+        """Test model with various field different field types"""
+
+        class _Inner(BaseModel):
+            count: StrictInt
+
+        name: StrictStr
+        inner: _Inner | None = None
+        ids: list[StrictInt] = []
+        either: StrictStr | StrictInt = "x"
+        limit: StrictInt | None = None
+
+        @model_validator(mode="after")
+        def check_limit(self) -> "PydanticErrorFormatingTestCase.TestModel":
+            # A custom validator to test formatting custom error messages
+            if self.limit is not None and self.limit > 10:
+                raise ValueError("limit must be at most 10.")
+            return self
+
+    def _validate(self, body: dict) -> SynapseError:
+        """Helper method to validate a bad JSON body against the test model."""
+        with self.assertRaises(SynapseError) as cm:
+            validate_json_object(body, self.TestModel)
+        self.assertEqual(cm.exception.code, HTTPStatus.BAD_REQUEST)
+        return cm.exception
+
+    def test_missing_field(self) -> None:
+        """Test missing field"""
+        e = self._validate({})
+        self.assertEqual(e.errcode, Codes.MISSING_PARAM)
+        self.assertEqual(e.msg, "Missing required field '.name'")
+
+    def test_nested_path_and_list_index(self) -> None:
+        """Test error messages for nested paths and list indices."""
+        e = self._validate({"name": "n", "inner": {"count": "x"}, "ids": [1, "two"]})
+        self.assertEqual(e.errcode, Codes.BAD_JSON)
+        self.assertEqual(
+            e.msg,
+            "'.inner.count': Input should be a valid integer; '.ids[1]': Input should be a valid integer",
+        )
+
+    def test_object_expected_does_not_leak_class_name(self) -> None:
+        """Test that object expected errors do not leak internal class names."""
+
+        e = self._validate({"name": "n", "inner": "oops"})
+        self.assertEqual(e.msg, "'.inner' must be an object")
+        self.assertNotIn("_Inner", e.msg)
+
+    def test_union_drops_branch_tags(self) -> None:
+        """Test that union type errors do not include branch tags."""
+
+        e = self._validate({"name": "n", "either": 1.5})
+        self.assertEqual(
+            e.msg,
+            "'.either': Input should be a valid string; '.either': Input should be a valid integer",
+        )
+
+    def test_custom_validator_message_used_verbatim(self) -> None:
+        """Test that custom validator messages are used verbatim.
+
+        They don't include the 'path' as the pydantic error doesn't provide one
+        in this case.
+        """
+
+        e = self._validate({"name": "n", "limit": 11})
+        self.assertEqual(e.errcode, Codes.INVALID_PARAM)
+        self.assertEqual(e.msg, "limit must be at most 10.")

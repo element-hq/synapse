@@ -18,14 +18,10 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import re
-from typing import ClassVar
-
 import pydantic_core.core_schema
 from pydantic import (
     ConfigDict,
     Field,
-    GetCoreSchemaHandler,
     GetPydanticSchema,
     StrictBool,
     StrictInt,
@@ -34,7 +30,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import CoreSchema
 from typing_extensions import Annotated, Self
 
 from synapse.types import Absent, AbsentType, NonNegativeStrictInt
@@ -131,82 +126,6 @@ ISO3166_1_Alpha_2 = Annotated[
 class MsisdnRequestTokenBody(ThreepidRequestTokenBody):
     country: ISO3166_1_Alpha_2
     phone_number: StrictStr
-
-
-class SlidingSyncStickyEventsToken:
-    """
-    A token returned by `next_batch` of the MSC4354 Sticky Events extension to Sliding Sync
-    and then accepted as the `since` parameter in the requests of the same extension.
-
-    Current format:
-        SlidingSyncStickyEventsToken ::= 'sticky_' DIGIT+
-        DIGIT ::= '0'-'9'
-
-    The `sticky_` prefix allows us to make sure it's not swapped for another token
-    or to evolve the type of token accepted with backwards compatibility in the future.
-    """
-
-    PATTERN = re.compile(r"^sticky_([0-9]+)$")
-    START: ClassVar["SlidingSyncStickyEventsToken"]
-
-    def __init__(self, *, sticky_events_stream_id: int) -> None:
-        # FIXME: We should use MultiWriterStreamToken here
-        # Track: https://github.com/element-hq/synapse/issues/19661
-        self.sticky_events_stream_id = sticky_events_stream_id
-
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source_type: object, handler: GetCoreSchemaHandler
-    ) -> CoreSchema:
-        """
-        This function is checked for and used by Pydantic when
-        attempting to deserialise/validate a field of this type.
-
-        This returns a schema that will parse a string into an
-        instance of `SlidingSyncStickyEventsToken`.
-        """
-
-        return pydantic_core.core_schema.no_info_plain_validator_function(
-            cls._validate,
-            serialization=pydantic_core.core_schema.plain_serializer_function_ser_schema(
-                cls.serialise,
-                info_arg=False,
-            ),
-        )
-
-    @classmethod
-    def _validate(cls, v: object) -> Self:
-        """
-        Create an instance from serialised string form.
-
-        The inverse of `serialise`.
-        """
-        if isinstance(v, cls):
-            return v
-        if isinstance(v, str):
-            match = cls.PATTERN.match(v)
-            if match is None:
-                raise ValueError(f"Invalid SlidingSyncStickyEventsToken format: {v!r}")
-            return cls(sticky_events_stream_id=int(match.group(1)))
-        raise ValueError(f"Cannot parse SlidingSyncStickyEventsToken from {type(v)}")
-
-    def serialise(self) -> str:
-        """
-        Convert this instance to string.
-
-        The inverse of `_validate`.
-        """
-        return f"sticky_{self.sticky_events_stream_id}"
-
-    def __repr__(self) -> str:
-        # Use the serialised form as debug output.
-        return self.serialise()
-
-
-# Starting reading a stream at 0 ensures all stream fact rows will be read
-SlidingSyncStickyEventsToken.START = SlidingSyncStickyEventsToken(
-    sticky_events_stream_id=0
-)
 
 
 class SlidingSyncBody(RequestBodyModel):
@@ -421,10 +340,10 @@ class SlidingSyncBody(RequestBodyModel):
                 enabled
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
 
         class AccountDataExtension(RequestBodyModel):
-            """The Account Data extension (MSC3959)
+            """The Account Data extension (MSC4548, previously MSC3959)
 
             Attributes:
                 enabled
@@ -434,14 +353,14 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] | None = ["*"]
+            lists: list[StrictStr] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] | None = ["*"]
+            rooms: list[StrictStr] = ["*"]
 
         class ReceiptsExtension(RequestBodyModel):
-            """The Receipts extension (MSC3960)
+            """The Receipts extension (MSC4551, previously MSC3960)
 
             Attributes:
                 enabled
@@ -451,14 +370,14 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] | None = ["*"]
+            lists: list[StrictStr] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] | None = ["*"]
+            rooms: list[StrictStr] = ["*"]
 
         class TypingExtension(RequestBodyModel):
-            """The Typing Notification extension (MSC3961)
+            """The Typing Notification extension (MSC4508, previously MSC3961)
 
             Attributes:
                 enabled
@@ -468,11 +387,11 @@ class SlidingSyncBody(RequestBodyModel):
                     extension to.
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] | None = ["*"]
+            lists: list[StrictStr] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] | None = ["*"]
+            rooms: list[StrictStr] = ["*"]
 
         class ThreadSubscriptionsExtension(RequestBodyModel):
             """The Thread Subscriptions extension (MSC4308)
@@ -482,21 +401,28 @@ class SlidingSyncBody(RequestBodyModel):
                 limit: maximum number of subscription changes to return (default 100)
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
             limit: StrictInt = 100
 
         class StickyEventsExtension(RequestBodyModel):
-            """The Sticky Events extension (MSC4354)
+            """The Sticky Events extension (MSC4354 / MSC4480)
 
             Attributes:
                 enabled
-                limit: maximum number of sticky events to return in the extension (default 100)
-                since: either a string with the Sticky Events since token or absent
+                limit: maximum number of sticky events to return in the extension
+                    (default 100). The server may cap this to a lower number.
+                lists: List of list keys (from the Sliding Window API) to apply this
+                    extension to.
+                rooms: List of room IDs (from the Room Subscription API) to apply this
+                    extension to.
             """
 
             enabled: StrictBool = False
             limit: NonNegativeStrictInt = 100
-            since: SlidingSyncStickyEventsToken | AbsentType = Absent
+            # Process all lists defined in the Sliding Window API. (This is the default.)
+            lists: list[StrictStr] = ["*"]
+            # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
+            rooms: list[StrictStr] = ["*"]
 
         class ProfilesExtension(RequestBodyModel):
             """The Profile Updates extension (MSC4262)

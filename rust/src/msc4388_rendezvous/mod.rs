@@ -32,14 +32,16 @@ use crate::{
     errors::{NotFoundError, SynapseError},
     homeserver::HomeServer,
     http::http_request_from_twisted,
-    msc4388_rendezvous::session::{GetResponse, PostResponse, PutResponse},
+    identifier::OpaqueIdentifier,
+    msc4388_rendezvous::session::{ConcurrentWrite, GetResponse, PostResponse, PutResponse},
+    runtime::RustRuntime,
 };
 
 mod session;
 
 #[pyclass]
 struct MSC4388RendezvousHandler {
-    clock: Py<PyAny>,
+    runtime: RustRuntime,
     sessions: BTreeMap<Ulid, Session>,
     soft_limit: usize,
     hard_limit: usize,
@@ -99,6 +101,7 @@ impl MSC4388RendezvousHandler {
         eviction_interval: u64,
         ttl: u64,
     ) -> PyResult<Py<Self>> {
+        let runtime = homeserver.get_rust_runtime(py)?;
         let clock = homeserver.get_clock(py)?;
 
         // Construct a Python object so that we can get a reference to the
@@ -106,7 +109,7 @@ impl MSC4388RendezvousHandler {
         let self_ = Py::new(
             py,
             Self {
-                clock: clock.clone_ref(py),
+                runtime,
                 sessions: BTreeMap::new(),
                 soft_limit,
                 hard_limit,
@@ -125,23 +128,15 @@ impl MSC4388RendezvousHandler {
         Ok(self_)
     }
 
-    fn _evict(&mut self, py: Python<'_>) -> PyResult<()> {
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+    fn _evict(&mut self) -> PyResult<()> {
+        let now = self.runtime.clock().now();
         self.evict(now);
 
         Ok(())
     }
 
-    fn handle_post(
-        &mut self,
-        py: Python<'_>,
-        twisted_request: &Bound<'_, PyAny>,
-    ) -> PyResult<(u8, PostResponse)> {
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+    fn handle_post(&mut self, twisted_request: &Bound<'_, PyAny>) -> PyResult<(u8, PostResponse)> {
+        let now = self.runtime.clock().now();
 
         // We trigger an immediate eviction if we're at the hard limit
         if self.sessions.len() >= self.hard_limit {
@@ -176,7 +171,6 @@ impl MSC4388RendezvousHandler {
 
     fn handle_get(
         &mut self,
-        py: Python<'_>,
         id: &str,
         twisted_request: &Bound<'_, PyAny>,
     ) -> PyResult<(u8, GetResponse)> {
@@ -274,9 +268,7 @@ impl MSC4388RendezvousHandler {
             ));
         }
 
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        let now = self.runtime.clock().now();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self
@@ -290,10 +282,23 @@ impl MSC4388RendezvousHandler {
 
     fn handle_put(
         &mut self,
-        py: Python<'_>,
         id: &str,
+        txn_id: &str,
         twisted_request: &Bound<'_, PyAny>,
     ) -> PyResult<(u8, PutResponse)> {
+        // The transaction ID is recorded against the session, so we enforce the
+        // opaque identifier grammar (including its 255 byte limit) that MSC4388
+        // requires of it, to keep the memory used by a session bounded.
+        let txn_id = OpaqueIdentifier::try_from(txn_id).map_err(|_| {
+            SynapseError::new(
+                StatusCode::BAD_REQUEST,
+                "Invalid transaction ID".to_owned(),
+                "M_INVALID_PARAM",
+                None,
+                None,
+            )
+        })?;
+
         let request = http_request_from_twisted(twisted_request)?;
         // parse JSON body
         let put_request: PutRequest =
@@ -313,9 +318,7 @@ impl MSC4388RendezvousHandler {
 
         self.check_data_length(&data)?;
 
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        let now = self.runtime.clock().now();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self
@@ -324,27 +327,18 @@ impl MSC4388RendezvousHandler {
             .filter(|s| !s.expired(now))
             .ok_or_else(NotFoundError::new)?;
 
-        if !session.sequence_token().eq(&sequence_token) {
-            // Allow clients to safely retry a PUT (e.g. after a network error)
-            // by accepting the previous sequence_token as long as the data
-            // being submitted matches what is currently stored. This makes
-            // PUTs idempotent without weakening the concurrent-write check.
-            if session.is_idempotent_retry(&sequence_token, &data) {
-                return Ok((200, session.put_response()));
-            }
-
-            return Err(SynapseError::new(
+        // The session performs the compare-and-swap, and remembers the result
+        // against the transaction ID so that retries are idempotent.
+        match session.send(&txn_id, &sequence_token, data, now) {
+            Ok(sequence_token) => Ok((200, PutResponse::new(sequence_token))),
+            Err(ConcurrentWrite) => Err(SynapseError::new(
                 StatusCode::CONFLICT,
                 "sequence_token does not match".to_owned(),
                 "IO_ELEMENT_MSC4388_CONCURRENT_WRITE",
                 None,
                 None,
-            ));
+            )),
         }
-
-        session.update(data, now);
-
-        Ok((200, session.put_response()))
     }
 
     fn handle_delete(&mut self, id: &str) -> PyResult<(u8, ())> {

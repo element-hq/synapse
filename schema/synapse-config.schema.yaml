@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.162/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.164/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -1341,7 +1341,7 @@ properties:
       unused. If this option is enabled, instead of returning an error, these
       endpoints will act as if no error happened and return a fake session ID
       (`sid`) to clients.
-    default: false
+    default: true
     examples:
       - true
   next_link_domain_whitelist:
@@ -2344,8 +2344,7 @@ properties:
 
 
       This is a ratelimiting option that ratelimits attempts to restart, cancel,
-      or view delayed events based on the sending client's account,
-      or its source IP when requests are unauthenticated.
+      or view delayed events based on the sending client's account.
 
 
       Attempts to create or send delayed events are ratelimited not by this

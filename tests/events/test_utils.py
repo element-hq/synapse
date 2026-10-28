@@ -631,6 +631,8 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
         )
         original.internal_metadata.stream_ordering = 1234
         self.assertEqual(original.internal_metadata.stream_ordering, 1234)
+        original.internal_metadata.received_ts = 424242
+        self.assertEqual(original.internal_metadata.received_ts, 424242)
         original.internal_metadata.instance_name = "worker1"
         self.assertEqual(original.internal_metadata.instance_name, "worker1")
 
@@ -644,6 +646,7 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
             cloned.unsigned.for_event(), {"age_ts": 3, "replaces_state": "2"}
         )
         self.assertEqual(cloned.internal_metadata.stream_ordering, 1234)
+        self.assertEqual(cloned.internal_metadata.received_ts, 424242)
         self.assertEqual(cloned.internal_metadata.instance_name, "worker1")
         self.assertEqual(cloned.internal_metadata.txn_id, "txn")
 

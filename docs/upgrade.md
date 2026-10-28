@@ -117,6 +117,17 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.164.0
+
+## Python 3.11+ is now required
+
+The minimum supported Python version has been increased from v3.10 to v3.11.
+You will need Python 3.11+ to run Synapse v1.164.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
 
 # Upgrading to v1.163.0
 
@@ -134,6 +145,20 @@ Synapse will now refuse to start with that combination. If you have
 `limit_profile_requests_to_users_who_share_rooms: true` in your configuration,
 either also set `require_auth_for_profile_requests: true`, or remove the option to
 keep the behaviour you have today.
+
+## Privacy-preserving `/requestToken` responses are now enabled by default
+
+The default value of `request_token_inhibit_3pid_errors` has changed from `false`
+to `true`. Synapse will now conceal whether an email address is associated with an
+account when responding to `/requestToken` requests, unless the setting is
+explicitly configured as `false`.
+
+Administrators who rely on the previous responses can retain them by adding the
+following to their configuration:
+
+```yaml
+request_token_inhibit_3pid_errors: false
+```
 
 # Upgrading to v1.161.0
 

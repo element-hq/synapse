@@ -477,13 +477,16 @@ class StickyEventField(TypedDict):
 
 
 class StickyEvent:
-    QUERY_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
+    REQUEST_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
     """
-    Query parameter used by clients for setting the sticky duration of an event they are sending.
+    Parameter used by clients for setting the sticky duration of an event they are sending.
 
-    Applies to:
+    Used as a query parameter for:
         - /rooms/.../send/...
         - /rooms/.../state/...
+
+    Used as a request body field for:
+        - /rooms/.../delayed_event/...
     """
 
     EVENT_FIELD_NAME: Final = "msc4354_sticky"
@@ -514,4 +517,8 @@ class StateDag:
     Max number of events to return in a single /get_missing_events response.
     Arbitrary, servers usually never get this high so it's mostly to bound the max size of
     a single /get_missing_events response.
+    """
+    MAX_PREV_STATE_EVENTS: Final = 20
+    """
+    Max number of prev_state_events allowed on an MSC4242 event as per the MSC.
     """
