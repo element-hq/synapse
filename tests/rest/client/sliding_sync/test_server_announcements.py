@@ -17,7 +17,7 @@ from parameterized import parameterized_class
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EventTypes, Membership, ReceiptTypes
+from synapse.api.constants import EventTypes, Membership, ReceiptTypes, RelationTypes
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.handlers.server_announcements import SYNTHETIC_JOIN_EVENT_ID_PREFIX
 from synapse.handlers.sliding_sync import StateValues
@@ -557,13 +557,34 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
             .get("changed", []),
         )
 
+    def _announce_in_thread(self) -> tuple[str, str]:
+        """Send an announcement and a reply in its thread, and return the IDs
+        of the thread root and of the reply.
+        """
+        root_id = self._announce("hello")
+        reply_id = self.helper.send_event(
+            self.room_id,
+            EventTypes.Message,
+            content={
+                "msgtype": "m.text",
+                "body": "reply",
+                "m.relates_to": {"rel_type": RelationTypes.THREAD, "event_id": root_id},
+            },
+            tok=self.announcer_tok,
+        )["event_id"]
+        return root_id, reply_id
+
     def _send_read_receipt(
-        self, event_id: str, tok: str, receipt_type: str = ReceiptTypes.READ
+        self,
+        event_id: str,
+        tok: str,
+        receipt_type: str = ReceiptTypes.READ,
+        thread_id: str | None = None,
     ) -> None:
         channel = self.make_request(
             "POST",
             f"/rooms/{self.room_id}/receipt/{receipt_type}/{event_id}",
-            {},
+            {} if thread_id is None else {"thread_id": thread_id},
             access_token=tok,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
@@ -572,6 +593,20 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         sync_body = self._sync_body()
         sync_body["extensions"] = {"receipts": {"enabled": True}}
         return sync_body
+
+    def _receipt_data(
+        self,
+        response: JsonDict,
+        event_id: str,
+        receipt_type: str = ReceiptTypes.READ,
+    ) -> JsonDict:
+        """Return the `receipt_type` receipts on `event_id` in the announcement
+        room of the receipts extension, by user ID.
+        """
+        receipt = (
+            response["extensions"]["receipts"].get("rooms", {}).get(self.room_id, {})
+        )
+        return dict(receipt.get("content", {}).get(event_id, {}).get(receipt_type, {}))
 
     def _receipt_readers(
         self,
@@ -582,10 +617,7 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         """Return the users with a `receipt_type` receipt on `event_id` in the
         announcement room of the receipts extension.
         """
-        receipt = (
-            response["extensions"]["receipts"].get("rooms", {}).get(self.room_id, {})
-        )
-        return set(receipt.get("content", {}).get(event_id, {}).get(receipt_type, {}))
+        return set(self._receipt_data(response, event_id, receipt_type))
 
     def test_non_member_receipt_on_new_connection_of_other_device(self) -> None:
         """A non-member's read receipt is sent to a new connection of their
@@ -685,3 +717,37 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
                 self._receipt_readers(response, event_id, ReceiptTypes.READ_PRIVATE),
                 set(),
             )
+
+    def test_non_member_threaded_receipt_on_other_device(self) -> None:
+        """A non-member's threaded read receipt is sent to an existing and a
+        new connection of their other devices.
+        """
+        root_id, reply_id = self._announce_in_thread()
+        _, pos = self.do_sync(self._receipts_sync_body(), tok=self.bob_other_tok)
+
+        self._send_read_receipt(reply_id, self.bob_tok, thread_id=root_id)
+
+        response, _ = self.do_sync(
+            self._receipts_sync_body(), since=pos, tok=self.bob_other_tok
+        )
+        receipts = self._receipt_data(response, reply_id)
+        self.assertEqual(set(receipts), {self.bob})
+        self.assertEqual(receipts[self.bob]["thread_id"], root_id)
+
+        response, _ = self.do_sync(self._receipts_sync_body(), tok=self.bob_other_tok)
+        receipts = self._receipt_data(response, reply_id)
+        self.assertEqual(set(receipts), {self.bob})
+        self.assertEqual(receipts[self.bob]["thread_id"], root_id)
+
+    def test_non_member_threaded_receipt_hidden_from_other_users(self) -> None:
+        """A non-member's threaded read receipt is not sent to a member of the
+        announcement room, nor to another non-member.
+        """
+        root_id, reply_id = self._announce_in_thread()
+
+        self._send_read_receipt(reply_id, self.bob_tok, thread_id=root_id)
+
+        for tok in (self.announcer_tok, self.dan_tok):
+            response, _ = self.do_sync(self._receipts_sync_body(), tok=tok)
+            self.assertIn(self.room_id, response["rooms"])
+            self.assertEqual(self._receipt_readers(response, reply_id), set())

@@ -23,7 +23,13 @@ from http import HTTPStatus
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, ReceiptTypes
+from synapse.api.constants import (
+    EduTypes,
+    EventTypes,
+    HistoryVisibility,
+    ReceiptTypes,
+    RelationTypes,
+)
 from synapse.api.errors import Codes
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.rest.client import login, receipts, room, sync
@@ -485,13 +491,34 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
     def _announce(self, body: str) -> str:
         return self.helper.send(self.room_id, body, tok=self.announcer_tok)["event_id"]
 
+    def _announce_in_thread(self) -> tuple[str, str]:
+        """Send an announcement and a reply in its thread, and return the IDs
+        of the thread root and of the reply.
+        """
+        root_id = self._announce("hello")
+        reply_id = self.helper.send_event(
+            self.room_id,
+            EventTypes.Message,
+            content={
+                "msgtype": "m.text",
+                "body": "reply",
+                "m.relates_to": {"rel_type": RelationTypes.THREAD, "event_id": root_id},
+            },
+            tok=self.announcer_tok,
+        )["event_id"]
+        return root_id, reply_id
+
     def _send_read_receipt(
-        self, event_id: str, tok: str, receipt_type: str = ReceiptTypes.READ
+        self,
+        event_id: str,
+        tok: str,
+        receipt_type: str = ReceiptTypes.READ,
+        thread_id: str | None = None,
     ) -> None:
         channel = self.make_request(
             "POST",
             f"/rooms/{self.room_id}/receipt/{receipt_type}/{event_id}",
-            {},
+            {} if thread_id is None else {"thread_id": thread_id},
             access_token=tok,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
@@ -502,6 +529,26 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         return channel.json_body
 
+    def _receipt_data(
+        self,
+        response: JsonDict,
+        event_id: str,
+        receipt_type: str = ReceiptTypes.READ,
+    ) -> JsonDict:
+        """Return the `receipt_type` receipts on `event_id` in the announcement
+        room's ephemeral events of a `/sync` response, by user ID.
+        """
+        room = response.get("rooms", {}).get("join", {}).get(self.room_id, {})
+        return {
+            user_id: data
+            for event in room.get("ephemeral", {}).get("events", [])
+            if event["type"] == EduTypes.RECEIPT
+            for user_id, data in event["content"]
+            .get(event_id, {})
+            .get(receipt_type, {})
+            .items()
+        }
+
     def _receipt_readers(
         self,
         response: JsonDict,
@@ -511,13 +558,7 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
         """Return the users with a `receipt_type` receipt on `event_id` in the
         announcement room's ephemeral events of a `/sync` response.
         """
-        room = response.get("rooms", {}).get("join", {}).get(self.room_id, {})
-        return {
-            user_id
-            for event in room.get("ephemeral", {}).get("events", [])
-            if event["type"] == EduTypes.RECEIPT
-            for user_id in event["content"].get(event_id, {}).get(receipt_type, {})
-        }
+        return set(self._receipt_data(response, event_id, receipt_type))
 
     def _assert_room_in_sync(self, response: JsonDict) -> None:
         self.assertIn(self.room_id, response.get("rooms", {}).get("join", {}))
@@ -624,3 +665,51 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
                 self._receipt_readers(response, event_id, ReceiptTypes.READ_PRIVATE),
                 set(),
             )
+
+    def test_non_member_sends_threaded_read_receipt(self) -> None:
+        """A user who is not a member of the announcement room can send a
+        threaded read receipt in an announcement's thread.
+        """
+        root_id, reply_id = self._announce_in_thread()
+
+        self._send_read_receipt(reply_id, self.bob_tok, thread_id=root_id)
+
+        receipts = self.get_success(
+            self.store.get_linearized_receipts_for_user_in_rooms(
+                self.bob, [self.room_id], self.store.get_max_receipt_stream_id()
+            )
+        )
+        self.assertEqual(
+            [(r.receipt_type, r.event_id, r.thread_id) for r in receipts[self.room_id]],
+            [(ReceiptTypes.READ, reply_id, root_id)],
+        )
+
+    def test_non_member_threaded_receipt_on_sync_of_other_device(self) -> None:
+        """A non-member's threaded read receipt is in the initial and next
+        incremental sync of their other devices.
+        """
+        root_id, reply_id = self._announce_in_thread()
+        since = self._sync(self.bob_other_tok)["next_batch"]
+
+        self._send_read_receipt(reply_id, self.bob_tok, thread_id=root_id)
+
+        for response in (
+            self._sync(self.bob_other_tok),
+            self._sync(self.bob_other_tok, since),
+        ):
+            receipts = self._receipt_data(response, reply_id)
+            self.assertEqual(set(receipts), {self.bob})
+            self.assertEqual(receipts[self.bob]["thread_id"], root_id)
+
+    def test_non_member_threaded_receipt_hidden_from_other_users_sync(self) -> None:
+        """A non-member's threaded read receipt is not in the sync of a member
+        of the announcement room, nor of another non-member.
+        """
+        root_id, reply_id = self._announce_in_thread()
+
+        self._send_read_receipt(reply_id, self.bob_tok, thread_id=root_id)
+
+        for tok in (self.announcer_tok, self.dan_tok):
+            response = self._sync(tok)
+            self._assert_room_in_sync(response)
+            self.assertEqual(self._receipt_readers(response, reply_id), set())
