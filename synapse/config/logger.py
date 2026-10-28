@@ -321,7 +321,19 @@ def _load_logging_config(log_config_path: str) -> None:
     if "structured" in log_config and log_config.get("structured"):
         raise ConfigError(STRUCTURED_ERROR)
 
-    logging.config.dictConfig(log_config)
+    real_streams = {
+        name: stream
+        for name in ("stdout", "stderr")
+        if (stream := getattr(sys, f"__{name}__")) is not None
+    }
+    current_streams = {name: getattr(sys, name) for name in real_streams}
+    for name, stream in real_streams.items():
+        setattr(sys, name, stream)
+    try:
+        logging.config.dictConfig(log_config)
+    finally:
+        for name, stream in current_streams.items():
+            setattr(sys, name, stream)
 
     # Blow away the pyo3-log cache so that it reloads the configuration.
     reset_logging_config()
