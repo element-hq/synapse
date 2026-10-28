@@ -144,6 +144,8 @@ class SlidingSyncInterestedRooms:
     _interested_ in (in a pure sense),
     even if these rooms are omitted from the current window (which
     is, in a sense, just a computational optimisation).
+    It also includes the server announcement rooms left out of the lists for
+    now, so that their updates are recorded until they are listed again.
     """
 
     room_membership_for_user_map: Mapping[str, RoomsForUserType]
@@ -769,7 +771,7 @@ class SlidingSyncRoomLists:
             lists=lists,
             relevant_room_map=relevant_room_map,
             relevant_rooms_to_send_map=relevant_rooms_to_send_map,
-            all_rooms=all_rooms,
+            all_rooms=all_rooms | hidden_room_ids,
             room_membership_for_user_map=room_membership_for_user_map,
             newly_joined_rooms=newly_joined_room_ids,
             newly_left_rooms=newly_left_room_map.keys()
@@ -972,7 +974,7 @@ class SlidingSyncRoomLists:
             lists=lists,
             relevant_room_map=relevant_room_map,
             relevant_rooms_to_send_map=relevant_rooms_to_send_map,
-            all_rooms=all_rooms,
+            all_rooms=all_rooms | hidden_room_ids,
             room_membership_for_user_map=room_membership_for_user_map,
             newly_joined_rooms=newly_joined_room_ids,
             newly_left_rooms=newly_left_room_ids - server_announcement_room_map.keys(),

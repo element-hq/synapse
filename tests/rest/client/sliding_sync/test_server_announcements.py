@@ -333,6 +333,34 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
 
         self._assert_not_delivered(response)
 
+    def test_removed_member_room_changed_while_left_out(self) -> None:
+        """A member removed from the configured senders before anything was
+        announced gets the room's new name with the first announcement, when the
+        name changed while the room was left out of their lists.
+        """
+        sync_body = self._sync_body(timeline_limit=5)
+        _, pos = self.do_sync(sync_body, tok=self.former_tok)
+        self._remove_former()
+        _, pos = self.do_sync(sync_body, since=pos, tok=self.former_tok)
+        self.config.rooms = [attr.evolve(self.config.rooms[0], room_name="New name")]
+        self.get_success(self.handler.reconcile_rooms())
+        response, pos = self.do_sync(sync_body, since=pos, tok=self.former_tok)
+        self._assert_not_delivered(response)
+        self._announce("hello")
+
+        response, _ = self.do_sync(sync_body, since=pos, tok=self.former_tok)
+
+        room = response["rooms"][self.room_id]
+        self.assertEqual(room.get("name"), "New name")
+        self.assertEqual(
+            [
+                event["content"]["name"]
+                for event in room.get("required_state", [])
+                if event["type"] == EventTypes.Name
+            ],
+            ["New name"],
+        )
+
     def test_removed_member_existing_connection(self) -> None:
         """A member removed from the configured senders while their connection is
         open gets the synthetic join instead of their kick, even before anything
