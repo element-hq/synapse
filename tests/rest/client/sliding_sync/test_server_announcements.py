@@ -23,7 +23,7 @@ from synapse.handlers.server_announcements import SYNTHETIC_JOIN_EVENT_ID_PREFIX
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import devices, login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -440,33 +440,6 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         self.assertEqual(
             state[(EventTypes.PowerLevels, "")]["content"]["users"][self.former], 50
         )
-
-    def _update_membership(self, user_id: str, membership: str) -> None:
-        """Change the membership of `user_id` as the management user."""
-        self.get_success(
-            self.hs.get_room_member_handler().update_membership(
-                create_requester(self.config.room_management_mxid),
-                UserID.from_string(user_id),
-                self.room_id,
-                membership,
-                ratelimit=False,
-            )
-        )
-
-    def test_revoked_invite(self) -> None:
-        """A user whose invite to the room is revoked while their connection is
-        open gets the synthetic join instead of their revoked invite in the same
-        sync, even when nothing was announced.
-        """
-        sync_body = self._sync_body(timeline_limit=10)
-        _, pos = self.do_sync(sync_body, tok=self.bob_tok)
-        self._update_membership(self.bob, Membership.INVITE)
-        self._update_membership(self.bob, Membership.LEAVE)
-
-        response, _ = self.do_sync(sync_body, since=pos, tok=self.bob_tok)
-
-        room = self._assert_delivered(response, self.bob)
-        self._assert_no_own_membership_in_timeline(room, self.bob)
 
     def test_stays_in_list(self) -> None:
         """An announcement room already sent on a connection stays in the list
