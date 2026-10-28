@@ -1,0 +1,2 @@
+Revert "Reject setting `null` profile field values" as it breaks some existing clients. Synapse will start
+enforcing this at a later date.
