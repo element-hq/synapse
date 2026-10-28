@@ -97,6 +97,9 @@ async def _sendmail(
     )
 
     if force_tls:
+        # Appease type-checking.
+        # EmailConfig prevents `force_tls` from being True when TLS is disabled anyhow.
+        assert tlsname is not None
         factory = TLSMemoryBIOFactory(optionsForClientTLS(tlsname), True, factory)
 
     endpoint = HostnameEndpoint(

@@ -67,7 +67,7 @@ jobs:
 
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Set up docker layer caching
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -142,7 +142,7 @@ jobs:
 
       - name: Only build a single wheel on PR
         if: startsWith(github.ref, 'refs/pull/')
-        run: echo "CIBW_BUILD="cp310-manylinux_*"" >> $GITHUB_ENV
+        run: echo "CIBW_BUILD="cp311-manylinux_*"" >> $GITHUB_ENV
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
@@ -170,7 +170,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - run: pip install build
 

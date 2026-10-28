@@ -311,7 +311,8 @@ presence:
 ---
 ### `require_auth_for_profile_requests`
 
-*(boolean)* Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless `allow_profile_lookup_over_federation` is set to false. Defaults to `false`.
+*(boolean)* Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless `allow_profile_lookup_over_federation` is set to false.
+This option must be enabled in order to use `limit_profile_requests_to_users_who_share_rooms`. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -320,7 +321,8 @@ require_auth_for_profile_requests: true
 ---
 ### `limit_profile_requests_to_users_who_share_rooms`
 
-*(boolean)* Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server. Defaults to `false`.
+*(boolean)* Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server.
+The check can only be applied to authenticated requests, so this option requires `require_auth_for_profile_requests` to be enabled as well. Synapse will refuse to start if this option is enabled without it. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -1109,7 +1111,7 @@ user_ips_max_age: 14d
 ---
 ### `request_token_inhibit_3pid_errors`
 
-*(boolean)* Inhibits the `/requestToken` endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (`sid`) to clients. Defaults to `false`.
+*(boolean)* Inhibits the `/requestToken` endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (`sid`) to clients. Defaults to `true`.
 
 Example configuration:
 ```yaml
@@ -2021,7 +2023,7 @@ rc_presence:
 
 *(object)* Ratelimiting settings for delayed event management.
 
-This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account, or its source IP when requests are unauthenticated.
+This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 

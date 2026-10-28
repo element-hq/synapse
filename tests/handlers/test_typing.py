@@ -349,6 +349,41 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(events[0], [])
         self.assertEqual(events[1], 0)
 
+    def test_started_typing_remote_recv_non_compliant_user_id(self) -> None:
+        """A remote server sends a typing notification for a non-compliant
+        (grandfathered historical) user ID in a room we share. It is dropped.
+        """
+        non_compliant_user = UserID.from_string("@ónion:farm")
+        self.room_members = [U_APPLE, non_compliant_user]
+
+        self.assertEqual(self.event_source.get_current_key(), 0)
+
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/federation/v1/send/1000000",
+            _make_edu_transaction_json(
+                EduTypes.TYPING,
+                content={
+                    "room_id": ROOM_ID,
+                    "user_id": non_compliant_user.to_string(),
+                    "typing": True,
+                },
+            ),
+            federation_auth_origin=b"farm",
+        )
+        self.assertEqual(channel.code, 200)
+
+        self.on_new_event.assert_not_called()
+
+        self.assertEqual(self.event_source.get_current_key(), 0)
+        events = self.get_success(
+            self.event_source.get_new_events(
+                user=U_APPLE, from_key=0, limit=0, room_ids=[ROOM_ID], is_guest=False
+            )
+        )
+        self.assertEqual(events[0], [])
+        self.assertEqual(events[1], 0)
+
     # Enable federation sending on the main process.
     @override_config({"federation_sender_instances": None})
     def test_stopped_typing(self) -> None:

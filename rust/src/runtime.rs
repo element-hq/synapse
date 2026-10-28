@@ -17,8 +17,7 @@
 //!
 //! A [`RustRuntime`] is created once per homeserver (`hs.get_rust_runtime()`)
 //! and holds everything the Rust side keeps for the lifetime of that
-//! homeserver: currently the tokio thread pool and a handle to the Twisted
-//! reactor. Rust consumers (e.g. the HTTP client) clone the inner
+//! homeserver. Rust consumers (e.g. the HTTP client) clone the inner
 //! [`Arc<RustRuntimeInner>`] at construction time and don't need the GIL (or
 //! the Python-facing object) to reach it afterwards.
 //!
@@ -33,8 +32,10 @@ use anyhow::Context;
 use pyo3::{exceptions::PyRuntimeError, prelude::*};
 use tokio::runtime::{Handle, Runtime};
 
+use crate::clock::{set_virtual_time_msec, Clock};
 use crate::homeserver::HomeServer;
 use crate::reactor::Reactor;
+use crate::twisted_dispatch::{self, TwistedDispatchReader, TwistedDispatcher};
 
 /// How long to wait for in-flight tokio tasks to be cancelled when shutting
 /// down with the reactor.
@@ -60,12 +61,35 @@ pub struct RustRuntimeInner {
     reactor: Reactor,
     tokio: Mutex<TokioState>,
     worker_threads: usize,
+    clock: Clock,
+
+    /// Runs closures on the Twisted reactor thread without taking the GIL on
+    /// the calling thread. See [`crate::twisted_dispatch`].
+    dispatcher: Arc<TwistedDispatcher>,
+    /// The reactor-facing half of `dispatcher`, registered with the Twisted
+    /// reactor via `addReader` until `shutdown`.
+    dispatch_reader: Py<TwistedDispatchReader>,
 }
 
 impl RustRuntimeInner {
-    /// The Twisted reactor this homeserver runs on.
-    pub fn reactor(&self) -> &Reactor {
-        &self.reactor
+    /// This homeserver's clock. See [`crate::clock`].
+    pub fn clock(&self) -> &Clock {
+        &self.clock
+    }
+
+    /// Queue `f` to run on the Twisted reactor thread with the GIL held, and
+    /// wake the reactor. Never takes the GIL itself, so a tokio task can call
+    /// it to hand a result back to Twisted. See [`crate::twisted_dispatch`].
+    ///
+    /// This is the equivalent of calling `reactor.callFromThread` in Python and
+    /// should be used by Rust code instead of `callFromThread`.
+    ///
+    /// Returns an error once the homeserver has shut down.
+    pub fn dispatch_to_twisted<F>(&self, f: F) -> anyhow::Result<()>
+    where
+        F: FnOnce(Python<'_>) + Send + 'static,
+    {
+        self.dispatcher.dispatch(f)
     }
 
     /// Get a handle to the tokio runtime, starting the runtime if it hasn't
@@ -117,6 +141,17 @@ impl RustRuntimeInner {
             py.detach(|| runtime.shutdown_timeout(SHUTDOWN_TIMEOUT));
         }
 
+        // Unregister the wakeup socket from the Twisted reactor, then close
+        // the dispatcher and run the closures still queued so that their
+        // deferreds fire.
+        //
+        // All tokio tasks should be stopped by now, so only long running
+        // blocking threads may still be active. If they try to dispatch new
+        // work they get an error and should stop.
+        self.reactor
+            .remove_reader(py, self.dispatch_reader.bind(py).as_any())?;
+        self.dispatch_reader.get().close_and_drain(py);
+
         Ok(())
     }
 }
@@ -142,7 +177,7 @@ impl Drop for RustRuntimeInner {
 /// `HomeServer.get_rust_runtime()`. Rust classes that need it take it as a
 /// constructor argument and store their own clone, which is just an `Arc`
 /// refcount bump. Derefs to [`RustRuntimeInner`].
-#[pyclass(frozen, skip_from_py_object)]
+#[pyclass(frozen, weakref, skip_from_py_object)]
 #[derive(Clone)]
 pub struct RustRuntime {
     inner: Arc<RustRuntimeInner>,
@@ -161,10 +196,22 @@ impl RustRuntime {
     #[new]
     #[pyo3(signature = (hs, worker_threads = 4))]
     fn py_new(py: Python<'_>, hs: HomeServer, worker_threads: usize) -> PyResult<Self> {
+        let reactor = hs.get_reactor(py)?;
+
+        // Register the read end of the dispatcher's wakeup socket with the
+        // Twisted reactor, so that closures dispatched by tokio tasks run on
+        // the reactor thread. `shutdown` removes it again.
+        let (dispatcher, dispatch_reader) = twisted_dispatch::new_pair()?;
+        let dispatch_reader = Py::new(py, dispatch_reader)?;
+        reactor.add_reader(py, dispatch_reader.bind(py).as_any())?;
+
         let inner = Arc::new(RustRuntimeInner {
-            reactor: hs.get_reactor(py)?,
+            reactor,
             tokio: Mutex::new(TokioState::NotStarted),
             worker_threads,
+            clock: Clock::new(),
+            dispatcher,
+            dispatch_reader,
         });
 
         // Shut the tokio runtime down when the homeserver is shut down. The
@@ -180,6 +227,11 @@ impl RustRuntime {
         hs.register_sync_shutdown_handler(py, hook.bind(py).as_any())?;
 
         Ok(RustRuntime { inner })
+    }
+
+    /// The current time, in milliseconds since the Unix epoch.
+    fn time_msec(&self) -> u64 {
+        self.inner.clock.now_millis()
     }
 }
 
@@ -206,6 +258,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     let child_module = PyModule::new(py, "runtime")?;
 
     child_module.add_class::<RustRuntime>()?;
+    child_module.add_function(wrap_pyfunction!(set_virtual_time_msec, m)?)?;
 
     m.add_submodule(&child_module)?;
 

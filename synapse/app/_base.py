@@ -372,10 +372,12 @@ def listen_manhole(
     )
 
 
+# These listener helpers do not inspect the factory's protocol type. Erase that
+# invariant type parameter, quoting the annotation for older Twisted versions.
 def listen_tcp(
     bind_addresses: StrCollection,
     port: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     reactor: IReactorTCP = reactor,
     backlog: int = 50,
 ) -> list[Port]:
@@ -400,7 +402,7 @@ def listen_tcp(
 def listen_unix(
     path: str,
     mode: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     reactor: IReactorUNIX = reactor,
     backlog: int = 50,
 ) -> list[Port]:
@@ -541,7 +543,7 @@ def listen_http(
 def listen_ssl(
     bind_addresses: StrCollection,
     port: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     context_factory: IOpenSSLContextFactory,
     reactor: IReactorSSL = reactor,
     backlog: int = 50,
@@ -728,6 +730,11 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
 
     # If we've configured an expiry time for caches, start the background job now.
     setup_expire_lru_cache_entries(hs)
+
+    # Only reconcile server announcement rooms on the main process.
+    if not hs.config.worker.worker_app and hs.config.serverannouncements.rooms:
+        await hs.get_server_announcements_handler().validate_configuration()
+        await hs.get_server_announcements_handler().reconcile_rooms()
 
     # It is now safe to start your Synapse.
     hs.start_listening()
