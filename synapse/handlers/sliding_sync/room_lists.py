@@ -247,19 +247,19 @@ class SlidingSyncRoomLists:
         is not a member of them, and those to leave out of the lists.
 
         The rule mirrors legacy `/sync`. A room the user has no membership in, or
-        has left, was kicked or was banned from, is listed as joined:
+        has left or was kicked from, is listed as joined:
           - once it holds an announcement at `to_token`, so that creating the
             room and joining its senders does not show it to every user;
-          - or when the user left, was kicked or was banned within this request's
-            window, even without an announcement, so that the user's real
-            membership is replaced by the synthetic join in the same response
-            rather than sent first.
-        Otherwise, a room the user left, was kicked or was banned from is left
-        out of the lists, rather than listed with their real membership.
+          - or when the user left or was kicked within this request's window,
+            even without an announcement, so that the user's real membership is
+            replaced by the synthetic join in the same response rather than sent
+            first.
+        Otherwise, a room the user left or was kicked from is left out of the
+        lists, rather than listed with their real membership.
 
         A listed room's membership points at the user's synthetic join and at
-        the position of the latest announcement, or of the user's leave or ban
-        if there is no announcement yet.
+        the position of the latest announcement, or of the user's leave if
+        there is no announcement yet.
 
         This runs on every request without caching, for a cost bounded by the
         number of configured rooms rather than the user's rooms:
@@ -275,7 +275,7 @@ class SlidingSyncRoomLists:
         Args:
             user_id: The syncing user.
             room_membership_for_user_map: The user's memberships at `to_token`.
-                Rooms with one other than a leave or a ban are left out.
+                Rooms with one other than a leave are left out.
             from_token: The point in the stream to sync from, if any.
             to_token: The point in the stream to sync up to.
 
@@ -287,9 +287,9 @@ class SlidingSyncRoomLists:
         hidden_room_ids: set[str] = set()
         for room_id in await self.store.get_server_announcement_room_ids():
             room_for_user = room_membership_for_user_map.get(room_id)
-            if room_for_user is not None and room_for_user.membership not in (
-                Membership.LEAVE,
-                Membership.BAN,
+            if (
+                room_for_user is not None
+                and room_for_user.membership != Membership.LEAVE
             ):
                 continue
             if room_id in self.rooms_to_exclude_globally:

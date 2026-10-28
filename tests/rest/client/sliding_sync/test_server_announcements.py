@@ -425,45 +425,6 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
             )
         )
 
-    def test_banned_member(self) -> None:
-        """A member banned from the room gets later announcements as a
-        non-member, with the synthetic join instead of their ban.
-        """
-        self._update_membership(self.former, Membership.BAN)
-        event_id = self._announce("hello")
-
-        response, _ = self.do_sync(
-            self._sync_body(timeline_limit=10), tok=self.former_tok
-        )
-
-        room = self._assert_delivered(response, self.former)
-        self._assert_no_own_membership_in_timeline(room, self.former)
-        self.assertEqual(self._timeline_ids(room)[-1], event_id)
-
-    def test_banned_member_existing_connection(self) -> None:
-        """A member banned from the room while their connection is open gets the
-        synthetic join instead of their ban in the same sync, even when nothing
-        was announced.
-        """
-        sync_body = self._sync_body(timeline_limit=10)
-        _, pos = self.do_sync(sync_body, tok=self.former_tok)
-        self._update_membership(self.former, Membership.BAN)
-
-        response, _ = self.do_sync(sync_body, since=pos, tok=self.former_tok)
-
-        room = self._assert_delivered(response, self.former)
-        self._assert_no_own_membership_in_timeline(room, self.former)
-
-    def test_banned_member_without_announcement(self) -> None:
-        """A member banned from the room before anything was announced does not
-        get the room on a new connection, neither as joined nor with their ban.
-        """
-        self._update_membership(self.former, Membership.BAN)
-
-        response, _ = self.do_sync(self._sync_body(), tok=self.former_tok)
-
-        self._assert_not_delivered(response)
-
     def test_revoked_invite(self) -> None:
         """A user whose invite to the room is revoked while their connection is
         open gets the synthetic join instead of their revoked invite in the same
