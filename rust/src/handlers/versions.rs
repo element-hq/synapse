@@ -285,6 +285,9 @@ pub struct UnstableFeatureMap {
     /// Photon: shared to-device content with cached recipient sets
     #[serde(rename = "org.matrix.experimental.photon.shared_to_device")]
     photon_shared_to_device: bool,
+    /// Fermion: this server arbitrates the photon rooms its users create
+    #[serde(rename = "org.matrix.experimental.fermion.arbiter")]
+    fermion_arbiter: bool,
 
     // Whether new rooms will be set to encrypted or not (based on presets).
     #[serde(rename = "io.element.e2ee_forced.public")]
@@ -340,6 +343,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
         msc4446_enabled: config.experimental.msc4446_enabled,
         msc4502: config.experimental.msc4502_enabled,
         photon_shared_to_device: config.experimental.photon_shared_to_device_enabled,
+        fermion_arbiter: config.experimental.fermion_arbiter_enabled,
         e2ee_forced_public: config
             .room
             .encryption_enabled_by_default_for_room_presets

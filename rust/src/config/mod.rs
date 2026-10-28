@@ -77,4 +77,5 @@ pub struct ExperimentalConfig {
     pub msc4446_enabled: bool,
     pub msc4502_enabled: bool,
     pub photon_shared_to_device_enabled: bool,
+    pub fermion_arbiter_enabled: bool,
 }

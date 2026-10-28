@@ -324,3 +324,9 @@ class ExperimentalConfig(Config):
         self.photon_shared_to_device_enabled: bool = experimental.get(
             "photon_shared_to_device_enabled", False
         )
+
+        # Fermion: this server arbitrates (orders the MLS commits of) the
+        # photon rooms its users create.
+        self.fermion_arbiter_enabled: bool = experimental.get(
+            "fermion_arbiter_enabled", False
+        )

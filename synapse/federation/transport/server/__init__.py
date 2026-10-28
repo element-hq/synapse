@@ -342,5 +342,21 @@ def register_servlets(
                 server_name=hs.hostname,
             ).register(resource)
 
+    if (
+        "federation" in servlet_groups
+        and hs.config.experimental.fermion_arbiter_enabled
+    ):
+        from synapse.federation.transport.server.fermion import (
+            FERMION_SERVLET_CLASSES,
+        )
+
+        for servletclass in FERMION_SERVLET_CLASSES:
+            servletclass(
+                hs=hs,
+                authenticator=authenticator,
+                ratelimiter=ratelimiter,
+                server_name=hs.hostname,
+            ).register(resource)
+
     if "federation" in servlet_groups:
         appservice_proxy.register_servlets(hs, resource, authenticator, ratelimiter)

@@ -198,6 +198,7 @@ if TYPE_CHECKING:
     from synapse.handlers.jwt import JwtHandler
     from synapse.handlers.oidc import OidcHandler
     from synapse.handlers.saml import SamlHandler
+    from synapse.rest.client.fermion import Arbiter as FermionArbiter
     from synapse.storage._base import SQLBaseStore
 
 
@@ -888,6 +889,12 @@ class HomeServer(metaclass=abc.ABCMeta):
             return DeviceWriterHandler(self)
 
         return DeviceHandler(self)
+
+    @cache_in_self
+    def get_fermion_arbiter(self) -> "FermionArbiter":
+        from synapse.rest.client.fermion import Arbiter
+
+        return Arbiter(self)
 
     @cache_in_self
     def get_device_message_handler(self) -> DeviceMessageHandler:
