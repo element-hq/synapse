@@ -2324,6 +2324,34 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self._timeline_ids(room), event_ids[-2:])
         self.assertTrue(room["timeline"]["limited"])
 
+    def test_state_changes_after_last_announcement(self) -> None:
+        """An announcement room is delivered on initial and `full_state` syncs
+        even when state changes push its last announcement out of the timeline.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        self.config.rooms = [
+            attr.evolve(
+                self.config.rooms[0], room_name="New name", room_topic="New topic"
+            )
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+        filter = {"room": {"timeline": {"limit": 1}}}
+
+        for response in (
+            self._sync(self.bob_tok, filter=filter),
+            self._sync(self.bob_tok, since, full_state=True, filter=filter),
+        ):
+            room = self._assert_delivered(response, self.bob)
+            self.assertNotIn(EventTypes.Message, self._timeline_types(room))
+            topic = [
+                event
+                for event in room["state"]["events"] + room["timeline"]["events"]
+                if event["type"] == EventTypes.Topic
+            ][-1]
+            self.assertEqual(topic["content"]["topic"], "New topic")
+
     def test_initial_sync_without_announcement(self) -> None:
         """An announcement room without any announcement is left out of an
         initial sync.

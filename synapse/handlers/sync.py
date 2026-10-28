@@ -3340,9 +3340,10 @@ class SyncHandler:
         announcement to show, i.e. a non-state event.
 
         On an incremental sync, only announcements since the `since_token` count,
-        unless `full_state` is set, in which case a room is also included if its
-        most recent events hold an announcement. On an initial sync, a room is
-        included if its most recent events hold an announcement.
+        unless `full_state` is set, in which case a room is also included if it
+        has ever had an announcement. On an initial sync, a room is included if
+        it has ever had an announcement, even when later state changes push that
+        announcement out of the timeline.
 
         Rooms in `left_room_ids` are included even without an announcement, so
         that the client replaces the user's real membership with the synthetic
@@ -3389,17 +3390,11 @@ class SyncHandler:
             if not all(event.is_state() for event in events)
         } | (left_room_ids & room_ids)
 
-        if since_token and sync_result_builder.full_state:
-            recent_room_to_events = await self.store.get_room_events_stream_for_rooms(
-                room_ids=room_ids - announced_room_ids,
-                from_key=now_token.room_key,
-                limit=timeline_limit + 1,
-                direction=Direction.BACKWARDS,
-            )
+        if not since_token or sync_result_builder.full_state:
             announced_room_ids.update(
-                room_id
-                for room_id, (events, _, _) in recent_room_to_events.items()
-                if not all(event.is_state() for event in events)
+                await self.store.get_server_announcement_room_ids_with_announcement(
+                    room_ids - announced_room_ids, now_token.room_key.stream
+                )
             )
 
         room_entries = []
