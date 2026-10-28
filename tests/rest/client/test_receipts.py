@@ -442,6 +442,8 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
         self.bob = self.register_user("bob", "pass")
         self.bob_tok = self.login("bob", "pass")
         self.bob_other_tok = self.login("bob", "pass")
+        self.dan = self.register_user("dan", "pass")
+        self.dan_tok = self.login("dan", "pass")
 
         hs.config.serverannouncements.rooms = [
             ServerAnnouncementRoom(
@@ -510,6 +512,9 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
             for user_id in event["content"].get(event_id, {}).get(ReceiptTypes.READ, {})
         }
 
+    def _assert_room_in_sync(self, response: JsonDict) -> None:
+        self.assertIn(self.room_id, response.get("rooms", {}).get("join", {}))
+
     def test_non_member_receipt_on_initial_sync_of_other_device(self) -> None:
         """A non-member's read receipt is in the initial sync of their other
         devices.
@@ -531,3 +536,37 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
 
         response = self._sync(self.bob_other_tok, since)
         self.assertEqual(self._receipt_readers(response, event_id), {self.bob})
+
+    def test_non_member_receipt_hidden_from_member_sync(self) -> None:
+        """A non-member's read receipt is not in the initial or incremental
+        sync of a member of the announcement room.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.announcer_tok)["next_batch"]
+
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        response = self._sync(self.announcer_tok)
+        self._assert_room_in_sync(response)
+        self.assertEqual(self._receipt_readers(response, event_id), set())
+
+        response = self._sync(self.announcer_tok, since)
+        self.assertEqual(self._receipt_readers(response, event_id), set())
+
+    def test_non_member_receipt_hidden_from_other_non_member_sync(self) -> None:
+        """A non-member's read receipt is not in the initial or incremental
+        sync of another non-member.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.dan_tok)["next_batch"]
+
+        self._send_read_receipt(event_id, self.bob_tok)
+        self._announce("again")
+
+        response = self._sync(self.dan_tok)
+        self._assert_room_in_sync(response)
+        self.assertEqual(self._receipt_readers(response, event_id), set())
+
+        response = self._sync(self.dan_tok, since)
+        self._assert_room_in_sync(response)
+        self.assertEqual(self._receipt_readers(response, event_id), set())

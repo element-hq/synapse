@@ -63,6 +63,8 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         self.bob = self.register_user("bob", "pass")
         self.bob_tok = self.login("bob", "pass")
         self.bob_other_tok = self.login("bob", "pass")
+        self.dan = self.register_user("dan", "pass")
+        self.dan_tok = self.login("dan", "pass")
 
         self.config = hs.config.serverannouncements
         self.config.rooms = [
@@ -603,3 +605,39 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
             self._receipts_sync_body(), since=pos, tok=self.bob_other_tok
         )
         self.assertEqual(self._receipt_readers(response, event_id), {self.bob})
+
+    def test_non_member_receipt_hidden_from_member(self) -> None:
+        """A non-member's read receipt is not sent to a member of the
+        announcement room, on a new connection or an existing one.
+        """
+        event_id = self._announce("hello")
+        _, pos = self.do_sync(self._receipts_sync_body(), tok=self.announcer_tok)
+
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        response, _ = self.do_sync(
+            self._receipts_sync_body(), since=pos, tok=self.announcer_tok
+        )
+        self.assertEqual(self._receipt_readers(response, event_id), set())
+
+        response, _ = self.do_sync(self._receipts_sync_body(), tok=self.announcer_tok)
+        self.assertIn(self.room_id, response["rooms"])
+        self.assertEqual(self._receipt_readers(response, event_id), set())
+
+    def test_non_member_receipt_hidden_from_other_non_member(self) -> None:
+        """A non-member's read receipt is not sent to another non-member, on a
+        new connection or an existing one.
+        """
+        event_id = self._announce("hello")
+        _, pos = self.do_sync(self._receipts_sync_body(), tok=self.dan_tok)
+
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        response, _ = self.do_sync(
+            self._receipts_sync_body(), since=pos, tok=self.dan_tok
+        )
+        self.assertEqual(self._receipt_readers(response, event_id), set())
+
+        response, _ = self.do_sync(self._receipts_sync_body(), tok=self.dan_tok)
+        self._assert_delivered(response, self.dan)
+        self.assertEqual(self._receipt_readers(response, event_id), set())
