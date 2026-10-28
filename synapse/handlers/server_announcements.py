@@ -40,11 +40,8 @@ def make_synthetic_join_event(
     so the same user always receives the same event and clients drop repeats. The
     prefix makes it obvious that the event ID is not a real one.
 
-    It is added to the room's state whatever the sync filter asks for. State type
-    filters are ignored on purpose, so that clients always see the user's own
-    membership. `event_format` is ignored because a fake event has no federation
-    form, and `event_fields` because trimming a single small event is not worth
-    the extra code.
+    It is injected into the `/sync` responses of every user of the homeserver who
+    is not one of the room's senders.
 
     Args:
         room_id: The announcement room.
