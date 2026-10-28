@@ -2242,6 +2242,9 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
     def _timeline_ids(self, room: JsonDict) -> list[str]:
         return [event["event_id"] for event in room["timeline"]["events"]]
 
+    def _timeline_types(self, room: JsonDict) -> list[str]:
+        return [event["type"] for event in room["timeline"]["events"]]
+
     def _state_types(self, room: JsonDict) -> set[str]:
         return {event["type"] for event in room["state"]["events"]}
 
@@ -2342,8 +2345,9 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         )
 
     def test_removed_member(self) -> None:
-        """A member removed from the room by the config does not get their leave,
-        then gets later announcements as a non-member, on initial sync too.
+        """A member removed from the room by the config switches straight to the
+        synthetic join and the room's current power levels, then gets later
+        announcements as a non-member, on initial sync too.
         """
         since = self._sync(self.former_tok)["next_batch"]
 
@@ -2352,7 +2356,14 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         ]
         self.get_success(self.handler.reconcile_rooms())
         response = self._sync(self.former_tok, since)
-        self._assert_not_delivered(response)
+        room = self._assert_delivered(response, self.former)
+        self.assertNotIn(EventTypes.Message, self._timeline_types(room))
+        power_levels = [
+            event
+            for event in room["state"]["events"] + room["timeline"]["events"]
+            if event["type"] == EventTypes.PowerLevels
+        ][-1]
+        self.assertNotIn(self.former, power_levels["content"]["users"])
 
         event_id = self._announce("hello")
         room = self._assert_delivered(
@@ -2379,6 +2390,17 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self.assertNotIn(self.room_id, response["rooms"].get("leave", {}))
         room = self._assert_delivered(response, self.former)
         self.assertEqual(self._timeline_ids(room)[-2:], event_ids)
+
+    def test_member_leaving(self) -> None:
+        """A member who leaves the room on their own switches straight to the
+        synthetic join, even when no announcement is sent.
+        """
+        since = self._sync(self.former_tok)["next_batch"]
+
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+
+        room = self._assert_delivered(self._sync(self.former_tok, since), self.former)
+        self.assertEqual(self._timeline_ids(room), [])
 
     def test_initial_sync_after_leaving(self) -> None:
         """A former member who left on their own gets a single, synthetic join

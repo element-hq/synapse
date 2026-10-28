@@ -3096,6 +3096,7 @@ class SyncHandler:
             sync_result_builder.forced_newly_joined_room_ids
         )
         newly_left_rooms: list[str] = []
+        left_announcement_room_ids: set[str] = set()
         room_entries: list[RoomSyncResultBuilder] = []
         invited: list[InvitedSyncResult] = []
         knocked: list[KnockedSyncResult] = []
@@ -3200,6 +3201,7 @@ class SyncHandler:
                     knocked.append(knock_room_sync)
 
             if room_id in sync_result_builder.announcement_room_ids:
+                left_announcement_room_ids.add(room_id)
                 continue
 
             # Always include leave/ban events. Just take the last one.
@@ -3311,7 +3313,9 @@ class SyncHandler:
 
         room_entries.extend(
             await self._get_announcement_room_entries(
-                sync_result_builder, sync_result_builder.announcement_room_ids
+                sync_result_builder,
+                sync_result_builder.announcement_room_ids,
+                left_room_ids=left_announcement_room_ids,
             )
         )
 
@@ -3327,6 +3331,7 @@ class SyncHandler:
         self,
         sync_result_builder: "SyncResultBuilder",
         room_ids: AbstractSet[str],
+        left_room_ids: AbstractSet[str] = frozenset(),
     ) -> list["RoomSyncResultBuilder"]:
         """Returns entries for the given announcement rooms that have an
         announcement to show, i.e. a non-state event.
@@ -3336,9 +3341,15 @@ class SyncHandler:
         most recent events hold an announcement. On an initial sync, a room is
         included if its most recent events hold an announcement.
 
+        Rooms in `left_room_ids` are included even without an announcement, so
+        that the client replaces the user's real membership with the synthetic
+        join and gets the room's current state.
+
         Args:
             sync_result_builder
             room_ids: The announcement rooms to consider.
+            left_room_ids: Rooms among `room_ids` that the user left or was
+                removed from since the `since_token`.
         """
         since_token = sync_result_builder.since_token
         now_token = sync_result_builder.now_token
@@ -3357,7 +3368,7 @@ class SyncHandler:
             room_id
             for room_id, (events, _, _) in room_to_events.items()
             if not all(event.is_state() for event in events)
-        }
+        } | (left_room_ids & room_ids)
 
         if since_token and sync_result_builder.full_state:
             recent_room_to_events = await self.store.get_room_events_stream_for_rooms(
