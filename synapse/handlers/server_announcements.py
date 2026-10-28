@@ -33,7 +33,13 @@ SYNTHETIC_JOIN_EVENT_ID_PREFIX = "$fake_announcement_join_"
 SERVER_ANNOUNCEMENT_EVENT_TYPES = SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES - {
     EventTypes.Create
 }
-"""The event types that make an announcement room show up in sliding sync."""
+"""The event types that make an announcement room show up in sliding sync.
+
+These are the types that bump a room in sliding sync, so the room shows up on
+the same activity that moves the user's other rooms up their list and sets its
+`bump_stamp`. `m.room.create` is left out so that a room nobody has announced
+anything in yet is not listed.
+"""
 
 
 def make_synthetic_join_event_id(room_id: str, user_id: str) -> str:
