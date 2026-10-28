@@ -3355,6 +3355,15 @@ class SyncHandler:
         not from the `since_token`. Changes since the `since_token` would miss
         any name, topic, avatar or power level changes made in between.
 
+        Sending an announcement does not wake up waiting syncs, so that an
+        announcement does not wake every user's sync at once. A waiting sync
+        picks announcements up when it next runs: at its timeout, or when
+        something else wakes it. A long-polling user with no other activity can
+        get an announcement up to two sync timeouts late: a sync whose first run
+        found nothing returns that empty result at its timeout without running
+        again, and the client's next sync may wait a full timeout before it
+        runs.
+
         Args:
             sync_result_builder
             room_ids: The announcement rooms to consider.
