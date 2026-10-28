@@ -485,10 +485,12 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
     def _announce(self, body: str) -> str:
         return self.helper.send(self.room_id, body, tok=self.announcer_tok)["event_id"]
 
-    def _send_read_receipt(self, event_id: str, tok: str) -> None:
+    def _send_read_receipt(
+        self, event_id: str, tok: str, receipt_type: str = ReceiptTypes.READ
+    ) -> None:
         channel = self.make_request(
             "POST",
-            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.READ}/{event_id}",
+            f"/rooms/{self.room_id}/receipt/{receipt_type}/{event_id}",
             {},
             access_token=tok,
         )
@@ -500,8 +502,13 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         return channel.json_body
 
-    def _receipt_readers(self, response: JsonDict, event_id: str) -> set[str]:
-        """Return the users with an `m.read` receipt on `event_id` in the
+    def _receipt_readers(
+        self,
+        response: JsonDict,
+        event_id: str,
+        receipt_type: str = ReceiptTypes.READ,
+    ) -> set[str]:
+        """Return the users with a `receipt_type` receipt on `event_id` in the
         announcement room's ephemeral events of a `/sync` response.
         """
         room = response.get("rooms", {}).get("join", {}).get(self.room_id, {})
@@ -509,7 +516,7 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
             user_id
             for event in room.get("ephemeral", {}).get("events", [])
             if event["type"] == EduTypes.RECEIPT
-            for user_id in event["content"].get(event_id, {}).get(ReceiptTypes.READ, {})
+            for user_id in event["content"].get(event_id, {}).get(receipt_type, {})
         }
 
     def _assert_room_in_sync(self, response: JsonDict) -> None:
@@ -570,3 +577,50 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
         response = self._sync(self.dan_tok, since)
         self._assert_room_in_sync(response)
         self.assertEqual(self._receipt_readers(response, event_id), set())
+
+    def test_non_member_sends_private_read_receipt(self) -> None:
+        """A user who is not a member of the announcement room can send a
+        private read receipt for an announcement.
+        """
+        event_id = self._announce("hello")
+
+        self._send_read_receipt(event_id, self.bob_tok, ReceiptTypes.READ_PRIVATE)
+
+        receipts = self.get_success(
+            self.store.get_receipts_for_user(self.bob, [ReceiptTypes.READ_PRIVATE])
+        )
+        self.assertEqual(receipts, {self.room_id: event_id})
+
+    def test_non_member_private_receipt_on_sync_of_other_device(self) -> None:
+        """A non-member's private read receipt is in the initial and next
+        incremental sync of their other devices.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.bob_other_tok)["next_batch"]
+
+        self._send_read_receipt(event_id, self.bob_tok, ReceiptTypes.READ_PRIVATE)
+
+        for response in (
+            self._sync(self.bob_other_tok),
+            self._sync(self.bob_other_tok, since),
+        ):
+            self.assertEqual(
+                self._receipt_readers(response, event_id, ReceiptTypes.READ_PRIVATE),
+                {self.bob},
+            )
+
+    def test_non_member_private_receipt_hidden_from_other_users_sync(self) -> None:
+        """A non-member's private read receipt is not in the sync of a member
+        of the announcement room, nor of another non-member.
+        """
+        event_id = self._announce("hello")
+
+        self._send_read_receipt(event_id, self.bob_tok, ReceiptTypes.READ_PRIVATE)
+
+        for tok in (self.announcer_tok, self.dan_tok):
+            response = self._sync(tok)
+            self._assert_room_in_sync(response)
+            self.assertEqual(
+                self._receipt_readers(response, event_id, ReceiptTypes.READ_PRIVATE),
+                set(),
+            )

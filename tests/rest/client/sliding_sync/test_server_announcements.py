@@ -557,10 +557,12 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
             .get("changed", []),
         )
 
-    def _send_read_receipt(self, event_id: str, tok: str) -> None:
+    def _send_read_receipt(
+        self, event_id: str, tok: str, receipt_type: str = ReceiptTypes.READ
+    ) -> None:
         channel = self.make_request(
             "POST",
-            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.READ}/{event_id}",
+            f"/rooms/{self.room_id}/receipt/{receipt_type}/{event_id}",
             {},
             access_token=tok,
         )
@@ -571,16 +573,19 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         sync_body["extensions"] = {"receipts": {"enabled": True}}
         return sync_body
 
-    def _receipt_readers(self, response: JsonDict, event_id: str) -> set[str]:
-        """Return the users with an `m.read` receipt on `event_id` in the
+    def _receipt_readers(
+        self,
+        response: JsonDict,
+        event_id: str,
+        receipt_type: str = ReceiptTypes.READ,
+    ) -> set[str]:
+        """Return the users with a `receipt_type` receipt on `event_id` in the
         announcement room of the receipts extension.
         """
         receipt = (
             response["extensions"]["receipts"].get("rooms", {}).get(self.room_id, {})
         )
-        return set(
-            receipt.get("content", {}).get(event_id, {}).get(ReceiptTypes.READ, {})
-        )
+        return set(receipt.get("content", {}).get(event_id, {}).get(receipt_type, {}))
 
     def test_non_member_receipt_on_new_connection_of_other_device(self) -> None:
         """A non-member's read receipt is sent to a new connection of their
@@ -641,3 +646,42 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         response, _ = self.do_sync(self._receipts_sync_body(), tok=self.dan_tok)
         self._assert_delivered(response, self.dan)
         self.assertEqual(self._receipt_readers(response, event_id), set())
+
+    def test_non_member_private_receipt_on_other_device(self) -> None:
+        """A non-member's private read receipt is sent to an existing and a new
+        connection of their other devices.
+        """
+        event_id = self._announce("hello")
+        _, pos = self.do_sync(self._receipts_sync_body(), tok=self.bob_other_tok)
+
+        self._send_read_receipt(event_id, self.bob_tok, ReceiptTypes.READ_PRIVATE)
+
+        response, _ = self.do_sync(
+            self._receipts_sync_body(), since=pos, tok=self.bob_other_tok
+        )
+        self.assertEqual(
+            self._receipt_readers(response, event_id, ReceiptTypes.READ_PRIVATE),
+            {self.bob},
+        )
+
+        response, _ = self.do_sync(self._receipts_sync_body(), tok=self.bob_other_tok)
+        self.assertEqual(
+            self._receipt_readers(response, event_id, ReceiptTypes.READ_PRIVATE),
+            {self.bob},
+        )
+
+    def test_non_member_private_receipt_hidden_from_other_users(self) -> None:
+        """A non-member's private read receipt is not sent to a member of the
+        announcement room, nor to another non-member.
+        """
+        event_id = self._announce("hello")
+
+        self._send_read_receipt(event_id, self.bob_tok, ReceiptTypes.READ_PRIVATE)
+
+        for tok in (self.announcer_tok, self.dan_tok):
+            response, _ = self.do_sync(self._receipts_sync_body(), tok=tok)
+            self.assertIn(self.room_id, response["rooms"])
+            self.assertEqual(
+                self._receipt_readers(response, event_id, ReceiptTypes.READ_PRIVATE),
+                set(),
+            )
