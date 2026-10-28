@@ -531,7 +531,7 @@
         "integer",
         "null"
       ],
-      "description": "Turn on the Twisted telnet manhole service on the given port.\n\nThis can also be set by the `--manhole` argument when starting Synapse.",
+      "description": "Turn on the Twisted manhole service on the given port.\n\nThis can also be set by the `--manhole` argument when starting Synapse.",
       "default": null,
       "examples": [
         1234
