@@ -3336,25 +3336,27 @@ class SyncHandler:
         room_ids: AbstractSet[str],
         left_room_ids: AbstractSet[str] = frozenset(),
     ) -> list["RoomSyncResultBuilder"]:
-        """Returns entries for the given announcement rooms that have an
-        announcement to show, i.e. a non-state event.
+        """Returns entries for the given announcement rooms that have something
+        to show.
 
-        On an incremental sync, only announcements since the `since_token` count,
-        unless `full_state` is set, in which case a room is also included if it
-        has ever had an announcement. On an initial sync, a room is included if
-        it has ever had an announcement, even when later state changes push that
-        announcement out of the timeline.
+        A room only shows up once it has had an announcement, i.e. a non-state
+        event, so that creating the room and joining its senders does not show
+        it to every user. On an incremental sync, a room is included if it has
+        had an announcement and there is any new event in it since the
+        `since_token`, such as a sender leaving or a name change. With
+        `full_state` set, a room is also included without any new event. On an
+        initial sync, a room is included if it has ever had an announcement,
+        even when later state changes push that announcement out of the
+        timeline.
 
         Rooms in `left_room_ids` are included even without an announcement, so
         that the client replaces the user's real membership with the synthetic
         join and gets the room's current state.
 
         Every entry carries the room's full state rather than the changes since
-        the `since_token`. The client may never have received the room before,
-        and a room is not sent for windows that only change its state, so the
-        client's copy of the state dates from the last time the room was sent,
-        not from the `since_token`. Changes since the `since_token` would miss
-        any name, topic, avatar or power level changes made in between.
+        the `since_token`. The first time a room is sent to a user, the client
+        has no earlier state for it, and which users have already received the
+        room is not tracked.
 
         Sending an announcement does not wake up waiting syncs, so that an
         announcement does not wake every user's sync at once. A waiting sync
@@ -3391,11 +3393,18 @@ class SyncHandler:
         } | (left_room_ids & room_ids)
 
         if not since_token or sync_result_builder.full_state:
-            announced_room_ids.update(
-                await self.store.get_server_announcement_room_ids_with_announcement(
-                    room_ids - announced_room_ids, now_token.room_key.stream
-                )
+            room_ids_to_check = room_ids - announced_room_ids
+        else:
+            room_ids_to_check = {
+                room_id
+                for room_id, (events, _, _) in room_to_events.items()
+                if events and room_id not in announced_room_ids
+            }
+        announced_room_ids.update(
+            await self.store.get_server_announcement_room_ids_with_announcement(
+                room_ids_to_check, now_token.room_key.stream
             )
+        )
 
         room_entries = []
         for room_id in announced_room_ids:

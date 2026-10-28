@@ -2329,8 +2329,10 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self.assertTrue(room["timeline"]["limited"])
 
     def test_state_changes_after_last_announcement(self) -> None:
-        """An announcement room is delivered on initial and `full_state` syncs
-        even when state changes push its last announcement out of the timeline.
+        """An announcement room is delivered on initial, incremental and
+        `full_state` syncs even when state changes push its last announcement
+        out of the timeline. The incremental sync has the state changes in its
+        timeline.
         """
         self._announce("hello")
         since = self._sync(self.bob_tok)["next_batch"]
@@ -2345,6 +2347,7 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
 
         for response in (
             self._sync(self.bob_tok, filter=filter),
+            self._sync(self.bob_tok, since, filter=filter),
             self._sync(self.bob_tok, since, full_state=True, filter=filter),
         ):
             room = self._assert_delivered(response, self.bob)
@@ -2355,6 +2358,39 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
                 if event["type"] == EventTypes.Topic
             ][-1]
             self.assertEqual(topic["content"]["topic"], "New topic")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertIn(EventTypes.Topic, self._timeline_types(room))
+
+    def test_state_change_after_announcement(self) -> None:
+        """Once an announcement room has had an announcement, a state change
+        such as a sender leaving delivers the room to non-members with the
+        change in the timeline, as it does for members.
+        """
+        self._announce("hello")
+        bob_since = self._sync(self.bob_tok)["next_batch"]
+        announcer_since = self._sync(self.announcer_tok)["next_batch"]
+
+        leave_id = self.helper.leave(self.room_id, self.former, tok=self.former_tok)[
+            "event_id"
+        ]
+
+        room = self._assert_delivered(self._sync(self.bob_tok, bob_since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [leave_id])
+        room = self._sync(self.announcer_tok, announcer_since)["rooms"]["join"][
+            self.room_id
+        ]
+        self.assertEqual(self._timeline_ids(room), [leave_id])
+
+    def test_state_change_before_first_announcement(self) -> None:
+        """Before an announcement room's first announcement, a state change such
+        as a sender leaving does not deliver the room on incremental sync.
+        """
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+
+        self._assert_not_delivered(self._sync(self.bob_tok, since))
 
     def test_initial_sync_without_announcement(self) -> None:
         """An announcement room without any announcement is left out of an
