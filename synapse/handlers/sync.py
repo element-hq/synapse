@@ -3345,6 +3345,13 @@ class SyncHandler:
         that the client replaces the user's real membership with the synthetic
         join and gets the room's current state.
 
+        Every entry carries the room's full state rather than the changes since
+        the `since_token`. The client may never have received the room before,
+        and a room is not sent for windows that only change its state, so the
+        client's copy of the state dates from the last time the room was sent,
+        not from the `since_token`. Changes since the `since_token` would miss
+        any name, topic, avatar or power level changes made in between.
+
         Args:
             sync_result_builder
             room_ids: The announcement rooms to consider.
