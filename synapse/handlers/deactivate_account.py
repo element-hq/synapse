@@ -119,7 +119,7 @@ class DeactivateAccountHandler:
         # Cancel the user's delayed events (MSC4140). Do this first, so that none
         # of them get sent while the rest of the deactivation is in progress.
         await self._delayed_events_handler.cancel_all_for_user(
-            get_localpart_from_id(user_id)
+            get_localpart_from_id(user_id), erase_data
         )
 
         # FIXME: Theoretically there is a race here wherein user resets
