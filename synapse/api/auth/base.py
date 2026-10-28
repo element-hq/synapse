@@ -129,7 +129,9 @@ class BaseAuth(ABC):
         Returns:
             Resolves to the current membership of the user in the room and the
             membership event ID of the user. If the user is not in the room and
-            never has been, then `(Membership.JOIN, None)` is returned.
+            never has been, then `(Membership.JOIN, None)` is returned. The same
+            is returned for a user who left a configured server announcement
+            room, so that they keep reading it like a user who never joined.
         """
 
         try:
@@ -138,24 +140,40 @@ class BaseAuth(ABC):
             #  * The user is a non-guest user, and was ever in the room
             #  * The user is a guest user, and has joined the room
             # else it will throw.
-            return await self.check_user_in_room(
+            membership, member_event_id = await self.check_user_in_room(
                 room_id, requester, allow_departed_users=allow_departed_users
             )
         except AuthError:
-            visibility = await self._storage_controllers.state.get_current_state_event(
-                room_id, EventTypes.RoomHistoryVisibility, ""
-            )
+            pass
+        else:
             if (
-                visibility
-                and visibility.content.get("history_visibility")
-                == HistoryVisibility.WORLD_READABLE
+                membership == Membership.JOIN
+                or not await self._is_server_announcement_room(room_id)
             ):
-                return Membership.JOIN, None
-            raise AuthError(
-                403,
-                "User %r not in room %s, and room previews are disabled"
-                % (requester.user, room_id),
-            )
+                return membership, member_event_id
+
+        visibility = await self._storage_controllers.state.get_current_state_event(
+            room_id, EventTypes.RoomHistoryVisibility, ""
+        )
+        if (
+            visibility
+            and visibility.content.get("history_visibility")
+            == HistoryVisibility.WORLD_READABLE
+        ):
+            return Membership.JOIN, None
+        raise AuthError(
+            403,
+            "User %r not in room %s, and room previews are disabled"
+            % (requester.user, room_id),
+        )
+
+    async def _is_server_announcement_room(self, room_id: str) -> bool:
+        """Whether the room is the room of a configured server announcement."""
+        config_id = await self.store.get_server_announcement_id(room_id)
+        return config_id is not None and any(
+            room.config_id == config_id
+            for room in self.hs.config.serverannouncements.rooms
+        )
 
     async def validate_appservice_can_control_user_id(
         self, app_service: ApplicationService, user_id: str
