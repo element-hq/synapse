@@ -75,6 +75,31 @@ class RemoteHandlerTestCase(LoggerCleanupMixin, TestCase):
         # Ensure the data passed through properly.
         self.assertEqual(logs[0], "Hello there, wally!")
 
+    def test_log_output_after_connecting(self) -> None:
+        """
+        The remote handler keeps delivering logs once it is connected.
+        """
+        handler = RemoteHandler("127.0.0.1", 9000, _reactor=self.reactor)
+        logger = self.get_logger(handler)
+
+        logger.info("Hello there, %s!", "wally")
+
+        # Trigger the connection
+        client, server = connect_logging_client(self.reactor, 0)
+        client_transport = checked_cast(FakeTransport, client.transport)
+        client_transport.flush()
+
+        # Log over the existing connection
+        for i in range(3):
+            logger.info("more %s", i)
+            client_transport.flush()
+
+        logs = server.data.decode("utf8").splitlines()
+        self.assertEqual(
+            ["Hello there, wally!", "more 0", "more 1", "more 2"],
+            logs,
+        )
+
     def test_log_backpressure_debug(self) -> None:
         """
         When backpressure is hit, DEBUG logs will be shed.
