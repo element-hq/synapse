@@ -76,8 +76,19 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
             # Synapse is untested against older SQLite versions, and we don't want
             # to let users upgrade to a version of Synapse with broken support for their
             # sqlite version, because it risks leaving them with a half-upgraded db.
-            if sqlite3.sqlite_version_info < (3, 37, 2):
-                raise RuntimeError("Synapse requires sqlite 3.37.2 or above.")
+            #
+            # See `docs/deprecation_policy.md`
+            # Check versions at https://repology.org/project/sqlite/versions
+            #
+            # At time of writing, our oldest supported distros have these versions:
+            # bookworm (Debian 12): 3.40.1
+            # noble (Ubuntu 24.04): 3.45.1
+            #
+            # Staying with 3.40.0 because we had already previously announced 3.40.0 as
+            # our minimum and I didn't think it was worth issuing another announcement
+            # for the tiny bump to 3.40.1.
+            if sqlite3.sqlite_version_info < (3, 40, 0):
+                raise RuntimeError("Synapse requires SQLite 3.40.0 or above.")
 
     def check_new_database(self, txn: Cursor) -> None:
         """Gets called when setting up a brand new database. This allows us to
