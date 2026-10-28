@@ -541,7 +541,14 @@ class SlidingSyncRoomLists:
             room_membership_for_user_map.pop(room_id, None)
 
         server_announcement_room_map = await self._get_server_announcement_rooms(
-            user_id, room_membership_for_user_map.keys(), to_token
+            user_id,
+            {
+                room_id
+                for room_id, room_for_user in room_membership_for_user_map.items()
+                if room_for_user.membership != Membership.LEAVE
+                or room_id in newly_left_room_map
+            },
+            to_token,
         )
         room_membership_for_user_map.update(server_announcement_room_map)
 
@@ -751,12 +758,9 @@ class SlidingSyncRoomLists:
             sync_config.user.to_string(),
             {
                 room_id
-                for room_id, room_membership_for_user in room_membership_for_user_map.items()
-                if filter_membership_for_sync(
-                    user_id=sync_config.user.to_string(),
-                    room_membership_for_user=room_membership_for_user,
-                    newly_left=room_id in newly_left_room_ids,
-                )
+                for room_id, room_for_user in room_membership_for_user_map.items()
+                if room_for_user.membership != Membership.LEAVE
+                or room_id in newly_left_room_ids
             },
             to_token,
         )

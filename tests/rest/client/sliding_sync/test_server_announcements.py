@@ -11,6 +11,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
+import attr
 from parameterized import parameterized_class
 
 from twisted.internet.testing import MemoryReactor
@@ -219,6 +220,44 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         event_id = self._announce("hello")
 
         response, _ = self.do_sync(self._sync_body(), tok=self.former_tok)
+
+        room = self._assert_delivered(response, self.former)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+
+    def _remove_former(self) -> None:
+        """Drop `former` from the configured senders, which kicks them."""
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], allowed_user_ids=[self.announcer])
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+
+    def test_removed_member(self) -> None:
+        """A member removed from the configured senders gets later announcements
+        as a non-member, with the synthetic join instead of their kick.
+        """
+        self._remove_former()
+        event_id = self._announce("hello")
+
+        response, _ = self.do_sync(self._sync_body(), tok=self.former_tok)
+
+        room = self._assert_delivered(response, self.former)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+
+    def test_removed_member_existing_connection(self) -> None:
+        """A member removed from the configured senders first sees their kick,
+        then gets later announcements as a non-member.
+        """
+        _, pos = self.do_sync(self._sync_body(), tok=self.former_tok)
+        self._remove_former()
+
+        response, pos = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
+        kick = response["rooms"][self.room_id]["timeline"][-1]
+        self.assertEqual(kick["type"], EventTypes.Member)
+        self.assertEqual(kick["state_key"], self.former)
+        self.assertEqual(kick["content"]["membership"], Membership.LEAVE)
+
+        event_id = self._announce("hello")
+        response, _ = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
 
         room = self._assert_delivered(response, self.former)
         self.assertEqual(self._timeline_ids(room), [event_id])
