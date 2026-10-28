@@ -613,7 +613,7 @@ listeners:
 ---
 ### `manhole`
 
-*(integer|null)* Turn on the Twisted telnet manhole service on the given port.
+*(integer|null)* Turn on the Twisted manhole service on the given port.
 
 This can also be set by the `--manhole` argument when starting Synapse.
 
