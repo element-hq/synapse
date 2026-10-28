@@ -208,26 +208,6 @@ class AbsentType(Enum):
             python_schema=pydantic_core.core_schema.is_instance_schema(cls),
         )
 
-    def __copy__(self) -> "AbsentType":
-        """
-        Copy implementation used by `copy.copy()`.
-        Always use the same instance.
-
-        Without this and the deep version `__deepcopy__`,
-        `copy.copy(Absent)` on Python 3.10 (olddeps)
-        had a problem where it tried to construct a new Absent
-        as part of a deepcopy operation and resulted in:
-            ValueError: <object object at 0x7f64b3b6d930> is not a valid AbsentType
-        """
-        return self
-
-    def __deepcopy__(self, memo: object) -> "AbsentType":
-        """
-        Copy implementation used by `copy.deepcopy()`.
-        Always use the same instance.
-        """
-        return self
-
     def __bool__(self) -> Literal[False]:
         return False
 
