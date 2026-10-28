@@ -128,16 +128,6 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             writers=hs.config.worker.writers.events,
         )
 
-        if hs.config.experimental.msc4354_enabled and isinstance(
-            self.database_engine, Sqlite3Engine
-        ):
-            import sqlite3
-
-            if sqlite3.sqlite_version_info < (3, 40, 0):
-                raise RuntimeError(
-                    f"Experimental MSC4354 Sticky Events enabled but SQLite3 version is too old: {sqlite3.sqlite_version_info}, must be at least 3.40. Disable MSC4354 Sticky Events, switch to Postgres, or upgrade SQLite. See https://github.com/element-hq/synapse/issues/19428"
-                )
-
     def process_replication_position(
         self, stream_name: str, instance_name: str, token: int
     ) -> None:

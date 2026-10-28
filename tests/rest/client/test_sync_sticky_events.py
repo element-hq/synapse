@@ -11,7 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import json
-import sqlite3
 from dataclasses import dataclass
 from http import HTTPStatus
 from unittest.mock import patch
@@ -28,7 +27,6 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests import unittest
-from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
 @dataclass
@@ -67,10 +65,6 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
     """
     Tests for oldschool (v3) /sync with sticky events (MSC4354)
     """
-
-    if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
-        # We need the JSON functionality in SQLite
-        skip = f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
 
     servlets = [
         room.register_servlets,
