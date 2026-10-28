@@ -670,7 +670,7 @@ properties:
   manhole:
     type: ["integer", "null"]
     description: >-
-      Turn on the Twisted telnet manhole service on the given port.
+      Turn on the Twisted manhole service on the given port.
 
 
       This can also be set by the `--manhole` argument when starting Synapse.
