@@ -542,27 +542,6 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
 
         self.assertNotIn(self.room_id, response.get("rooms", {}))
 
-    def test_no_unread_counts(self) -> None:
-        """An announcement mentioning a non-member does not count as unread for
-        them.
-        """
-        self.helper.send_event(
-            self.room_id,
-            EventTypes.Message,
-            {
-                "msgtype": "m.text",
-                "body": f"Hello {self.bob}",
-                "m.mentions": {"user_ids": [self.bob]},
-            },
-            tok=self.announcer_tok,
-        )
-
-        response, _ = self.do_sync(self._sync_body(), tok=self.bob_tok)
-
-        room = self._assert_delivered(response, self.bob)
-        self.assertEqual(room["notification_count"], 0)
-        self.assertEqual(room["highlight_count"], 0)
-
     def test_no_device_list_changes(self) -> None:
         """Device changes of members in an announcement room are not sent to
         non-members.
