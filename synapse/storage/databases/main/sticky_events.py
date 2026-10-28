@@ -334,14 +334,6 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             list of StickyEventUpdate update rows
         """
 
-        if not self.hs.config.experimental.msc4354_enabled:
-            # We need to prevent `_get_updated_sticky_events_txn`
-            # from running when MSC4354 is turned off, because the query used
-            # for SQLite is not compatible with Ubuntu 22.04 (as used in our CI olddeps run).
-            # It's technically out of support.
-            # See: https://github.com/element-hq/synapse/issues/19428
-            return []
-
         return await self.db_pool.runInteraction(
             "get_updated_sticky_events",
             self._get_updated_sticky_events_txn,
