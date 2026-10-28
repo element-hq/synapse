@@ -1,0 +1,4 @@
+Fix clearing user status for clients that send a `null` profile field value.
+
+When `include_profile_updates_in_sync` is enabled, Synapse will continue to accept `null` custom profile field values
+until clients have had a sufficient time to change their behaviour. This special casing is tracked in [this issue](https://github.com/element-hq/synapse/issues/20424).
