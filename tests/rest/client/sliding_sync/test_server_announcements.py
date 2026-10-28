@@ -138,6 +138,21 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         )
         self.assertEqual(membership["content"], {"membership": Membership.JOIN})
 
+    def _assert_no_own_membership_in_timeline(
+        self, room: JsonDict, user_id: str
+    ) -> None:
+        """Assert that the timeline of `room` holds no membership event of
+        `user_id`.
+        """
+        self.assertEqual(
+            [
+                event
+                for event in room["timeline"]
+                if event["type"] == EventTypes.Member and event["state_key"] == user_id
+            ],
+            [],
+        )
+
     def test_new_connection_delivers_announcements(self) -> None:
         """A new connection gets an announcement room with its most recent
         announcements and the state asked for.
@@ -224,6 +239,21 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         room = self._assert_delivered(response, self.former)
         self.assertEqual(self._timeline_ids(room), [event_id])
 
+    def test_self_left_member_full_timeline(self) -> None:
+        """A self-left member whose timeline reaches back to their leave gets the
+        synthetic join, and not their leave in the timeline.
+        """
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+        event_id = self._announce("hello")
+
+        response, _ = self.do_sync(
+            self._sync_body(timeline_limit=10), tok=self.former_tok
+        )
+
+        room = self._assert_delivered(response, self.former)
+        self._assert_no_own_membership_in_timeline(room, self.former)
+        self.assertEqual(self._timeline_ids(room)[-1], event_id)
+
     def test_self_left_member_on_existing_connection(self) -> None:
         """A member who leaves the room themselves while their connection is open
         gets later announcements as a non-member, with the synthetic join.
@@ -276,6 +306,23 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
 
         room = self._assert_delivered(response, self.former)
         self.assertEqual(self._timeline_ids(room), [event_id])
+
+    def test_removed_member_existing_connection_full_timeline(self) -> None:
+        """A member removed from the configured senders while their connection is
+        open gets later announcements with the synthetic join, and not their kick
+        in the timeline.
+        """
+        sync_body = self._sync_body(timeline_limit=10)
+        _, pos = self.do_sync(sync_body, tok=self.former_tok)
+        self._remove_former()
+        _, pos = self.do_sync(sync_body, since=pos, tok=self.former_tok)
+        event_id = self._announce("hello")
+
+        response, _ = self.do_sync(sync_body, since=pos, tok=self.former_tok)
+
+        room = self._assert_delivered(response, self.former)
+        self._assert_no_own_membership_in_timeline(room, self.former)
+        self.assertEqual(self._timeline_ids(room)[-1], event_id)
 
     def test_stays_in_list(self) -> None:
         """An announcement room already sent on a connection stays in the list

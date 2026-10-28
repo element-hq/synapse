@@ -803,6 +803,13 @@ class SlidingSyncHandler:
                 != Membership.JOIN,
                 filter_send_to_client=True,
             )
+            if is_server_announcement:
+                timeline_events = [
+                    timeline_event
+                    for timeline_event in timeline_events
+                    if timeline_event.event.type != EventTypes.Member
+                    or timeline_event.event.state_key != user.to_string()
+                ]
 
             # TODO: Handle timeline gaps (`get_timeline_gaps()`)
 
