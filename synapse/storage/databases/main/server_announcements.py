@@ -12,7 +12,10 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+from typing import Collection
+
 from synapse.storage._base import SQLBaseStore
+from synapse.storage.database import LoggingTransaction
 
 
 class ServerAnnouncementsStore(SQLBaseStore):
@@ -43,6 +46,56 @@ class ServerAnnouncementsStore(SQLBaseStore):
             retcol="config_id",
             allow_none=True,
             desc="get_server_announcement_id",
+        )
+
+    async def get_server_announcement_room_ids(self) -> set[str]:
+        """Return the room IDs of the currently configured announcement rooms.
+
+        Rooms whose config ID is no longer in the config are left out, as
+        are configured rooms that have not been created yet.
+        """
+        rows = await self.db_pool.simple_select_many_batch(
+            table="server_announcement_rooms",
+            column="config_id",
+            iterable=[
+                room.config_id for room in self.hs.config.serverannouncements.rooms
+            ],
+            retcols=("room_id",),
+            desc="get_server_announcement_room_ids",
+        )
+        return {room_id for (room_id,) in rows}
+
+    async def get_server_announcement_room_ids_with_announcement(
+        self, room_ids: Collection[str], max_stream_ordering: int
+    ) -> set[str]:
+        """Return the rooms among `room_ids` that have a non-state event at or
+        before `max_stream_ordering`.
+        """
+
+        def _get_server_announcement_room_ids_with_announcement_txn(
+            txn: LoggingTransaction,
+        ) -> set[str]:
+            announced_room_ids = set()
+            for room_id in room_ids:
+                txn.execute(
+                    """
+                    SELECT 1 FROM events
+                    WHERE room_id = ? AND stream_ordering <= ?
+                    AND state_key IS NULL
+                    LIMIT 1
+                    """,
+                    (room_id, max_stream_ordering),
+                )
+                if txn.fetchone() is not None:
+                    announced_room_ids.add(room_id)
+            return announced_room_ids
+
+        if not room_ids:
+            return set()
+
+        return await self.db_pool.runInteraction(
+            "get_server_announcement_room_ids_with_announcement",
+            _get_server_announcement_room_ids_with_announcement_txn,
         )
 
     async def store_server_announcement_room(
