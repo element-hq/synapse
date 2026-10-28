@@ -239,15 +239,16 @@ class SlidingSyncRoomLists:
     async def _get_server_announcement_rooms(
         self,
         user_id: str,
-        room_ids_with_membership: AbstractSet[str],
+        room_membership_for_user_map: Mapping[str, RoomsForUserType],
         to_token: StreamToken,
     ) -> dict[str, RoomsForUserSlidingSync]:
         """Return the server announcement rooms to list as joined for a user who
         is not a member of them.
 
-        A room is only returned once it holds an announcement at `to_token`. Its
-        membership points at the user's synthetic join and at the position of
-        the latest announcement.
+        A room is only returned once it holds an announcement at `to_token`, or
+        once the user has been removed from it. Its membership points at the
+        user's synthetic join and at the position of the latest announcement, or
+        of the removal if there is no announcement yet.
 
         This runs on every request without caching, for a cost bounded by the
         number of configured rooms rather than the user's rooms:
@@ -262,13 +263,17 @@ class SlidingSyncRoomLists:
 
         Args:
             user_id: The syncing user.
-            room_ids_with_membership: The rooms the user already has a membership
-                in, which are left out.
+            room_membership_for_user_map: The user's memberships. Rooms with one
+                other than a leave are left out.
             to_token: The point in the stream to sync up to.
         """
         rooms: dict[str, RoomsForUserSlidingSync] = {}
         for room_id in await self.store.get_server_announcement_room_ids():
-            if room_id in room_ids_with_membership:
+            room_for_user = room_membership_for_user_map.get(room_id)
+            if (
+                room_for_user is not None
+                and room_for_user.membership != Membership.LEAVE
+            ):
                 continue
             if room_id in self.rooms_to_exclude_globally:
                 continue
@@ -278,9 +283,12 @@ class SlidingSyncRoomLists:
                     room_id, to_token.room_key, SERVER_ANNOUNCEMENT_EVENT_TYPES
                 )
             )
-            if last_announcement is None:
+            if last_announcement is not None:
+                _, event_pos = last_announcement
+            elif room_for_user is not None and room_for_user.sender != user_id:
+                event_pos = room_for_user.event_pos
+            else:
                 continue
-            _, event_pos = last_announcement
 
             room_type = await self.store.get_room_type(room_id)
             rooms[room_id] = RoomsForUserSlidingSync(
@@ -552,13 +560,7 @@ class SlidingSyncRoomLists:
             room_membership_for_user_map.pop(room_id, None)
 
         server_announcement_room_map = await self._get_server_announcement_rooms(
-            user_id,
-            {
-                room_id
-                for room_id, room_for_user in room_membership_for_user_map.items()
-                if room_for_user.membership != Membership.LEAVE
-            },
-            to_token,
+            user_id, room_membership_for_user_map, to_token
         )
         room_membership_for_user_map.update(server_announcement_room_map)
 
@@ -766,13 +768,7 @@ class SlidingSyncRoomLists:
         )
 
         server_announcement_room_map = await self._get_server_announcement_rooms(
-            sync_config.user.to_string(),
-            {
-                room_id
-                for room_id, room_for_user in room_membership_for_user_map.items()
-                if room_for_user.membership != Membership.LEAVE
-            },
-            to_token,
+            sync_config.user.to_string(), room_membership_for_user_map, to_token
         )
         room_membership_for_user_map.update(server_announcement_room_map)
 

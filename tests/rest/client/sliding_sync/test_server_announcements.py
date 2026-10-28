@@ -303,41 +303,49 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         room = self._assert_delivered(response, self.former)
         self.assertEqual(self._timeline_ids(room), [event_id])
 
+    def test_removed_member_without_announcement(self) -> None:
+        """A member removed from the configured senders before anything was
+        announced gets the room with the synthetic join instead of their kick.
+        """
+        self._remove_former()
+
+        response, _ = self.do_sync(self._sync_body(), tok=self.former_tok)
+
+        room = self._assert_delivered(response, self.former)
+        self._assert_no_own_membership_in_timeline(room, self.former)
+
     def test_removed_member_existing_connection(self) -> None:
-        """A member removed from the configured senders first sees their kick,
-        then gets later announcements as a non-member.
+        """A member removed from the configured senders while their connection is
+        open gets the synthetic join instead of their kick, even before anything
+        was announced, then later announcements.
         """
         _, pos = self.do_sync(self._sync_body(), tok=self.former_tok)
         self._remove_former()
 
         response, pos = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
-        kick = response["rooms"][self.room_id]["timeline"][-1]
-        self.assertEqual(kick["type"], EventTypes.Member)
-        self.assertEqual(kick["state_key"], self.former)
-        self.assertEqual(kick["content"]["membership"], Membership.LEAVE)
+        room = self._assert_delivered(response, self.former)
+        self._assert_no_own_membership_in_timeline(room, self.former)
 
         event_id = self._announce("hello")
         response, _ = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
 
-        room = self._assert_delivered(response, self.former)
+        self.assertIn(self.room_id, self._list_room_ids(response))
+        room = response["rooms"][self.room_id]
         self.assertEqual(self._timeline_ids(room), [event_id])
 
     def test_removed_member_existing_connection_full_timeline(self) -> None:
         """A member removed from the configured senders while their connection is
-        open gets later announcements with the synthetic join, and not their kick
-        in the timeline.
+        open, with a timeline reaching back to their kick, gets the synthetic
+        join and not their kick in the timeline.
         """
         sync_body = self._sync_body(timeline_limit=10)
         _, pos = self.do_sync(sync_body, tok=self.former_tok)
         self._remove_former()
-        _, pos = self.do_sync(sync_body, since=pos, tok=self.former_tok)
-        event_id = self._announce("hello")
 
         response, _ = self.do_sync(sync_body, since=pos, tok=self.former_tok)
 
         room = self._assert_delivered(response, self.former)
         self._assert_no_own_membership_in_timeline(room, self.former)
-        self.assertEqual(self._timeline_ids(room)[-1], event_id)
 
     def test_removed_member_offline(self) -> None:
         """A member removed from the configured senders, with an announcement
@@ -352,6 +360,39 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
 
         room = self._assert_delivered(response, self.former)
         self.assertEqual(self._timeline_ids(room), [event_id])
+
+    def test_removed_member_added_back(self) -> None:
+        """A removed member added back to the configured senders while their
+        connection is open gets their real join and the power levels that let
+        them post again.
+        """
+        sync_body = self._sync_body()
+        sync_body["lists"]["foo-list"]["required_state"].append(
+            [EventTypes.PowerLevels, ""]
+        )
+        self._remove_former()
+        _, pos = self.do_sync(sync_body, tok=self.former_tok)
+        self.config.rooms = [
+            attr.evolve(
+                self.config.rooms[0], allowed_user_ids=[self.announcer, self.former]
+            )
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+
+        response, _ = self.do_sync(sync_body, since=pos, tok=self.former_tok)
+
+        state = {
+            (event["type"], event["state_key"]): event
+            for event in response["rooms"][self.room_id]["required_state"]
+        }
+        membership = state[(EventTypes.Member, self.former)]
+        self.assertFalse(
+            membership["event_id"].startswith(SYNTHETIC_JOIN_EVENT_ID_PREFIX)
+        )
+        self.assertEqual(membership["content"]["membership"], Membership.JOIN)
+        self.assertEqual(
+            state[(EventTypes.PowerLevels, "")]["content"]["users"][self.former], 50
+        )
 
     def test_stays_in_list(self) -> None:
         """An announcement room already sent on a connection stays in the list
