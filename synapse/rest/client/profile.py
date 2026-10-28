@@ -138,6 +138,9 @@ class ProfileFieldRestServlet(RestServlet):
                     r"^/_matrix/client/unstable/uk\.tcpip\.msc4133/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)$"
                 )
             )
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
@@ -232,13 +235,20 @@ class ProfileFieldRestServlet(RestServlet):
                 errcode=Codes.MISSING_PARAM,
             )
 
-        if new_value is None:
+        if new_value is None and not self._include_profile_updates_in_sync:
             # > Servers MAY reject null values.
             # — https://spec.matrix.org/v1.19/client-server-api/#put_matrixclientv3profileuseridkeyname
             #
             # Although we can safely handle nulls internally, for interoperability reasons it is preferable if we
             # reject them.
             # That way, clients don't accidentally rely on being able to send them.
+            #
+            # The exception is if we have the profile update stream enabled, ie send
+            # down profile updates via sync streams, we will still accept null values
+            # for some time, as Element Web depends on removing User Status via
+            # a PUT and `null` value.
+            # https://github.com/element-hq/synapse/issues/20424 tracks removing
+            # this special case once enough clients have updated.
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 f"'{field_name}' cannot be `null`.",
