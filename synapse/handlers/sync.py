@@ -277,6 +277,9 @@ class JoinedSyncResult:
     summary: JsonDict | None
     unread_count: int
     is_announcement: bool = False
+    """Unread counts are always zero for announcement rooms: push actions are only
+    computed for members, and computing the counts fails for a user with no
+    membership in the room."""
 
     def __bool__(self) -> bool:
         """Make the result appear empty if there are no updates. This is used
