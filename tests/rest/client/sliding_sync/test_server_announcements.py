@@ -269,6 +269,23 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         room = self._assert_delivered(response, self.former)
         self.assertEqual(self._timeline_ids(room), [event_id])
 
+    def test_self_left_member_without_new_announcement(self) -> None:
+        """A member who leaves the room themselves while their connection is open
+        first sees their leave, then gets the synthetic join on the next sync,
+        even when nothing new was announced.
+        """
+        self._announce("hello")
+        _, pos = self.do_sync(self._sync_body(), tok=self.former_tok)
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+        response, pos = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
+        leave = response["rooms"][self.room_id]["timeline"][-1]
+        self.assertEqual(leave["state_key"], self.former)
+        self.assertEqual(leave["content"]["membership"], Membership.LEAVE)
+
+        response, _ = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
+
+        self._assert_delivered(response, self.former)
+
     def _remove_former(self) -> None:
         """Drop `former` from the configured senders, which kicks them."""
         self.config.rooms = [
@@ -323,6 +340,24 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         room = self._assert_delivered(response, self.former)
         self._assert_no_own_membership_in_timeline(room, self.former)
         self.assertEqual(self._timeline_ids(room)[-1], event_id)
+
+    def test_removed_member_offline(self) -> None:
+        """A member removed from the configured senders, with an announcement
+        sent before their next sync, first sees their kick, then gets the
+        announcement with the synthetic join on the following sync.
+        """
+        _, pos = self.do_sync(self._sync_body(), tok=self.former_tok)
+        self._remove_former()
+        event_id = self._announce("hello")
+        response, pos = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
+        kick = response["rooms"][self.room_id]["timeline"][-1]
+        self.assertEqual(kick["state_key"], self.former)
+        self.assertEqual(kick["content"]["membership"], Membership.LEAVE)
+
+        response, _ = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
+
+        room = self._assert_delivered(response, self.former)
+        self.assertEqual(self._timeline_ids(room), [event_id])
 
     def test_stays_in_list(self) -> None:
         """An announcement room already sent on a connection stays in the list
