@@ -544,11 +544,17 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
 
     def test_no_device_list_changes(self) -> None:
         """Device changes of members in an announcement room are not sent to
-        non-members.
+        non-members, while a user sharing a regular room with the member gets
+        them.
         """
+        carol = self.register_user("carol", "pass")
+        carol_tok = self.login("carol", "pass")
+        regular_room_id = self.helper.create_room_as(carol, tok=carol_tok)
+        self.helper.join(regular_room_id, self.announcer, tok=self.announcer_tok)
         self._announce("hello")
         sync_body = {**self._sync_body(), "extensions": {"e2ee": {"enabled": True}}}
-        _, pos = self.do_sync(sync_body, tok=self.bob_tok)
+        _, carol_pos = self.do_sync(sync_body, tok=carol_tok)
+        _, bob_pos = self.do_sync(sync_body, tok=self.bob_tok)
 
         channel = self.make_request(
             "PUT",
@@ -558,9 +564,18 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        response, _ = self.do_sync(sync_body, since=pos, tok=self.bob_tok)
+        carol_response, _ = self.do_sync(sync_body, since=carol_pos, tok=carol_tok)
+        bob_response, _ = self.do_sync(sync_body, since=bob_pos, tok=self.bob_tok)
 
+        self.assertIn(
+            self.announcer,
+            carol_response["extensions"]["e2ee"]
+            .get("device_lists", {})
+            .get("changed", []),
+        )
         self.assertNotIn(
             self.announcer,
-            response["extensions"]["e2ee"].get("device_lists", {}).get("changed", []),
+            bob_response["extensions"]["e2ee"]
+            .get("device_lists", {})
+            .get("changed", []),
         )
