@@ -2342,8 +2342,8 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         )
 
     def test_removed_member(self) -> None:
-        """A member removed from the room by the config first gets their leave,
-        then later announcements as a non-member, on initial sync too.
+        """A member removed from the room by the config does not get their leave,
+        then gets later announcements as a non-member, on initial sync too.
         """
         since = self._sync(self.former_tok)["next_batch"]
 
@@ -2352,8 +2352,7 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         ]
         self.get_success(self.handler.reconcile_rooms())
         response = self._sync(self.former_tok, since)
-        self.assertNotIn(self.room_id, response["rooms"].get("join", {}))
-        self.assertIn(self.room_id, response["rooms"]["leave"])
+        self._assert_not_delivered(response)
 
         event_id = self._announce("hello")
         room = self._assert_delivered(
@@ -2363,6 +2362,23 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
 
         room = self._assert_delivered(self._sync(self.former_tok), self.former)
         self.assertEqual(self._timeline_ids(room)[-1], event_id)
+
+    def test_removed_member_syncing_after_announcements(self) -> None:
+        """A member removed from the room by the config while offline gets the
+        announcements sent since their removal on their next incremental sync.
+        """
+        since = self._sync(self.former_tok)["next_batch"]
+
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], allowed_user_ids=[self.announcer])
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+        event_ids = [self._announce(f"message {i}") for i in range(2)]
+
+        response = self._sync(self.former_tok, since)
+        self.assertNotIn(self.room_id, response["rooms"].get("leave", {}))
+        room = self._assert_delivered(response, self.former)
+        self.assertEqual(self._timeline_ids(room)[-2:], event_ids)
 
     def test_initial_sync_after_leaving(self) -> None:
         """A former member who left on their own gets a single, synthetic join

@@ -2361,8 +2361,8 @@ class SyncHandler:
             if room_id not in mutable_rooms_to_exclude
         )
 
-        membership_changed_room_ids = {
-            event.room_id for event in membership_change_events
+        last_membership_by_room_id = {
+            event.room_id: event.membership for event in membership_change_events
         }
         announcement_room_ids = frozenset(
             room_id
@@ -2371,7 +2371,8 @@ class SyncHandler:
             )
             if room_id not in mutable_joined_room_ids
             and room_id not in mutable_rooms_to_exclude
-            and room_id not in membership_changed_room_ids
+            and last_membership_by_room_id.get(room_id, Membership.LEAVE)
+            in (Membership.LEAVE, Membership.BAN)
         )
 
         sync_result_builder = SyncResultBuilder(
@@ -3197,6 +3198,9 @@ class SyncHandler:
                 knock_room_sync = KnockedSyncResult(room_id, knock=last_non_join)
                 if knock_room_sync:
                     knocked.append(knock_room_sync)
+
+            if room_id in sync_result_builder.announcement_room_ids:
+                continue
 
             # Always include leave/ban events. Just take the last one.
             # TODO: How do we handle ban -> leave in same batch?
