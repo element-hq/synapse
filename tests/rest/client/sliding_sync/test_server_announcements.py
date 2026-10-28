@@ -17,11 +17,11 @@ from parameterized import parameterized_class
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.handlers.server_announcements import SYNTHETIC_JOIN_EVENT_ID_PREFIX
 from synapse.handlers.sliding_sync import StateValues
-from synapse.rest.client import devices, login, room, sync
+from synapse.rest.client import devices, login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -50,6 +50,7 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         room.register_servlets,
         sync.register_servlets,
         devices.register_servlets,
+        receipts.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -61,6 +62,7 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         self.former_tok = self.login("former", "pass")
         self.bob = self.register_user("bob", "pass")
         self.bob_tok = self.login("bob", "pass")
+        self.bob_other_tok = self.login("bob", "pass")
 
         self.config = hs.config.serverannouncements
         self.config.rooms = [
@@ -552,3 +554,52 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
             .get("device_lists", {})
             .get("changed", []),
         )
+
+    def _send_read_receipt(self, event_id: str, tok: str) -> None:
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.READ}/{event_id}",
+            {},
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+    def _receipts_sync_body(self) -> JsonDict:
+        sync_body = self._sync_body()
+        sync_body["extensions"] = {"receipts": {"enabled": True}}
+        return sync_body
+
+    def _receipt_readers(self, response: JsonDict, event_id: str) -> set[str]:
+        """Return the users with an `m.read` receipt on `event_id` in the
+        announcement room of the receipts extension.
+        """
+        receipt = (
+            response["extensions"]["receipts"].get("rooms", {}).get(self.room_id, {})
+        )
+        return set(
+            receipt.get("content", {}).get(event_id, {}).get(ReceiptTypes.READ, {})
+        )
+
+    def test_non_member_receipt_on_new_connection_of_other_device(self) -> None:
+        """A non-member's read receipt is sent to a new connection of their
+        other devices.
+        """
+        event_id = self._announce("hello")
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        response, _ = self.do_sync(self._receipts_sync_body(), tok=self.bob_other_tok)
+        self.assertEqual(self._receipt_readers(response, event_id), {self.bob})
+
+    def test_non_member_receipt_on_existing_connection_of_other_device(self) -> None:
+        """A non-member's read receipt is sent to an existing connection of their
+        other devices, even with no new announcement since.
+        """
+        event_id = self._announce("hello")
+        _, pos = self.do_sync(self._receipts_sync_body(), tok=self.bob_other_tok)
+
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        response, _ = self.do_sync(
+            self._receipts_sync_body(), since=pos, tok=self.bob_other_tok
+        )
+        self.assertEqual(self._receipt_readers(response, event_id), {self.bob})

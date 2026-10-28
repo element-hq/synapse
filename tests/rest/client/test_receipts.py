@@ -441,6 +441,7 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
         self.announcer_tok = self.login("announcer", "pass")
         self.bob = self.register_user("bob", "pass")
         self.bob_tok = self.login("bob", "pass")
+        self.bob_other_tok = self.login("bob", "pass")
 
         hs.config.serverannouncements.rooms = [
             ServerAnnouncementRoom(
@@ -478,3 +479,55 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
             self.store.get_receipts_for_user(self.bob, [ReceiptTypes.READ])
         )
         self.assertEqual(receipts, {self.room_id: event_id})
+
+    def _announce(self, body: str) -> str:
+        return self.helper.send(self.room_id, body, tok=self.announcer_tok)["event_id"]
+
+    def _send_read_receipt(self, event_id: str, tok: str) -> None:
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.READ}/{event_id}",
+            {},
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+    def _sync(self, tok: str, since: str | None = None) -> JsonDict:
+        url = "/sync" if since is None else f"/sync?since={since}"
+        channel = self.make_request("GET", url, access_token=tok)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        return channel.json_body
+
+    def _receipt_readers(self, response: JsonDict, event_id: str) -> set[str]:
+        """Return the users with an `m.read` receipt on `event_id` in the
+        announcement room's ephemeral events of a `/sync` response.
+        """
+        room = response.get("rooms", {}).get("join", {}).get(self.room_id, {})
+        return {
+            user_id
+            for event in room.get("ephemeral", {}).get("events", [])
+            if event["type"] == EduTypes.RECEIPT
+            for user_id in event["content"].get(event_id, {}).get(ReceiptTypes.READ, {})
+        }
+
+    def test_non_member_receipt_on_initial_sync_of_other_device(self) -> None:
+        """A non-member's read receipt is in the initial sync of their other
+        devices.
+        """
+        event_id = self._announce("hello")
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        response = self._sync(self.bob_other_tok)
+        self.assertEqual(self._receipt_readers(response, event_id), {self.bob})
+
+    def test_non_member_receipt_on_incremental_sync_of_other_device(self) -> None:
+        """A non-member's read receipt is in the next incremental sync of their
+        other devices, even with no new announcement since.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.bob_other_tok)["next_batch"]
+
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        response = self._sync(self.bob_other_tok, since)
+        self.assertEqual(self._receipt_readers(response, event_id), {self.bob})
