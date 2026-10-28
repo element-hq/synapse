@@ -3358,11 +3358,11 @@ class SyncHandler:
         Sending an announcement does not wake up waiting syncs, so that an
         announcement does not wake every user's sync at once. A waiting sync
         picks announcements up when it next runs: at its timeout, or when
-        something else wakes it. A long-polling user with no other activity can
-        get an announcement up to two sync timeouts late: a sync whose first run
-        found nothing returns that empty result at its timeout without running
-        again, and the client's next sync may wait a full timeout before it
-        runs.
+        something else wakes it. With no other activity, an announcement is up
+        to one sync timeout late. It can be up to about two timeouts late when
+        something woke the sync without producing anything for it: the sync
+        then returns that empty result at its timeout without running again,
+        and the announcement waits for the next sync.
 
         Args:
             sync_result_builder
