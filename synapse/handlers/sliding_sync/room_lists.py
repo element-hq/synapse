@@ -246,9 +246,10 @@ class SlidingSyncRoomLists:
         is not a member of them.
 
         A room is only returned once it holds an announcement at `to_token`, or
-        once the user has been removed from it. Its membership points at the
-        user's synthetic join and at the position of the latest announcement, or
-        of the removal if there is no announcement yet.
+        once the user has been removed from it by someone else, through a kick or
+        a ban. Its membership points at the user's synthetic join and at the
+        position of the latest announcement, or of the removal if there is no
+        announcement yet.
 
         This runs on every request without caching, for a cost bounded by the
         number of configured rooms rather than the user's rooms:
@@ -264,15 +265,15 @@ class SlidingSyncRoomLists:
         Args:
             user_id: The syncing user.
             room_membership_for_user_map: The user's memberships. Rooms with one
-                other than a leave are left out.
+                other than a leave or a ban are left out.
             to_token: The point in the stream to sync up to.
         """
         rooms: dict[str, RoomsForUserSlidingSync] = {}
         for room_id in await self.store.get_server_announcement_room_ids():
             room_for_user = room_membership_for_user_map.get(room_id)
-            if (
-                room_for_user is not None
-                and room_for_user.membership != Membership.LEAVE
+            if room_for_user is not None and room_for_user.membership not in (
+                Membership.LEAVE,
+                Membership.BAN,
             ):
                 continue
             if room_id in self.rooms_to_exclude_globally:

@@ -23,7 +23,7 @@ from synapse.handlers.server_announcements import SYNTHETIC_JOIN_EVENT_ID_PREFIX
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import devices, login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -408,6 +408,47 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         self.assertEqual(
             state[(EventTypes.PowerLevels, "")]["content"]["users"][self.former], 50
         )
+
+    def _ban_former(self) -> None:
+        """Ban `former` from the room as the management user."""
+        self.get_success(
+            self.hs.get_room_member_handler().update_membership(
+                create_requester(self.config.room_management_mxid),
+                UserID.from_string(self.former),
+                self.room_id,
+                Membership.BAN,
+                ratelimit=False,
+            )
+        )
+
+    def test_banned_member(self) -> None:
+        """A member banned from the room gets later announcements as a
+        non-member, with the synthetic join instead of their ban.
+        """
+        self._ban_former()
+        event_id = self._announce("hello")
+
+        response, _ = self.do_sync(
+            self._sync_body(timeline_limit=10), tok=self.former_tok
+        )
+
+        room = self._assert_delivered(response, self.former)
+        self._assert_no_own_membership_in_timeline(room, self.former)
+        self.assertEqual(self._timeline_ids(room)[-1], event_id)
+
+    def test_banned_member_existing_connection(self) -> None:
+        """A member banned from the room while their connection is open gets the
+        synthetic join instead of their ban in the same sync, even when nothing
+        was announced.
+        """
+        sync_body = self._sync_body(timeline_limit=10)
+        _, pos = self.do_sync(sync_body, tok=self.former_tok)
+        self._ban_former()
+
+        response, _ = self.do_sync(sync_body, since=pos, tok=self.former_tok)
+
+        room = self._assert_delivered(response, self.former)
+        self._assert_no_own_membership_in_timeline(room, self.former)
 
     def test_stays_in_list(self) -> None:
         """An announcement room already sent on a connection stays in the list
