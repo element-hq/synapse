@@ -160,7 +160,9 @@ class InitialSyncHandler:
             to_key=now_token.receipt_key,
         )
 
-        receipt = ReceiptEventSource.filter_out_private_receipts(receipt, user_id)
+        receipt = ReceiptEventSource.filter_out_private_receipts(
+            receipt, user_id, await self.store.get_server_announcement_room_ids()
+        )
 
         tags_by_room = await self.store.get_tags_for_user(user_id)
 
@@ -486,6 +488,7 @@ class InitialSyncHandler:
             return ReceiptEventSource.filter_out_private_receipts(
                 receipts,
                 requester.user.to_string(),
+                await self.store.get_server_announcement_room_ids(),
             )
 
         presence, receipts, (messages, token) = await make_deferred_yieldable(
