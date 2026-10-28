@@ -543,10 +543,22 @@ class LargestRoomsStatisticsTestCase(unittest.HomeserverTestCase):
 
     def test_tables_without_common_room_ids(self) -> None:
         """
-        Tables that are empty, or whose `room_id` column is entirely NULL, have
-        no most common values in `pg_stats` and must not break the estimate.
+        Tables without stats in `pg_stats`, or whose `room_id` column is entirely
+        NULL, have no most common values and must not break the estimate.
         """
         room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
+
+        # Nothing has been analyzed yet, so there is nothing to estimate from.
+        channel = self.make_request(
+            "GET",
+            self.url,
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertNotIn(room_id, [r["room_id"] for r in channel.json_body["rooms"]])
+
+        for i in range(5):
+            self.helper.send(room_id, f"message {i}", tok=self.admin_user_tok)
 
         # `event_push_actions` is still empty and `event_edges.room_id` is never
         # written, so neither gets a list of most common values.
