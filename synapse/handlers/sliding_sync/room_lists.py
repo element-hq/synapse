@@ -557,7 +557,6 @@ class SlidingSyncRoomLists:
                 room_id
                 for room_id, room_for_user in room_membership_for_user_map.items()
                 if room_for_user.membership != Membership.LEAVE
-                or room_id in newly_left_room_map
             },
             to_token,
         )
@@ -743,7 +742,8 @@ class SlidingSyncRoomLists:
             all_rooms=all_rooms,
             room_membership_for_user_map=room_membership_for_user_map,
             newly_joined_rooms=newly_joined_room_ids,
-            newly_left_rooms=set(newly_left_room_map),
+            newly_left_rooms=newly_left_room_map.keys()
+            - server_announcement_room_map.keys(),
             dm_room_ids=dm_room_ids,
             server_announcement_room_ids=server_announcement_room_map.keys(),
         )
@@ -771,7 +771,6 @@ class SlidingSyncRoomLists:
                 room_id
                 for room_id, room_for_user in room_membership_for_user_map.items()
                 if room_for_user.membership != Membership.LEAVE
-                or room_id in newly_left_room_ids
             },
             to_token,
         )
@@ -944,7 +943,7 @@ class SlidingSyncRoomLists:
             all_rooms=all_rooms,
             room_membership_for_user_map=room_membership_for_user_map,
             newly_joined_rooms=newly_joined_room_ids,
-            newly_left_rooms=newly_left_room_ids,
+            newly_left_rooms=newly_left_room_ids - server_announcement_room_map.keys(),
             dm_room_ids=dm_room_ids,
             server_announcement_room_ids=server_announcement_room_map.keys(),
         )

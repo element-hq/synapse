@@ -1382,12 +1382,15 @@ class SlidingSyncHandler:
         synthetic_join = False
         if is_server_announcement:
             own_membership_key = (EventTypes.Member, user.to_string())
+            synthetic_join = (
+                own_membership_key in newly_required_state_filter
+                or own_membership_key in required_room_state
+            )
             required_room_state = {
                 key: event
                 for key, event in required_room_state.items()
                 if key != own_membership_key
             }
-            synthetic_join = own_membership_key in newly_required_state_filter
 
         room_avatar: str | None = None
         avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
