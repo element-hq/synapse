@@ -11,6 +11,8 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+from parameterized import parameterized_class
+
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
@@ -24,10 +26,19 @@ from synapse.util.clock import Clock
 from tests import unittest
 
 
+@parameterized_class(
+    ("reader",),
+    [("never_joined",), ("removed_sender",)],
+)
 class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
-    """Tests that a local user who has never been in a server announcement room
+    """Tests that a local user who is not a member of a server announcement room
     can read its history through the endpoints clients use outside of `/sync`.
+
+    The reader has either never been in the room, or is a former announcement
+    sender who was removed from the room before the announcement was sent.
     """
+
+    reader: str
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -40,20 +51,35 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.announcer = self.register_user("announcer", "pass")
         self.announcer_tok = self.login("announcer", "pass")
-        self.register_user("reader", "pass")
+        reader = self.register_user("reader", "pass")
         self.reader_tok = self.login("reader", "pass")
 
-        hs.config.serverannouncements.rooms = [
-            ServerAnnouncementRoom(
-                config_id="news",
-                room_name="Server News",
-                room_topic="News from the server",
-                room_avatar_url=None,
-                room_avatar_path=None,
-                allowed_user_ids=[self.announcer],
-            )
-        ]
-        self.get_success(hs.get_server_announcements_handler().reconcile_rooms())
+        room_config = ServerAnnouncementRoom(
+            config_id="news",
+            room_name="Server News",
+            room_topic="News from the server",
+            room_avatar_url=None,
+            room_avatar_path=None,
+            allowed_user_ids=[self.announcer],
+        )
+        config = hs.config.serverannouncements
+        handler = hs.get_server_announcements_handler()
+
+        if self.reader == "removed_sender":
+            config.rooms = [
+                ServerAnnouncementRoom(
+                    config_id=room_config.config_id,
+                    room_name=room_config.room_name,
+                    room_topic=room_config.room_topic,
+                    room_avatar_url=room_config.room_avatar_url,
+                    room_avatar_path=room_config.room_avatar_path,
+                    allowed_user_ids=[self.announcer, reader],
+                )
+            ]
+            self.get_success(handler.reconcile_rooms())
+
+        config.rooms = [room_config]
+        self.get_success(handler.reconcile_rooms())
 
         room_id = self.get_success(
             hs.get_datastores().main.get_server_announcement_room("news")
