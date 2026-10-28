@@ -249,6 +249,17 @@ class SlidingSyncRoomLists:
         membership points at the user's synthetic join and at the position of
         the latest announcement.
 
+        This runs on every request without caching, for a cost bounded by the
+        number of configured rooms rather than the user's rooms:
+          - The room IDs come from one query on a small table, which the store
+            deliberately leaves uncached, as legacy sync does on every request.
+            No query is made when no room is configured.
+          - Each room costs one lookup of its latest announcement, answered from
+            the `(room_id, stream_ordering)` index of `events`. No existing cache
+            answers it: the events stream cache doesn't know event types, and the
+            room's `bump_stamp` is uncached and counts the create event. The
+            position is kept as the room's `bump_stamp` fallback.
+
         Args:
             user_id: The syncing user.
             room_ids_with_membership: The rooms the user already has a membership
