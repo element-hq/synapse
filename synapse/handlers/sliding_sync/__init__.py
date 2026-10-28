@@ -313,6 +313,8 @@ class SlidingSyncHandler:
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
                 newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
+                is_server_announcement=room_id
+                in interested_rooms.server_announcement_room_ids,
             )
 
             # Filter out empty room results during incremental sync
@@ -586,6 +588,7 @@ class SlidingSyncHandler:
         newly_joined: bool,
         newly_left: bool,
         is_dm: bool,
+        is_server_announcement: bool,
     ) -> SlidingSyncResult.RoomResult:
         """
         Fetch room data for the sync response.
@@ -604,6 +607,8 @@ class SlidingSyncHandler:
             newly_joined: If the user has newly joined the room
             newly_left: If the user has newly left the room
             is_dm: Whether the room is a DM room
+            is_server_announcement: Whether the room is a server announcement room
+                the user is not a member of, listed with a synthetic join
         """
         user = sync_config.user
 
@@ -792,6 +797,13 @@ class SlidingSyncHandler:
                 != Membership.JOIN,
                 filter_send_to_client=True,
             )
+            if is_server_announcement:
+                timeline_events = [
+                    timeline_event
+                    for timeline_event in timeline_events
+                    if timeline_event.event.type != EventTypes.Member
+                    or timeline_event.event.state_key != user.to_string()
+                ]
 
             # TODO: Handle timeline gaps (`get_timeline_gaps()`)
 
@@ -1235,7 +1247,10 @@ class SlidingSyncHandler:
             returned_user_id_to_last_seen_ts_map=returned_user_id_to_last_seen_ts_map
         )
 
+        newly_required_state_filter = StateFilter.none()
+
         if initial:
+            newly_required_state_filter = required_state_filter
             room_state = await self.get_current_state_at(
                 room_id=room_id,
                 room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
@@ -1326,6 +1341,7 @@ class SlidingSyncHandler:
                     # and fallback to `None` (which means now) if we don't.
                     returned_user_id_to_last_seen_ts_map.setdefault(user_id, None)
 
+                newly_required_state_filter = changes_return.added_state_filter
                 if changes_return.added_state_filter:
                     # Some state entries got added, so we pull out the current
                     # state for them. If we don't do this we'd only send down new deltas.
@@ -1356,6 +1372,19 @@ class SlidingSyncHandler:
         required_room_state: StateMap[EventBase] = {}
         if required_state_filter != StateFilter.none():
             required_room_state = required_state_filter.filter_state(room_state)
+
+        synthetic_join = False
+        if is_server_announcement:
+            own_membership_key = (EventTypes.Member, user.to_string())
+            synthetic_join = (
+                own_membership_key in newly_required_state_filter
+                or own_membership_key in required_room_state
+            )
+            required_room_state = {
+                key: event
+                for key, event in required_room_state.items()
+                if key != own_membership_key
+            }
 
         room_avatar: str | None = None
         avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
@@ -1521,6 +1550,7 @@ class SlidingSyncHandler:
             # (encrypted rooms).
             notification_count=0,
             highlight_count=0,
+            synthetic_join=synthetic_join,
         )
 
     @trace

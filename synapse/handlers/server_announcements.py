@@ -19,6 +19,7 @@ from synapse.api.room_versions import RoomVersion
 from synapse.config import ConfigError
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.types import JsonDict, UserID, create_requester
+from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.util.hash import sha256_and_url_safe_base64
 
@@ -28,6 +29,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 SYNTHETIC_JOIN_EVENT_ID_PREFIX = "$fake_announcement_join_"
+
+SERVER_ANNOUNCEMENT_EVENT_TYPES = SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES - {
+    EventTypes.Create
+}
+"""The event types that make an announcement room show up in sliding sync.
+
+These are the types that bump a room in sliding sync, so the room shows up on
+the same activity that moves the user's other rooms up their list and sets its
+`bump_stamp`. `m.room.create` is left out so that a room nobody has announced
+anything in yet is not listed.
+"""
+
+
+def make_synthetic_join_event_id(room_id: str, user_id: str) -> str:
+    """Return the event ID of the synthetic join of `user_id` in `room_id`.
+
+    See `make_synthetic_join_event`.
+    """
+    return SYNTHETIC_JOIN_EVENT_ID_PREFIX + sha256_and_url_safe_base64(
+        f"{room_id}\0{user_id}"
+    )
 
 
 def make_synthetic_join_event(
@@ -54,8 +76,7 @@ def make_synthetic_join_event(
     """
     return {
         "type": EventTypes.Member,
-        "event_id": SYNTHETIC_JOIN_EVENT_ID_PREFIX
-        + sha256_and_url_safe_base64(f"{room_id}\0{user_id}"),
+        "event_id": make_synthetic_join_event_id(room_id, user_id),
         "sender": user_id,
         "state_key": user_id,
         "origin_server_ts": origin_server_ts,
