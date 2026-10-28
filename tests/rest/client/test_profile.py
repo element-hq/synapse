@@ -1007,7 +1007,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
-        self.assertEqual(channel.json_body.get("errcode"), Codes.INVALID_PARAM)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
 
         channel = self.make_request(
             "POST",
@@ -1016,7 +1016,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
-        self.assertEqual(channel.json_body.get("errcode"), Codes.INVALID_PARAM)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.MISSING_PARAM)
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_malformed_users(
@@ -1040,14 +1040,25 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     access_token=self.owner_tok,
                 )
                 self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
-                self.assertEqual(channel.json_body.get("errcode"), Codes.INVALID_PARAM)
+                self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_respects_limit(self) -> None:
         """With MSC4536 enabled, the profiles query endpoint should
-        be enabled, and should limit to 100 results.
+        be enabled, and should allow up to 100 users but reject more.
         """
-        users = [self.register_user(f"user{i}", "password") for i in range(105)]
+        users = [self.register_user(f"user{i}", "password") for i in range(101)]
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": users[:100],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(set(channel.json_body.keys()), set(users[:100]))
+
         channel = self.make_request(
             "POST",
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
@@ -1056,7 +1067,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             },
             access_token=self.owner_tok,
         )
-        self.assertEqual(len(channel.json_body.keys()), 100)
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_returns_profile_data(
