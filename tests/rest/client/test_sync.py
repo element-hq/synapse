@@ -23,6 +23,7 @@ import logging
 
 from parameterized import parameterized
 
+from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
@@ -37,7 +38,14 @@ from synapse.api.constants import (
 from synapse.events import EventBase
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
+from synapse.types import (
+    JsonDict,
+    RoomStreamToken,
+    StateKey,
+    StateMap,
+    StreamKeyType,
+    StreamToken,
+)
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -1926,6 +1934,27 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
             if e["type"] == EventTypes.Member
         ]
 
+    def _park_incremental_path(self) -> tuple[Deferred, list[str]]:
+        """Make the next incremental room state computation wait on the
+        returned Deferred. By then the request has entered
+        `building_response`. The list receives the room ID of the parked
+        computation."""
+        handler = self.hs.get_sync_handler()
+        original = handler._compute_state_delta_for_incremental_sync
+        gate: "Deferred[None]" = Deferred()
+        parked: list[str] = []
+
+        async def wrapper(
+            room_id: str, *args: object, **kwargs: object
+        ) -> tuple[StateMap[str], set[StateKey]]:
+            if not parked:
+                parked.append(room_id)
+                await gate
+            return await original(room_id, *args, **kwargs)  # type: ignore[arg-type]
+
+        handler._compute_state_delta_for_incremental_sync = wrapper  # type: ignore[method-assign]
+        return gate, parked
+
     @parameterized.expand([("state", False), ("state_after", True)])
     def test_member_sent_once_when_acknowledged(
         self, _: str, use_state_after: bool
@@ -2133,7 +2162,7 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         cache = self.hs.get_sync_handler().get_lazy_loaded_members_cache(
             (self.alice, self.alice_device)
         )
-        cache.mark_sent(self.bob, kick["event_id"], t0_token)
+        cache.record(self.bob, kick["event_id"], t0_token.room_key)
 
         response = self._sync(use_state_after, t0, timeline_limit=1)
         self.assertNotIn(kick["event_id"], self._timeline_ids(response))
@@ -2173,7 +2202,7 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         cache = self.hs.get_sync_handler().get_lazy_loaded_members_cache(
             (self.alice, self.alice_device)
         )
-        cache.mark_sent(self.alice, join["event_id"], t0_token)
+        cache.record(self.alice, join["event_id"], t0_token.room_key)
 
         # Do a sync from t0, which will include the full state for the newly
         # joined room. Despite what the cache says, the full state should still
@@ -2187,3 +2216,71 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
             if e["type"] == EventTypes.Member
         ]
         self.assertIn(self.alice, members)
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_reload_overlapping_old_request(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """An incremental sync built while another request for the same
+        device is still running must send the members that request sends too
+        (element-hq/element-web#35567).
+
+        Element Web reloads from a token persisted minutes earlier, while the
+        request from before the reload may still be building on the server.
+        That request finishes after the reload's request forgot its entries,
+        and the reload's request must not leave out what it recorded.
+        """
+        t0 = self._sync(use_state_after)["next_batch"]
+        # bob's membership is sent and recorded in the response ending at
+        # t_live, which the reload will not have processed.
+        self.helper.send(self.room_id, body="pad", tok=self.bob_tok)
+        t_live = self._sync(use_state_after, t0)["next_batch"]
+        self.helper.send(self.room_id, body="hi", tok=self.bob_tok)
+
+        gate, parked = self._park_incremental_path()
+        reload = self._sync_request(use_state_after, t0, await_result=False)
+        self.pump()
+        self.assertEqual(parked, [self.room_id])
+
+        # The request from before the reload sends bob's membership again,
+        # as the reload's request forgot it.
+        old = self._sync(use_state_after, t_live)
+        self.assertEqual(self._members_in_state(old, use_state_after), [self.bob])
+
+        gate.callback(None)
+        reload.await_result()
+        self.assertEqual(reload.code, 200, reload.result)
+        self.assertEqual(
+            self._members_in_state(reload.json_body, use_state_after), [self.bob]
+        )
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_two_clients_on_one_device_do_not_trust_each_other(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """Two clients sharing a device build responses one after another and
+        end at the same position. What one of them was sent must not be left
+        out for the other.
+
+        Client X syncs from before charlie's join. Client Y starts with an
+        initial sync whose timeline no longer holds the join, so Y has never
+        seen charlie's membership. X's next response carries the join and
+        ends at the same position Y's did. When charlie then sends a message,
+        Y must still be sent his membership.
+        """
+        charlie = self.register_user("charlie", "password")
+        charlie_tok = self.login("charlie", "password")
+
+        x0 = self._sync(use_state_after)["next_batch"]
+
+        self.helper.join(self.room_id, charlie, tok=charlie_tok)
+        for i in range(10):
+            self.helper.send(self.room_id, body=f"after join {i}", tok=self.alice_tok)
+
+        y0 = self._sync(use_state_after)["next_batch"]
+        x1 = self._sync(use_state_after, x0)["next_batch"]
+        self.assertEqual(x1, y0)
+
+        self.helper.send(self.room_id, body="hello", tok=charlie_tok)
+        response = self._sync(use_state_after, y0)
+        self.assertIn(charlie, self._members_in_state(response, use_state_after))
