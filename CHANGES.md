@@ -1,3 +1,19 @@
+# Synapse 1.164.1 (2026-10-28)
+
+## Bugfixes
+
+- Fix clearing user status for clients that send a `null` profile field value.
+
+  When `include_profile_updates_in_sync` is enabled, Synapse will continue to accept `null` custom profile field values
+  until clients have had a sufficient time to change their behaviour. This special casing is tracked in [this issue](https://github.com/element-hq/synapse/issues/20424). ([\#20422](https://github.com/element-hq/synapse/issues/20422))
+
+## Internal Changes
+
+- Bump `msgpack` from `1.2.1` to `1.2.4` to address [`GHSA-j586-36cw-2gc2`](https://github.com/msgpack/msgpack-python/security/advisories/GHSA-j586-36cw-2gc2) which can cause memory exhaustion problems when malformed tokens are used with the public room list API's. ([\#20421](https://github.com/element-hq/synapse/issues/20421))
+
+
+
+
 # Synapse 1.164.0 (2026-10-27)
 
 No significant changes since 1.164.0rc3.
