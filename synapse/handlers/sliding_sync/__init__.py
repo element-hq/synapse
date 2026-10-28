@@ -387,6 +387,12 @@ class SlidingSyncHandler:
             new_connection_state.rooms.record_sent_rooms(
                 relevant_rooms_to_send_map.keys()
             )
+            if rooms.keys() & interested_rooms.newly_left_rooms:
+                new_connection_state.rooms.record_never_sent_rooms(
+                    rooms.keys()
+                    & interested_rooms.newly_left_rooms
+                    & await self.store.get_server_announcement_room_ids()
+                )
 
             connection_position = await self.connection_store.record_new_state(
                 sync_config=sync_config,

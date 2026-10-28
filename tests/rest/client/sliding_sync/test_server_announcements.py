@@ -127,10 +127,10 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         """
         own_memberships = [
             event
-            for event in room["required_state"]
+            for event in room.get("required_state", [])
             if event["type"] == EventTypes.Member and event["state_key"] == user_id
         ]
-        self.assertEqual(len(own_memberships), 1, room["required_state"])
+        self.assertEqual(len(own_memberships), 1, room)
         membership = own_memberships[0]
         self.assertTrue(
             membership["event_id"].startswith(SYNTHETIC_JOIN_EVENT_ID_PREFIX),
@@ -220,6 +220,21 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         event_id = self._announce("hello")
 
         response, _ = self.do_sync(self._sync_body(), tok=self.former_tok)
+
+        room = self._assert_delivered(response, self.former)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+
+    def test_self_left_member_on_existing_connection(self) -> None:
+        """A member who leaves the room themselves while their connection is open
+        gets later announcements as a non-member, with the synthetic join.
+        """
+        self._announce("hello")
+        _, pos = self.do_sync(self._sync_body(), tok=self.former_tok)
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+        _, pos = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
+        event_id = self._announce("world")
+
+        response, _ = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
 
         room = self._assert_delivered(response, self.former)
         self.assertEqual(self._timeline_ids(room), [event_id])
