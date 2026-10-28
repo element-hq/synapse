@@ -25,6 +25,7 @@ from twisted.internet.testing import MemoryReactor
 import synapse.rest.admin
 from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, ReceiptTypes
 from synapse.api.errors import Codes
+from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.rest.client import login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -420,3 +421,60 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
         ]["events"]
         receipt_event = filter(is_read_receipt, ephemeral_events)
         return next(receipt_event, None)
+
+
+class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
+    """Tests read receipts in server announcement rooms, which most users see
+    without being members of them.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        receipts.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.announcer = self.register_user("announcer", "pass")
+        self.announcer_tok = self.login("announcer", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_tok = self.login("bob", "pass")
+
+        hs.config.serverannouncements.rooms = [
+            ServerAnnouncementRoom(
+                config_id="news",
+                room_name="Server News",
+                room_topic="News from the server",
+                room_avatar_url=None,
+                room_avatar_path=None,
+                allowed_user_ids=[self.announcer],
+            )
+        ]
+        self.store = hs.get_datastores().main
+        self.get_success(hs.get_server_announcements_handler().reconcile_rooms())
+        room_id = self.get_success(self.store.get_server_announcement_room("news"))
+        assert room_id is not None
+        self.room_id = room_id
+
+    def test_non_member_sends_read_receipt(self) -> None:
+        """A user who is not a member of the announcement room can send a read
+        receipt for an announcement.
+        """
+        event_id = self.helper.send(self.room_id, "hello", tok=self.announcer_tok)[
+            "event_id"
+        ]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.READ}/{event_id}",
+            {},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        receipts = self.get_success(
+            self.store.get_receipts_for_user(self.bob, [ReceiptTypes.READ])
+        )
+        self.assertEqual(receipts, {self.room_id: event_id})
