@@ -56,6 +56,9 @@ def make_synthetic_join_event(
     so the same user always receives the same event and clients drop repeats. The
     prefix makes it obvious that the event ID is not a real one.
 
+    It is injected into the `/sync` responses of every user of the homeserver who
+    is not one of the room's senders.
+
     Args:
         room_id: The announcement room.
         user_id: The user receiving the event.

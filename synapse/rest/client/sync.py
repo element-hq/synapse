@@ -612,6 +612,14 @@ class SyncRestServlet(RestServlet):
                 for key, event in state_dict.items()
                 if key != (EventTypes.Member, user_id)
             }
+            timeline_events = [
+                filtered_event
+                for filtered_event in timeline_events
+                if not (
+                    filtered_event.event.type == EventTypes.Member
+                    and filtered_event.event.state_key == user_id
+                )
+            ]
 
         state_events = state_dict.values()
 

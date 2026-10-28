@@ -2361,8 +2361,8 @@ class SyncHandler:
             if room_id not in mutable_rooms_to_exclude
         )
 
-        membership_changed_room_ids = {
-            event.room_id for event in membership_change_events
+        last_membership_by_room_id = {
+            event.room_id: event.membership for event in membership_change_events
         }
         announcement_room_ids = frozenset(
             room_id
@@ -2371,7 +2371,8 @@ class SyncHandler:
             )
             if room_id not in mutable_joined_room_ids
             and room_id not in mutable_rooms_to_exclude
-            and room_id not in membership_changed_room_ids
+            and last_membership_by_room_id.get(room_id)
+            in (None, Membership.LEAVE, Membership.BAN)
         )
 
         sync_result_builder = SyncResultBuilder(
@@ -3095,6 +3096,7 @@ class SyncHandler:
             sync_result_builder.forced_newly_joined_room_ids
         )
         newly_left_rooms: list[str] = []
+        left_announcement_room_ids: set[str] = set()
         room_entries: list[RoomSyncResultBuilder] = []
         invited: list[InvitedSyncResult] = []
         knocked: list[KnockedSyncResult] = []
@@ -3197,6 +3199,10 @@ class SyncHandler:
                 knock_room_sync = KnockedSyncResult(room_id, knock=last_non_join)
                 if knock_room_sync:
                     knocked.append(knock_room_sync)
+
+            if room_id in sync_result_builder.announcement_room_ids:
+                left_announcement_room_ids.add(room_id)
+                continue
 
             # Always include leave/ban events. Just take the last one.
             # TODO: How do we handle ban -> leave in same batch?
@@ -3307,7 +3313,9 @@ class SyncHandler:
 
         room_entries.extend(
             await self._get_announcement_room_entries(
-                sync_result_builder, sync_result_builder.announcement_room_ids
+                sync_result_builder,
+                sync_result_builder.announcement_room_ids,
+                left_room_ids=left_announcement_room_ids,
             )
         )
 
@@ -3323,18 +3331,44 @@ class SyncHandler:
         self,
         sync_result_builder: "SyncResultBuilder",
         room_ids: AbstractSet[str],
+        left_room_ids: AbstractSet[str] = frozenset(),
     ) -> list["RoomSyncResultBuilder"]:
-        """Returns entries for the given announcement rooms that have an
-        announcement to show, i.e. a non-state event.
+        """Returns entries for the given announcement rooms that have something
+        to show.
 
-        On an incremental sync, only announcements since the `since_token` count,
-        unless `full_state` is set, in which case a room is also included if its
-        most recent events hold an announcement. On an initial sync, a room is
-        included if its most recent events hold an announcement.
+        A room only shows up once it has had an announcement, i.e. a non-state
+        event, so that creating the room and joining its senders does not show
+        it to every user. On an incremental sync, a room is included if it has
+        had an announcement and there is any new event in it since the
+        `since_token`, such as a sender leaving or a name change. With
+        `full_state` set, a room is also included without any new event. On an
+        initial sync, a room is included if it has ever had an announcement,
+        even when later state changes push that announcement out of the
+        timeline.
+
+        Rooms in `left_room_ids` are included even without an announcement, so
+        that the client replaces the user's real membership with the synthetic
+        join and gets the room's current state.
+
+        Every entry carries the room's full state rather than the changes since
+        the `since_token`. The first time a room is sent to a user, the client
+        has no earlier state for it, and which users have already received the
+        room is not tracked.
+
+        Sending an announcement does not wake up waiting syncs, so that an
+        announcement does not wake every user's sync at once. A waiting sync
+        picks announcements up when it next runs: at its timeout, or when
+        something else wakes it. With no other activity, an announcement is up
+        to one sync timeout late. It can be up to about two timeouts late when
+        something woke the sync without producing anything for it: the sync
+        then returns that empty result at its timeout without running again,
+        and the announcement waits for the next sync.
 
         Args:
             sync_result_builder
             room_ids: The announcement rooms to consider.
+            left_room_ids: Rooms among `room_ids` that the user left or was
+                removed from since the `since_token`.
         """
         since_token = sync_result_builder.since_token
         now_token = sync_result_builder.now_token
@@ -3353,20 +3387,21 @@ class SyncHandler:
             room_id
             for room_id, (events, _, _) in room_to_events.items()
             if not all(event.is_state() for event in events)
-        }
+        } | (left_room_ids & room_ids)
 
-        if since_token and sync_result_builder.full_state:
-            recent_room_to_events = await self.store.get_room_events_stream_for_rooms(
-                room_ids=room_ids - announced_room_ids,
-                from_key=now_token.room_key,
-                limit=timeline_limit + 1,
-                direction=Direction.BACKWARDS,
-            )
-            announced_room_ids.update(
+        if not since_token or sync_result_builder.full_state:
+            room_ids_to_check = room_ids - announced_room_ids
+        else:
+            room_ids_to_check = {
                 room_id
-                for room_id, (events, _, _) in recent_room_to_events.items()
-                if not all(event.is_state() for event in events)
+                for room_id, (events, _, _) in room_to_events.items()
+                if events and room_id not in announced_room_ids
+            }
+        announced_room_ids.update(
+            await self.store.get_server_announcement_room_ids_with_announcement(
+                room_ids_to_check, now_token.room_key.stream
             )
+        )
 
         room_entries = []
         for room_id in announced_room_ids:
@@ -3455,6 +3490,9 @@ class SyncHandler:
                 knock = await self.store.get_event(event.event_id)
                 knocked.append(KnockedSyncResult(room_id=event.room_id, knock=knock))
             elif event.membership in (Membership.LEAVE, Membership.BAN):
+                if event.room_id in sync_result_builder.announcement_room_ids:
+                    continue
+
                 # Always send down rooms we were banned from or kicked from.
                 if not sync_config.filter_collection.include_leave:
                     if event.membership == Membership.LEAVE:
