@@ -23,9 +23,16 @@ from http import HTTPStatus
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, ReceiptTypes
+from synapse.api.constants import (
+    EduTypes,
+    EventTypes,
+    HistoryVisibility,
+    ReceiptTypes,
+    RelationTypes,
+)
 from synapse.api.errors import Codes
-from synapse.rest.client import login, receipts, room, sync
+from synapse.config.server_announcements import ServerAnnouncementRoom
+from synapse.rest.client import login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -420,3 +427,349 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
         ]["events"]
         receipt_event = filter(is_read_receipt, ephemeral_events)
         return next(receipt_event, None)
+
+
+class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
+    """Tests read receipts in server announcement rooms, which most users see
+    without being members of them.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        read_marker.register_servlets,
+        receipts.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.announcer = self.register_user("announcer", "pass")
+        self.announcer_tok = self.login("announcer", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_tok = self.login("bob", "pass")
+        self.bob_other_tok = self.login("bob", "pass")
+        self.dan = self.register_user("dan", "pass")
+        self.dan_tok = self.login("dan", "pass")
+
+        hs.config.serverannouncements.rooms = [
+            ServerAnnouncementRoom(
+                config_id="news",
+                room_name="Server News",
+                room_topic="News from the server",
+                room_avatar_url=None,
+                room_avatar_path=None,
+                allowed_user_ids=[self.announcer],
+            )
+        ]
+        self.store = hs.get_datastores().main
+        self.get_success(hs.get_server_announcements_handler().reconcile_rooms())
+        room_id = self.get_success(self.store.get_server_announcement_room("news"))
+        assert room_id is not None
+        self.room_id = room_id
+
+    def test_non_member_sends_read_receipt(self) -> None:
+        """A user who is not a member of the announcement room can send a read
+        receipt for an announcement.
+        """
+        event_id = self.helper.send(self.room_id, "hello", tok=self.announcer_tok)[
+            "event_id"
+        ]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.READ}/{event_id}",
+            {},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        receipts = self.get_success(
+            self.store.get_receipts_for_user(self.bob, [ReceiptTypes.READ])
+        )
+        self.assertEqual(receipts, {self.room_id: event_id})
+
+    def _announce(self, body: str) -> str:
+        return self.helper.send(self.room_id, body, tok=self.announcer_tok)["event_id"]
+
+    def _announce_in_thread(self) -> tuple[str, str]:
+        """Send an announcement and a reply in its thread, and return the IDs
+        of the thread root and of the reply.
+        """
+        root_id = self._announce("hello")
+        reply_id = self.helper.send_event(
+            self.room_id,
+            EventTypes.Message,
+            content={
+                "msgtype": "m.text",
+                "body": "reply",
+                "m.relates_to": {"rel_type": RelationTypes.THREAD, "event_id": root_id},
+            },
+            tok=self.announcer_tok,
+        )["event_id"]
+        return root_id, reply_id
+
+    def _send_read_receipt(
+        self,
+        event_id: str,
+        tok: str,
+        receipt_type: str = ReceiptTypes.READ,
+        thread_id: str | None = None,
+    ) -> None:
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{receipt_type}/{event_id}",
+            {} if thread_id is None else {"thread_id": thread_id},
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+    def _set_read_markers(self, event_id: str, tok: str) -> None:
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/read_markers",
+            {ReceiptTypes.FULLY_READ: event_id, ReceiptTypes.READ: event_id},
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+    def _sync(self, tok: str, since: str | None = None) -> JsonDict:
+        url = "/sync" if since is None else f"/sync?since={since}"
+        channel = self.make_request("GET", url, access_token=tok)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        return channel.json_body
+
+    def _receipt_data(
+        self,
+        response: JsonDict,
+        event_id: str,
+        receipt_type: str = ReceiptTypes.READ,
+    ) -> JsonDict:
+        """Return the `receipt_type` receipts on `event_id` in the announcement
+        room's ephemeral events of a `/sync` response, by user ID.
+        """
+        room = response.get("rooms", {}).get("join", {}).get(self.room_id, {})
+        return {
+            user_id: data
+            for event in room.get("ephemeral", {}).get("events", [])
+            if event["type"] == EduTypes.RECEIPT
+            for user_id, data in event["content"]
+            .get(event_id, {})
+            .get(receipt_type, {})
+            .items()
+        }
+
+    def _receipt_readers(
+        self,
+        response: JsonDict,
+        event_id: str,
+        receipt_type: str = ReceiptTypes.READ,
+    ) -> set[str]:
+        """Return the users with a `receipt_type` receipt on `event_id` in the
+        announcement room's ephemeral events of a `/sync` response.
+        """
+        return set(self._receipt_data(response, event_id, receipt_type))
+
+    def _assert_room_in_sync(self, response: JsonDict) -> None:
+        self.assertIn(self.room_id, response.get("rooms", {}).get("join", {}))
+
+    def test_non_member_receipt_on_initial_sync_of_other_device(self) -> None:
+        """A non-member's read receipt is in the initial sync of their other
+        devices.
+        """
+        event_id = self._announce("hello")
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        response = self._sync(self.bob_other_tok)
+        self.assertEqual(self._receipt_readers(response, event_id), {self.bob})
+
+    def test_non_member_receipt_on_incremental_sync_of_other_device(self) -> None:
+        """A non-member's read receipt is in the next incremental sync of their
+        other devices, even with no new announcement since.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.bob_other_tok)["next_batch"]
+
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        response = self._sync(self.bob_other_tok, since)
+        self.assertEqual(self._receipt_readers(response, event_id), {self.bob})
+
+    def test_non_member_receipt_hidden_from_member_sync(self) -> None:
+        """A non-member's read receipt is not in the initial or incremental
+        sync of a member of the announcement room.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.announcer_tok)["next_batch"]
+
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        response = self._sync(self.announcer_tok)
+        self._assert_room_in_sync(response)
+        self.assertEqual(self._receipt_readers(response, event_id), set())
+
+        response = self._sync(self.announcer_tok, since)
+        self.assertEqual(self._receipt_readers(response, event_id), set())
+
+    def test_non_member_receipt_hidden_from_other_non_member_sync(self) -> None:
+        """A non-member's read receipt is not in the initial or incremental
+        sync of another non-member.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.dan_tok)["next_batch"]
+
+        self._send_read_receipt(event_id, self.bob_tok)
+        self._announce("again")
+
+        response = self._sync(self.dan_tok)
+        self._assert_room_in_sync(response)
+        self.assertEqual(self._receipt_readers(response, event_id), set())
+
+        response = self._sync(self.dan_tok, since)
+        self._assert_room_in_sync(response)
+        self.assertEqual(self._receipt_readers(response, event_id), set())
+
+    def test_non_member_sends_private_read_receipt(self) -> None:
+        """A user who is not a member of the announcement room can send a
+        private read receipt for an announcement.
+        """
+        event_id = self._announce("hello")
+
+        self._send_read_receipt(event_id, self.bob_tok, ReceiptTypes.READ_PRIVATE)
+
+        receipts = self.get_success(
+            self.store.get_receipts_for_user(self.bob, [ReceiptTypes.READ_PRIVATE])
+        )
+        self.assertEqual(receipts, {self.room_id: event_id})
+
+    def test_non_member_private_receipt_on_sync_of_other_device(self) -> None:
+        """A non-member's private read receipt is in the initial and next
+        incremental sync of their other devices.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.bob_other_tok)["next_batch"]
+
+        self._send_read_receipt(event_id, self.bob_tok, ReceiptTypes.READ_PRIVATE)
+
+        for response in (
+            self._sync(self.bob_other_tok),
+            self._sync(self.bob_other_tok, since),
+        ):
+            self.assertEqual(
+                self._receipt_readers(response, event_id, ReceiptTypes.READ_PRIVATE),
+                {self.bob},
+            )
+
+    def test_non_member_private_receipt_hidden_from_other_users_sync(self) -> None:
+        """A non-member's private read receipt is not in the sync of a member
+        of the announcement room, nor of another non-member.
+        """
+        event_id = self._announce("hello")
+
+        self._send_read_receipt(event_id, self.bob_tok, ReceiptTypes.READ_PRIVATE)
+
+        for tok in (self.announcer_tok, self.dan_tok):
+            response = self._sync(tok)
+            self._assert_room_in_sync(response)
+            self.assertEqual(
+                self._receipt_readers(response, event_id, ReceiptTypes.READ_PRIVATE),
+                set(),
+            )
+
+    def test_non_member_sends_threaded_read_receipt(self) -> None:
+        """A user who is not a member of the announcement room can send a
+        threaded read receipt in an announcement's thread.
+        """
+        root_id, reply_id = self._announce_in_thread()
+
+        self._send_read_receipt(reply_id, self.bob_tok, thread_id=root_id)
+
+        receipts = self.get_success(
+            self.store.get_linearized_receipts_for_user_in_rooms(
+                self.bob, [self.room_id], self.store.get_max_receipt_stream_id()
+            )
+        )
+        self.assertEqual(
+            [(r.receipt_type, r.event_id, r.thread_id) for r in receipts[self.room_id]],
+            [(ReceiptTypes.READ, reply_id, root_id)],
+        )
+
+    def test_non_member_threaded_receipt_on_sync_of_other_device(self) -> None:
+        """A non-member's threaded read receipt is in the initial and next
+        incremental sync of their other devices.
+        """
+        root_id, reply_id = self._announce_in_thread()
+        since = self._sync(self.bob_other_tok)["next_batch"]
+
+        self._send_read_receipt(reply_id, self.bob_tok, thread_id=root_id)
+
+        for response in (
+            self._sync(self.bob_other_tok),
+            self._sync(self.bob_other_tok, since),
+        ):
+            receipts = self._receipt_data(response, reply_id)
+            self.assertEqual(set(receipts), {self.bob})
+            self.assertEqual(receipts[self.bob]["thread_id"], root_id)
+
+    def test_non_member_threaded_receipt_hidden_from_other_users_sync(self) -> None:
+        """A non-member's threaded read receipt is not in the sync of a member
+        of the announcement room, nor of another non-member.
+        """
+        root_id, reply_id = self._announce_in_thread()
+
+        self._send_read_receipt(reply_id, self.bob_tok, thread_id=root_id)
+
+        for tok in (self.announcer_tok, self.dan_tok):
+            response = self._sync(tok)
+            self._assert_room_in_sync(response)
+            self.assertEqual(self._receipt_readers(response, reply_id), set())
+
+    def test_non_member_sets_read_markers(self) -> None:
+        """A user who is not a member of the announcement room can set their
+        fully read marker and read receipt on an announcement with
+        `/read_markers`.
+        """
+        event_id = self._announce("hello")
+
+        self._set_read_markers(event_id, self.bob_tok)
+
+        fully_read = self.get_success(
+            self.store.get_account_data_for_room_and_type(
+                self.bob, self.room_id, ReceiptTypes.FULLY_READ
+            )
+        )
+        self.assertEqual(fully_read, {"event_id": event_id})
+        receipts = self.get_success(
+            self.store.get_receipts_for_user(self.bob, [ReceiptTypes.READ])
+        )
+        self.assertEqual(receipts, {self.room_id: event_id})
+
+    def test_non_member_read_markers_receipt_on_sync_of_other_device(self) -> None:
+        """The read receipt a non-member sets with `/read_markers` is in the
+        initial and next incremental sync of their other devices.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.bob_other_tok)["next_batch"]
+
+        self._set_read_markers(event_id, self.bob_tok)
+
+        for response in (
+            self._sync(self.bob_other_tok),
+            self._sync(self.bob_other_tok, since),
+        ):
+            self.assertEqual(self._receipt_readers(response, event_id), {self.bob})
+
+    def test_non_member_read_markers_receipt_hidden_from_other_users_sync(
+        self,
+    ) -> None:
+        """The read receipt a non-member sets with `/read_markers` is not in the
+        sync of a member of the announcement room, nor of another non-member.
+        """
+        event_id = self._announce("hello")
+
+        self._set_read_markers(event_id, self.bob_tok)
+
+        for tok in (self.announcer_tok, self.dan_tok):
+            response = self._sync(tok)
+            self._assert_room_in_sync(response)
+            self.assertEqual(self._receipt_readers(response, event_id), set())

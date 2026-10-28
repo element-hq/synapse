@@ -854,7 +854,9 @@ class SlidingSyncExtensionHandler:
                     )
 
             fetched_receipts = ReceiptEventSource.filter_out_private_receipts(
-                fetched_receipts, sync_config.user.to_string()
+                fetched_receipts,
+                sync_config.user.to_string(),
+                await self.store.get_server_announcement_room_ids(),
             )
 
             for receipt in fetched_receipts:
