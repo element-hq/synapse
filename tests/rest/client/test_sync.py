@@ -2187,12 +2187,15 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         since: str | None = None,
         full_state: bool = False,
         filter: JsonDict | None = None,
+        use_state_after: bool = False,
     ) -> JsonDict:
         params = []
         if since is not None:
             params.append(f"since={since}")
         if full_state:
             params.append("full_state=true")
+        if use_state_after:
+            params.append("use_state_after=true")
         if filter is not None:
             params.append(f"filter={json.dumps(filter)}")
         channel = self.make_request(
@@ -2215,10 +2218,11 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         synthetic join for `user_id` and no unread counts, and return it.
         """
         room = response["rooms"]["join"][self.room_id]
+        state = room["state_after"] if "state_after" in room else room["state"]
 
         own_memberships = [
             event
-            for event in room["state"]["events"] + room["timeline"]["events"]
+            for event in state["events"] + room["timeline"]["events"]
             if event["type"] == EventTypes.Member and event["state_key"] == user_id
         ]
         self.assertEqual(len(own_memberships), 1, own_memberships)
@@ -2438,6 +2442,37 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self._announce("hello")
 
         self._assert_delivered(self._sync(self.former_tok), self.former)
+
+    def test_no_device_list_changes(self) -> None:
+        """Delivering an announcement room does not report its members as users
+        whose device lists changed.
+        """
+        since = self._sync(self.bob_tok)["next_batch"]
+        self._announce("hello")
+
+        response = self._sync(self.bob_tok, since)
+        self._assert_delivered(response, self.bob)
+        self.assertEqual(response.get("device_lists", {}).get("changed", []), [])
+
+    def test_state_after(self) -> None:
+        """With `use_state_after`, a non-member gets the synthetic join in
+        `state_after`, including a former member whose real leave is in the
+        window.
+        """
+        bob_since = self._sync(self.bob_tok, use_state_after=True)["next_batch"]
+        former_since = self._sync(self.former_tok, use_state_after=True)["next_batch"]
+
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+        self._announce("hello")
+
+        for tok, user_id, since in (
+            (self.bob_tok, self.bob, bob_since),
+            (self.former_tok, self.former, former_since),
+        ):
+            room = self._assert_delivered(
+                self._sync(tok, since, use_state_after=True), user_id
+            )
+            self.assertNotIn("state", room)
 
     def test_lazy_loaded_members(self) -> None:
         """The synthetic join is sent when members are lazy-loaded."""
