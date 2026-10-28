@@ -27,6 +27,7 @@ from http import HTTPStatus
 from typing import Any
 
 from canonicaljson import encode_canonical_json
+from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
@@ -39,6 +40,7 @@ from synapse.types import UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
@@ -663,7 +665,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "array_field": ["test"],
             "object_field": {"test": "test"},
             "numeric_field": 1,
-            "null_field": None,
         }
 
         for key, value in fields.items():
@@ -690,6 +691,55 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
             self.assertEqual(channel.json_body, {key: value})
+
+    @parameterized.expand(
+        [
+            # These two fields are special as they are the original 2 fields
+            # and have their own storage implementation.
+            # They already rejected `null` before the introduction of this test.
+            ("displayname",),
+            ("avatar_url",),
+            # This is a 'custom field'.
+            ("org.example.custom_field",),
+        ]
+    )
+    def test_null_field_rejected(self, field_name: str) -> None:
+        """
+        Tests that setting a field to `null` is rejected.
+
+        This is optional as per spec, but we prefer to apply this as it is best for interoperability
+        (prevents clients from relying on `null` values being accepted, which is essentially
+        Synapse-specific behaviour).
+
+        > Servers MAY reject null values.
+        — https://spec.matrix.org/v1.19/client-server-api/#put_matrixclientv3profileuseridkeyname
+        """
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/{field_name}",
+            content={field_name: None},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_null_field_is_not_rejected_if_profile_update_stream_enabled(self) -> None:
+        """
+        Tests that setting a field to `null` is not rejected if profile update
+        stream is configured active.
+
+        See https://github.com/element-hq/synapse/issues/20424 for removing
+        this special case.
+        """
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/org.example.custom_field",
+            content={"org.example.custom_field": None},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertFalse("errcode" in channel.json_body.keys())
 
     def test_set_custom_field_noauth(self) -> None:
         channel = self.make_request(
