@@ -779,7 +779,6 @@ class HaveSentRoomFlag(Enum):
         LIVE -> PREVIOUSLY
         PREVIOUSLY -> LIVE
         PREVIOUSLY -> PREVIOUSLY (with a later token, when more of the data was sent)
-        LIVE/PREVIOUSLY -> NEVER (when the room must be sent down again from scratch)
     """
 
     # The room has never been sent down (or we have forgotten we have sent it
@@ -894,13 +893,6 @@ class MutableRoomStatusMap(RoomStatusMap[T]):
                 continue
 
             self._statuses[room_id] = HaveSentRoom.live()
-
-    def record_never_sent_rooms(self, room_ids: StrCollection) -> None:
-        """Record that these rooms should be sent down again as if we had never
-        sent them before.
-        """
-        for room_id in room_ids:
-            self._statuses[room_id] = HaveSentRoom.never()
 
     def record_partially_sent_rooms(
         self, room_ids: StrCollection, last_token: T

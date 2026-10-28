@@ -286,17 +286,21 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
 
     def test_self_left_member_before_any_announcement(self) -> None:
         """A member who leaves the room themselves while their connection is
-        open, before anything was announced, gets the first announcement with
-        the synthetic join.
+        open, before anything was announced, gets the synthetic join instead of
+        their leave in the same sync, then the first announcement.
         """
         _, pos = self.do_sync(self._sync_body(), tok=self.former_tok)
         self.helper.leave(self.room_id, self.former, tok=self.former_tok)
-        _, pos = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
-        event_id = self._announce("hello")
 
+        response, pos = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
+        room = self._assert_delivered(response, self.former)
+        self._assert_no_own_membership_in_timeline(room, self.former)
+
+        event_id = self._announce("hello")
         response, _ = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
 
-        room = self._assert_delivered(response, self.former)
+        self.assertIn(self.room_id, self._list_room_ids(response))
+        room = response["rooms"][self.room_id]
         self.assertEqual(self._timeline_ids(room), [event_id])
 
     def _remove_former(self) -> None:
@@ -320,14 +324,14 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
 
     def test_removed_member_without_announcement(self) -> None:
         """A member removed from the configured senders before anything was
-        announced gets the room with the synthetic join instead of their kick.
+        announced does not get the room on a new connection, neither as joined
+        nor with their kick.
         """
         self._remove_former()
 
         response, _ = self.do_sync(self._sync_body(), tok=self.former_tok)
 
-        room = self._assert_delivered(response, self.former)
-        self._assert_no_own_membership_in_timeline(room, self.former)
+        self._assert_not_delivered(response)
 
     def test_removed_member_existing_connection(self) -> None:
         """A member removed from the configured senders while their connection is
@@ -409,14 +413,14 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
             state[(EventTypes.PowerLevels, "")]["content"]["users"][self.former], 50
         )
 
-    def _ban_former(self) -> None:
-        """Ban `former` from the room as the management user."""
+    def _update_membership(self, user_id: str, membership: str) -> None:
+        """Change the membership of `user_id` as the management user."""
         self.get_success(
             self.hs.get_room_member_handler().update_membership(
                 create_requester(self.config.room_management_mxid),
-                UserID.from_string(self.former),
+                UserID.from_string(user_id),
                 self.room_id,
-                Membership.BAN,
+                membership,
                 ratelimit=False,
             )
         )
@@ -425,7 +429,7 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         """A member banned from the room gets later announcements as a
         non-member, with the synthetic join instead of their ban.
         """
-        self._ban_former()
+        self._update_membership(self.former, Membership.BAN)
         event_id = self._announce("hello")
 
         response, _ = self.do_sync(
@@ -443,12 +447,37 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         """
         sync_body = self._sync_body(timeline_limit=10)
         _, pos = self.do_sync(sync_body, tok=self.former_tok)
-        self._ban_former()
+        self._update_membership(self.former, Membership.BAN)
 
         response, _ = self.do_sync(sync_body, since=pos, tok=self.former_tok)
 
         room = self._assert_delivered(response, self.former)
         self._assert_no_own_membership_in_timeline(room, self.former)
+
+    def test_banned_member_without_announcement(self) -> None:
+        """A member banned from the room before anything was announced does not
+        get the room on a new connection, neither as joined nor with their ban.
+        """
+        self._update_membership(self.former, Membership.BAN)
+
+        response, _ = self.do_sync(self._sync_body(), tok=self.former_tok)
+
+        self._assert_not_delivered(response)
+
+    def test_revoked_invite(self) -> None:
+        """A user whose invite to the room is revoked while their connection is
+        open gets the synthetic join instead of their revoked invite in the same
+        sync, even when nothing was announced.
+        """
+        sync_body = self._sync_body(timeline_limit=10)
+        _, pos = self.do_sync(sync_body, tok=self.bob_tok)
+        self._update_membership(self.bob, Membership.INVITE)
+        self._update_membership(self.bob, Membership.LEAVE)
+
+        response, _ = self.do_sync(sync_body, since=pos, tok=self.bob_tok)
+
+        room = self._assert_delivered(response, self.bob)
+        self._assert_no_own_membership_in_timeline(room, self.bob)
 
     def test_stays_in_list(self) -> None:
         """An announcement room already sent on a connection stays in the list
