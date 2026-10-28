@@ -20,15 +20,14 @@
 #
 #
 import sys
+import tomllib
 from pathlib import Path
-
-import tomli
 
 
 def main() -> None:
     lockfile_path = Path(__file__).parent.parent.joinpath("poetry.lock")
     with open(lockfile_path, "rb") as lockfile:
-        lockfile_content = tomli.load(lockfile)
+        lockfile_content = tomllib.load(lockfile)
 
     # Poetry 1.3+ lockfile format:
     # There's a `files` inline table in each [[package]]

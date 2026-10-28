@@ -1871,7 +1871,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
 
 # We test this here because this endpoint must still work
-# even if lxml is not installed.
+# even if beautifulsoup4 is not installed.
 class URLPreviewDisabledTests(unittest.HomeserverTestCase):
     servlets = [
         admin.register_servlets,

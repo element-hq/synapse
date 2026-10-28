@@ -32,9 +32,9 @@ from tests import unittest
 from tests.unittest import override_config, skip_unless
 
 try:
-    import lxml
+    import bs4
 except ImportError:
-    lxml = None  # type: ignore[assignment]
+    bs4 = None  # type: ignore[assignment]
 
 
 class CapabilitiesTestCase(unittest.HomeserverTestCase):
@@ -336,7 +336,7 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.preview_url"]["enabled"])
 
-    @skip_unless(lxml is not None, "Requires lxml")
+    @skip_unless(bs4 is not None, "Requires beautifulsoup4")
     @override_config(
         {
             "url_preview_enabled": True,
@@ -372,7 +372,7 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         self.assertFalse(capabilities["io.element.msc4452.preview_url"]["enabled"])
         self.assertFalse(capabilities["m.preview_url"]["enabled"])
 
-    @skip_unless(lxml is not None, "Requires lxml")
+    @skip_unless(bs4 is not None, "Requires beautifulsoup4")
     @override_config(
         {
             "url_preview_enabled": True,

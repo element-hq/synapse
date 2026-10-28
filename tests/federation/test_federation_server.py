@@ -20,7 +20,6 @@
 #
 import logging
 from http import HTTPStatus
-from unittest import skip as skip_test
 from unittest.mock import Mock
 
 from parameterized import parameterized
@@ -44,6 +43,7 @@ from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.server import FakeChannel
 from tests.test_utils.event_builders import make_test_event, make_test_pdu_event
 from tests.unittest import override_config
 
@@ -440,13 +440,13 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
             self.room_id, "m.room.topic", {"topic": "two"}, tok=self.local_user_token
         )["event_id"]
 
-    def _get_missing_events(
+    def _get_missing_events_channel(
         self,
         earliest_events: list[str],
         latest_events: list[str],
         walk_state_dag: bool,
         limit: int = 10,
-    ) -> list[JsonDict]:
+    ) -> FakeChannel:
         content: JsonDict = {
             "earliest_events": earliest_events,
             "latest_events": latest_events,
@@ -455,10 +455,24 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
         if walk_state_dag:
             content[StateDag.GET_MISSING_EVENTS_FIELD] = True
 
-        channel = self.make_signed_federation_request(
+        return self.make_signed_federation_request(
             "POST",
             f"/_matrix/federation/v1/get_missing_events/{self.room_id}",
             content=content,
+        )
+
+    def _get_missing_events(
+        self,
+        earliest_events: list[str],
+        latest_events: list[str],
+        walk_state_dag: bool,
+        limit: int = 10,
+    ) -> list[JsonDict]:
+        channel = self._get_missing_events_channel(
+            earliest_events=earliest_events,
+            latest_events=latest_events,
+            walk_state_dag=walk_state_dag,
+            limit=limit,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.json_body)
         return channel.json_body["events"]
@@ -511,25 +525,27 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(len(events), 2)
 
     def test_is_opt_in(self) -> None:
+        # the state DAG is only walked when the request asks for it...
         state_dag_events = self._get_missing_events(
             earliest_events=[],
             latest_events=[self.second_topic_id],
             limit=20,
             walk_state_dag=True,
         )
-        timeline_events = self._get_missing_events(
+        self.assertEqual(
+            [ev for ev in state_dag_events if ev["type"] == "m.room.message"], []
+        )
+
+        # ...and when it doesn't, we refuse to serve the request rather than walking
+        # the timeline DAG, which isn't implemented for state DAG rooms.
+        channel = self._get_missing_events_channel(
             earliest_events=[],
             latest_events=[self.second_topic_id],
             limit=20,
             walk_state_dag=False,
         )
-
-        self.assertEqual(
-            [ev for ev in state_dag_events if ev["type"] == "m.room.message"], []
-        )
-        self.assertNotEqual(
-            [ev for ev in timeline_events if ev["type"] == "m.room.message"], []
-        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.json_body)
+        self.assertEqual(Codes.UNRECOGNIZED, channel.json_body["errcode"])
 
     def test_walks_from_a_non_state_event(self) -> None:
         store = self.hs.get_datastores().main
@@ -1234,7 +1250,6 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         """Test send_join with USE_FROZEN_DICTS=False"""
         self._test_send_join_common(room_version)
 
-    @skip_test("requires MSC4242 inbound event auth")
     @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_send_join_state_dag(self) -> None:
         """
@@ -1246,7 +1261,6 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         """
         self._test_send_join_common(RoomVersions.MSC4242v12.identifier)
 
-    @skip_test("requires MSC4242 inbound event auth")
     @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_send_join_state_dag_ignores_partial_state(self) -> None:
         # FIXME: when we support partial joins this test can be deleted
