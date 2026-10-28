@@ -32,7 +32,7 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes
 from synapse.config.server_announcements import ServerAnnouncementRoom
-from synapse.rest.client import login, receipts, room, sync
+from synapse.rest.client import login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -437,6 +437,7 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
+        read_marker.register_servlets,
         receipts.register_servlets,
         room.register_servlets,
         sync.register_servlets,
@@ -519,6 +520,15 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
             "POST",
             f"/rooms/{self.room_id}/receipt/{receipt_type}/{event_id}",
             {} if thread_id is None else {"thread_id": thread_id},
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+    def _set_read_markers(self, event_id: str, tok: str) -> None:
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/read_markers",
+            {ReceiptTypes.FULLY_READ: event_id, ReceiptTypes.READ: event_id},
             access_token=tok,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
@@ -713,3 +723,53 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
             response = self._sync(tok)
             self._assert_room_in_sync(response)
             self.assertEqual(self._receipt_readers(response, reply_id), set())
+
+    def test_non_member_sets_read_markers(self) -> None:
+        """A user who is not a member of the announcement room can set their
+        fully read marker and read receipt on an announcement with
+        `/read_markers`.
+        """
+        event_id = self._announce("hello")
+
+        self._set_read_markers(event_id, self.bob_tok)
+
+        fully_read = self.get_success(
+            self.store.get_account_data_for_room_and_type(
+                self.bob, self.room_id, ReceiptTypes.FULLY_READ
+            )
+        )
+        self.assertEqual(fully_read, {"event_id": event_id})
+        receipts = self.get_success(
+            self.store.get_receipts_for_user(self.bob, [ReceiptTypes.READ])
+        )
+        self.assertEqual(receipts, {self.room_id: event_id})
+
+    def test_non_member_read_markers_receipt_on_sync_of_other_device(self) -> None:
+        """The read receipt a non-member sets with `/read_markers` is in the
+        initial and next incremental sync of their other devices.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.bob_other_tok)["next_batch"]
+
+        self._set_read_markers(event_id, self.bob_tok)
+
+        for response in (
+            self._sync(self.bob_other_tok),
+            self._sync(self.bob_other_tok, since),
+        ):
+            self.assertEqual(self._receipt_readers(response, event_id), {self.bob})
+
+    def test_non_member_read_markers_receipt_hidden_from_other_users_sync(
+        self,
+    ) -> None:
+        """The read receipt a non-member sets with `/read_markers` is not in the
+        sync of a member of the announcement room, nor of another non-member.
+        """
+        event_id = self._announce("hello")
+
+        self._set_read_markers(event_id, self.bob_tok)
+
+        for tok in (self.announcer_tok, self.dan_tok):
+            response = self._sync(tok)
+            self._assert_room_in_sync(response)
+            self.assertEqual(self._receipt_readers(response, event_id), set())
