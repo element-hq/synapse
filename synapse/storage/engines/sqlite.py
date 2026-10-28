@@ -83,6 +83,8 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
             # At time of writing, our oldest supported distros have these versions:
             # bookworm (Debian 12): 3.40.1
             # noble (Ubuntu 24.04): 3.45.1
+            # Note: Ubuntu 22.04 itself is not EOL but it is unsupported because it
+            # comes with Python 3.10, which is EOL.
             #
             # Staying with 3.40.0 because we had already previously announced 3.40.0 as
             # our minimum and I didn't think it was worth issuing another announcement
