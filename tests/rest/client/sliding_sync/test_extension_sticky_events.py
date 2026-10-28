@@ -34,27 +34,27 @@ logger = logging.getLogger(__name__)
 
 DUMMY_LISTS = {
     "main": {
-        # Don't include any rooms in the top-N window
-        "ranges": [[0, 0]],
+        # Include (up to) the first 11 rooms in the window, but don't return any
+        # timeline events for them.
+        "ranges": [[0, 10]],
         "required_state": [],
         "timeline_limit": 0,
     }
 }
 """
 Subscription lists that can be used in the Sliding Sync request `lists` field,
-which sets up a subscription that is interested in all rooms but does not let any rooms into the window,
-thus does not return any timelines.
+which sets up a list whose window covers all of the (few) rooms used in these
+tests, but does not return any timelines.
 
-Sufficient to get sticky event updates as per MSC4354:
-
-> The server MUST include sticky events across all rooms that would be matched by at least one subscription list
-> (i.e. all rooms that the client is interested in), even if the room does not appear in top-N window for that
-> subscription list at this time.
-> Rooms that would not be matched by a list are not included, as this means the client is not interested
-> in those rooms.
->
-> — https://github.com/matrix-org/matrix-spec-proposals/pull/4354/changes#diff-d76bc1a1d612c6da37d024f5b57f7b8352939b8db8a7ee9c6b71c1a848359afdR213-R217
+As per the common per-room extension semantics of MSC4508 (which MSC4480 follows),
+only rooms within the range of a list (or room subscriptions) are in scope for
+the sticky events extension.
 """
+
+STICKY_EVENTS_EXT = "org.matrix.msc4354.sticky_events"
+
+ROOM_SUBSCRIPTION = {"required_state": [], "timeline_limit": 0}
+"""A room subscription that doesn't return any timeline events."""
 
 
 class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
@@ -90,7 +90,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         self,
         response_body: JsonDict,
         expected_events_by_room: dict[str, list[str]] | None,
-    ) -> str | None:
+    ) -> None:
         """Assert the sliding sync response was successful and has the expected
         sticky events.
 
@@ -99,20 +99,16 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
             expected_events_by_room:
                 map of room ID to list of event IDs to expect (in the order we expect them),
                 or None if we expect an empty sticky events extension response
-
-        Returns the next_batch token from the sticky events section,
-        unless we're expecting an empty response.
         """
         extensions = response_body["extensions"]
-        sticky_events = extensions.get("org.matrix.msc4354.sticky_events")
+        sticky_events = extensions.get(STICKY_EVENTS_EXT)
 
         # If there are no expected events, we shouldn't get anything in the response
         if expected_events_by_room is None:
             self.assertIsNone(sticky_events)
-            return None
+            return
 
         self.assertIsNotNone(sticky_events)
-        self.assertIsInstance(sticky_events["next_batch"], str)
 
         actual_rooms = sticky_events["rooms"]
         # Check that we have the expected rooms
@@ -131,8 +127,23 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
                 ttl = actual_event["unsigned"][EventUnsignedContentFields.STICKY_TTL]
                 self.assertIsInstance(ttl, int)
 
-        self.assertIn("next_batch", sticky_events)
-        return sticky_events["next_batch"]
+    def _send_sticky_event(
+        self,
+        room_id: str,
+        tok: str,
+        *,
+        duration: Duration = Duration(minutes=5),
+        body: str = "sticky message",
+        event_type: str = EventTypes.Message,
+    ) -> str:
+        """Send a sticky event and return its event ID."""
+        return self.helper.send_sticky_event(
+            room_id,
+            event_type,
+            duration=duration,
+            content={"body": body, "msgtype": "m.text"},
+            tok=tok,
+        )["event_id"]
 
     def test_empty_sync(self) -> None:
         """Test that enabling sticky events extension works on initial and incremental sync,
@@ -144,7 +155,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         sync_body = {
             "lists": DUMMY_LISTS,
             "extensions": {
-                "org.matrix.msc4354.sticky_events": {
+                STICKY_EVENTS_EXT: {
                     "enabled": True,
                 }
             },
@@ -160,8 +171,8 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         self._assert_sticky_events_response(response_body, None)
 
     def test_initial_sync(self) -> None:
-        """Test that we get sticky events when we don't specify a since token
-        (initial sync).
+        """Test that we get all unexpired sticky events on an initial sync (no
+        `pos`), and only new ones on subsequent incremental syncs.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -185,30 +196,18 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         sync_body: JsonDict = {
             "lists": DUMMY_LISTS,
             "extensions": {
-                "org.matrix.msc4354.sticky_events": {
+                STICKY_EVENTS_EXT: {
                     "enabled": True,
                 }
             },
         }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        # Assert the response and then get the next_batch for the next sliding sync request
-        next_batch = self._assert_sticky_events_response(
-            response_body, {room_id: [sticky_event_id]}
-        )
-        assert next_batch is not None
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
 
         # Do an incremental sync immediately again
-        sync_body = {
-            "lists": DUMMY_LISTS,
-            "extensions": {
-                "org.matrix.msc4354.sticky_events": {
-                    "enabled": True,
-                    "since": next_batch,
-                }
-            },
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
 
         # Check we don't get that event again
         self._assert_sticky_events_response(response_body, None)
@@ -223,7 +222,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         )["event_id"]
 
         # Now the incremental sync should give us that event
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
         self._assert_sticky_events_response(
             response_body, {room_id: [sticky_event_id2]}
         )
@@ -252,7 +251,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         sync_body = {
             "lists": DUMMY_LISTS,
             "extensions": {
-                "org.matrix.msc4354.sticky_events": {
+                STICKY_EVENTS_EXT: {
                     "enabled": True,
                 }
             },
@@ -286,7 +285,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         sync_body = {
             "lists": DUMMY_LISTS,
             "extensions": {
-                "org.matrix.msc4354.sticky_events": {
+                STICKY_EVENTS_EXT: {
                     "enabled": True,
                 }
             },
@@ -343,7 +342,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         sync_body = {
             "lists": DUMMY_LISTS,
             "extensions": {
-                "org.matrix.msc4354.sticky_events": {
+                STICKY_EVENTS_EXT: {
                     "enabled": True,
                 }
             },
@@ -428,7 +427,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
                 }
             },
             "extensions": {
-                "org.matrix.msc4354.sticky_events": {
+                STICKY_EVENTS_EXT: {
                     "enabled": True,
                 }
             },
@@ -512,7 +511,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
                 }
             },
             "extensions": {
-                "org.matrix.msc4354.sticky_events": {
+                STICKY_EVENTS_EXT: {
                     "enabled": True,
                 }
             },
@@ -562,15 +561,13 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         # Initial sync
         sync_body = {
             "lists": DUMMY_LISTS,
-            "extensions": {
-                "org.matrix.msc4354.sticky_events": {"enabled": True, "limit": 2}
-            },
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 2}},
         }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # We expect to see the first 2 sticky events by stream order
         # and they should be in that stream order
-        next_batch = self._assert_sticky_events_response(
+        self._assert_sticky_events_response(
             response_body, {room_id: sticky_event_ids[0:2]}
         )
 
@@ -578,30 +575,37 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         sync_body = {
             "lists": DUMMY_LISTS,
             "extensions": {
-                "org.matrix.msc4354.sticky_events": {
+                STICKY_EVENTS_EXT: {
                     "enabled": True,
-                    # This makes it incremental
-                    "since": next_batch,
                     "limit": 3,
                 }
             },
         }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
 
         # Should get remaining events, in stream order again
         self._assert_sticky_events_response(
             response_body, {room_id: sticky_event_ids[2:4]}
         )
 
+        # And nothing more after that
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # A new sticky event is delivered as normal afterwards
+        sticky_event_id = self._send_sticky_event(room_id, user2_tok)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+
     def test_sticky_event_limit_zero_does_not_advance(self) -> None:
         """
         Tests that sending a limit of 0 in the Sticky Events request extension returns no
-        sticky events and omits the extension from the response, rather than erroring.
-
-        'Regression' test for a bug that _almost_ existed.
-        (The `next_batch` token would be wrongly advanced internally,
-        but because no events were returned, the entire extension response was not serialised
-        and so the dodgy `next_batch` never actually got sent to a client.)
+        sticky events and omits the extension from the response, rather than erroring,
+        and that doing so doesn't cause any sticky events to be skipped.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -613,47 +617,42 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         self.helper.join(room_id, user1_id, tok=user1_tok)
 
         # Send 2 sticky events (more than our limit of 1)
-        sticky_event_ids: list[str] = []
-        for i in range(2):
-            event_id = self.helper.send_sticky_event(
-                room_id,
-                EventTypes.Message,
-                duration=Duration(minutes=5),
-                content={"body": f"sticky message {i}", "msgtype": "m.text"},
-                tok=user2_tok,
-            )["event_id"]
-            sticky_event_ids.append(event_id)
+        sticky_event_ids = [
+            self._send_sticky_event(room_id, user2_tok, body=f"sticky message {i}")
+            for i in range(2)
+        ]
 
         # Initial sync
         sync_body = {
             "lists": DUMMY_LISTS,
-            "extensions": {
-                "org.matrix.msc4354.sticky_events": {"enabled": True, "limit": 1}
-            },
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 1}},
         }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # We expect to see the first sticky event
-        next_batch = self._assert_sticky_events_response(
+        self._assert_sticky_events_response(
             response_body, {room_id: sticky_event_ids[0:1]}
         )
 
         # Incremental sync with limit=0
         sync_body = {
             "lists": DUMMY_LISTS,
-            "extensions": {
-                "org.matrix.msc4354.sticky_events": {
-                    "enabled": True,
-                    # This makes it incremental
-                    "since": next_batch,
-                    "limit": 0,
-                }
-            },
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 0}},
         }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-        # You could imagine a buggy system returns a `next_batch` here with no events,
-        # but Synapse just omits the response extension altogether.
-        next_batch = self._assert_sticky_events_response(response_body, None)
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # The second sticky event is still delivered once the limit allows it
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 1}},
+        }
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(
+            response_body, {room_id: sticky_event_ids[1:2]}
+        )
 
     def test_deduplication_with_timeline(self) -> None:
         """
@@ -710,7 +709,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
                 }
             },
             "extensions": {
-                "org.matrix.msc4354.sticky_events": {
+                STICKY_EVENTS_EXT: {
                     "enabled": True,
                     "limit": 2,
                 }
@@ -718,9 +717,9 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
-        events_in_sticky_section = response_body["extensions"][
-            "org.matrix.msc4354.sticky_events"
-        ]["rooms"][room_id]["events"]
+        events_in_sticky_section = response_body["extensions"][STICKY_EVENTS_EXT][
+            "rooms"
+        ][room_id]["events"]
         event_ids_in_sticky_section = [e["event_id"] for e in events_in_sticky_section]
 
         events_in_timeline_section = response_body["rooms"][room_id]["timeline"]
@@ -735,3 +734,573 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         self.assertEqual(
             event_ids_in_timeline_section, [sticky_event_ids[1], non_sticky_event_id]
         )
+
+    def test_retry_with_same_pos_redelivers(self) -> None:
+        """
+        Test that retrying a request with the same `pos` (e.g. because the
+        response was lost) delivers the same sticky events again.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        sticky_event_id = self._send_sticky_event(room_id, user2_tok)
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+
+        # Retry with the same `pos`
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+
+    def test_enable_extension_partway_through_connection(self) -> None:
+        """
+        Test that enabling the extension for the first time partway through a
+        connection returns all unexpired sticky events for the rooms in scope,
+        including ones sent before the request's `pos`.
+
+        This allows clients to defer enabling the extension past their initial
+        request, as required by MSC4508.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        sticky_event_id = self._send_sticky_event(room_id, user2_tok)
+
+        # Initial sync and an incremental sync, both without the extension
+        sync_body: JsonDict = {"lists": DUMMY_LISTS}
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+        _, from_token = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # Now enable the extension: we should get the sticky event sent before
+        # the connection even started.
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+
+        # But not again on the next request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+    def test_reenable_extension_after_disabling(self) -> None:
+        """
+        Test that re-enabling the extension after having disabled it (or omitted
+        it) on the same connection returns the unexpired sticky events that were
+        sent while it was disabled, as well as those sent after the request's
+        `pos`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        enabled_sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        disabled_sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": False}},
+        }
+        omitted_sync_body: JsonDict = {"lists": DUMMY_LISTS}
+
+        _, from_token = self.do_sync(enabled_sync_body, tok=user1_tok)
+
+        # Disable the extension and send a sticky event while it is disabled
+        _, from_token = self.do_sync(
+            disabled_sync_body, since=from_token, tok=user1_tok
+        )
+        sticky_event_id1 = self._send_sticky_event(
+            room_id, user2_tok, body="while disabled"
+        )
+        response_body, from_token = self.do_sync(
+            disabled_sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # Omit the extension altogether and send another sticky event, plus one
+        # that will have expired by the time the extension is re-enabled.
+        self._send_sticky_event(
+            room_id, user2_tok, duration=Duration(seconds=2), body="expires soon"
+        )
+        sticky_event_id2 = self._send_sticky_event(
+            room_id, user2_tok, body="while omitted"
+        )
+        response_body, from_token = self.do_sync(
+            omitted_sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+        self.reactor.advance(3)
+
+        # Re-enable: the unexpired sticky events sent in the meantime are replayed
+        response_body, from_token = self.do_sync(
+            enabled_sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id1, sticky_event_id2]}
+        )
+
+        # But not again afterwards, and new sticky events are delivered as normal
+        response_body, from_token = self.do_sync(
+            enabled_sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+        sticky_event_id3 = self._send_sticky_event(room_id, user2_tok)
+        response_body, _ = self.do_sync(
+            enabled_sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id3]}
+        )
+
+    def test_newly_joined_room_gets_all_unexpired_sticky_events(self) -> None:
+        """
+        Test that when the user joins a room on an incremental sync, all unexpired
+        sticky events in the room are returned, including ones sent before `pos`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        sticky_event_id1 = self._send_sticky_event(room_id, user2_tok, body="one")
+
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        # user1 isn't in the room yet, so sees nothing
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+        # user1 joins and sees the historical sticky event
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id1]}
+        )
+
+        # user1 leaves, another sticky event is sent, and user1 re-joins: they
+        # should get all unexpired sticky events in the room again.
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+        _, from_token = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        sticky_event_id2 = self._send_sticky_event(room_id, user2_tok, body="two")
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id1, sticky_event_id2]}
+        )
+
+    def test_scoping_by_lists_and_rooms(self) -> None:
+        """
+        Test that the common per-room extension fields `lists` and `rooms`
+        (MSC4508) control which rooms sticky events are returned for.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        sticky_event_id = self._send_sticky_event(room_id, user2_tok)
+
+        # No lists in scope, no room subscriptions: nothing is in scope
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {
+                STICKY_EVENTS_EXT: {"enabled": True, "lists": [], "rooms": []}
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+        # A list key that doesn't exist in the request is ignored
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {
+                STICKY_EVENTS_EXT: {"enabled": True, "lists": ["other"], "rooms": []}
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+        # Naming the list brings the room into scope
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "lists": ["main"]}},
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+
+        # A room subscription brings the room into scope, even with no lists
+        sync_body = {
+            "room_subscriptions": {room_id: ROOM_SUBSCRIPTION},
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "lists": []}},
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+
+        # ...unless the subscription isn't named in `rooms`
+        sync_body = {
+            "room_subscriptions": {room_id: ROOM_SUBSCRIPTION},
+            "extensions": {
+                STICKY_EVENTS_EXT: {"enabled": True, "lists": [], "rooms": []}
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+    def test_room_outside_list_range_is_not_in_scope(self) -> None:
+        """
+        Test that a room that matches a list but is outside the list's range is
+        not in scope for the extension, and that it gets all of its unexpired
+        sticky events when it comes into range.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id_a = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_a, user1_id, tok=user1_tok)
+        room_id_b = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_b, user1_id, tok=user1_tok)
+
+        # A sticky event in room B, and then a regular message in room A so that
+        # room A is the most recent room (and therefore the only one in a range
+        # of [0, 0]).
+        sticky_event_id = self._send_sticky_event(room_id_b, user2_tok)
+        self.helper.send(room_id_a, body="bump A", tok=user2_tok)
+
+        sync_body = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertEqual(
+            response_body["lists"]["main"]["ops"][0]["room_ids"], [room_id_a]
+        )
+        # Room B is out of range, so its sticky event is not returned
+        self._assert_sticky_events_response(response_body, None)
+
+        # Bump room B into range: we now get its (old) sticky event
+        self.helper.send(room_id_b, body="bump B", tok=user2_tok)
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self.assertEqual(
+            response_body["lists"]["main"]["ops"][0]["room_ids"], [room_id_b]
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id_b: [sticky_event_id]}
+        )
+
+        # And not again afterwards
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+    def test_room_leaving_and_reentering_scope(self) -> None:
+        """
+        Test that when a room drops out of scope and later comes back into scope,
+        the sticky events sent in the meantime are returned (unless they have
+        expired by then).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id_a = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_a, user1_id, tok=user1_tok)
+        room_id_b = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_b, user1_id, tok=user1_tok)
+
+        def sync_body_with_scope(room_ids: list[str]) -> JsonDict:
+            return {
+                "room_subscriptions": {
+                    room_id_a: ROOM_SUBSCRIPTION,
+                    room_id_b: ROOM_SUBSCRIPTION,
+                },
+                "extensions": {
+                    STICKY_EVENTS_EXT: {
+                        "enabled": True,
+                        "lists": [],
+                        "rooms": room_ids,
+                    }
+                },
+            }
+
+        # Room A is in scope to begin with
+        response_body, from_token = self.do_sync(
+            sync_body_with_scope([room_id_a]), tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # Room A drops out of scope
+        response_body, from_token = self.do_sync(
+            sync_body_with_scope([room_id_b]), since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # Sticky events are sent in room A while it is out of scope
+        expiring_event_id = self._send_sticky_event(
+            room_id_a,
+            user2_tok,
+            duration=Duration(seconds=2),
+            body="expires soon",
+        )
+        sticky_event_id = self._send_sticky_event(
+            room_id_a, user2_tok, body="still sticky"
+        )
+        response_body, from_token = self.do_sync(
+            sync_body_with_scope([room_id_b]), since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # Let the short-lived sticky event expire
+        self.reactor.advance(3)
+
+        # Room A comes back into scope: we get the sticky event sent while it was
+        # out of scope, but not the one that has expired since.
+        response_body, from_token = self.do_sync(
+            sync_body_with_scope([room_id_a]), since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id_a: [sticky_event_id]}
+        )
+        self.assertNotIn(
+            expiring_event_id,
+            [
+                e["event_id"]
+                for e in response_body["extensions"][STICKY_EVENTS_EXT]["rooms"][
+                    room_id_a
+                ]["events"]
+            ],
+        )
+
+        # And not again afterwards
+        response_body, _ = self.do_sync(
+            sync_body_with_scope([room_id_a]), since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+    def test_pagination_across_rooms_entering_scope(self) -> None:
+        """
+        Test that the `limit` bounds the response even when a room with many
+        unexpired sticky events comes into scope, with the remainder following on
+        subsequent requests in stream order, and that this doesn't lose track of
+        sticky events in other rooms that are out of scope in the meantime.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id_a = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_a, user1_id, tok=user1_tok)
+        room_id_b = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_b, user1_id, tok=user1_tok)
+
+        def sync_body_with_scope(room_ids: list[str]) -> JsonDict:
+            return {
+                "room_subscriptions": {
+                    room_id_a: ROOM_SUBSCRIPTION,
+                    room_id_b: ROOM_SUBSCRIPTION,
+                },
+                "extensions": {
+                    STICKY_EVENTS_EXT: {
+                        "enabled": True,
+                        "limit": 2,
+                        "lists": [],
+                        "rooms": room_ids,
+                    }
+                },
+            }
+
+        # 3 sticky events in room B, which is out of scope to begin with
+        sticky_event_ids_b = [
+            self._send_sticky_event(room_id_b, user2_tok, body=f"B {i}")
+            for i in range(3)
+        ]
+        response_body, from_token = self.do_sync(
+            sync_body_with_scope([room_id_a]), tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # Room B comes into scope and room A drops out of scope, and a new sticky
+        # event arrives in room A (which must not be returned while out of scope).
+        sticky_event_id_a = self._send_sticky_event(room_id_a, user2_tok, body="A")
+
+        # First page: the oldest 2 of room B's sticky events
+        response_body, from_token = self.do_sync(
+            sync_body_with_scope([room_id_b]), since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id_b: sticky_event_ids_b[0:2]}
+        )
+
+        # Second page: the remaining one
+        response_body, from_token = self.do_sync(
+            sync_body_with_scope([room_id_b]), since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id_b: sticky_event_ids_b[2:3]}
+        )
+
+        # Nothing more after that
+        response_body, from_token = self.do_sync(
+            sync_body_with_scope([room_id_b]), since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # Room A comes back into scope and we get the sticky event that was sent
+        # while it was out of scope.
+        response_body, _ = self.do_sync(
+            sync_body_with_scope([room_id_a]), since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id_a: [sticky_event_id_a]}
+        )
+
+    def test_live_room_pagination(self) -> None:
+        """
+        Test that `limit` also bounds the sticky events of rooms that are already
+        live on the connection, with the remainder following on subsequent
+        requests in stream order and nothing being lost or duplicated.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 2}},
+        }
+        # The room is now live on the connection
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+        sticky_event_ids = [
+            self._send_sticky_event(room_id, user2_tok, body=f"sticky {i}")
+            for i in range(5)
+        ]
+
+        # The sticky events arrive in pages of 2, in stream order
+        for page in (sticky_event_ids[0:2], sticky_event_ids[2:4]):
+            response_body, from_token = self.do_sync(
+                sync_body, since=from_token, tok=user1_tok
+            )
+            self._assert_sticky_events_response(response_body, {room_id: page})
+
+        # A new sticky event sent in the meantime is picked up after the backlog
+        sticky_event_id = self._send_sticky_event(room_id, user2_tok, body="newest")
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_ids[4], sticky_event_id]}
+        )
+
+        # And then nothing more
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+    def test_per_room_state_is_persisted(self) -> None:
+        """
+        Test that the per-room sticky events position is persisted in the
+        per-connection state in the database (rather than only held in memory),
+        so that it survives restarts and is shared between workers.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        def get_persisted_sticky_events_state(pos: str) -> list[tuple[str, str, str]]:
+            """Returns (room_id, room_status, last_token) rows for the given `pos`."""
+            connection_position = int(pos.split("/", 1)[0])
+            return self.get_success(
+                self.store.db_pool.simple_select_list(
+                    table="sliding_sync_connection_streams",
+                    keyvalues={
+                        "connection_position": connection_position,
+                        "stream": "sticky_events",
+                    },
+                    retcols=("room_id", "room_status", "last_token"),
+                    desc="get_persisted_sticky_events_state",
+                )
+            )
+
+        for _ in range(3):
+            self._send_sticky_event(room_id, user2_tok)
+
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 2}},
+        }
+
+        # The first page is cut short, so the room is recorded as partially sent,
+        # along with the position we got up to.
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+        rows = get_persisted_sticky_events_state(from_token)
+        self.assertEqual(len(rows), 1, rows)
+        persisted_room_id, room_status, last_token = rows[0]
+        self.assertEqual(persisted_room_id, room_id)
+        self.assertEqual(room_status, "previously")
+        self.assertIsNotNone(last_token)
+
+        # After the remainder is sent, the room is recorded as live (and the
+        # persisted position was correctly read back to continue from).
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self.assertEqual(
+            len(
+                response_body["extensions"][STICKY_EVENTS_EXT]["rooms"][room_id][
+                    "events"
+                ]
+            ),
+            1,
+        )
+        rows = get_persisted_sticky_events_state(from_token)
+        self.assertEqual(rows, [(room_id, "live", None)])
