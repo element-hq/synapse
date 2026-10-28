@@ -284,6 +284,21 @@ class SlidingSyncServerAnnouncementsTestCase(SlidingSyncBase):
         room = self._assert_delivered(response, self.former)
         self._assert_no_own_membership_in_timeline(room, self.former)
 
+    def test_self_left_member_before_any_announcement(self) -> None:
+        """A member who leaves the room themselves while their connection is
+        open, before anything was announced, gets the first announcement with
+        the synthetic join.
+        """
+        _, pos = self.do_sync(self._sync_body(), tok=self.former_tok)
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+        _, pos = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
+        event_id = self._announce("hello")
+
+        response, _ = self.do_sync(self._sync_body(), since=pos, tok=self.former_tok)
+
+        room = self._assert_delivered(response, self.former)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+
     def _remove_former(self) -> None:
         """Drop `former` from the configured senders, which kicks them."""
         self.config.rooms = [
