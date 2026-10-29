@@ -166,3 +166,13 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
             self.announcement_id,
             [event["event_id"] for event in body["messages"]["chunk"]],
         )
+
+    def test_messages_after_room_is_unconfigured(self) -> None:
+        """The reader can still paginate back to the announcement once the room
+        is removed from the configuration."""
+        self.hs.config.serverannouncements.rooms = []
+
+        body = self._get(f"/rooms/{self.room_id}/messages?dir=b")
+        self.assertIn(
+            self.announcement_id, [event["event_id"] for event in body["chunk"]]
+        )
