@@ -153,6 +153,7 @@ class BaseAuth(ABC):
                 % (requester.user, room_id),
             )
 
+        # Allow users who left a server announcement room to keep reading it.
         if (
             membership != Membership.JOIN
             and await self._is_server_announcement_room(room_id)
