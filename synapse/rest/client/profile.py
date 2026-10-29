@@ -23,7 +23,9 @@
 
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
+
+from pydantic import Field
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, SynapseError
@@ -31,16 +33,23 @@ from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
+    parse_and_validate_json_object_from_request,
     parse_boolean,
     parse_json_object_from_request,
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.types import JsonDict, Requester, UserID
+from synapse.types import Absent, AbsentType, JsonDict, Requester, UserID
+from synapse.types.rest import RequestBodyModel
 from synapse.util.stringutils import is_namedspaced_grammar
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+
+PROFILE_QUERY_MAX_TARGET_USERS = 100
+"""Maximum amount of target user profiles to allow querying via the profile
+query endpoint. Defined in MSC4536.
+"""
 
 
 def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
@@ -85,7 +94,7 @@ async def _auth_and_ratelimit_profile_lookup(
 
 class ProfileRestServlet(RestServlet):
     PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)$", v1=True)
-    CATEGORY = "Event sending requests"
+    CATEGORY = "Profile requests"
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -349,10 +358,90 @@ class UnstableProfileFieldRestServlet(ProfileFieldRestServlet):
     )
 
 
+class ProfileQueryRestServlet(RestServlet):
+    PATTERNS = client_patterns(
+        "/org.matrix.msc4536/profile/query$",
+        unstable=True,
+        releases=(),
+    )
+    CATEGORY = "Profile requests"
+
+    class PostBody(RequestBodyModel):
+        users: Annotated[
+            list[str], Field(min_length=1, max_length=PROFILE_QUERY_MAX_TARGET_USERS)
+        ]
+        """
+        List of user IDs to query profiles for.
+        """
+
+        fields: Annotated[list[str], Field(min_length=1)] | AbsentType = Absent
+        """
+        If specified, the profile fields to return.
+
+        If absent, return whole profiles.
+        """
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.profile_handler = hs.get_profile_handler()
+        self.auth = hs.get_auth()
+
+    async def on_POST(
+        self,
+        request: SynapseRequest,
+    ) -> tuple[int, JsonDict]:
+        """Profiles query endpoint (MSC4536)
+
+        Allows querying multiple profiles in one go as an authenticated user. Hard
+        limited to an arbitrary number of profiles in one request.
+
+        Note, currently does not return information about remote profiles, ie this
+        won't cause a remote lookup like when using the `/profile/<user>` or
+        `/profile/<user_id>/<field>` endpoints. This is subject to change
+        with MSC4259 bringing support for federated profile information.
+        """
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
+        if not requester:
+            raise SynapseError(
+                HTTPStatus.UNAUTHORIZED,
+                "You must be authenticated to query profiles.",
+                Codes.MISSING_TOKEN,
+            )
+
+        content = parse_and_validate_json_object_from_request(request, self.PostBody)
+
+        target_users = set(content.users)
+        field_names = set(content.fields) if content.fields is not Absent else None
+
+        for user_id in target_users:
+            if not UserID.is_valid(user_id):
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"Invalid user id {user_id}",
+                    Codes.INVALID_PARAM,
+                )
+
+        filtered_profiles = (
+            await self.profile_handler.check_profile_query_allowed_for_users(
+                target_users=target_users,
+                requester=requester.user,
+            )
+        )
+
+        ret = await self.profile_handler.get_profiles(
+            filtered_profiles, field_names=field_names
+        )
+
+        return 200, ret
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ProfileFieldRestServlet(hs).register(http_server)
 
     if hs.config.experimental.msc4133_enabled:
         UnstableProfileFieldRestServlet(hs).register(http_server)
+    if hs.config.experimental.msc4536_enabled:
+        ProfileQueryRestServlet(hs).register(http_server)
 
     ProfileRestServlet(hs).register(http_server)
