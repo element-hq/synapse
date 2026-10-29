@@ -2275,6 +2275,21 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
 
         self._assert_not_delivered(self._sync(self.bob_tok, since))
 
+    def test_incremental_sync_after_first_announcement(self) -> None:
+        """A non-member who has synced past an announcement room's first
+        announcement gets a later announcement with only the synthetic join in
+        `state`, as nothing else changed since their token.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+        event_id = self._announce("again")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+        self.assertEqual(
+            [event["type"] for event in room["state"]["events"]], [EventTypes.Member]
+        )
+
     def test_members_get_their_real_membership(self) -> None:
         """Members of an announcement room sync it as a regular room."""
         self._announce("hello")
