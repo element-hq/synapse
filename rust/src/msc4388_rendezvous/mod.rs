@@ -43,8 +43,7 @@ mod session;
 struct MSC4388RendezvousHandler {
     runtime: RustRuntime,
     sessions: BTreeMap<Ulid, Session>,
-    soft_limit: usize,
-    hard_limit: usize,
+    max_sessions: usize,
     max_content_length: u64,
     ttl: Duration,
 }
@@ -65,15 +64,13 @@ impl MSC4388RendezvousHandler {
         Ok(())
     }
 
-    /// Evict expired sessions and remove the oldest sessions until we're under the capacity.
+    /// Evict expired sessions.
+    ///
+    /// Live sessions are never evicted to make room for new ones, as otherwise
+    /// anyone could disrupt sign ins that are in progress by creating lots of
+    /// sessions. Instead, new sessions are refused while at capacity.
     fn evict(&mut self, now: SystemTime) {
-        // First remove all the entries which expired
         self.sessions.retain(|_, session| !session.expired(now));
-
-        // Then we remove the oldest entries until we're under the soft limit
-        while self.sessions.len() > self.soft_limit {
-            self.sessions.pop_first();
-        }
     }
 }
 
@@ -91,12 +88,11 @@ pub struct PutRequest {
 #[pymethods]
 impl MSC4388RendezvousHandler {
     #[new]
-    #[pyo3(signature = (homeserver, /, soft_limit=100, hard_limit=200,max_content_length=4*1024, eviction_interval=60*1000, ttl=2*60*1000))]
+    #[pyo3(signature = (homeserver, /, max_sessions=1000, max_content_length=4*1024, eviction_interval=60*1000, ttl=2*60*1000))]
     fn new(
         py: Python<'_>,
         homeserver: HomeServer,
-        soft_limit: usize,
-        hard_limit: usize,
+        max_sessions: usize,
         max_content_length: u64,
         eviction_interval: u64,
         ttl: u64,
@@ -111,8 +107,7 @@ impl MSC4388RendezvousHandler {
             Self {
                 runtime,
                 sessions: BTreeMap::new(),
-                soft_limit,
-                hard_limit,
+                max_sessions,
                 max_content_length,
                 ttl: Duration::from_millis(ttl),
             },
@@ -138,11 +133,6 @@ impl MSC4388RendezvousHandler {
     fn handle_post(&mut self, twisted_request: &Bound<'_, PyAny>) -> PyResult<(u8, PostResponse)> {
         let now = self.runtime.clock().now();
 
-        // We trigger an immediate eviction if we're at the hard limit
-        if self.sessions.len() >= self.hard_limit {
-            self.evict(now);
-        }
-
         // Generate a new ULID for the session from the current time.
         let id = Ulid::from_datetime(now);
 
@@ -161,6 +151,21 @@ impl MSC4388RendezvousHandler {
 
         let data: String = post_request.data;
         self.check_data_length(&data)?;
+
+        // If we're at capacity, evict expired sessions now rather than waiting
+        // for the next eviction run, in case that frees up some room.
+        if self.sessions.len() >= self.max_sessions {
+            self.evict(now);
+        }
+        if self.sessions.len() >= self.max_sessions {
+            return Err(SynapseError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many rendezvous sessions in progress, try again later".to_owned(),
+                "M_LIMIT_EXCEEDED",
+                None,
+                None,
+            ));
+        }
 
         let session = Session::new(id, data, now, self.ttl);
         let response = session.post_response(now);

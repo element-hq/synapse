@@ -687,11 +687,16 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
 
+    @override_config({"experimental_features": {"msc4388_max_sessions": 10}})
     def test_capacity(self) -> None:
         """
-        Test that the soft capacity limit is enforced on the rendezvous sessions, as old
-        entries are evicted at an interval when the limit is reached.
+        Test that new sessions are refused while at capacity, rather than live
+        sessions being evicted, and that capacity is freed up as sessions expire.
         """
+        # Offset the sessions from the eviction interval (60 seconds), so that
+        # they expire between two eviction runs
+        self.reactor.advance(30)
+
         # Start a new session
         channel = self.make_request(
             "POST",
@@ -702,20 +707,8 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         session_endpoint = rz_endpoint + "/" + channel.json_body["id"]
 
-        # Sanity check that we can get the data back
-        channel = self.make_request(
-            "GET",
-            session_endpoint,
-            access_token=None,
-        )
-        self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["data"], "foo=bar")
-
-        # We advance the clock to make sure that this entry is the "lowest" in the session list
-        self.reactor.advance(1)
-
-        # Start a lot of new sessions
-        for _ in range(100):
+        # Fill up the remaining capacity
+        for _ in range(9):
             channel = self.make_request(
                 "POST",
                 rz_endpoint,
@@ -724,33 +717,34 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200)
 
-        # Get the data back, it should still be there, as the eviction hasn't run yet
+        # Further sessions are refused
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 429)
+        self.assertEqual(channel.json_body["errcode"], "M_LIMIT_EXCEEDED")
+
+        # The first session is still there, even after the eviction has run
+        self.reactor.advance(60)
         channel = self.make_request(
             "GET",
             session_endpoint,
             access_token=None,
         )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["data"], "foo=bar")
 
+        # Deleting a session frees up capacity for a new one
+        channel = self.make_request(
+            "DELETE",
+            session_endpoint,
+            access_token=None,
+        )
         self.assertEqual(channel.code, 200)
 
-        # Advance the clock, as it will trigger the eviction
-        self.reactor.advance(59)
-
-        # Get the data back, it should be gone
-        channel = self.make_request(
-            "GET",
-            session_endpoint,
-            access_token=None,
-        )
-
-        self.assertEqual(channel.code, 404)
-
-    def test_hard_capacity(self) -> None:
-        """
-        Test that the hard capacity limit is enforced on the rendezvous sessions, as old
-        entries are evicted immediately when the limit is reached.
-        """
-        # Start a new session
         channel = self.make_request(
             "POST",
             rz_endpoint,
@@ -758,21 +752,12 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             access_token=None,
         )
         self.assertEqual(channel.code, 200)
-        session_endpoint = rz_endpoint + "/" + channel.json_body["id"]
-        # We advance the clock to make sure that this entry is the "lowest" in the session list
-        self.reactor.advance(1)
 
-        # Sanity check that we can get the data back
-        channel = self.make_request(
-            "GET",
-            session_endpoint,
-            access_token=None,
-        )
-        self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["data"], "foo=bar")
-
-        # Start a lot of new sessions
-        for _ in range(200):
+        # Once the original sessions have expired, there is capacity for new
+        # ones even though the eviction has not run since. The session created
+        # after the delete is still live, so only 9 fit.
+        self.reactor.advance(61)
+        for _ in range(9):
             channel = self.make_request(
                 "POST",
                 rz_endpoint,
@@ -781,14 +766,13 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200)
 
-        # Get the data back, it should already be gone as we hit the hard limit
         channel = self.make_request(
-            "GET",
-            session_endpoint,
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
             access_token=None,
         )
-
-        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.code, 429)
 
     def test_data_type(self) -> None:
         """

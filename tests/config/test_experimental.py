@@ -86,6 +86,18 @@ class ExperimentalConfigTestCase(unittest.TestCase):
         with self.assertRaises(ConfigError):
             _read_config({"experimental_features": {"msc4388_session_ttl": ttl}})
 
+    @parameterized.expand([["zero", 0], ["negative", -1], ["string", "100"]])
+    def test_msc4388_max_sessions_invalid(
+        self, test_description: str, max_sessions: object
+    ) -> None:
+        """
+        Test that an invalid maximum number of MSC4388 sessions is rejected.
+        """
+        with self.assertRaises(ConfigError):
+            _read_config(
+                {"experimental_features": {"msc4388_max_sessions": max_sessions}}
+            )
+
 
 def _read_config(config_values: JsonDict) -> ExperimentalConfig:
     config = ExperimentalConfig(RootConfig())

@@ -261,15 +261,30 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4388_session_ttl"),
             )
 
+        # The maximum number of rendezvous sessions that can be live at once.
+        # New sessions are refused while at this limit, rather than evicting
+        # live ones, so that sign ins in progress cannot be disrupted. Each
+        # session uses up to around 32KiB, for its payload and the transaction
+        # IDs recorded against it.
+        self.msc4388_max_sessions: int = experimental.get("msc4388_max_sessions", 1000)
+        if (
+            not isinstance(self.msc4388_max_sessions, int)
+            or self.msc4388_max_sessions < 1
+        ):
+            raise ConfigError(
+                "msc4388_max_sessions must be a positive integer",
+                ("experimental", "msc4388_max_sessions"),
+            )
+
         # MSC4388 requests are ratelimited by client IP address, as most are
         # unauthenticated: only discovery and creating a session may carry an
         # access token, and even then it is not used for ratelimiting.
         #
-        # Creating a session is limited more strictly than other requests, as
-        # there is a cap on the number of concurrent sessions, and creating new
-        # sessions beyond it evicts the oldest ones. A client using these
-        # defaults can hold at most around 20 live sessions at once with the
-        # default session TTL of 2 minutes, or 40 with the maximum of 5 minutes.
+        # Creating a session is limited more strictly than other requests, so
+        # that a single client cannot use up the capacity for live sessions. A
+        # client using these defaults can hold at most around 20 live sessions
+        # at once with the default session TTL of 2 minutes, or 40 with the
+        # maximum of 5 minutes.
         self.msc4388_rc_create = RatelimitSettings.parse(
             experimental,
             "msc4388_rc_create",
