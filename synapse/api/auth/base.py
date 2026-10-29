@@ -145,27 +145,32 @@ class BaseAuth(ABC):
                 room_id, requester, allow_departed_users=allow_departed_users
             )
         except AuthError:
-            pass
-        else:
-            if (
-                membership == Membership.JOIN
-                or not await self._is_server_announcement_room(room_id)
-            ):
-                return membership, member_event_id
+            if await self._is_world_readable(room_id):
+                return Membership.JOIN, None
+            raise AuthError(
+                403,
+                "User %r not in room %s, and room previews are disabled"
+                % (requester.user, room_id),
+            )
 
+        if (
+            membership != Membership.JOIN
+            and await self._is_server_announcement_room(room_id)
+            and await self._is_world_readable(room_id)
+        ):
+            return Membership.JOIN, None
+
+        return membership, member_event_id
+
+    async def _is_world_readable(self, room_id: str) -> bool:
+        """Whether the room's history is visible to anyone."""
         visibility = await self._storage_controllers.state.get_current_state_event(
             room_id, EventTypes.RoomHistoryVisibility, ""
         )
-        if (
-            visibility
+        return (
+            visibility is not None
             and visibility.content.get("history_visibility")
             == HistoryVisibility.WORLD_READABLE
-        ):
-            return Membership.JOIN, None
-        raise AuthError(
-            403,
-            "User %r not in room %s, and room previews are disabled"
-            % (requester.user, room_id),
         )
 
     async def _is_server_announcement_room(self, room_id: str) -> bool:
