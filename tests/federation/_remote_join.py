@@ -15,7 +15,7 @@
 import logging
 import urllib.parse
 from http import HTTPStatus
-from typing import Callable, TypeVar
+from typing import Awaitable, Callable, TypeVar
 from unittest.mock import Mock
 
 import attr
@@ -192,9 +192,55 @@ class RemoteJoinHelper:
         self._creator_membership_event = creator_membership_event
         self._extra_state_events = extra_state_events
 
-    def join(self, local_user_id: str, local_user_tok: str) -> None:
+    def make_remote_message(self, prev_event: EventBase, body: str) -> EventBase:
+        """
+        A message from the remote room creator, sent after `prev_event` and signed by
+        the remote server.
+
+        Args:
+            prev_event: the event the message follows (its only `prev_event`).
+            body: the message's text.
+
+        Returns:
+            The message event, not yet sent anywhere.
+        """
+        room_version = self._room_version
+        return make_test_event(
+            self._test_case.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.room_id,
+                    "sender": self._remote_creator_user_id,
+                    "depth": prev_event.depth + 1,
+                    "origin_server_ts": prev_event.depth + 1,
+                    "type": EventTypes.Message,
+                    "content": {"msgtype": "m.text", "body": body},
+                    "auth_events": [
+                        self._room_create_event.event_id,
+                        self._creator_membership_event.event_id,
+                    ]
+                    if not room_version.msc4291_room_ids_as_hashes
+                    else [self._creator_membership_event.event_id],
+                    "prev_events": [prev_event.event_id],
+                },
+                room_version=room_version,
+            ),
+            room_version=room_version,
+        )
+
+    def join(
+        self,
+        local_user_id: str,
+        local_user_tok: str,
+        *,
+        on_send_join: Callable[[EventBase], Awaitable[None]] | None = None,
+    ) -> None:
         """
         Invite `local_user_id` and perform the federation join dance.
+
+        Args:
+            on_send_join: called with the signed join event while the mocked remote
+                server handles `/send_join`, before it responds. Use it to have the
+                remote server do something in the meantime (send an event, say).
         """
         remote_room_id = self.room_id
         room_version = self._room_version
@@ -333,6 +379,8 @@ class RemoteJoinHelper:
                     ),
                     room_version=room_version,
                 )
+                if on_send_join is not None:
+                    await on_send_join(join_membership_event_signed)
                 return SendJoinResponse(
                     auth_events=[
                         room_create_event,
