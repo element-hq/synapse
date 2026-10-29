@@ -3350,13 +3350,13 @@ class SyncHandler:
         that the client replaces the user's real membership with the synthetic
         join and gets the room's current state.
 
-        An entry carries the room's full state when the client may not have
-        received the room yet, and the changes since the `since_token`
-        otherwise. Which users have received a room is not tracked, but any
-        sync covering a room's first announcement delivers it with full state.
-        So the client already has the room if its first announcement is before
-        the `since_token`. Entries for rooms in `left_room_ids` always carry
-        full state.
+        An entry carries the full state only if any of:
+        - there is no `since_token`
+        - the first announcement is after the `since_token`
+        - the user left or was removed from the room
+        Otherwise it carries the changes since the `since_token`, as for a
+        joined room: any sync covering a room's first announcement delivers it
+        with full state, so the client already has the room.
 
         Sending an announcement does not wake up waiting syncs, so that an
         announcement does not wake every user's sync at once. A waiting sync
@@ -3402,7 +3402,7 @@ class SyncHandler:
             }
         first_announcement_positions = (
             await self.store.get_first_non_state_event_positions(
-                room_ids_to_check, now_token.room_key.stream
+                room_ids_to_check, now_token.room_key.get_max_stream_pos()
             )
         )
         announced_room_ids.update(first_announcement_positions)
