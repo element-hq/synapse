@@ -106,6 +106,7 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
         return channel.json_body
 
     def _send_relation(self, rel_type: str, content: JsonDict) -> str:
+        """Send a relation as the announcer user."""
         return self.helper.send_event(
             self.room_id,
             EventTypes.Reaction
