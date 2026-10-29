@@ -130,8 +130,8 @@ class BaseAuth(ABC):
             Resolves to the current membership of the user in the room and the
             membership event ID of the user. If the user is not in the room and
             never has been, then `(Membership.JOIN, None)` is returned. The same
-            is returned for a user who left a configured server announcement
-            room, so that they keep reading it like a user who never joined.
+            is returned for a user who left a server announcement room, so that
+            they keep reading it like a user who never joined.
         """
 
         try:
@@ -168,12 +168,8 @@ class BaseAuth(ABC):
         )
 
     async def _is_server_announcement_room(self, room_id: str) -> bool:
-        """Whether the room is the room of a configured server announcement."""
-        config_id = await self.store.get_server_announcement_id(room_id)
-        return config_id is not None and any(
-            room.config_id == config_id
-            for room in self.hs.config.serverannouncements.rooms
-        )
+        """Whether the room is a server announcement room."""
+        return await self.store.get_server_announcement_id(room_id) is not None
 
     async def validate_appservice_can_control_user_id(
         self, app_service: ApplicationService, user_id: str
