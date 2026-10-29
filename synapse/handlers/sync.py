@@ -2978,7 +2978,9 @@ class SyncHandler:
         ignored_users = await self.store.ignored_users(user_id)
         if since_token:
             room_changes = await self._get_room_changes_for_incremental_sync(
-                sync_result_builder, ignored_users
+                sync_result_builder,
+                ignored_users,
+                account_data_room_ids=account_data_by_room.keys(),
             )
             tags_by_room = await self.store.get_updated_tags(
                 user_id, since_token.account_data_key
@@ -3058,6 +3060,7 @@ class SyncHandler:
         self,
         sync_result_builder: "SyncResultBuilder",
         ignored_users: frozenset[str],
+        account_data_room_ids: AbstractSet[str],
     ) -> _RoomChanges:
         """Determine the changes in rooms to report to the user.
 
@@ -3316,6 +3319,7 @@ class SyncHandler:
                 sync_result_builder,
                 sync_result_builder.announcement_room_ids,
                 left_room_ids=left_announcement_room_ids,
+                account_data_room_ids=account_data_room_ids,
             )
         )
 
@@ -3332,6 +3336,7 @@ class SyncHandler:
         sync_result_builder: "SyncResultBuilder",
         room_ids: AbstractSet[str],
         left_room_ids: AbstractSet[str] = frozenset(),
+        account_data_room_ids: AbstractSet[str] = frozenset(),
     ) -> list["RoomSyncResultBuilder"]:
         """Returns entries for the given announcement rooms that have something
         to show.
@@ -3340,8 +3345,9 @@ class SyncHandler:
         event, so that creating the room and joining its senders does not show
         it to every user. On an incremental sync, a room is included if it has
         had an announcement and there is any new event in it since the
-        `since_token`, such as a sender leaving or a name change. With
-        `full_state` set, a room is also included without any new event. On an
+        `since_token`, such as a sender leaving or a name change, or a change
+        to the user's room account data for it. With `full_state` set, a room
+        is also included without any new event. On an
         initial sync, a room is included if it has ever had an announcement,
         even when later state changes push that announcement out of the
         timeline.
@@ -3372,6 +3378,9 @@ class SyncHandler:
             room_ids: The announcement rooms to consider.
             left_room_ids: Rooms among `room_ids` that the user left or was
                 removed from since the `since_token` of `sync_result_builder`.
+            account_data_room_ids: Rooms whose room account data for the user
+                changed since the `since_token` of `sync_result_builder`.
+                They may include rooms that are not in `room_ids`.
         """
         since_token = sync_result_builder.since_token
         now_token = sync_result_builder.now_token
@@ -3400,7 +3409,8 @@ class SyncHandler:
 
         # On an incremental sync, `room_ids_to_include` should also include
         # rooms that have new state events but no new announcement in the
-        # window, if they had an announcement before the window.
+        # window, or a room account data change, if they had an announcement
+        # before the window.
         #
         # On an initial or `full_state` sync, a room is included whenever it
         # has ever had an announcement, even if it isn't among the recent
@@ -3413,6 +3423,10 @@ class SyncHandler:
                 for room_id, (events, _, _) in room_to_events.items()
                 if events and room_id not in left_room_ids
             }
+            # Also consider rooms whose account data has changed.
+            room_ids_to_check |= account_data_room_ids & (
+                room_ids - room_ids_to_include
+            )
         first_announcement_positions = (
             await self.store.get_first_non_state_event_positions(
                 room_ids_to_check, now_token.room_key.get_max_stream_pos()
