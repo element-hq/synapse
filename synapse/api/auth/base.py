@@ -129,9 +129,10 @@ class BaseAuth(ABC):
         Returns:
             Resolves to the current membership of the user in the room and the
             membership event ID of the user. If the user is not in the room and
-            never has been, then `(Membership.JOIN, None)` is returned. The same
-            is returned for a user who left a server announcement room, so that
-            they keep reading it like a user who never joined.
+            never has been, then `(Membership.JOIN, None)` is returned.
+
+            The same is returned for a user who left a server announcement room,
+            so that they keep reading it like a user who never joined.
         """
 
         try:
