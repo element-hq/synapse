@@ -50,9 +50,10 @@ def make_synthetic_join_event(
             every time, e.g. that of the room's create event.
 
     Returns:
-        The event, serialized for the client.
+        The event's JSON in federation format.
     """
     return {
+        "room_id": room_id,
         "type": EventTypes.Member,
         "event_id": "-".join(
             [

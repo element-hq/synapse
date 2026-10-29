@@ -467,6 +467,24 @@ def serialize_events(
         The serialized events, in the same order as `events`.
     """
 
+def serialize_synthetic_event(
+    event: JsonDict, config: SerializeEventConfig
+) -> JsonDict:
+    """Serialize an event that only exists as JSON, such as a synthetic event
+    that is never persisted.
+
+    Only the event format and the field allowlist from `config` apply: there is
+    no stored event to take the age, transaction ID, redaction or bundled
+    aggregations from.
+
+    Args:
+        event: The event's JSON, in federation format.
+        config: The serialization config.
+
+    Returns:
+        The serialized event.
+    """
+
 # The standalone `format_event_*` transforms below are a backwards
 # compatibility hack: they have never been part of the module API and modules
 # shouldn't be pulling them in, but some in the wild import them (via

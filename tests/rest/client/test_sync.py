@@ -2592,3 +2592,51 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
             ),
             self.bob,
         )
+
+    def test_event_fields(self) -> None:
+        """With an `event_fields` filter, the synthetic join is trimmed to the
+        requested fields like every other event.
+        """
+        self._announce("hello")
+        event_fields = ["type", "content", "state_key"]
+
+        response = self._sync(self.bob_tok, filter={"event_fields": event_fields})
+        room = response["rooms"]["join"][self.room_id]
+
+        events = room["state"]["events"] + room["timeline"]["events"]
+        own_memberships = [
+            event
+            for event in events
+            if event["type"] == EventTypes.Member and event["state_key"] == self.bob
+        ]
+        self.assertEqual(
+            own_memberships,
+            [
+                {
+                    "type": EventTypes.Member,
+                    "content": {"membership": Membership.JOIN},
+                    "state_key": self.bob,
+                }
+            ],
+        )
+        for event in events:
+            self.assertLessEqual(set(event), set(event_fields), event)
+
+    def test_federation_event_format(self) -> None:
+        """With the `federation` event format, the synthetic join carries the
+        room ID like every other event.
+        """
+        self._announce("hello")
+
+        response = self._sync(self.bob_tok, filter={"event_format": "federation"})
+        room = response["rooms"]["join"][self.room_id]
+
+        events = room["state"]["events"] + room["timeline"]["events"]
+        own_memberships = [
+            event
+            for event in events
+            if event["type"] == EventTypes.Member and event["state_key"] == self.bob
+        ]
+        self.assertEqual(len(own_memberships), 1, own_memberships)
+        for event in events:
+            self.assertEqual(event.get("room_id"), self.room_id, event)

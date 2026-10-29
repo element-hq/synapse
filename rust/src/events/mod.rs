@@ -118,6 +118,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_function(wrap_pyfunction!(redact_event_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_dict, m)?)?;
     child_module.add_function(wrap_pyfunction!(serialize::serialize_events, m)?)?;
+    child_module.add_function(wrap_pyfunction!(serialize::serialize_synthetic_event, m)?)?;
     child_module.add_function(wrap_pyfunction!(serialize::format_event_raw, m)?)?;
     child_module.add_function(wrap_pyfunction!(serialize::format_event_for_client_v1, m)?)?;
     child_module.add_function(wrap_pyfunction!(serialize::format_event_for_client_v2, m)?)?;

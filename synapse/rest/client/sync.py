@@ -655,8 +655,11 @@ class SyncRestServlet(RestServlet):
         if is_announcement:
             create_event = await self.store.get_create_event_for_room(room.room_id)
             serialized_state.append(
-                make_synthetic_join_event(
-                    room.room_id, user_id, create_event.origin_server_ts
+                self._event_serializer.serialize_synthetic_event(
+                    make_synthetic_join_event(
+                        room.room_id, user_id, create_event.origin_server_ts
+                    ),
+                    serialize_options,
                 )
             )
         serialized_timeline = await self._event_serializer.serialize_events(
