@@ -14,18 +14,18 @@
 
 from typing import Collection
 
-from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import LoggingTransaction
+from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
+from synapse.util.caches.descriptors import cached
 
 
-class ServerAnnouncementsStore(SQLBaseStore):
+class ServerAnnouncementsStore(CacheInvalidationWorkerStore):
     """Stores details about an announcement room.
 
     The unique announcement `id` identifies the same room even when its configured
     details change. It is separate from the actual room ID.
 
-    Lookups are cheap and deliberately uncached, avoiding cross-worker cache
-    invalidation for mapping and avatar changes.
+    Only the set of configured room IDs is cached, as it is read on every sync.
     """
 
     async def get_server_announcement_room(self, config_id: str) -> str | None:
@@ -48,7 +48,8 @@ class ServerAnnouncementsStore(SQLBaseStore):
             desc="get_server_announcement_id",
         )
 
-    async def get_server_announcement_room_ids(self) -> set[str]:
+    @cached(num_args=0)
+    async def get_server_announcement_room_ids(self) -> frozenset[str]:
         """Return the room IDs of the currently configured announcement rooms.
 
         Rooms whose config ID is no longer in the config are left out, as
@@ -63,7 +64,7 @@ class ServerAnnouncementsStore(SQLBaseStore):
             retcols=("room_id",),
             desc="get_server_announcement_room_ids",
         )
-        return {room_id for (room_id,) in rows}
+        return frozenset(room_id for (room_id,) in rows)
 
     async def get_server_announcement_room_ids_with_announcement(
         self, room_ids: Collection[str], max_stream_ordering: int
@@ -102,10 +103,19 @@ class ServerAnnouncementsStore(SQLBaseStore):
         self, config_id: str, room_id: str
     ) -> None:
         """Store a new mapping."""
-        await self.db_pool.simple_insert(
-            table="server_announcement_rooms",
-            values={"config_id": config_id, "room_id": room_id},
-            desc="store_server_announcement_room",
+
+        def _store_server_announcement_room_txn(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_insert_txn(
+                txn,
+                table="server_announcement_rooms",
+                values={"config_id": config_id, "room_id": room_id},
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.get_server_announcement_room_ids, ()
+            )
+
+        await self.db_pool.runInteraction(
+            "store_server_announcement_room", _store_server_announcement_room_txn
         )
 
     async def get_server_announcement_avatar(
