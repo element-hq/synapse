@@ -4617,6 +4617,37 @@ class ThreepidInviteTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400)
         self.assertEqual(channel.json_body["errcode"], "M_MISSING_PARAM")
 
+    def test_identity_server_error_is_proxied(self) -> None:
+        """
+        Test that an error response from the identity server's `/store-invite`
+        endpoint is returned to the client instead of a 500 error.
+        """
+        identity_handler = self.hs.get_identity_handler()
+        identity_handler.lookup_3pid = AsyncMock(  # type: ignore[method-assign]
+            return_value=None,
+        )
+        identity_handler._http_client.post_json_get_json = AsyncMock(  # type: ignore[method-assign]
+            side_effect=HttpResponseException(
+                400,
+                "Bad Request",
+                b'{"errcode": "M_THREEPID_IN_USE", "error": "Already invited"}',
+            )
+        )
+
+        channel = self.make_request(
+            method="POST",
+            path="/rooms/" + self.room_id + "/invite",
+            content={
+                "id_server": "example.com",
+                "id_access_token": "sometoken",
+                "medium": "email",
+                "address": "teresa@example.com",
+            },
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 400, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], Codes.THREEPID_IN_USE)
+
 
 class TimestampLookupTestCase(unittest.HomeserverTestCase):
     servlets = [
