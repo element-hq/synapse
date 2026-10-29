@@ -1437,19 +1437,23 @@ class SyncHandler:
 
                 # Only send members which aren't in our cache (either because
                 # they're new to this client or have been pushed out of the
-                # cache). For an initial sync the cache has already been
-                # cleared.
+                # cache).
                 #
                 # A state change since `since_token` is always sent, regardless
                 # of whether it was previously sent to the client (e.g due to a
                 # client retrying the request).
-                logger.debug("filtering state from %r...", state_ids)
-                state_ids = {
-                    t: event_id
-                    for t, event_id in state_ids.items()
-                    if t in changed_keys or not cache.was_sent(t[1], event_id)
-                }
-                logger.debug("...to %r", state_ids)
+                #
+                # We don't filter the full state as we know this is the first
+                # time the client will see the memberships. For full state the
+                # cache *should* already be cleared by this point.
+                if not full_state:
+                    logger.debug("filtering state from %r...", state_ids)
+                    state_ids = {
+                        t: event_id
+                        for t, event_id in state_ids.items()
+                        if t in changed_keys or not cache.was_sent(t[1], event_id)
+                    }
+                    logger.debug("...to %r", state_ids)
 
                 # add any member IDs we are about to send into our cache
                 for t, event_id in itertools.chain(
