@@ -3386,14 +3386,20 @@ class SyncHandler:
             limit=timeline_limit + 1,
             direction=Direction.BACKWARDS,
         )
+
+        # Rooms with an announcement since the `since_token`.
         announced_room_ids = {
             room_id
             for room_id, (events, _, _) in room_to_events.items()
             if not all(event.is_state() for event in events)
-        } | (left_room_ids & room_ids)
+        }
+
+        # Rooms the user left are included even without an announcement, so
+        # their real membership is replaced by the synthetic join.
+        room_ids_to_include = announced_room_ids | left_room_ids
 
         if not since_token or sync_result_builder.full_state:
-            room_ids_to_check = room_ids - announced_room_ids
+            room_ids_to_check = room_ids - room_ids_to_include
         else:
             room_ids_to_check = {
                 room_id
@@ -3405,10 +3411,10 @@ class SyncHandler:
                 room_ids_to_check, now_token.room_key.get_max_stream_pos()
             )
         )
-        announced_room_ids.update(first_announcement_positions)
+        room_ids_to_include.update(first_announcement_positions)
 
         room_entries = []
-        for room_id in announced_room_ids:
+        for room_id in room_ids_to_include:
             if room_id in room_to_events:
                 events, start_key, _ = room_to_events[room_id]
                 events.reverse()
