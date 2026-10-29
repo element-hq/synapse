@@ -3331,35 +3331,39 @@ class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
         """A request from `since` forgets the entries recorded after it and
         keeps the rest."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@a:test", "$a", self._token(5))
-        cache.mark_sent("@b:test", "$b", self._token(7))
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+        cache.record("@b:test", "$b", RoomStreamToken(stream=7))
 
         # The client synced past both responses.
-        cache.start_request(self._token(7))
+        with cache.building_response(self._token(7)):
+            pass
         self.assertTrue(cache.was_sent("@a:test", "$a"))
         self.assertTrue(cache.was_sent("@b:test", "$b"))
 
         # The client lost the response that ended at 7.
-        cache.start_request(self._token(6))
+        with cache.building_response(self._token(6)):
+            pass
         self.assertTrue(cache.was_sent("@a:test", "$a"))
         self.assertFalse(cache.was_sent("@b:test", "$b"))
 
         # A later request from an even older token forgets the rest.
-        cache.start_request(self._token(4))
+        with cache.building_response(self._token(4)):
+            pass
         self.assertFalse(cache.was_sent("@a:test", "$a"))
 
     def test_initial_sync_forgets_everything(self) -> None:
         """An initial sync has no `since`, and the client starts from nothing."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@a:test", "$a", self._token(5))
-        cache.start_request(None)
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+        with cache.building_response(None):
+            pass
         self.assertFalse(cache.was_sent("@a:test", "$a"))
 
     def test_different_event_is_not_sent(self) -> None:
         """An entry only covers the membership event it was recorded with, so
         a changed membership counts as not sent."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@a:test", "$a1", self._token(5))
+        cache.record("@a:test", "$a1", RoomStreamToken(stream=5))
         self.assertFalse(cache.was_sent("@a:test", "$a2"))
 
     def test_out_of_order_marks_are_still_forgotten(self) -> None:
@@ -3367,10 +3371,11 @@ class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
         later one. Its entries must still be forgotten by a request from
         before either response."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@b:test", "$b", self._token(7))
-        cache.mark_sent("@a:test", "$a", self._token(5))
+        cache.record("@b:test", "$b", RoomStreamToken(stream=7))
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
 
-        cache.start_request(self._token(6))
+        with cache.building_response(self._token(6)):
+            pass
         self.assertTrue(cache.was_sent("@a:test", "$a"))
         self.assertFalse(cache.was_sent("@b:test", "$b"))
 
@@ -3379,11 +3384,94 @@ class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
         evicts the least recently used one. A hit counts as a use."""
         cache = LazyLoadedMembersCache()
         for i in range(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE):
-            cache.mark_sent(f"@u{i}:test", f"$u{i}", self._token(1))
+            cache.record(f"@u{i}:test", f"$u{i}", RoomStreamToken(stream=1))
         # Touch the oldest entry so that it is no longer the eviction candidate.
         self.assertTrue(cache.was_sent("@u0:test", "$u0"))
 
-        cache.mark_sent("@new:test", "$new", self._token(1))
+        cache.record("@new:test", "$new", RoomStreamToken(stream=1))
         self.assertTrue(cache.was_sent("@u0:test", "$u0"))
         self.assertFalse(cache.was_sent("@u1:test", "$u1"))
         self.assertTrue(cache.was_sent("@new:test", "$new"))
+
+    def test_forgetting_disables_recording(self) -> None:
+        """A response from before the newest entry forgets the newer entries
+        and commits nothing itself. A response from its `next_batch` commits
+        again."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+
+        with cache.building_response(self._token(4)) as handle:
+            self.assertFalse(handle.commits)
+            self.assertFalse(handle.was_sent("@a:test", "$a"))
+            handle.mark_sent("@b:test", "$b", self._token(6))
+        self.assertFalse(cache.was_sent("@b:test", "$b"))
+
+        with cache.building_response(self._token(6)) as handle:
+            self.assertTrue(handle.commits)
+            handle.mark_sent("@c:test", "$c", self._token(7))
+        self.assertTrue(cache.was_sent("@c:test", "$c"))
+
+    def test_eviction_still_disables_recording(self) -> None:
+        """The newest-entry bound decides, not the entries. An initial sync
+        can record more members than the cache holds, and the evicted ones
+        still ended after a response's `since`."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@old:test", "$old", RoomStreamToken(stream=5))
+        for i in range(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE):
+            cache.record(f"@u{i}:test", f"$u{i}", RoomStreamToken(stream=5))
+        self.assertFalse(cache.was_sent("@old:test", "$old"))
+
+        with cache.building_response(self._token(4)) as handle:
+            self.assertFalse(handle.commits)
+
+    def test_overlapping_responses_commit_nothing(self) -> None:
+        """Responses being built at the same time cannot see each other's
+        entries and commit none of their own, whichever finishes first."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@old:test", "$old", RoomStreamToken(stream=4))
+
+        with cache.building_response(self._token(4)) as first:
+            self.assertTrue(first.commits)
+            first.mark_sent("@a:test", "$a", self._token(5))
+
+            with cache.building_response(self._token(4)) as second:
+                self.assertFalse(first.commits)
+                self.assertFalse(second.commits)
+                # Entries committed before the overlap are still used.
+                self.assertTrue(second.was_sent("@old:test", "$old"))
+                self.assertFalse(second.was_sent("@a:test", "$a"))
+                second.mark_sent("@b:test", "$b", self._token(5))
+
+                # A third response overlaps too, and finishes before them.
+                with cache.building_response(self._token(4)) as third:
+                    self.assertFalse(third.commits)
+                    third.mark_sent("@c:test", "$c", self._token(5))
+                self.assertFalse(cache.was_sent("@c:test", "$c"))
+
+            self.assertFalse(cache.was_sent("@b:test", "$b"))
+            first.mark_sent("@d:test", "$d", self._token(5))
+
+        # The first was alone when it started, but not throughout.
+        self.assertFalse(cache.was_sent("@a:test", "$a"))
+        self.assertFalse(cache.was_sent("@d:test", "$d"))
+        self.assertTrue(cache.was_sent("@old:test", "$old"))
+
+        # The next response is alone again and commits.
+        with cache.building_response(self._token(5)) as handle:
+            self.assertTrue(handle.commits)
+            handle.mark_sent("@e:test", "$e", self._token(6))
+        self.assertTrue(cache.was_sent("@e:test", "$e"))
+
+    def test_failed_response_commits_nothing(self) -> None:
+        """A response that was not finished never reached the client."""
+        cache = LazyLoadedMembersCache()
+        with self.assertRaises(RuntimeError):
+            with cache.building_response(None) as handle:
+                handle.mark_sent("@a:test", "$a", self._token(5))
+                if handle.commits:
+                    raise RuntimeError("cancelled")
+        self.assertFalse(cache.was_sent("@a:test", "$a"))
+
+        # And the cache is not left thinking the response is still being built.
+        with cache.building_response(self._token(5)) as handle:
+            self.assertTrue(handle.commits)

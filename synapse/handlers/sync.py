@@ -24,11 +24,13 @@ import json
 import logging
 import os
 from collections import OrderedDict
+from contextlib import contextmanager
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
     Any,
     Collection,
+    Iterator,
     Mapping,
     Sequence,
 )
@@ -138,17 +140,22 @@ class LazyLoadedMembersCache:
     """The membership events a lazy-loading client has been sent, so that later
     syncs can leave them out. One per (user, device).
 
+    The cache needs to handle concurrent requests, retries, and reusing old
+    tokens. Ideally, the sync token would include a field that can be used to
+    track the state of the cache, similarly to sliding sync. The following
+    details how the cache handles the various scenarios without an ID.
+
     A member may only be left out if the client processed the response that
     carried it. Each entry therefore records the `next_batch` position of the
     response that carried it. A client that has processed a response syncs
     from its `next_batch` next, so a request from `since` means the client
-    processed every response up to `since` and none after it. `start_request`
-    forgets the entries recorded after `since`. They were in responses the
-    client lost, by timing out a slow request and retrying it (#19978) or by
-    reloading from an older persisted token (#20278). Entries recorded at or
-    before `since` stay, so a client resuming from a token a few minutes old is
-    only sent again what it lost in those minutes. An initial sync forgets
-    everything.
+    processed every response up to `since` and none after it.
+    `building_response` forgets the entries recorded after `since`. They were
+    in responses the client lost, by timing out a slow request and retrying it
+    (#19978) or by reloading from an older persisted token (#20278). Entries
+    recorded at or before `since` stay, so a client resuming from a token a
+    few minutes old is only sent again what it lost in those minutes. An
+    initial sync forgets everything.
 
     Forgetting everything whenever `since` is before the newest entry would be
     simpler, and `_newest` alone would suffice. But Element Web only persists
@@ -162,33 +169,93 @@ class LazyLoadedMembersCache:
     Leaving out a member the client never received loses it for good. A
     `state_after` client does not apply state from the timeline, and a `state`
     client only sees the membership changes that fall inside the timeline.
+
+    The above handles reusing old tokens. However, we need to also guard against
+    concurrent requests and retries from the same device. A typical example is
+    when Element Web gets reloaded, and Synapse processes an incremental sync
+    request from before the reload at the same time as the initial sync request
+    triggered by the reload.
+
+    We solve this by detecting when a concurrent request has happened and
+    invalidating/not committing any entries from *any* concurrent request. This
+    is because we don't know which request the client will actually process.
+
+    There are two distinct scenarios:
+      1. The response for the two requests are processed at the same time.
+      2. One or other finishes processing before the other starts.
+
+    For the first scenario, we track how many in-flight responses are being
+    built for this device. If a second response starts building while another is
+    still in progress, it will ensure that neither response commits any entries
+    to the cache.
+
+    For the second scenario, the second response notices that the are entries in
+    the cache that it needs to evict. It therefore invalidates those and doesn't
+    commit its own entries.
     """
 
     # user_id -> (event_id of the membership we last sent, room position of the
     # `next_batch` of the response that carried it). Least recently used first.
     #
-    # Not an `LruCache`, as that cannot be iterated over and `start_request`
+    # Not an `LruCache`, as that cannot be iterated over and `_forget_after`
     # needs to check every entry's position against `since`.
     _sent: OrderedDict[str, tuple[str, RoomStreamToken]] = attr.Factory(OrderedDict)
 
-    # An upper bound on the positions of the entries, so that `start_request`
+    # An upper bound on the positions of the entries, so that `_forget_after`
     # need not look at them when nothing was recorded after `since`. That is the
     # steady state, where `since` is the `next_batch` of the last response.
     _newest: RoomStreamToken | None = None
 
-    def start_request(self, since_token: StreamToken | None) -> None:
-        """Forget the members the client did not receive. Called at the start of
-        each sync request for this device."""
+    # The responses being built for this device right now.
+    _building: list["LazyLoadedMembersHandle"] = attr.Factory(list)
+
+    @contextmanager
+    def building_response(
+        self, since_token: StreamToken | None
+    ) -> Iterator["LazyLoadedMembersHandle"]:
+        """Wraps building one response for this device, syncing from
+        `since_token`. Yields the handle the response reads and stages
+        through. Once the response has finished, commits what it staged,
+        unless its `commits` flag was cleared (see the class docstring)."""
+        handle = LazyLoadedMembersHandle(cache=self)
+
+        # Check if there are multiple responses being processed at once, if so
+        # none of them may commit.
+        if self._building:
+            handle.commits = False
+            for other in self._building:
+                other.commits = False
+
+        # If any entries get invalidated, it indicates that there are concurrent
+        # requests and we should not commit.
+        if self._forget_after(since_token):
+            handle.commits = False
+
+        self._building.append(handle)
+        try:
+            yield handle
+        finally:
+            self._building.remove(handle)
+
+        # Not reached if building the response failed, which includes the
+        # request being cancelled.
+        if handle.commits:
+            for user_id, (event_id, sent_at) in handle.staged.items():
+                self.record(user_id, event_id, sent_at)
+
+    def _forget_after(self, since_token: StreamToken | None) -> bool:
+        """Forget the members the client did not receive: the entries recorded
+        after `since_token`. Returns whether there were any."""
         if since_token is None:
             self._sent.clear()
             self._newest = None
-            return
+            return False
 
         # Check for the common case where nothing has been recorded after
         # `since`.
         since = since_token.room_key
         if self._newest is None or self._newest.is_before_or_eq(since):
-            return
+            return False
 
         # Remove all entries that were sent after `since`. This only has
         # `LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE` entries.
@@ -199,6 +266,11 @@ class LazyLoadedMembersCache:
         # Everything left is at or before `since`.
         self._newest = since
 
+        # Report by the bound, not by whether anything was deleted. The
+        # entries may all have been evicted already, and the responses that
+        # carried them still ended after `since`.
+        return True
+
     def was_sent(self, user_id: str, event_id: str) -> bool:
         """Whether `event_id` is the membership of `user_id` we last sent."""
         entry = self._sent.get(user_id)
@@ -207,20 +279,46 @@ class LazyLoadedMembersCache:
         self._sent.move_to_end(user_id)
         return True
 
-    def mark_sent(self, user_id: str, event_id: str, next_batch: StreamToken) -> None:
-        """Record that `event_id` is being sent in the response ending at
-        `next_batch`."""
-        sent_at = next_batch.room_key
+    def record(self, user_id: str, event_id: str, sent_at: RoomStreamToken) -> None:
+        """Record that `event_id` is the membership of `user_id` the client
+        received, in the response ending at room position `sent_at`."""
         self._sent[user_id] = (event_id, sent_at)
         self._sent.move_to_end(user_id)
         while len(self._sent) > LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE:
             self._sent.popitem(last=False)
 
-        # Only move the bound forwards. Positions taken by this process only
-        # ever advance, but a response that started earlier may record its
-        # entries after a later one has.
+        # Responses commit one after another and positions only advance, so
+        # `sent_at` is normally the newest. Never move the bound back
+        # regardless, as `_forget_after` would then skip the entries above it.
         if self._newest is None or self._newest.is_before_or_eq(sent_at):
             self._newest = sent_at
+
+
+@attr.s(slots=True, auto_attribs=True)
+class LazyLoadedMembersHandle:
+    """One response's view of its device's `LazyLoadedMembersCache`. Reads go
+    to the cache. What the response sends is staged here, and the cache
+    commits it when the response finishes if `commits` is still set. See
+    `building_response`."""
+
+    _cache: LazyLoadedMembersCache
+
+    # Whether the cache commits what this response staged when it finishes.
+    # Cleared when another response is being built at any point while this
+    # one is, or when this one had to forget entries.
+    commits: bool = True
+
+    # user_id -> (event_id, room position of `next_batch`), as in the cache.
+    staged: dict[str, tuple[str, RoomStreamToken]] = attr.Factory(dict)
+
+    def was_sent(self, user_id: str, event_id: str) -> bool:
+        """Whether `event_id` is the membership of `user_id` we last sent."""
+        return self._cache.was_sent(user_id, event_id)
+
+    def mark_sent(self, user_id: str, event_id: str, next_batch: StreamToken) -> None:
+        """Stage that `event_id` is being sent in the response ending at
+        `next_batch`."""
+        self.staged[user_id] = (event_id, next_batch.room_key)
 
 
 SyncRequestKey = tuple[Any, ...]
@@ -1107,11 +1205,15 @@ class SyncHandler:
         batch: TimelineBatch,
         state: MutableStateMap[EventBase],
         now_token: StreamToken,
+        lazy_loaded_members: LazyLoadedMembersHandle | None,
     ) -> JsonDict | None:
         """Works out a room summary block for this room, summarising the number
         of joined members in the room, and providing the 'hero' members if the
         room has no name so clients can consistently name rooms.  Also adds
         state events to 'state' if needed to describe the heroes.
+
+        `lazy_loaded_members` is the response's `LazyLoadedMembersHandle`, or
+        None if the request does not lazy-load members.
 
         Args
             room_id
@@ -1187,8 +1289,8 @@ class SyncHandler:
             return summary
 
         # ensure we send membership events for heroes if needed
-        cache_key = (sync_config.user.to_string(), sync_config.device_id)
-        cache = self.get_lazy_loaded_members_cache(cache_key)
+        assert lazy_loaded_members is not None
+        cache = lazy_loaded_members
 
         # track which members the client should already know about via LL:
         # Ones which are already in state...
@@ -1271,6 +1373,7 @@ class SyncHandler:
         now_token: StreamToken,
         full_state: bool,
         joined: bool,
+        lazy_loaded_members: LazyLoadedMembersHandle | None,
     ) -> MutableStateMap[EventBase]:
         """Works out the difference in state between the end of the previous sync and
         the start of the timeline.
@@ -1287,6 +1390,8 @@ class SyncHandler:
             full_state: Whether to force returning the full state.
                 `lazy_load_members` still applies when `full_state` is `True`.
             joined: whether the user is currently joined to the room
+            lazy_loaded_members: The response's `LazyLoadedMembersHandle`, or
+                None if the request does not lazy-load members.
 
         Returns:
             The state to return in the sync response for the room.
@@ -1432,8 +1537,8 @@ class SyncHandler:
             # memberships of event senders. Otherwise we make an effort to limit the set
             # of memberships we send to those that we have not already sent to this client.
             if lazy_load_members and not include_redundant_members:
-                cache_key = (sync_config.user.to_string(), sync_config.device_id)
-                cache = self.get_lazy_loaded_members_cache(cache_key)
+                assert lazy_loaded_members is not None
+                cache = lazy_loaded_members
 
                 # Only send members which aren't in our cache (either because
                 # they're new to this client or have been pushed out of the
@@ -2064,6 +2169,33 @@ class SyncHandler:
         since_token: StreamToken | None = None,
         full_state: bool = False,
     ) -> SyncResult:
+        """Generates the response body of a sync result. See
+        `_generate_sync_result`.
+
+        Tells the device's `LazyLoadedMembersCache` when the response starts
+        and finishes being built. That is how it detects two responses being
+        built at once.
+        """
+        if not sync_config.filter_collection.lazy_load_members():
+            return await self._generate_sync_result(
+                sync_config, since_token, full_state, lazy_loaded_members=None
+            )
+
+        cache = self.get_lazy_loaded_members_cache(
+            (sync_config.user.to_string(), sync_config.device_id)
+        )
+        with cache.building_response(since_token) as handle:
+            return await self._generate_sync_result(
+                sync_config, since_token, full_state, lazy_loaded_members=handle
+            )
+
+    async def _generate_sync_result(
+        self,
+        sync_config: SyncConfig,
+        since_token: StreamToken | None,
+        full_state: bool,
+        lazy_loaded_members: LazyLoadedMembersHandle | None,
+    ) -> SyncResult:
         """Generates the response body of a sync result.
 
         This is represented by a `SyncResult` struct, which is built from small pieces
@@ -2089,6 +2221,7 @@ class SyncHandler:
             since_token,
             full_state,
         )
+        sync_result_builder.lazy_loaded_members = lazy_loaded_members
 
         logger.debug(
             "Calculating sync response for %r between %s and %s",
@@ -2871,11 +3004,6 @@ class SyncHandler:
         sync_config = sync_result_builder.sync_config
         user_id = sync_config.user.to_string()
 
-        if sync_config.filter_collection.lazy_load_members():
-            self.get_lazy_loaded_members_cache(
-                (user_id, sync_config.device_id)
-            ).start_request(since_token)
-
         blocks_all_rooms = (
             sync_result_builder.sync_config.filter_collection.blocks_all_rooms()
         )
@@ -3569,6 +3697,7 @@ class SyncHandler:
                     now_token,
                     full_state=full_state,
                     joined=room_builder.rtype == "joined",
+                    lazy_loaded_members=sync_result_builder.lazy_loaded_members,
                 )
             else:
                 # An out of band room won't have any state changes.
@@ -3598,7 +3727,12 @@ class SyncHandler:
                 )
             ):
                 summary = await self.compute_summary(
-                    room_id, sync_config, batch, state, now_token
+                    room_id,
+                    sync_config,
+                    batch,
+                    state,
+                    now_token,
+                    sync_result_builder.lazy_loaded_members,
                 )
 
             if room_builder.rtype == "joined":
@@ -3812,6 +3946,8 @@ class SyncResultBuilder:
             (This is useful if the room was previously excluded from a /sync response,
             and now the client should be made aware of it.)
             Only used by incremental syncs.
+        lazy_loaded_members: The response's `LazyLoadedMembersHandle`, or None
+            if the request does not lazy-load members.
 
         # The following mirror the fields in a sync response
         presence
@@ -3832,6 +3968,8 @@ class SyncResultBuilder:
     excluded_room_ids: frozenset[str]
     forced_newly_joined_room_ids: frozenset[str]
     membership_change_events: list[EventBase]
+
+    lazy_loaded_members: LazyLoadedMembersHandle | None = None
 
     presence: list[UserPresenceState] = attr.Factory(list)
     account_data: list[JsonDict] = attr.Factory(list)
