@@ -3371,7 +3371,7 @@ class SyncHandler:
             sync_result_builder
             room_ids: The announcement rooms to consider.
             left_room_ids: Rooms among `room_ids` that the user left or was
-                removed from since the `since_token`.
+                removed from since the `since_token` of `sync_result_builder`.
         """
         since_token = sync_result_builder.since_token
         now_token = sync_result_builder.now_token
