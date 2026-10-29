@@ -3398,6 +3398,13 @@ class SyncHandler:
         # their real membership is replaced by the synthetic join.
         room_ids_to_include = announced_room_ids | left_room_ids
 
+        # On an incremental sync, `room_ids_to_include` should also include
+        # rooms that have new state events but no new announcement in the
+        # window, if they had an announcement before the window.
+        #
+        # On an initial or `full_state` sync, a room is included whenever it
+        # has ever had an announcement, even if it isn't among the recent
+        # events fetched above.
         if not since_token or sync_result_builder.full_state:
             room_ids_to_check = room_ids - room_ids_to_include
         else:
