@@ -27,7 +27,7 @@ from tests import unittest
 
 
 @parameterized_class(
-    ("reader",),
+    ("reader_type",),
     [("never_joined",), ("removed_sender",)],
 )
 class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
@@ -38,7 +38,7 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
     sender who was removed from the room before the announcement was sent.
     """
 
-    reader: str
+    reader_type: str
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -65,7 +65,7 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
         config = hs.config.serverannouncements
         handler = hs.get_server_announcements_handler()
 
-        if self.reader == "removed_sender":
+        if self.reader_type == "removed_sender":
             config.rooms = [
                 ServerAnnouncementRoom(
                     config_id=room_config.config_id,
