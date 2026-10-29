@@ -36,6 +36,12 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
 
     The reader has either never been in the room, or is a former announcement
     sender who was removed from the room before the announcement was sent.
+
+    Both scenarios are tested because they reach the history through different
+    paths:
+        - a user who never joined relies on the room being world-readable
+        - a removed sender has a leave membership, which would otherwise hide
+          every event sent after they left.
     """
 
     reader_type: str
@@ -65,6 +71,9 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
         config = hs.config.serverannouncements
         handler = hs.get_server_announcements_handler()
 
+        # Make the reader initially join the room as an announcement sender.
+        # The second reconciliation below then removes them, so their leave
+        # comes before the announcement is sent.
         if self.reader_type == "removed_sender":
             config.rooms = [
                 ServerAnnouncementRoom(
