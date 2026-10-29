@@ -495,7 +495,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
     def _get_max_stream_id_in_tables_txn(
         self, cur: LoggingTransaction, tables: list[tuple[str, str, str]]
     ) -> int:
-        """Get the highest stream ID in the given tables, or 1 if they're empty."""
+        """Returns the highest stream ID in the given tables, or 1 if they're empty."""
 
         # We add a GREATEST here to ensure that the result is always
         # positive. (This can be a problem for e.g. backfill streams where
