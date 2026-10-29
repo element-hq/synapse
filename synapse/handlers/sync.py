@@ -3779,8 +3779,9 @@ class SyncHandler:
                     summary=summary,
                     unread_count=0,
                     sticky=sticky_events,
-                    is_announcement=room_id
-                    in sync_result_builder.announcement_room_ids,
+                    is_announcement=(
+                        room_id in sync_result_builder.announcement_room_ids
+                    ),
                 )
 
                 if room_sync or always_include:
