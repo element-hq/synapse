@@ -606,6 +606,9 @@ class SyncRestServlet(RestServlet):
 
         user_id = sync_config.user.to_string()
         is_announcement = isinstance(room, JoinedSyncResult) and room.is_announcement
+        # A former member gets the room with `is_announcement` set, as they are
+        # no longer a member, but their real leave or ban can still be in the
+        # state or the timeline. Remove it, as the synthetic join replaces it.
         if is_announcement:
             state_dict = {
                 key: event
