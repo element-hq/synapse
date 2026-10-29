@@ -40,6 +40,7 @@ from synapse.types import UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
@@ -721,6 +722,24 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_null_field_is_not_rejected_if_profile_update_stream_enabled(self) -> None:
+        """
+        Tests that setting a field to `null` is not rejected if profile update
+        stream is configured active.
+
+        See https://github.com/element-hq/synapse/issues/20424 for removing
+        this special case.
+        """
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/org.example.custom_field",
+            content={"org.example.custom_field": None},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertFalse("errcode" in channel.json_body.keys())
 
     def test_set_custom_field_noauth(self) -> None:
         channel = self.make_request(
