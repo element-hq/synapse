@@ -38,7 +38,16 @@ from synapse.api.constants import (
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.events import EventBase
 from synapse.handlers.server_announcements import SYNTHETIC_JOIN_EVENT_ID_PREFIX
-from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
+from synapse.rest.client import (
+    account_data,
+    devices,
+    knock,
+    login,
+    read_marker,
+    receipts,
+    room,
+    sync,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
 from synapse.util.clock import Clock
@@ -2153,6 +2162,7 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         room.register_servlets,
         sync.register_servlets,
+        account_data.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -2504,6 +2514,53 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         response = self._sync(self.bob_tok, since)
         self._assert_delivered(response, self.bob)
         self.assertEqual(response.get("device_lists", {}).get("changed", []), [])
+
+    def test_marked_unread_without_new_events(self) -> None:
+        """A non-member who marks an announcement room as unread gets
+        `m.marked_unread` on their next incremental sync, even when nothing
+        else happened in the room.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/account_data/m.marked_unread",
+            {"unread": True},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.marked_unread", "content": {"unread": True}}],
+        )
+
+    def test_marked_unread_with_new_announcement(self) -> None:
+        """A non-member who marks an announcement room as unread, followed by a
+        new announcement, gets both the announcement and `m.marked_unread` in
+        the room on their next incremental sync.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/account_data/m.marked_unread",
+            {"unread": True},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        event_id = self._announce("again")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.marked_unread", "content": {"unread": True}}],
+        )
 
     def test_state_after(self) -> None:
         """With `use_state_after`, a non-member gets the synthetic join in
