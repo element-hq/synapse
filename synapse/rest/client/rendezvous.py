@@ -102,12 +102,11 @@ class MSC4388CreateRendezvousServlet(RestServlet):
         refreshing rather than that server policy does not permit it to create
         a session.
         """
-        if self.auth.has_access_token(request):
-            # This will raise if the token is invalid or needs a refresh
-            await self.auth.get_user_by_req(request)
-            return True
-
-        return not self.require_authentication
+        requester = await self.auth.get_optional_user_by_req(request)
+        
+        # Creation is allowed if authenticated or authentication isn't
+        # required
+        return requester is not None or not self.require_authentication
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, Any]:
         await self._requests_ratelimiter.ratelimit(
