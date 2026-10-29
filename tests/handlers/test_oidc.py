@@ -1155,12 +1155,14 @@ class OidcHandlerTestCase(HomeserverTestCase):
         )
         self.reset_mocks()
 
-        # Some providers return an integer ID.
+        # Some providers (e.g. GitHub) return an integer ID from the userinfo endpoint.
+        self.provider._user_profile_method = "userinfo_endpoint"
         userinfo = {
             "sub": 1234,
             "username": "test_user_2",
         }
-        request, _ = self.start_authorization(userinfo)
+        # Without the OpenID "scope", the FakeProvider does not generate an id_token
+        request, _ = self.start_authorization(userinfo, scope="")
         self.get_success(self.handler.handle_oidc_callback(request))
         self.complete_sso_login.assert_called_once_with(
             "@test_user_2:test",

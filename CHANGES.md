@@ -1,3 +1,62 @@
+# Synapse 1.164.1 (2026-10-28)
+
+## Bugfixes
+
+- Fix clearing user status for clients that send a `null` profile field value.
+
+  When `include_profile_updates_in_sync` is enabled, Synapse will continue to accept `null` custom profile field values
+  until clients have had a sufficient time to change their behaviour. This special casing is tracked in [this issue](https://github.com/element-hq/synapse/issues/20424). ([\#20422](https://github.com/element-hq/synapse/issues/20422))
+
+## Internal Changes
+
+- Bump `msgpack` from `1.2.1` to `1.2.4` to address [`GHSA-j586-36cw-2gc2`](https://github.com/msgpack/msgpack-python/security/advisories/GHSA-j586-36cw-2gc2) which can cause memory exhaustion problems when malformed tokens are used with the public room list API's. ([\#20421](https://github.com/element-hq/synapse/issues/20421))
+
+
+
+
+# Synapse 1.164.0 (2026-10-27)
+
+No significant changes since 1.164.0rc3.
+
+
+
+# Synapse 1.163.2 (2026-10-23)
+
+## Internal Changes
+
+- Bump `pillow` to `13.0.0` to address [critical security vulnerabilties](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html#security). You must use Python >= 3.11 to take advantage of this version bump. ([\#20398](https://github.com/element-hq/synapse/issues/20398))
+
+
+
+
+# Synapse 1.164.0rc3 (2026-10-23)
+
+## Internal Changes
+
+- Bump `pillow` to `13.0.0` to address [critical security vulnerabilties](https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html#security). You must use Python >= 3.11 to take advantage of this version bump. ([\#20399](https://github.com/element-hq/synapse/issues/20399))
+
+
+
+
+# Synapse 1.163.1 (2026-10-22)
+
+## Internal Changes
+
+- Update `certifi` to `2026.10.19` to address [GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2). This only affects TLS connections made by the Sentry SDK when `sentry` is configured, SAML, and a couple utility scripts; federation and Synapse's other outbound HTTP requests use the system trust store. ([\#20387](https://github.com/element-hq/synapse/issues/20387))
+- Bump `rustls-webpki` to `0.103.16` to actively distrust [compromised eMudhra intermediate CA certificates](https://emudhra.we-have-a-problem.com/). ([\#20392](https://github.com/element-hq/synapse/issues/20392))
+
+
+
+# Synapse 1.164.0rc2 (2026-10-22)
+
+## Internal Changes
+
+- Update `certifi` to `2026.10.19` to address [GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2). This only affects TLS connections made by the Sentry SDK when `sentry` is configured, SAML, and a couple utility scripts; federation and Synapse's other outbound HTTP requests use the system trust store. ([\#20387](https://github.com/element-hq/synapse/issues/20387))
+- Bump `rustls-webpki` to `0.103.16` to actively distrust [compromised eMudhra intermediate CA certificates](https://emudhra.we-have-a-problem.com/). ([\#20392](https://github.com/element-hq/synapse/issues/20392))
+
+
+
+
 # Synapse 1.164.0rc1 (2026-10-20)
 
 ## Features
@@ -57,11 +116,13 @@
 
 
 
+
 # Synapse 1.163.0 (2026-10-14)
 
 ## Bugfixes
 
 - Fix Synapse failing to start with Redis enabled when installed using pip (avoid incompatible breaking changes in `txredisapi@1.6.0`). ([\#20354](https://github.com/element-hq/synapse/issues/20354))
+
 
 
 

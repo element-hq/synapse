@@ -193,7 +193,7 @@ class RegistrationHandler:
                     "A different user ID has already been registered for this session",
                 )
 
-        self.check_user_id_not_appservice_exclusive(user_id)
+        self.check_user_id_not_reserved_by_service(user_id)
 
         if len(user_id) > MAX_USERID_LENGTH:
             raise SynapseError(
@@ -355,7 +355,7 @@ class RegistrationHandler:
                 generated_localpart = await self.store.generate_user_id()
                 user = UserID(generated_localpart, self.hs.hostname)
                 user_id = user.to_string()
-                self.check_user_id_not_appservice_exclusive(user_id)
+                self.check_user_id_not_reserved_by_service(user_id)
                 if generate_display_name:
                     default_display_name = generated_localpart
                 try:
@@ -667,7 +667,7 @@ class RegistrationHandler:
 
         service_id = service.id if service.is_exclusive_user(user_id) else None
 
-        self.check_user_id_not_appservice_exclusive(user_id, allowed_appservice=service)
+        self.check_user_id_not_reserved_by_service(user_id, allowed_appservice=service)
 
         await self.register_with_store(
             user_id=user_id,
@@ -677,9 +677,15 @@ class RegistrationHandler:
         )
         return (user_id, service)
 
-    def check_user_id_not_appservice_exclusive(
+    def check_user_id_not_reserved_by_service(
         self, user_id: str, allowed_appservice: ApplicationService | None = None
     ) -> None:
+        # Don't allow people to register the server announcements mxid.
+        if user_id == self.hs.config.serverannouncements.room_management_mxid:
+            raise SynapseError(
+                400, "This user ID is reserved.", errcode=Codes.EXCLUSIVE
+            )
+
         # don't allow people to register the server notices mxid
         if self._server_notices_mxid is not None:
             if user_id == self._server_notices_mxid:
