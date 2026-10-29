@@ -3958,7 +3958,9 @@ class SyncResultBuilder:
         now_token: The token to sync up to.
         joined_room_ids: List of rooms the user is joined to
         announcement_room_ids: Server announcement rooms the user is not a member
-            of, whose new announcements should still be sent to them.
+            of, whose new announcements should still be sent.
+            They are kept apart from `joined_room_ids` because most code that
+            reads `joined_room_ids` relies on the user being a member.
         excluded_room_ids: Set of room ids we should omit from the /sync response.
         forced_newly_joined_room_ids:
             Rooms that should be presented in the /sync response as if they were
