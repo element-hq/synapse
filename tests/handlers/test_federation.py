@@ -19,11 +19,11 @@
 #
 #
 import logging
-from typing import Collection
+from typing import Any, Awaitable, Callable, Collection
 from unittest import TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
-from twisted.internet.defer import Deferred
+from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
@@ -34,13 +34,14 @@ from synapse.api.errors import (
     NotFoundError,
     SynapseError,
 )
-from synapse.api.room_versions import RoomVersions
+from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.federation.federation_client import SendJoinResult
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventCacheEntry
+from synapse.types import create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -420,6 +421,91 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(r[(EventTypes.Member, other_user)], join_event.event_id)
 
         return join_event
+
+    def test_send_join_waits_for_in_flight_local_event(self) -> None:
+        """An inbound /send_join should not persist ahead of a local event.
+
+        If a local event has already chosen its prev_events but has not yet
+        persisted, persisting the join first can hide the local event from the
+        joining server's /send_join response. The room event creation limiter
+        should make the join wait until the local event has been persisted.
+        """
+        local_user_id = self.register_user("local", "test")
+        local_access_token = self.login("local", "test")
+        room_id = self.helper.create_room_as(
+            room_creator=local_user_id,
+            tok=local_access_token,
+        )
+
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        real_persist_events = persistence.persist_events
+
+        persist_started: "Deferred[None]" = Deferred()
+        unblock_persistence: "Deferred[None]" = Deferred()
+
+        async def blocking_persist_events(*args: Any, **kwargs: Any) -> Any:
+            if not persist_started.called:
+                persist_started.callback(None)
+                await unblock_persistence
+
+            return await real_persist_events(*args, **kwargs)
+
+        with patch.object(persistence, "persist_events", blocking_persist_events):
+            local_event_deferred = ensureDeferred(
+                self.hs.get_event_creation_handler().create_and_send_nonmember_event(
+                    create_requester(local_user_id),
+                    {
+                        "type": EventTypes.Message,
+                        "room_id": room_id,
+                        "sender": local_user_id,
+                        "content": {"msgtype": "m.text", "body": "hello"},
+                    },
+                    ratelimit=False,
+                )
+            )
+
+            self.get_success(persist_started)
+
+            other_server = "remote.test"
+            other_user = f"@user:{other_server}"
+            join_event = self.get_success(
+                self.handler.on_make_join_request(other_server, room_id, other_user)
+            )
+            join_event.signatures.update({other_server: {"x": "y"}})
+
+            async def accept_signature_check(
+                room_version: RoomVersion,
+                event: EventBase,
+                record_failure_callback: Callable[[EventBase, str], Awaitable[None]]
+                | None = None,
+            ) -> EventBase:
+                return event
+
+            federation_server = self.hs.get_federation_server()
+            federation_server._check_sigs_and_hash = accept_signature_check  # type: ignore[assignment]
+
+            send_join_deferred = ensureDeferred(
+                federation_server.on_send_join_request(
+                    other_server,
+                    join_event.get_pdu_json(self.clock.time_msec()),
+                    room_id,
+                )
+            )
+
+            self.pump()
+            self.assertNoResult(send_join_deferred)
+
+            unblock_persistence.callback(None)
+            local_event, local_stream_id = self.get_success(local_event_deferred)
+            self.get_success(send_join_deferred)
+
+        join_stream_id = self.get_success(
+            self.store.get_position_for_event(join_event.event_id)
+        ).stream
+
+        self.assertLess(local_stream_id, join_stream_id)
+        self.assertNotIn(local_event.event_id, join_event.prev_event_ids())
 
 
 class EventFromPduTestCase(TestCase):
