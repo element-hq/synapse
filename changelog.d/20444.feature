@@ -1,0 +1,1 @@
+Add experimental support for [MSC4233](https://github.com/matrix-org/matrix-spec-proposals/pull/4233), so that a user who knocks on a remote room can withdraw the knock over federation, and is told when the room rejects it.
