@@ -155,6 +155,10 @@ class ServerAnnouncementsConfigTestCase(TestCase):
                 "room_topic": "Server news",
                 "room_avatar_url": "mxc://media.example.com/avatar",
                 "allowed_user_ids": ["@alice:example.com", "@Bob:example.com"],
+                "excluded_user_ids": [
+                    "@audit_bot:example.com",
+                    "@_appservice:example.com",
+                ],
             },
             {"id": "maintenance", "room_name": "Announcements"},
         ]
@@ -169,11 +173,19 @@ class ServerAnnouncementsConfigTestCase(TestCase):
                     "mxc://media.example.com/avatar",
                     None,
                     ["@alice:example.com", "@Bob:example.com"],
+                    ["@audit_bot:example.com", "@_appservice:example.com"],
                 ),
                 ServerAnnouncementRoom(
                     "maintenance", "Announcements", None, None, None, []
                 ),
             ],
+        )
+
+    def test_excluded_user_ids_default(self) -> None:
+        """Test the defaults of the `excluded_user_ids` option are as expected."""
+        self.assertEqual(self._read_room({}).rooms[0].excluded_user_ids, [])
+        self.assertEqual(
+            self._read_room({"excluded_user_ids": []}).rooms[0].excluded_user_ids, []
         )
 
     def test_duplicate_id(self) -> None:
