@@ -61,6 +61,7 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.server_notices.server_notices_manager import SERVER_NOTICE_ROOM_TAG
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction
@@ -3685,6 +3686,9 @@ class SyncHandler:
                 # sync
                 if not tags:
                     tags = None
+
+            if room_id in sync_result_builder.announcement_room_ids:
+                tags = {SERVER_NOTICE_ROOM_TAG: {}, **(tags or {})}
 
             account_data_events = []
             if tags is not None:
