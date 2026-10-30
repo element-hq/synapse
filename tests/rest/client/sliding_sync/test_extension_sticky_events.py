@@ -12,7 +12,6 @@
 # <https://www.gnu.org/licenses/agpl_3.0.html>.
 #
 import logging
-import sqlite3
 
 from twisted.internet.testing import MemoryReactor
 
@@ -27,7 +26,6 @@ from synapse.util.duration import Duration
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.server import TimedOutException
-from tests.utils import USE_POSTGRES_FOR_TESTS
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +57,6 @@ ROOM_SUBSCRIPTION = {"required_state": [], "timeline_limit": 0}
 
 class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
     """Tests for the sticky events sliding sync extension"""
-
-    if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
-        # We need the JSON functionality in SQLite
-        skip = f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
 
     servlets = [
         synapse.rest.admin.register_servlets,

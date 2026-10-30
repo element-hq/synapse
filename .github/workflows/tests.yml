@@ -468,7 +468,9 @@ jobs:
     needs:
       - linting-done
       - changes
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    # Debian oldstable, to test against our minimum supported SQLite version
+    container: docker.io/python:3.11-bookworm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -478,16 +480,10 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      # There aren't wheels for some of the older deps, so we need to install
-      # their build dependencies
       - run: |
-          sudo apt-get -qq update
-          sudo apt-get -qq install build-essential libffi-dev python3-dev \
-            libxslt-dev xmlsec1 zlib1g-dev libjpeg-dev libwebp-dev
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.11"
+          apt-get -qq update
+          # xmlsec1 is needed for the SAML tests
+          apt-get -qq install xmlsec1
 
       - name: Prepare old deps
         # Note: we install using `uv` here, not poetry or pip to allow us to test with the

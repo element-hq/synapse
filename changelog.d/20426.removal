@@ -1,0 +1,1 @@
+Drop support for SQLite versions older than 3.40.0. The older versions had previously been announced as unsupported but Synapse would not check the version at startup.
