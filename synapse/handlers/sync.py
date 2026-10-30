@@ -3445,6 +3445,8 @@ class SyncHandler:
                 events.reverse()
                 upto_token = now_token.copy_and_replace(StreamKeyType.ROOM, start_key)
             else:
+                # Without a `since_token`, `room_to_events` has an entry for every
+                # room in `room_ids`.
                 assert since_token is not None
                 events = []
                 upto_token = since_token
