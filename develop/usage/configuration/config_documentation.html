@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-509f6cc2.js";
+            window.path_to_searchindex_js = "../../searchindex-7ceaf60c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-64310643.js"></script>
@@ -2497,18 +2497,29 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <p>This setting has the following sub-options:</p>
 <ul>
 <li>
-<p><code>transports</code> (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to <code>[]</code>.</p>
+<p><code>transports</code> (array): A list of MatrixRTC transports advertised to clients on <code>/_matrix/client/v1/rtc/transports</code> and, if it is enabled via <code>experimental_features.msc4143_enabled</code>, the unstable <code>/_matrix/client/unstable/org.matrix.msc4143/rtc/transports</code> endpoint. Defaults to <code>[]</code>.</p>
 <p>Options for each entry include:</p>
 <ul>
 <li>
-<p><code>type</code> (string): The type of transport to use to connect to the selective forwarding unit (SFU).</p>
+<p><code>type</code> (string): The type of transport to advertise to clients.</p>
+<ul>
+<li>
+<p>Transports of type <code>m.livekit</code> advertise the stable transport based on LiveKit’s selective
+forwarding unit (SFU).</p>
 </li>
 <li>
-<p><code>url</code> (string): The WebSocket URL of the LiveKit SFU. If type is “livekit”, either this or <code>livekit_service_url</code> is required.</p>
+<p>Transports of type <code>livekit</code> advertise the unstable version of the LiveKit-based transport.
+This type is deprecated and should only be used when backwards compatibility for clients
+that don’t yet support the stable transport is required.</p>
+</li>
+</ul>
+</li>
+<li>
+<p><code>url</code> (string): The WebSocket URL of the LiveKit SFU. If <code>type</code> is “m.livekit”, this is required. If <code>type</code> is “livekit”, either this or <code>livekit_service_url</code> is required.</p>
 <p>Clients that support <code>url</code> will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.</p>
 </li>
 <li>
-<p><code>livekit_service_url</code> (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is “livekit”, either this or <code>url</code> is required.</p>
+<p><code>livekit_service_url</code> (string): Deprecated. The HTTP URL of the LiveKit authorization service. If <code>type</code> is “livekit”, either this or <code>url</code> is required.</p>
 <p>Clients that don’t support <code>url</code> will use <code>livekit_service_url</code> to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.</p>
 </li>
 </ul>
@@ -2517,6 +2528,8 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <p>Example configuration:</p>
 <pre><code class="language-yaml">matrix_rtc:
   transports:
+  - type: m.livekit
+    url: wss://livekit.example.com
   - type: livekit
     url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt

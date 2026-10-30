@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-509f6cc2.js";
+            window.path_to_searchindex_js = "searchindex-7ceaf60c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -330,6 +330,16 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11650"><a class="header" href="#upgrading-to-v11650">Upgrading to v1.165.0</a></h1>
+<h2 id="stable-matrixrtc-transport-discovery"><a class="header" href="#stable-matrixrtc-transport-discovery">Stable MatrixRTC transport discovery</a></h2>
+<p>Synapse has added stable support for <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4143">MSC4143</a>
+and serves <code>GET /_matrix/client/v1/rtc/transports</code> with the transports configured in
+<a href="usage/configuration/config_documentation.html#matrix_rtc"><code>matrix_rtc.transports</code></a>.</p>
+<p>Clients that implement the stable LiveKit transport from <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4195">MSC4195</a>
+expect transports of type <code>m.livekit</code>. The <code>livekit</code> transport type is deprecated. An
+<code>m.livekit</code> config entry should be added for each LiveKit SFU. As long as clients still
+depend on the unstable LiveKit transport from earlier versions of <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4195">MSC4195</a>,
+matching <code>livekit</code> entries should still be listed in addition.</p>
 <h1 id="upgrading-to-v11640"><a class="header" href="#upgrading-to-v11640">Upgrading to v1.164.0</a></h1>
 <h2 id="python-311-is-now-required"><a class="header" href="#python-311-is-now-required">Python 3.11+ is now required</a></h2>
 <p>The minimum supported Python version has been increased from v3.10 to v3.11.
