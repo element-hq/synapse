@@ -184,6 +184,8 @@ Changes in SCHEMA_VERSION = 95
       sent from a different user.
     - `event_edges.is_state` is no longer read from (it has not been written to since SCHEMA_VERSION 72).
     - Add `server_announcement_rooms` table.
+    - MSC4233: Add the `local_knock_via_servers` table, recording which server a
+      local user's knock was fulfilled through.
 """
 
 
