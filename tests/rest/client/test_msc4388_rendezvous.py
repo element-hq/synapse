@@ -823,7 +823,8 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_JSON")
 
-        for invalid_body in ({}, [], "data", {"data": 0}, {"data": {}}):
+        invalid_post_bodies: list[Any] = [{}, [], "data", {"data": 0}, {"data": {}}]
+        for invalid_body in invalid_post_bodies:
             channel = self.make_request(
                 "POST", rz_endpoint, json.dumps(invalid_body), access_token=None
             )
@@ -850,21 +851,20 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_JSON")
 
-        for i, invalid_body in enumerate(
-            (
-                {"data": "test"},
-                {"sequence_token": sequence_token},
-                "[]",
-                {"sequence_token": sequence_token, "data": 0},
-                {"sequence_token": sequence_token, "data": {}},
-                {"data": "test", "sequence_token": 0},
-                {"data": "test", "sequence_token": {}},
-            )
-        ):
+        invalid_put_bodies: list[Any] = [
+            {"data": "test"},
+            {"sequence_token": sequence_token},
+            [],
+            {"sequence_token": sequence_token, "data": 0},
+            {"sequence_token": sequence_token, "data": {}},
+            {"data": "test", "sequence_token": 0},
+            {"data": "test", "sequence_token": {}},
+        ]
+        for i, invalid_body in enumerate(invalid_put_bodies):
             channel = self.make_request(
                 "PUT",
                 send_endpoint(rendezvous_id, f"txn{i + 2}"),
-                invalid_body,
+                json.dumps(invalid_body),
                 access_token=None,
             )
             self.assertEqual(channel.code, 400, invalid_body)
