@@ -12,17 +12,21 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-from synapse.storage._base import SQLBaseStore
+from typing import Collection
+
+from synapse.storage.database import LoggingTransaction
+from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
+from synapse.types import PersistedEventPosition
+from synapse.util.caches.descriptors import cached
 
 
-class ServerAnnouncementsStore(SQLBaseStore):
+class ServerAnnouncementsStore(CacheInvalidationWorkerStore):
     """Stores details about an announcement room.
 
     The unique announcement `id` identifies the same room even when its configured
     details change. It is separate from the actual room ID.
 
-    Lookups are cheap and deliberately uncached, avoiding cross-worker cache
-    invalidation for mapping and avatar changes.
+    Only the set of configured room IDs is cached, as it is read on every sync.
     """
 
     async def get_server_announcement_room(self, config_id: str) -> str | None:
@@ -45,14 +49,80 @@ class ServerAnnouncementsStore(SQLBaseStore):
             desc="get_server_announcement_id",
         )
 
+    @cached(num_args=0)
+    async def get_server_announcement_room_ids(self) -> frozenset[str]:
+        """Return the room IDs of the currently configured announcement rooms.
+
+        Rooms whose config ID is no longer in the config are left out, as
+        are configured rooms that have not been created yet.
+        """
+        rows = await self.db_pool.simple_select_many_batch(
+            table="server_announcement_rooms",
+            column="config_id",
+            iterable=[
+                room.config_id for room in self.hs.config.serverannouncements.rooms
+            ],
+            retcols=("room_id",),
+            desc="get_server_announcement_room_ids",
+        )
+        return frozenset(room_id for (room_id,) in rows)
+
+    async def get_first_non_state_event_positions(
+        self, room_ids: Collection[str], max_stream_ordering: int
+    ) -> dict[str, PersistedEventPosition]:
+        """Return the position of the first non-state event at or before
+        `max_stream_ordering` in each of `room_ids`, leaving out rooms that have
+        none.
+        """
+
+        def _get_first_non_state_event_positions_txn(
+            txn: LoggingTransaction,
+        ) -> dict[str, PersistedEventPosition]:
+            positions = {}
+            for room_id in room_ids:
+                txn.execute(
+                    """
+                    SELECT instance_name, stream_ordering FROM events
+                    WHERE room_id = ? AND stream_ordering <= ?
+                    AND state_key IS NULL
+                    ORDER BY stream_ordering
+                    LIMIT 1
+                    """,
+                    (room_id, max_stream_ordering),
+                )
+                row = txn.fetchone()
+                if row is not None:
+                    instance_name, stream_ordering = row
+                    positions[room_id] = PersistedEventPosition(
+                        instance_name or "master", stream_ordering
+                    )
+            return positions
+
+        if not room_ids:
+            return {}
+
+        return await self.db_pool.runInteraction(
+            "get_first_non_state_event_positions",
+            _get_first_non_state_event_positions_txn,
+        )
+
     async def store_server_announcement_room(
         self, config_id: str, room_id: str
     ) -> None:
         """Store a new mapping."""
-        await self.db_pool.simple_insert(
-            table="server_announcement_rooms",
-            values={"config_id": config_id, "room_id": room_id},
-            desc="store_server_announcement_room",
+
+        def _store_server_announcement_room_txn(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_insert_txn(
+                txn,
+                table="server_announcement_rooms",
+                values={"config_id": config_id, "room_id": room_id},
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.get_server_announcement_room_ids, ()
+            )
+
+        await self.db_pool.runInteraction(
+            "store_server_announcement_room", _store_server_announcement_room_txn
         )
 
     async def get_server_announcement_avatar(

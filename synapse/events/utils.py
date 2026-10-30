@@ -50,6 +50,7 @@ from synapse.synapse_rust.events import (
     format_event_raw,
     redact_event,
     serialize_events,
+    serialize_synthetic_event,
 )
 from synapse.synapse_rust.types import Requester
 from synapse.types import JsonDict
@@ -409,6 +410,22 @@ class EventClientSerializer:
             event if not isinstance(event, FilteredEvent) else next(serialized)
             for event in events
         ]
+
+    def serialize_synthetic_event(
+        self, event: JsonDict, config: SerializeEventConfig
+    ) -> JsonDict:
+        """Serializes an event that only exists as JSON, such as a synthetic
+        event that is never persisted, applying the event format and field
+        allowlist from `config`.
+
+        Args:
+            event: The event's JSON, in federation format.
+            config: Event serialization config
+
+        Returns:
+            The serialized event
+        """
+        return serialize_synthetic_event(event, config)
 
     def register_add_extra_fields_to_unsigned_client_event_callback(
         self, callback: ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
