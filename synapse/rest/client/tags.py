@@ -82,6 +82,7 @@ class TagServlet(RestServlet):
         self.auth = hs.get_auth()
         self.handler = hs.get_account_data_handler()
         self.room_member_handler = hs.get_room_member_handler()
+        self.store = hs.get_datastores().main
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, room_id: str, tag: str
@@ -102,9 +103,10 @@ class TagServlet(RestServlet):
         # Check if the user has any membership in the room and raise error if not.
         # Although it's not harmful for users to tag random rooms, it's just superfluous
         # data we don't need to track or allow.
-        await self.room_member_handler.check_for_any_membership_in_room(
-            user_id=user_id, room_id=room_id
-        )
+        if await self.store.get_server_announcement_id(room_id) is None:
+            await self.room_member_handler.check_for_any_membership_in_room(
+                user_id=user_id, room_id=room_id
+            )
 
         body = parse_json_object_from_request(request)
 

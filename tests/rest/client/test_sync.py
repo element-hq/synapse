@@ -47,6 +47,7 @@ from synapse.rest.client import (
     receipts,
     room,
     sync,
+    tags,
 )
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
@@ -2212,6 +2213,7 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
         sync.register_servlets,
         account_data.register_servlets,
+        tags.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -2609,6 +2611,57 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             room["account_data"]["events"],
             [{"type": "m.marked_unread", "content": {"unread": True}}],
+        )
+
+    def test_tag_without_new_events(self) -> None:
+        """A non-member who tags an announcement room gets `m.tag` on their next
+        incremental sync, even when nothing else happened in the room.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.favourite": {"order": 0.5}}}}],
+        )
+
+    def test_tag_removed_without_new_events(self) -> None:
+        """A non-member who removes their last tag from an announcement room gets
+        an empty `m.tag` on their next incremental sync, even when nothing else
+        happened in the room.
+        """
+        self._announce("hello")
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {}}}],
         )
 
     def test_state_after(self) -> None:
