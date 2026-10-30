@@ -1246,6 +1246,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
     ) -> None:
         """
         Check if the user has any membership in the room and raise error if not.
+        This includes the synthetic membership users have in server announcement
+        rooms.
 
         Args:
             user_id: The user to check.
@@ -1254,6 +1256,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         Raises:
             AuthError if the user doesn't have any membership in the room.
         """
+        if room_id in await self.store.get_server_announcement_room_ids():
+            return
+
         result = await self.store.get_local_current_membership_for_user_in_room(
             user_id=user_id, room_id=room_id
         )
