@@ -23,7 +23,8 @@ use pyo3::{
     types::{PyAnyMethods, PyDict, PyModule, PyModuleMethods},
     Bound, Py, PyAny, PyResult, Python,
 };
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
+use serde_json::error::Category;
 use ulid::Ulid;
 
 use self::session::Session;
@@ -48,22 +49,44 @@ struct MSC4388RendezvousHandler {
     ttl: Duration,
 }
 
-impl MSC4388RendezvousHandler {
-    /// Check the length of the data parameter and throw error if invalid.
-    fn check_data_length(&self, data: &str) -> PyResult<()> {
-        let data_length = data.len() as u64;
-        if data_length > self.max_content_length {
-            return Err(SynapseError::new(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "Payload too large".to_owned(),
-                "M_TOO_LARGE",
-                None,
-                None,
-            ));
-        }
-        Ok(())
+/// Check the length of the data parameter and throw error if invalid.
+fn check_data_length(data: &str, max_content_length: u64) -> PyResult<()> {
+    let data_length = data.len() as u64;
+    if data_length > max_content_length {
+        return Err(SynapseError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Payload too large".to_owned(),
+            "M_TOO_LARGE",
+            None,
+            None,
+        ));
     }
+    Ok(())
+}
 
+/// Parse the JSON request body, distinguishing between a body which is not
+/// JSON (`M_NOT_JSON`) and one which is JSON but has a required field missing
+/// or of the wrong type (`M_BAD_JSON`), as MSC4388 requires.
+fn parse_json_body<T: DeserializeOwned>(body: &[u8]) -> PyResult<T> {
+    serde_json::from_slice(body).map_err(|e| match e.classify() {
+        Category::Data => SynapseError::new(
+            StatusCode::BAD_REQUEST,
+            format!("Invalid request body: {e}"),
+            "M_BAD_JSON",
+            None,
+            None,
+        ),
+        Category::Io | Category::Syntax | Category::Eof => SynapseError::new(
+            StatusCode::BAD_REQUEST,
+            "Content not JSON".to_owned(),
+            "M_NOT_JSON",
+            None,
+            None,
+        ),
+    })
+}
+
+impl MSC4388RendezvousHandler {
     /// Evict expired sessions.
     ///
     /// Live sessions are never evicted to make room for new ones, as otherwise
@@ -137,20 +160,10 @@ impl MSC4388RendezvousHandler {
         let id = Ulid::from_datetime(now);
 
         let request = http_request_from_twisted(twisted_request)?;
-        // parse JSON body
-        let post_request: PostRequest =
-            serde_json::from_slice(&request.into_body()).map_err(|_| {
-                SynapseError::new(
-                    StatusCode::BAD_REQUEST,
-                    "Invalid JSON in request body".to_owned(),
-                    "M_INVALID_PARAM",
-                    None,
-                    None,
-                )
-            })?;
+        let post_request: PostRequest = parse_json_body(&request.into_body())?;
 
         let data: String = post_request.data;
-        self.check_data_length(&data)?;
+        check_data_length(&data, self.max_content_length)?;
 
         // If we're at capacity, evict expired sessions now rather than waiting
         // for the next eviction run, in case that frees up some room.
@@ -305,24 +318,6 @@ impl MSC4388RendezvousHandler {
         })?;
 
         let request = http_request_from_twisted(twisted_request)?;
-        // parse JSON body
-        let put_request: PutRequest =
-            serde_json::from_slice(&request.into_body()).map_err(|_| {
-                SynapseError::new(
-                    StatusCode::BAD_REQUEST,
-                    "Invalid JSON in request body".to_owned(),
-                    "M_INVALID_PARAM",
-                    None,
-                    None,
-                )
-            })?;
-
-        let PutRequest {
-            sequence_token,
-            data,
-        } = put_request;
-
-        self.check_data_length(&data)?;
 
         let now = self.runtime.clock().now();
 
@@ -333,8 +328,22 @@ impl MSC4388RendezvousHandler {
             .filter(|s| !s.expired(now))
             .ok_or_else(NotFoundError::new)?;
 
-        // The session performs the compare-and-swap, and remembers the result
-        // against the transaction ID so that retries are idempotent.
+        // A retry of a successful PUT gets the earlier response without the new
+        // request being considered, so MSC4388 requires that we check for a
+        // recorded transaction ID before validating the request body.
+        if let Some(sequence_token) = session.transaction_outcome(&txn_id) {
+            return Ok((200, PutResponse::new(sequence_token.clone())));
+        }
+
+        let PutRequest {
+            sequence_token,
+            data,
+        } = parse_json_body(&request.into_body())?;
+
+        check_data_length(&data, self.max_content_length)?;
+
+        // The session performs the compare-and-swap, and remembers a successful
+        // result against the transaction ID so that retries are idempotent.
         match session.send(&txn_id, &sequence_token, data, now) {
             Ok(sequence_token) => Ok((200, PutResponse::new(sequence_token))),
             Err(ConcurrentWrite) => Err(SynapseError::new(

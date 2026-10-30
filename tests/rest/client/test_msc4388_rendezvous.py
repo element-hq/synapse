@@ -789,7 +789,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 access_token=None,
             )
             self.assertEqual(channel.code, 400)
-            self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
+            self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON")
 
         # Make a valid request
         channel = self.make_request(
@@ -811,7 +811,114 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 access_token=None,
             )
             self.assertEqual(channel.code, 400)
-            self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
+            self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON")
+
+    def test_invalid_body(self) -> None:
+        """
+        Test that a request body which is not JSON is rejected with M_NOT_JSON,
+        and one which is JSON but has a required field missing is rejected with
+        M_BAD_JSON.
+        """
+        channel = self.make_request("POST", rz_endpoint, b"not json", access_token=None)
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_NOT_JSON")
+
+        for invalid_body in ({}, [], "data", {"data": 0}, {"data": {}}):
+            channel = self.make_request(
+                "POST", rz_endpoint, json.dumps(invalid_body), access_token=None
+            )
+            self.assertEqual(channel.code, 400, invalid_body)
+            self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON")
+
+        # Make a valid request
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "test"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        rendezvous_id = channel.json_body["id"]
+        sequence_token = channel.json_body["sequence_token"]
+
+        channel = self.make_request(
+            "PUT",
+            send_endpoint(rendezvous_id, "txn1"),
+            b"not json",
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_NOT_JSON")
+
+        for i, invalid_body in enumerate(
+            (
+                {"data": "test"},
+                {"sequence_token": sequence_token},
+                "[]",
+                {"sequence_token": sequence_token, "data": 0},
+                {"sequence_token": sequence_token, "data": {}},
+                {"data": "test", "sequence_token": 0},
+                {"data": "test", "sequence_token": {}},
+            )
+        ):
+            channel = self.make_request(
+                "PUT",
+                send_endpoint(rendezvous_id, f"txn{i + 2}"),
+                invalid_body,
+                access_token=None,
+            )
+            self.assertEqual(channel.code, 400, invalid_body)
+            self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON")
+
+    def test_put_retry_does_not_validate_body(self) -> None:
+        """
+        Test that a PUT reusing the transaction ID of an earlier successful PUT
+        gets the earlier response, without the request body being validated.
+        """
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        rendezvous_id = channel.json_body["id"]
+        initial_sequence_token = channel.json_body["sequence_token"]
+
+        channel = self.make_request(
+            "PUT",
+            send_endpoint(rendezvous_id, "txn1"),
+            {"sequence_token": initial_sequence_token, "data": "foo=baz"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        updated_sequence_token = channel.json_body["sequence_token"]
+
+        # None of these would be accepted as a new request, but as retries
+        # they get the earlier response.
+        for body in (
+            b"not json",
+            {"data": "foo=baz"},
+            {"sequence_token": initial_sequence_token, "data": "a" * 5000},
+        ):
+            channel = self.make_request(
+                "PUT",
+                send_endpoint(rendezvous_id, "txn1"),
+                body,
+                access_token=None,
+            )
+            self.assertEqual(channel.code, 200, body)
+            self.assertEqual(
+                channel.json_body["sequence_token"], updated_sequence_token
+            )
+
+        # The payload is unchanged.
+        channel = self.make_request(
+            "GET", rz_endpoint + f"/{rendezvous_id}", access_token=None
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["data"], "foo=baz")
+        self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
 
     def test_max_length(self) -> None:
         """
