@@ -11,13 +11,22 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+import hashlib
 import logging
+import os
+from io import BytesIO
 from typing import TYPE_CHECKING
 
+from matrix_common.types.mxc_uri import MXCUri
+from PIL import Image
+
 from synapse.api.constants import EventTypes, HistoryVisibility, JoinRules, Membership
+from synapse.api.errors import SynapseError
 from synapse.api.room_versions import RoomVersion
 from synapse.config import ConfigError
 from synapse.config.server_announcements import ServerAnnouncementRoom
+from synapse.logging.context import defer_to_thread
+from synapse.media._base import FileInfo
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.types.state import StateFilter
 
@@ -38,6 +47,7 @@ class ServerAnnouncementsHandler:
         self._room_creation = hs.get_room_creation_handler()
         self._room_member = hs.get_room_member_handler()
         self._event_creation = hs.get_event_creation_handler()
+        self._avatars = ServerAnnouncementAvatarManager(hs)
         self._creator = self._config.room_management_mxid
         self._requester = create_requester(
             self._creator, authenticated_entity=hs.hostname
@@ -215,11 +225,23 @@ class ServerAnnouncementsHandler:
             EventTypes.Topic,
             {"topic": room.room_topic or ""},
         )
-        await self._update_state(
-            room_id,
-            EventTypes.RoomAvatar,
-            {"url": room.room_avatar_url} if room.room_avatar_url is not None else {},
-        )
+        try:
+            avatar_url = await self._avatars.get_avatar_url(room)
+        except (ConfigError, SynapseError) as e:
+            # An unavailable avatar must not prevent startup or membership updates.
+            # Keep the existing state rather than clearing it on a transient failure.
+            logger.warning(
+                "Failed to resolve avatar for server announcement room '%s'; "
+                "leaving its avatar unchanged: %s",
+                room.config_id,
+                e,
+            )
+        else:
+            await self._update_state(
+                room_id,
+                EventTypes.RoomAvatar,
+                {"url": avatar_url} if avatar_url is not None else {},
+            )
 
         # Revoke both membership and outstanding invitations of any users not in
         # `allowed_user_ids`.
@@ -306,4 +328,227 @@ class ServerAnnouncementsHandler:
                 "content": content,
             },
             ratelimit=False,
+        )
+
+
+class ServerAnnouncementAvatarManager:
+    """
+    Resolve avatars for reconciliation, delegating uploads to a media worker if needed.
+
+    Only the configured media instance needs access to the avatar file and media
+    repository. The announcement room's mapping must have been created before calling
+    this helper.
+    """
+
+    def __init__(self, hs: "HomeServer") -> None:
+        self._hs = hs
+        self._store = hs.get_datastores().main
+
+    async def get_avatar_url(self, room: ServerAnnouncementRoom) -> str | None:
+        """
+        Fetch the avatar MXC URI for a server announcement room. If a `room_avatar_path`
+        is configured, the file is uploaded to the media store, before the MXC URI is
+        then returned.
+
+        Media that has already been uploaded is cached and not uploaded again. Media
+        *is* uploaded again if the file has changed on disk. This is checked via a
+        sha256 hash of the file.
+
+        Args:
+            room: The server announcements room config.
+
+        Returns:
+            The MXC URI, or `None` if an avatar isn't configured.
+        """
+        path = room.room_avatar_path
+        if path is None:
+            # No need to upload anything. Return the `room_avatar_url`.
+            #
+            # If that is also `None`, then this function will return `None`, which means
+            # "no/clear the room avatar".
+            return room.room_avatar_url
+
+        # Check if this worker has the ability to upload media.
+        media_instance_name = self._hs.config.serverannouncements.media_instance_name
+        if media_instance_name != self._hs.get_instance_name():
+            # We'll need to defer to the media worker instead then.
+
+            # Import here to avoid a cycle through replication servlet registration.
+            from synapse.replication.http.server_announcements import (
+                ReplicationServerAnnouncementAvatarRestServlet,
+            )
+
+            # Ask the media worker for the MXC URI for this room's avatar.
+            upload_request = ReplicationServerAnnouncementAvatarRestServlet.make_client(
+                self._hs
+            )
+            response = await upload_request(
+                instance_name=media_instance_name, config_id=room.config_id
+            )
+            return response["avatar_url"]
+
+        # Apparently we are the media worker.
+
+        if not self._hs.config.media.can_load_media_repo:
+            raise self._avatar_error(
+                room,
+                "The configured avatar uploader must have the media repository enabled",
+            )
+
+        # Read the specified media file from disk.
+        #
+        # Hash the contents so edits at the same path are detected on startup.
+        content, sha256, media_type = await defer_to_thread(
+            self._hs.get_reactor(), self._read_avatar, room, path
+        )
+        # Check if we have cached details for this announcement room.
+        existing_media = await self._store.get_server_announcement_avatar(
+            room.config_id
+        )
+        if existing_media is not None:
+            # We've already got an avatar for this room. Check whether the hash of the
+            # file on disk has changed.
+            existing_path, existing_hash, existing_mxc = existing_media
+            if (
+                existing_path == path
+                and existing_hash == sha256
+                and await self._media_is_available(room, existing_mxc)
+            ):
+                return existing_mxc
+
+        # Upload the media we've read from disk to the media store.
+        media_repo = self._hs.get_media_repository()
+        with BytesIO(content) as upload:
+            mxc = await media_repo.create_or_update_content(
+                media_type=media_type,
+                upload_name=os.path.basename(path),
+                content=upload,
+                content_length=len(content),
+                auth_user=UserID.from_string(
+                    self._hs.config.serverannouncements.room_management_mxid
+                ),
+            )
+        avatar_url = str(mxc)
+
+        # Check that the media can be fetched.
+        if not await self._media_is_available(room, avatar_url):
+            raise self._avatar_error(
+                room, "Uploaded media is missing; check the media storage configuration"
+            )
+
+        # Cache these details (in the database).
+        await self._store.store_server_announcement_avatar(
+            room.config_id, path, sha256, avatar_url
+        )
+        return avatar_url
+
+    async def _media_is_available(
+        self, room: ServerAnnouncementRoom, avatar_url: str
+    ) -> bool:
+        """
+        Check that a locally uploaded avatar is complete and retrievable.
+
+        This should not be called for remote media.
+
+        Raises:
+            ConfigError: If the media is quarantined.
+        """
+        # Sanity check that this is actually a local MXC URI.
+        try:
+            mxc = MXCUri.from_str(avatar_url)
+        except ValueError:
+            return False
+        if not self._hs.is_mine_server_name(mxc.server_name):
+            return False
+
+        # Attempt to fetch the media's metadata from the MXC URI.
+        media = await self._store.get_local_media(mxc.media_id)
+        if media is None:
+            return False
+
+        # Don't use quarantined media, as users won't be able to view it.
+        if media.quarantined_by is not None:
+            raise self._avatar_error(
+                room,
+                f"Media {avatar_url!r} is quarantined; unquarantine it or configure "
+                "a different image",
+            )
+
+        if media.media_length is None:
+            return False
+
+        # Consult all configured providers, not just the local filesystem.
+        responder = await self._hs.get_media_repository().media_storage.fetch_media(
+            FileInfo(
+                server_name=None, file_id=mxc.media_id, url_cache=bool(media.url_cache)
+            )
+        )
+        if responder is None:
+            return False
+
+        # Close the responder.
+        with responder:
+            return True
+
+    def _read_avatar(
+        self, room: ServerAnnouncementRoom, path: str
+    ) -> tuple[bytes, str, str]:
+        """
+        Reads the file, validates its a media file, then hashes it.
+
+        Args:
+            room: The announcment room config.
+            path: The path on disk that the media is located at.
+
+        Returns:
+            A tuple containing:
+                * The media content as bytes.
+                * The sha256 hash of the file.
+                * The mimetype of the file.
+
+        Raises:
+            ValueError: If the mimetype does not start with "image/", or is invalid in
+                some way.
+            OSError: If the file cannot be read from disk.
+            SyntaxError, Image.DecompressionBombError: if the image
+                is invalid or unsupported.
+        """
+        try:
+            # Read the file from disk.
+            with open(path, "rb") as avatar_file:
+                # This administrator-configured file is not subject to client upload limits.
+                content = avatar_file.read()
+        except (OSError, ValueError) as e:
+            raise self._avatar_error(
+                room, f"Cannot read file: {e}; check the path and file permissions"
+            ) from e
+
+        try:
+            # Parse it as an image.
+            with Image.open(BytesIO(content)) as image:
+                media_type = Image.MIME.get(image.format or "")
+                if media_type is None or not media_type.startswith("image/"):
+                    raise ValueError("image format has no supported image MIME type")
+
+                # Verify that this is indeed an image.
+                image.verify()
+
+            # Further checks that this is an image.
+            #
+            # verify() alone does not decode pixels for all formats (e.g. JPEG).
+            with Image.open(BytesIO(content)) as image:
+                image.load()
+
+        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as e:
+            raise self._avatar_error(
+                room, f"Invalid or unsupported image: {e}; provide a valid image file"
+            ) from e
+
+        return content, hashlib.sha256(content).hexdigest(), media_type
+
+    @staticmethod
+    def _avatar_error(room: ServerAnnouncementRoom, reason: str) -> ConfigError:
+        return ConfigError(
+            f"Server announcement room {room.config_id!r}, room_avatar_path "
+            f"{room.room_avatar_path!r}: {reason}"
         )
