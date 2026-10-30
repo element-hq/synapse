@@ -103,7 +103,7 @@ class TagServlet(RestServlet):
         # Check if the user has any membership in the room and raise error if not.
         # Although it's not harmful for users to tag random rooms, it's just superfluous
         # data we don't need to track or allow.
-        if await self.store.get_server_announcement_id(room_id) is None:
+        if room_id not in await self.store.get_server_announcement_room_ids():
             await self.room_member_handler.check_for_any_membership_in_room(
                 user_id=user_id, room_id=room_id
             )
