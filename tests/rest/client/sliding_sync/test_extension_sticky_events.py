@@ -13,6 +13,8 @@
 #
 import logging
 import sqlite3
+from typing import Any
+from unittest.mock import patch
 
 from twisted.internet.testing import MemoryReactor
 
@@ -169,6 +171,57 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
             sync_body, since=response_body["pos"], tok=user1_tok
         )
         self._assert_sticky_events_response(response_body, None)
+
+    def test_sticky_event_expiring_before_serialisation(self) -> None:
+        """
+        Test that a sticky event which expires during sync response processing
+        is not sent down.
+
+        This is a bit of an awkward test as it's hard to prove the absence,
+        but the most important property to bear in mind is that the
+        sticky events should be filtered with the same timestamp
+        as the one used for serialisation.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.send_sticky_event(
+            room_id,
+            EventTypes.Message,
+            duration=Duration(seconds=10),
+            content={"body": "sticky message", "msgtype": "m.text"},
+            tok=user1_tok,
+        )
+
+        # Advance the clock past the sticky event's expiry just after the
+        # sticky events have been selected from the database.
+        original_get_sticky_events_in_rooms = self.store.get_sticky_events_in_rooms
+
+        async def get_sticky_events_in_rooms_then_expire(
+            *args: Any, **kwargs: Any
+        ) -> Any:
+            result = await original_get_sticky_events_in_rooms(*args, **kwargs)
+            self.reactor.advance(11)
+            return result
+
+        sync_body: JsonDict = {
+            "lists": DUMMY_LISTS,
+            "extensions": {
+                "org.matrix.msc4354.sticky_events": {
+                    "enabled": True,
+                }
+            },
+        }
+        with patch.object(
+            self.store,
+            "get_sticky_events_in_rooms",
+            get_sticky_events_in_rooms_then_expire,
+        ):
+            response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        sticky_events = response_body["extensions"]["org.matrix.msc4354.sticky_events"]
+        self.assertEqual(sticky_events["rooms"], {room_id: {"events": []}})
 
     def test_initial_sync(self) -> None:
         """Test that we get all unexpired sticky events on an initial sync (no

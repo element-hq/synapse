@@ -43,6 +43,7 @@ from synapse.logging.opentracing import SynapseTags, set_tag, trace
 from synapse.synapse_rust.events import (
     EventFormat,
     SerializeEventConfig,
+    SerializeEventFilter,
     Unsigned,
     format_event_for_client_v1,
     format_event_for_client_v2,
@@ -67,6 +68,7 @@ from . import EventBase
 __all__ = [
     "EventFormat",
     "SerializeEventConfig",
+    "SerializeEventFilter",
     "format_event_for_client_v1",
     "format_event_for_client_v2",
     "format_event_for_client_v2_without_room_id",
@@ -259,14 +261,17 @@ class EventClientSerializer:
             [event], bundle_aggregations, redaction_map
         )
 
-        return serialize_events(
+        (serialized,) = serialize_events(
             [(event.event, event.membership)],
             time_now,
             config,
             bundle_aggregations=bundle_aggregations,
             redaction_map=redaction_map,
             unsigned_additions=unsigned_additions,
-        )[0]
+        )
+        # We didn't pass a filter, so the event can't have been filtered out.
+        assert serialized is not None
+        return serialized
 
     async def _prepare_serialization(
         self,
@@ -357,8 +362,12 @@ class EventClientSerializer:
         *,
         config: SerializeEventConfig | None = None,
         bundle_aggregations: dict[str, "BundledAggregations"] | None = None,
+        filter: SerializeEventFilter | None = None,
     ) -> list[JsonDict]:
         """Serializes multiple events.
+
+        Intended to be used with `FilteredEvent` objects,
+        but (to support legacy code) accepts `JsonDict` objects and passes those straight through.
 
         Args:
             event
@@ -367,6 +376,8 @@ class EventClientSerializer:
             bundle_aggregations: Whether to include the bundled aggregations for this
                 event. Only applies to non-state events. (State events never include
                 bundled aggregations.)
+            filter: If provided, events rejected by this filter are omitted from the result.
+                (Non-`FilteredEvent` objects are unaffected.)
 
         Returns:
             The list of serialized events
@@ -396,6 +407,7 @@ class EventClientSerializer:
                 bundle_aggregations=bundle_aggregations,
                 redaction_map=redaction_map,
                 unsigned_additions=unsigned_additions,
+                filter=filter,
             )
         )
 
@@ -405,10 +417,11 @@ class EventClientSerializer:
         # FIXME: Ideally we would only call `serialize_events` with
         # `FilteredEvent`s. Currently though some of the old `/events` code paths
         # pass through presence events and the like.
-        return [
-            event if not isinstance(event, FilteredEvent) else next(serialized)
+        stitched = (
+            next(serialized) if isinstance(event, FilteredEvent) else event
             for event in events
-        ]
+        )
+        return [event for event in stitched if event is not None]
 
     def register_add_extra_fields_to_unsigned_client_event_callback(
         self, callback: ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
