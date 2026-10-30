@@ -2368,7 +2368,7 @@ class SyncHandler:
         last_membership_by_room_id = {
             event.room_id: event.membership for event in membership_change_events
         }
-        announcement_room_ids = frozenset(
+        synthetic_join_announcement_room_ids = frozenset(
             room_id
             for room_id in sync_config.filter_collection.filter_rooms(
                 await self.store.get_server_announcement_room_ids()
@@ -2385,7 +2385,7 @@ class SyncHandler:
             since_token=since_token,
             now_token=now_token,
             joined_room_ids=joined_room_ids,
-            announcement_room_ids=announcement_room_ids,
+            synthetic_join_announcement_room_ids=synthetic_join_announcement_room_ids,
             excluded_room_ids=frozenset(mutable_rooms_to_exclude),
             forced_newly_joined_room_ids=frozenset(forced_newly_joined_room_ids),
             membership_change_events=membership_change_events,
@@ -3054,7 +3054,7 @@ class SyncHandler:
         stream_id = since_token.room_key.stream
         for room_id in (
             sync_result_builder.joined_room_ids
-            | sync_result_builder.announcement_room_ids
+            | sync_result_builder.synthetic_join_announcement_room_ids
         ):
             if self.store.has_room_changed_since(room_id, stream_id):
                 return True
@@ -3207,7 +3207,7 @@ class SyncHandler:
                 if knock_room_sync:
                     knocked.append(knock_room_sync)
 
-            if room_id in sync_result_builder.announcement_room_ids:
+            if room_id in sync_result_builder.synthetic_join_announcement_room_ids:
                 left_announcement_room_ids.add(room_id)
                 continue
 
@@ -3321,7 +3321,7 @@ class SyncHandler:
         room_entries.extend(
             await self._get_announcement_room_entries(
                 sync_result_builder,
-                sync_result_builder.announcement_room_ids,
+                sync_result_builder.synthetic_join_announcement_room_ids,
                 left_room_ids=left_announcement_room_ids,
                 account_data_room_ids=account_data_room_ids,
             )
@@ -3534,7 +3534,10 @@ class SyncHandler:
             elif event.membership in (Membership.LEAVE, Membership.BAN):
                 # Former members of an announcement room get the synthetic join
                 # instead of this leave or ban.
-                if event.room_id in sync_result_builder.announcement_room_ids:
+                if (
+                    event.room_id
+                    in sync_result_builder.synthetic_join_announcement_room_ids
+                ):
                     continue
 
                 # Always send down rooms we were banned from or kicked from.
@@ -3567,7 +3570,8 @@ class SyncHandler:
         room_entries.extend(
             await self._get_announcement_room_entries(
                 sync_result_builder,
-                sync_result_builder.announcement_room_ids - room_ids_in_response,
+                sync_result_builder.synthetic_join_announcement_room_ids
+                - room_ids_in_response,
             )
         )
 
@@ -3805,7 +3809,8 @@ class SyncHandler:
                     unread_count=0,
                     sticky=sticky_events,
                     is_announcement=(
-                        room_id in sync_result_builder.announcement_room_ids
+                        room_id
+                        in sync_result_builder.synthetic_join_announcement_room_ids
                     ),
                 )
 
@@ -4002,8 +4007,9 @@ class SyncResultBuilder:
         since_token: The token supplied by user, or None.
         now_token: The token to sync up to.
         joined_room_ids: List of rooms the user is joined to
-        announcement_room_ids: Server announcement rooms the user is not a member
-            of, whose new announcements should still be sent.
+        synthetic_join_announcement_room_ids: Server announcement rooms the user
+            is not a member of, whose new announcements should still be sent with
+            a synthetic join. Rooms the user really joined are not included.
             They are kept apart from `joined_room_ids` because most code that
             reads `joined_room_ids` relies on the user being a member.
         excluded_room_ids: Set of room ids we should omit from the /sync response.
@@ -4030,7 +4036,7 @@ class SyncResultBuilder:
     since_token: StreamToken | None
     now_token: StreamToken
     joined_room_ids: frozenset[str]
-    announcement_room_ids: frozenset[str]
+    synthetic_join_announcement_room_ids: frozenset[str]
     excluded_room_ids: frozenset[str]
     forced_newly_joined_room_ids: frozenset[str]
     membership_change_events: list[EventBase]
@@ -4057,7 +4063,7 @@ class SyncResultBuilder:
         newly_left_users = set()
         if self.since_token:
             for joined_sync in self.joined:
-                if joined_sync.room_id in self.announcement_room_ids:
+                if joined_sync.room_id in self.synthetic_join_announcement_room_ids:
                     continue
 
                 it = itertools.chain(
