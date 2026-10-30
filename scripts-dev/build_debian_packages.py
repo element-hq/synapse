@@ -212,7 +212,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--binary-only",
         action="store_true",
-        help="only build the binary package, not the source package",
+        help="only build the architecture-dependent binary packages, not the source package",
     )
     parser.add_argument(
         "--docker-build-arg",

@@ -32,7 +32,7 @@ dch -M -l "+$DIST" "build for $DIST"
 dch -M -r "" --force-distribution --distribution "$DIST"
 
 if [ -n "$BINARY_ONLY" ]; then
-    dpkg-buildpackage -us -uc --build=binary
+    dpkg-buildpackage -us -uc --build=any
 else
     dpkg-buildpackage -us -uc
 fi
