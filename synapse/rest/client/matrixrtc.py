@@ -49,7 +49,8 @@ class UnstableMatrixRTCTransportsRestServlet(RestServlet):
     """Implements the unstable `/org.matrix.msc4143/rtc/transports` endpoint.
 
     This is retained for backwards compatibility with clients that don't yet support
-    the stable endpoint.
+    the stable endpoint. It can be removed once enough of the client eco system has
+    implemented the stable endpoint.
     """
 
     PATTERNS = client_patterns(r"/org\.matrix\.msc4143/rtc/transports$", releases=())
