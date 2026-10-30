@@ -2041,6 +2041,57 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             get_un_partial_stated_rooms_from_stream_txn,
         )
 
+    async def get_room_report(self, report_id: int) -> dict[str, Any] | None:
+        """Retrieve a room report
+
+        Args:
+            report_id: ID of reported room in database
+        Returns:
+            JSON dict of information from an event report or None if the
+            report does not exist.
+        """
+
+        def _get_room_report_txn(
+            txn: LoggingTransaction, report_id: int
+        ) -> dict[str, Any] | None:
+            sql = """
+                  SELECT report.id,
+                         report.received_ts,
+                         report.room_id,
+                         report.user_id,
+                         report.reason,
+                         room_stats_state.canonical_alias,
+                         room_stats_state.name,
+                         room_stats_state.topic
+                  FROM room_reports AS report
+                  INNER JOIN room_stats_state
+                    ON room_stats_state.room_id = report.room_id
+                  WHERE report.id = ?
+                  """
+
+            txn.execute(sql, [report_id])
+            row = txn.fetchone()
+
+            if not row:
+                return None
+
+            room_report = {
+                "id": row[0],
+                "received_ts": row[1],
+                "room_id": row[2],
+                "user_id": row[3],
+                "reason": row[4],
+                "canonical_alias": row[5],
+                "name": row[6],
+                "topic": row[7],
+            }
+
+            return room_report
+
+        return await self.db_pool.runInteraction(
+            "get_room_report", _get_room_report_txn, report_id
+        )
+
     async def get_event_report(self, report_id: int) -> dict[str, Any] | None:
         """Retrieve an event report
 
@@ -2100,6 +2151,97 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction(
             "get_event_report", _get_event_report_txn, report_id
+        )
+
+    async def get_room_reports_paginate(
+        self,
+        *,
+        from_id: int | None,
+        limit: int,
+        user_id: str | None = None,
+        room_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Retrieve a paginated list of room reports
+
+        Args:
+            from_id: the room report id to start from - if not provided the reports will
+            start at the most recent report (largest report id) and descend
+            limit: number of rows to retrieve
+            user_id: search for user_id. Ignored if user_id is None
+            room_id: filter reports against a specific room_id. Ignored if room_id is None
+        Returns:
+            Tuple of:
+                json list of room reports
+                a boolean indicating whether there are more reports available
+        """
+
+        def _get_room_reports_paginate_txn(
+            txn: LoggingTransaction,
+        ) -> tuple[list[dict[str, Any]], bool]:
+            filters = []
+            args: list[str | int] = []
+
+            if user_id:
+                filters.append("rr.user_id = ?")
+                args.append(user_id)
+            if room_id:
+                filters.append("rr.room_id = ?")
+                args.append(room_id)
+
+            if from_id is not None:
+                filters.append("rr.id < ?")
+                args.append(from_id)
+
+            where_clause = "WHERE " + " AND ".join(filters) if filters else ""
+
+            # By the nature of the `INNER JOIN`, this avoid reports from rooms that have
+            # been deleted/purged. This is useful as it removes duplicate/stale reports for
+            # rooms that have already been "actioned".
+            sql = f"""
+                SELECT
+                    rr.id,
+                    rr.received_ts,
+                    rr.room_id,
+                    rr.user_id,
+                    rr.reason,
+                    room_stats_state.canonical_alias,
+                    room_stats_state.name,
+                    room_stats_state.topic
+                FROM room_reports AS rr
+                INNER JOIN room_stats_state
+                    ON room_stats_state.room_id = rr.room_id
+                {where_clause}
+                ORDER BY rr.id DESC
+                LIMIT ?
+            """
+
+            # fetch an extra row to determine if it exists for pagination
+            args.append(limit + 1)
+            txn.execute(sql, args)
+
+            room_reports = [
+                {
+                    "id": row[0],
+                    "received_ts": row[1],
+                    "room_id": row[2],
+                    "user_id": row[3],
+                    "reason": row[4],
+                    "canonical_alias": row[5],
+                    "name": row[6],
+                    "topic": row[7],
+                }
+                for row in txn
+            ]
+
+            limited = len(room_reports) > limit
+            # trim the extra rooms if it exists
+            if limited:
+                room_reports = room_reports[:limit]
+
+            return room_reports, limited
+
+        return await self.db_pool.runInteraction(
+            "get_room_reports_paginate", _get_room_reports_paginate_txn
         )
 
     async def get_event_reports_paginate(
@@ -2542,6 +2684,20 @@ class RoomBackgroundUpdateStore(RoomWorkerStore):
         self.db_pool.updates.register_background_update_handler(
             _BackgroundUpdates.POPULATE_ROOMS_CREATOR_COLUMN,
             self._background_populate_rooms_creator_column,
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="room_reports_user_id_idx",
+            index_name="room_reports_user_id_idx",
+            table="room_reports",
+            columns=("user_id",),
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="room_reports_room_id_idx",
+            index_name="room_reports_room_id_idx",
+            table="room_reports",
+            columns=("room_id",),
         )
 
     async def _background_insert_retention(
