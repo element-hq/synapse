@@ -3,11 +3,13 @@ from unittest.mock import AsyncMock, patch
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
+import synapse.rest.client.knock
 import synapse.rest.client.login
 import synapse.rest.client.room
 from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.crypto.event_signing import add_hashes_and_signatures
+from synapse.events.snapshot import EventContext
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
@@ -724,3 +726,231 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
         ).value
         self.assertEqual(f.code, 403)
         self.assertEqual(f.errcode, "M_INVITE_BLOCKED")
+
+
+class AutoJoinOnAcceptedKnockTestCase(FederatingHomeserverTestCase):
+    """MSC4509: join a user to a room as soon as their knock is accepted."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        synapse.rest.client.knock.register_servlets,
+        synapse.rest.client.login.register_servlets,
+        synapse.rest.client.room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.fed_handler = hs.get_federation_handler()
+
+        self.creator = self.register_user("creator", "pass")
+        self.creator_tok = self.login("creator", "pass")
+        self.knocker = self.register_user("knocker", "pass")
+        self.knocker_tok = self.login("knocker", "pass")
+
+    def _create_knockable_room(self) -> str:
+        room_id = self.helper.create_room_as(
+            self.creator, is_public=False, tok=self.creator_tok
+        )
+        self.helper.send_state(
+            room_id,
+            EventTypes.JoinRules,
+            {"join_rule": "knock"},
+            tok=self.creator_tok,
+        )
+        return room_id
+
+    def _current_membership(
+        self, room_id: str, user_id: str
+    ) -> tuple[str | None, str | None]:
+        membership, event_id = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(user_id, room_id)
+        )
+        return membership, event_id
+
+    @override_config({"experimental_features": {"msc4509_enabled": True}})
+    def test_local_invite_accepting_knock(self) -> None:
+        """An invite authorised against the invitee's knock joins them."""
+        room_id = self._create_knockable_room()
+        self.helper.knock(room_id, self.knocker, tok=self.knocker_tok)
+
+        self.helper.invite(room_id, self.creator, self.knocker, tok=self.creator_tok)
+        self.pump()
+
+        membership, event_id = self._current_membership(room_id, self.knocker)
+        self.assertEqual(membership, Membership.JOIN)
+
+        # The knocker's clients may never see the invite, so the join has to name
+        # the user who accepted the knock.
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id}/messages?dir=b&limit=1",
+            access_token=self.knocker_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        join_event = channel.json_body["chunk"][0]
+        self.assertEqual(join_event["event_id"], event_id)
+        self.assertEqual(join_event["unsigned"]["prev_sender"], self.creator)
+        self.assertEqual(
+            join_event["unsigned"]["prev_content"]["membership"], Membership.INVITE
+        )
+
+    def test_local_invite_accepting_knock_with_msc4509_disabled(self) -> None:
+        """Without the flag the accepted knock stays an ordinary invite."""
+        room_id = self._create_knockable_room()
+        self.helper.knock(room_id, self.knocker, tok=self.knocker_tok)
+
+        self.helper.invite(room_id, self.creator, self.knocker, tok=self.creator_tok)
+        self.pump()
+
+        membership, _ = self._current_membership(room_id, self.knocker)
+        self.assertEqual(membership, Membership.INVITE)
+
+    @override_config({"experimental_features": {"msc4509_enabled": True}})
+    def test_plain_invite(self) -> None:
+        """An invite which does not accept a knock is left alone."""
+        room_id = self.helper.create_room_as(
+            self.creator, is_public=False, tok=self.creator_tok
+        )
+
+        self.helper.invite(room_id, self.creator, self.knocker, tok=self.creator_tok)
+        self.pump()
+
+        membership, _ = self._current_membership(room_id, self.knocker)
+        self.assertEqual(membership, Membership.INVITE)
+
+    @override_config({"experimental_features": {"msc4509_enabled": True}})
+    def test_remote_invite_accepting_knock(self) -> None:
+        """An invite received over federation which accepts a knock we hold as
+        an outlier starts a remote join."""
+        room_version = self.hs.config.server.default_room_version
+        remote_user = f"@creator:{self.OTHER_SERVER_NAME}"
+
+        create_event_source: JsonDict = {
+            "type": EventTypes.Create,
+            "content": {"room_version": room_version.identifier},
+            "sender": remote_user,
+            "state_key": "",
+            "depth": 1,
+            "origin_server_ts": 0,
+            "auth_events": [],
+            "prev_events": [],
+        }
+        self.add_hashes_and_signatures_from_other_server(
+            create_event_source, room_version
+        )
+        create_event = make_test_pdu_event(create_event_source, room_version)
+        room_id = create_event.room_id
+
+        # Our user knocked on a room we are not in: all we hold is the knock.
+        knock_event = make_test_pdu_event(
+            {
+                "type": EventTypes.Member,
+                "content": {"membership": Membership.KNOCK},
+                "room_id": room_id,
+                "sender": self.knocker,
+                "state_key": self.knocker,
+                "depth": 10,
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            room_version,
+        )
+        knock_event.internal_metadata.outlier = True
+        knock_event.internal_metadata.out_of_band_membership = True
+        self.get_success(
+            self.store.maybe_store_room_on_outlier_membership(
+                room_id=room_id, room_version=room_version
+            )
+        )
+        self.get_success(
+            self.hs.get_federation_event_handler().persist_events_and_notify(
+                room_id,
+                [
+                    (
+                        knock_event,
+                        EventContext.for_outlier(self.hs.get_storage_controllers()),
+                    )
+                ],
+            )
+        )
+
+        invite_event = make_test_pdu_event(
+            {
+                "type": EventTypes.Member,
+                "content": {"membership": Membership.INVITE},
+                "room_id": room_id,
+                "sender": remote_user,
+                "state_key": self.knocker,
+                "depth": 11,
+                "auth_events": [knock_event.event_id],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            room_version,
+        )
+
+        # The remote's response to our `make_join`/`send_join`.
+        join_event_source = {
+            "type": EventTypes.Member,
+            "content": {"membership": Membership.JOIN},
+            "room_id": room_id,
+            "sender": self.knocker,
+            "state_key": self.knocker,
+            "depth": 12,
+            "origin_server_ts": self.clock.time_msec(),
+            "auth_events": [],
+            "prev_events": [create_event.event_id],
+        }
+        add_hashes_and_signatures(
+            room_version, join_event_source, self.hs.hostname, self.hs.signing_key
+        )
+        join_event = make_test_pdu_event(join_event_source, room_version)
+        mock_make_membership_event = AsyncMock(
+            return_value=(self.OTHER_SERVER_NAME, join_event, room_version)
+        )
+        mock_send_join = AsyncMock(
+            return_value=SendJoinResult(
+                join_event,
+                self.OTHER_SERVER_NAME,
+                state=[create_event],
+                auth_chain=[create_event],
+                partial_state=False,
+                servers_in_room=frozenset(),
+                state_dag=None,
+            )
+        )
+
+        with (
+            patch.object(
+                self.fed_handler.federation_client,
+                "make_membership_event",
+                mock_make_membership_event,
+            ),
+            patch.object(
+                self.fed_handler.federation_client, "send_join", mock_send_join
+            ),
+            patch(
+                "synapse.event_auth._is_membership_change_allowed", return_value=None
+            ),
+            patch(
+                "synapse.handlers.federation_event.check_state_dependent_auth_rules",
+                return_value=None,
+            ),
+        ):
+            self.get_success(
+                self.fed_handler.on_invite_request(
+                    origin=self.OTHER_SERVER_NAME,
+                    event=invite_event,
+                    room_version=room_version,
+                )
+            )
+            self.pump(1)
+
+        mock_make_membership_event.assert_called_once()
+        destinations, made_room_id, made_user_id, made_membership = (
+            mock_make_membership_event.call_args.args[:4]
+        )
+        self.assertEqual(list(destinations), [self.OTHER_SERVER_NAME])
+        self.assertEqual(made_room_id, room_id)
+        self.assertEqual(made_user_id, self.knocker)
+        self.assertEqual(made_membership, Membership.JOIN)
+        membership, _ = self._current_membership(room_id, self.knocker)
+        self.assertEqual(membership, Membership.JOIN)

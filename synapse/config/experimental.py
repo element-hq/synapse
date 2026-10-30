@@ -319,3 +319,8 @@ class ExperimentalConfig(Config):
 
         # MSC4512: Delegating parts of the C-S and S-S API to application services
         self.msc4512_enabled: bool = experimental.get("msc4512_enabled", False)
+
+        # MSC4509: Auto-joining rooms when a knock is accepted
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/4509
+        # Tracked in: https://github.com/element-hq/synapse/issues/16307
+        self.msc4509_enabled: bool = experimental.get("msc4509_enabled", False)
