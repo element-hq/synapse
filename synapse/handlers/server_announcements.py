@@ -20,11 +20,56 @@ from synapse.config import ConfigError
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.types.state import StateFilter
+from synapse.util.hash import sha256_and_url_safe_base64
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+SYNTHETIC_JOIN_EVENT_ID_PREFIX = "$fake_announcement_join"
+
+
+def make_synthetic_join_event(
+    room_id: str, user_id: str, origin_server_ts: int
+) -> JsonDict:
+    """Build the join event shown to a user who is not actually in an announcement
+    room, so that clients list the room as joined.
+
+    The event is never persisted. Its event ID is derived from the room and user,
+    so the same user always receives the same event and clients drop repeats. The
+    prefix makes it obvious that the event ID is not a real one.
+
+    It is injected into the `/sync` responses of every user of the homeserver who
+    is not one of the room's senders.
+
+    Args:
+        room_id: The announcement room.
+        user_id: The user receiving the event.
+        origin_server_ts: The timestamp to give the event. Pass the same value
+            every time, e.g. that of the room's create event.
+
+    Returns:
+        The event's JSON in federation format.
+    """
+    return {
+        "room_id": room_id,
+        "type": EventTypes.Member,
+        "event_id": "-".join(
+            [
+                SYNTHETIC_JOIN_EVENT_ID_PREFIX,
+                # 8 first chars of room_id and user_id localpart for debugging
+                room_id[1:9],
+                UserID.from_string(user_id).localpart[:8],
+                # hash of room_id + user_id for uniqueness & staying under 255 bytes length
+                sha256_and_url_safe_base64(f"{room_id}\0{user_id}"),
+            ]
+        ),
+        "sender": user_id,
+        "state_key": user_id,
+        "origin_server_ts": origin_server_ts,
+        "content": {"membership": Membership.JOIN},
+    }
 
 
 class ServerAnnouncementsHandler:
