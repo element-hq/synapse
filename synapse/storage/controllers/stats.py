@@ -92,9 +92,15 @@ class StatsController:
 
                 txn.execute(column_sql, (table,))
                 row = txn.fetchone()
-                assert row is not None
-                vals, freqs = row
 
+                # There are no stats for a table that is empty or hasn't been
+                # analyzed yet, and Postgres leaves `most_common_vals` NULL when
+                # no value is more common than the others, e.g. if every
+                # `room_id` in the table is NULL.
+                if row is None or row[0] is None:
+                    continue
+
+                vals, freqs = row
                 for room_id, freq in zip(vals, freqs):
                     room_estimates[room_id] += int(freq * table_size)
 
