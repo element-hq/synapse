@@ -79,6 +79,7 @@ from synapse.logging.context import (
     make_deferred_yieldable,
     run_in_background,
 )
+from synapse.metrics._thread_cpu import thread_cpu_metrics
 from synapse.metrics.background_process_metrics import (
     run_as_background_process as _run_as_background_process,
 )
@@ -1764,6 +1765,9 @@ class ModuleApi:
         Returns:
             The return value of the function once ran in a thread.
         """
+        # Report the CPU time of the module's threads under the pool's name.
+        thread_cpu_metrics.register_threadpool(threadpool.name or "module", threadpool)
+
         return await defer_to_threadpool(
             self._hs.get_reactor(), threadpool, f, *args, **kwargs
         )

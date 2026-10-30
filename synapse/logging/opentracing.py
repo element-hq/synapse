@@ -175,6 +175,7 @@ import enum
 import inspect
 import logging
 import re
+import threading
 from functools import wraps
 from typing import (
     TYPE_CHECKING,
@@ -492,7 +493,16 @@ def init_tracer(hs: "HomeServer") -> None:
         tracer = config.create_tracer(RustReporter(), config.sampler)
         opentracing.set_global_tracer(tracer)
     else:
+        threads_before = set(threading.enumerate())
         config.initialize_tracer()
+
+        # jaeger-client's reporter sends spans from a thread it starts without
+        # a name. Give its CPU time a type of its own.
+        from synapse.metrics._thread_cpu import thread_cpu_metrics
+
+        for thread in threading.enumerate():
+            if thread not in threads_before:
+                thread_cpu_metrics.register_thread("jaeger-reporter", thread)
 
 
 # Whitelisting
