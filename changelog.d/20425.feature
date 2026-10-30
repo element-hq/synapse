@@ -1,0 +1,1 @@
+Add stable support for `/rtc/transports` and copy `m.rtc.slot` state events during room upgrades as per [MSC4143](https://github.com/matrix-org/matrix-spec-proposals/pull/4143) and [MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195).

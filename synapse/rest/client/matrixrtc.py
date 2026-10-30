@@ -27,13 +27,37 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
-class MatrixRTCRestServlet(RestServlet):
+class MatrixRTCTransportsRestServlet(RestServlet):
+    """Implements `GET /_matrix/client/v1/rtc/transports` from MSC4143."""
+
+    PATTERNS = client_patterns(r"/rtc/transports$", releases=("v1",), unstable=False)
+    CATEGORY = "Client API requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self._auth = hs.get_auth()
+        self._transports = hs.config.matrix_rtc.transports
+
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        # Require authentication for this endpoint.
+        await self._auth.get_user_by_req(request, allow_guest=True)
+
+        return 200, {"transports": self._transports}
+
+
+class UnstableMatrixRTCTransportsRestServlet(RestServlet):
+    """Implements the unstable `/org.matrix.msc4143/rtc/transports` endpoint.
+
+    This is retained for backwards compatibility with clients that don't yet support
+    the stable endpoint. It can be removed once enough of the client eco system has
+    implemented the stable endpoint.
+    """
+
     PATTERNS = client_patterns(r"/org\.matrix\.msc4143/rtc/transports$", releases=())
     CATEGORY = "Client API requests"
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self._hs = hs
         self._auth = hs.get_auth()
         self._transports = hs.config.matrix_rtc.transports
 
@@ -48,5 +72,7 @@ class MatrixRTCRestServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
+    MatrixRTCTransportsRestServlet(hs).register(http_server)
+
     if hs.config.experimental.msc4143_enabled:
-        MatrixRTCRestServlet(hs).register(http_server)
+        UnstableMatrixRTCTransportsRestServlet(hs).register(http_server)
