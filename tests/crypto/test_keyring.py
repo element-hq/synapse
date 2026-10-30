@@ -238,6 +238,54 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         # self.assertFalse(d.called)
         self.get_success(d)
 
+    def _store_key_from_notary(
+        self,
+        key: SigningKey,
+        from_server: str,
+        ts_added_ms: int,
+        valid_until_ts: int,
+    ) -> None:
+        self.get_success(
+            self.hs.get_datastores().main.store_server_keys_response(
+                "server9",
+                from_server=from_server,
+                ts_added_ms=ts_added_ms,
+                verify_keys={
+                    get_key_id(key): FetchKeyResult(
+                        verify_key=get_verify_key(key), valid_until_ts=valid_until_ts
+                    )
+                },
+                response_json={
+                    "verify_keys": {
+                        get_key_id(key): {
+                            "key": encode_verify_key_base64(get_verify_key(key))
+                        }
+                    }
+                },
+            )
+        )
+
+    def test_stored_key_with_longest_validity_wins_over_latest_response(self) -> None:
+        key1 = signedjson.key.generate_signing_key("1")
+        self._store_key_from_notary(
+            key1, "long.example.com", ts_added_ms=1000, valid_until_ts=5000
+        )
+        self._store_key_from_notary(
+            key1, "short.example.com", ts_added_ms=2000, valid_until_ts=3000
+        )
+
+        fetched = self.get_success(
+            self.hs.get_datastores().main.get_server_keys_json(
+                [("server9", get_key_id(key1))]
+            )
+        )
+        self.assertEqual(fetched[("server9", get_key_id(key1))].valid_until_ts, 5000)
+
+        json1: JsonDict = {}
+        signedjson.sign.sign_json(json1, "server9", key1)
+        kr = keyring.Keyring(self.hs)
+        self.get_success(kr.verify_json_for_server("server9", json1, 4000))
+
     def test_verify_json_for_server_using_banned_key(self) -> None:
         """Ensure that JSON signed using a banned server_signing_key fails verification."""
         kr = keyring.Keyring(self.hs)
