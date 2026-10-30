@@ -193,6 +193,8 @@ class SlidingSyncExtensionHandler:
             )
 
         sticky_events_coro = None
+        # Called even when the request omits the extension, so that sticky events
+        # in out-of-scope rooms are still tracked.
         if self._enable_sticky_events:
             sticky_events_coro = self.get_sticky_events_extension_response(
                 sync_config=sync_config,
