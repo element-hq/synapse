@@ -61,6 +61,7 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.server_notices.server_notices_manager import SERVER_NOTICE_ROOM_TAG
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction
@@ -2981,13 +2982,13 @@ class SyncHandler:
         # 3. Work out which rooms need reporting in the sync response.
         ignored_users = await self.store.ignored_users(user_id)
         if since_token:
+            tags_by_room = await self.store.get_updated_tags(
+                user_id, since_token.account_data_key
+            )
             room_changes = await self._get_room_changes_for_incremental_sync(
                 sync_result_builder,
                 ignored_users,
-                account_data_room_ids=account_data_by_room.keys(),
-            )
-            tags_by_room = await self.store.get_updated_tags(
-                user_id, since_token.account_data_key
+                account_data_room_ids=account_data_by_room.keys() | tags_by_room.keys(),
             )
         else:
             room_changes = await self._get_room_changes_for_initial_sync(
@@ -3382,9 +3383,10 @@ class SyncHandler:
             room_ids: The announcement rooms to consider.
             left_room_ids: Rooms among `room_ids` that the user left or was
                 removed from since the `since_token` of `sync_result_builder`.
-            account_data_room_ids: Rooms whose room account data for the user
-                changed since the `since_token` of `sync_result_builder`.
-                They may include rooms that are not in `room_ids`.
+            account_data_room_ids: Rooms whose room account data for the user,
+                including tags, changed since the `since_token` of
+                `sync_result_builder`. They may include rooms that are not in
+                `room_ids`.
         """
         since_token = sync_result_builder.since_token
         now_token = sync_result_builder.now_token
@@ -3684,6 +3686,9 @@ class SyncHandler:
                 # sync
                 if not tags:
                     tags = None
+
+            if room_id in sync_result_builder.announcement_room_ids:
+                tags = {SERVER_NOTICE_ROOM_TAG: {}, **(tags or {})}
 
             account_data_events = []
             if tags is not None:

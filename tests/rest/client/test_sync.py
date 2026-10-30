@@ -47,6 +47,7 @@ from synapse.rest.client import (
     receipts,
     room,
     sync,
+    tags,
 )
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
@@ -2212,6 +2213,7 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
         sync.register_servlets,
         account_data.register_servlets,
+        tags.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -2584,7 +2586,10 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self._timeline_ids(room), [])
         self.assertEqual(
             room["account_data"]["events"],
-            [{"type": "m.marked_unread", "content": {"unread": True}}],
+            [
+                {"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}},
+                {"type": "m.marked_unread", "content": {"unread": True}},
+            ],
         )
 
     def test_marked_unread_with_new_announcement(self) -> None:
@@ -2608,8 +2613,165 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self._timeline_ids(room), [event_id])
         self.assertEqual(
             room["account_data"]["events"],
-            [{"type": "m.marked_unread", "content": {"unread": True}}],
+            [
+                {"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}},
+                {"type": "m.marked_unread", "content": {"unread": True}},
+            ],
         )
+
+    def test_tag_without_new_events(self) -> None:
+        """A non-member who tags an announcement room gets `m.tag` on their next
+        incremental sync, even when nothing else happened in the room.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [
+                {
+                    "type": "m.tag",
+                    "content": {
+                        "tags": {"m.favourite": {"order": 0.5}, "m.server_notice": {}}
+                    },
+                }
+            ],
+        )
+
+    def test_tag_removed_without_new_events(self) -> None:
+        """A non-member who removes their last tag from an announcement room gets
+        `m.tag` with only `m.server_notice` on their next incremental sync, even
+        when nothing else happened in the room.
+        """
+        self._announce("hello")
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+
+    def test_server_notice_tag_on_initial_sync(self) -> None:
+        """A non-member gets the `m.server_notice` tag for an announcement room on
+        an initial sync, without it being stored for them.
+        """
+        self._announce("hello")
+
+        room = self._assert_delivered(self._sync(self.bob_tok), self.bob)
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+        self.assertEqual(
+            self.get_success(self.store.get_tags_for_room(self.bob, self.room_id)), {}
+        )
+
+    def test_server_notice_tag_with_new_announcement(self) -> None:
+        """A non-member gets the `m.server_notice` tag alongside a new announcement
+        on an incremental sync.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+        event_id = self._announce("again")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+
+    def test_server_notice_tag_respects_filter(self) -> None:
+        """A non-member whose filter hides `m.tag` doesn't get the `m.server_notice`
+        tag, but still gets the announcement.
+        """
+        event_id = self._announce("hello")
+
+        room = self._assert_delivered(
+            self._sync(
+                self.bob_tok,
+                filter={"room": {"account_data": {"not_types": ["m.tag"]}}},
+            ),
+            self.bob,
+        )
+        self.assertIn(event_id, self._timeline_ids(room))
+        self.assertEqual(room["account_data"]["events"], [])
+
+    def test_server_notice_tag_not_sent_to_room_members(self) -> None:
+        """A sender who is really joined to an announcement room doesn't get the
+        `m.server_notice` tag.
+        """
+        self._announce("hello")
+
+        response = self._sync(self.announcer_tok)
+        room = response["rooms"]["join"][self.room_id]
+        self.assertEqual(room["account_data"]["events"], [])
+
+    def test_server_notice_tag_cannot_be_removed(self) -> None:
+        """A user can't remove the `m.server_notice` tag from an announcement room,
+        and still gets it on their next sync.
+        """
+        self._announce("hello")
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.server_notice",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+        room = self._assert_delivered(self._sync(self.bob_tok), self.bob)
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+
+    def test_server_notice_tag_removable_from_other_rooms(self) -> None:
+        """A user can still remove the `m.server_notice` tag from a room that isn't
+        an announcement room.
+        """
+        other_room_id = self.helper.create_room_as(self.bob, tok=self.bob_tok)
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{other_room_id}/tags/m.server_notice",
+            {},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{other_room_id}/tags/m.server_notice",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
 
     def test_state_after(self) -> None:
         """With `use_state_after`, a non-member gets the synthetic join in

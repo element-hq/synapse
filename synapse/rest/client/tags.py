@@ -27,6 +27,7 @@ from synapse.api.errors import AuthError, Codes, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_json_object_from_request
 from synapse.http.site import SynapseRequest
+from synapse.server_notices.server_notices_manager import SERVER_NOTICE_ROOM_TAG
 from synapse.types import JsonDict
 
 from ._base import client_patterns
@@ -82,6 +83,7 @@ class TagServlet(RestServlet):
         self.auth = hs.get_auth()
         self.handler = hs.get_account_data_handler()
         self.room_member_handler = hs.get_room_member_handler()
+        self.store = hs.get_datastores().main
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, room_id: str, tag: str
@@ -118,6 +120,15 @@ class TagServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot add tags for other users.")
+
+        if (
+            tag == SERVER_NOTICE_ROOM_TAG
+            and room_id in await self.store.get_server_announcement_room_ids()
+        ):
+            raise AuthError(
+                403,
+                f"Cannot remove the {SERVER_NOTICE_ROOM_TAG} tag from a server announcement room.",
+            )
 
         await self.handler.remove_tag_from_room(user_id, room_id, tag)
 
