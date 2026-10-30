@@ -19,12 +19,13 @@
 #
 #
 
+import json
 import logging
 import time
 import urllib.parse
 from http import HTTPStatus
 from typing import Any, Callable, TypeVar
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import attr
 from parameterized import parameterized
@@ -32,8 +33,8 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
-from synapse.api.room_versions import RoomVersion
-from synapse.events import EventBase
+from synapse.api.room_versions import RoomVersion, RoomVersions
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.utils import strip_event
 from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.matrixfederationclient import (
@@ -43,7 +44,7 @@ from synapse.http.types import QueryParams
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, MutableStateMap, StateMap
+from synapse.types import JsonDict, MutableStateMap, StateMap, create_requester
 from synapse.types.handlers.sliding_sync import (
     StateValues,
 )
@@ -657,3 +658,143 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             exact=True,
             message="Expected to find the event ID of the user2 membership to be sent from hs1 over federation to hs2",
         )
+
+
+class OutOfBandMembershipStateAfterTests(unittest.FederatingHomeserverTestCase):
+    """
+    Out-of-band memberships are outliers, so they are not part of the room state
+    that sync computes. Check that `state_after` reports them anyway.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
+        self.user_id = self.register_user("user1", "pass")
+        self.user_tok = self.login(self.user_id, "pass")
+        self.room_version = RoomVersions.V11
+
+    def _receive_invite(self, room_id: str) -> str:
+        """Have the remote server invite the user to the given room.
+
+        Returns:
+            The ID of the invite event.
+        """
+        invite_pdu = self.add_hashes_and_signatures_from_other_server(
+            {
+                "room_id": room_id,
+                "sender": f"@remote-user:{self.OTHER_SERVER_NAME}",
+                "depth": 1,
+                "origin_server_ts": 1,
+                "type": EventTypes.Member,
+                "state_key": self.user_id,
+                "content": {"membership": Membership.INVITE},
+                "auth_events": [],
+                "prev_events": [],
+            },
+            self.room_version,
+        )
+        invite_event_id = make_event_from_dict(invite_pdu, self.room_version).event_id
+        self.get_success(
+            self.hs.get_federation_server().on_invite_request(
+                origin=self.OTHER_SERVER_NAME,
+                expected_room_id=room_id,
+                expected_event_id=invite_event_id,
+                event_json=invite_pdu,
+                room_version_id=self.room_version.identifier,
+            )
+        )
+        return invite_event_id
+
+    def _reject_invite(self, invite_event_id: str) -> str:
+        """Reject the invite with a locally generated out-of-band leave, as when the
+        inviting server is unreachable.
+
+        Returns:
+            The ID of the leave event.
+        """
+        with patch.object(
+            self.hs.get_federation_handler(),
+            "do_remotely_reject_invite",
+            side_effect=Exception(),
+        ):
+            leave_event_id, _ = self.get_success(
+                self.hs.get_room_member_handler().remote_reject_invite(
+                    invite_event_id,
+                    txn_id=None,
+                    requester=create_requester(self.user_id),
+                    content={},
+                )
+            )
+        return leave_event_id
+
+    def _sync_state_after(
+        self, room_id: str, since: str | None = None
+    ) -> dict[tuple[str, str], str]:
+        """Sync with `use_state_after`, including left rooms.
+
+        Returns:
+            The `state_after` of the given left room, as a map from
+            (type, state_key) to event ID.
+        """
+        sync_filter = json.dumps({"room": {"include_leave": True}})
+        path = f"/_matrix/client/v3/sync?use_state_after=true&filter={sync_filter}"
+        if since is not None:
+            path += f"&since={since}"
+
+        channel = self.make_request("GET", path, access_token=self.user_tok)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        return {
+            (event["type"], event["state_key"]): event["event_id"]
+            for event in channel.json_body["rooms"]["leave"][room_id]["state_after"][
+                "events"
+            ]
+        }
+
+    def test_rejected_invite_incremental_sync(self) -> None:
+        """An incremental sync reports the rejection of a remote invite in
+        `state_after`."""
+        room_id = f"!remote-room:{self.OTHER_SERVER_NAME}"
+        invite_event_id = self._receive_invite(room_id)
+
+        channel = self.make_request("GET", "/sync", access_token=self.user_tok)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        since = channel.json_body["next_batch"]
+
+        leave_event_id = self._reject_invite(invite_event_id)
+
+        self.assertEqual(
+            self._sync_state_after(room_id, since=since),
+            {(EventTypes.Member, self.user_id): leave_event_id},
+        )
+
+    def test_rejected_reinvite_initial_sync(self) -> None:
+        """When the user was in the room before rejecting a remote re-invite, an
+        initial sync keeps the room's state in `state_after` and reports the
+        rejection as the user's membership."""
+        room_id = self.helper.create_room_as(
+            self.user_id,
+            room_version=self.room_version.identifier,
+            tok=self.user_tok,
+        )
+        name_event_id = self.helper.send_state(
+            room_id, EventTypes.Name, {"name": "the room"}, tok=self.user_tok
+        )["event_id"]
+        # The only local member leaves, so the server leaves the room.
+        self.helper.leave(room_id, self.user_id, tok=self.user_tok)
+
+        # The re-invite and its rejection are outliers: the server is no longer
+        # in the room, so neither is part of the room state it knows.
+        invite_event_id = self._receive_invite(room_id)
+        leave_event_id = self._reject_invite(invite_event_id)
+
+        state_after = self._sync_state_after(room_id)
+        self.assertEqual(state_after[(EventTypes.Name, "")], name_event_id)
+        self.assertEqual(state_after[(EventTypes.Member, self.user_id)], leave_event_id)
