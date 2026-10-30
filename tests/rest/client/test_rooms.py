@@ -46,6 +46,7 @@ from synapse.api.constants import (
     RoomTypes,
 )
 from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.room_versions import RoomVersions
 from synapse.appservice import ApplicationService
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
@@ -71,6 +72,7 @@ from tests.http.server._base import make_request_with_cancellation_test
 from tests.server import FakeChannel
 from tests.storage.test_stream import PaginationTestCase
 from tests.test_utils import FakeResponse
+from tests.test_utils.event_builders import make_test_pdu_event
 from tests.test_utils.event_injection import (
     create_event,
     inject_event,
@@ -4181,6 +4183,41 @@ class ContextTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body["errcode"], Codes.NOT_JSON, channel.json_body
         )
+
+    def test_out_of_band_membership_not_found(self) -> None:
+        """An out-of-band membership has no context but is served by `/event`."""
+        # Receive an invite over federation to a room this server is not in.
+        invite = make_test_pdu_event(
+            {
+                "type": EventTypes.Member,
+                "room_id": "!room:remote",
+                "sender": "@inviter:remote",
+                "state_key": self.user_id,
+                "content": {"membership": Membership.INVITE},
+            },
+            RoomVersions.V10,
+        )
+        self.get_success(
+            self.hs.get_federation_handler().on_invite_request(
+                origin="remote", event=invite, room_version=RoomVersions.V10
+            )
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/rooms/!room:remote/context/{invite.event_id}",
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        channel = self.make_request(
+            "GET",
+            f"/rooms/!room:remote/event/{invite.event_id}",
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body["event_id"], invite.event_id)
 
 
 class RoomAliasListTestCase(unittest.HomeserverTestCase):

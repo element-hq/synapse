@@ -2069,6 +2069,16 @@ class RoomContextHandler:
         if not filtered:
             raise AuthError(403, "You don't have permission to access that event.")
 
+        if (
+            event.internal_metadata.outlier
+            and event.type == EventTypes.Member
+            and event.state_key == user.to_string()
+        ):
+            # An out-of-band membership (a remote invite, a knock, or a leave that
+            # rejects either) has no state or neighbouring events on this server.
+            # The event itself is served by `/rooms/{roomId}/event/{eventId}`.
+            raise NotFoundError("No context is available for this event")
+
         results = await self.store.get_events_around(
             room_id, event_id, before_limit, after_limit, event_filter
         )

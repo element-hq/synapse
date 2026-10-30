@@ -1,0 +1,1 @@
+Fix `/rooms/{roomId}/context/{eventId}` returning a 500 instead of a 404 for the user's own out-of-band membership event, such as an invite to a room the server is not in.
