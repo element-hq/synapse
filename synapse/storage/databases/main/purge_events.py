@@ -95,6 +95,7 @@ purge_room_tables_with_room_id_column = (
     "appservice_room_list",
     "e2e_room_keys",
     "event_push_summary",
+    "local_knock_via_servers",
     "pusher_throttle",
     "room_account_data",
     "room_tags",
