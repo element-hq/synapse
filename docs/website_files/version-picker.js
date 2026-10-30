@@ -141,6 +141,7 @@ function readStoredVersions() {
     } catch (ex) {
         // localStorage can be unavailable (e.g. storage blocked by the user)
         // or hold invalid JSON. Then we simply fetch on every page load.
+        console.warn("Failed to read cached version data", ex);
     }
     return null;
 }
@@ -150,6 +151,7 @@ function storeVersions(versions) {
         localStorage.setItem(VERSIONS_STORAGE_KEY, JSON.stringify({ fetchedAt: Date.now(), versions: versions }));
     } catch (ex) {
         // Same as above: storage unavailable or full, nothing to do.
+        console.warn("Failed to cache version data", ex);
     }
 }
 
