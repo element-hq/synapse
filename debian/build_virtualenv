@@ -18,15 +18,19 @@ export DH_VIRTUALENV_INSTALL_ROOT=/opt/venvs
 SNAKE=$(readlink -e /usr/bin/python3)
 
 # try to set the CFLAGS so any compiled C extensions are compiled with the most
-# generic as possible x64 instructions, so that compiling it on a new Intel chip
-# doesn't enable features not available on older ones or AMD.
+# generic as possible instructions, so that compiling it on a new chip doesn't
+# enable features not available on older ones (e.g. building on a modern ARM
+# server and running on a Raspberry Pi).
 #
-# TODO: add similar things for non-amd64, or figure out a more generic way to
-# do this.
+# TODO: add similar things for other architectures, or figure out a more
+# generic way to do this.
 
 case $(dpkg-architecture -q DEB_HOST_ARCH) in
     amd64)
         export CFLAGS=-march=x86-64
+        ;;
+    arm64)
+        export CFLAGS=-march=armv8-a
         ;;
 esac
 
