@@ -615,6 +615,7 @@ class RoomCreationHandler:
             (EventTypes.RoomEncryption, ""),
             (EventTypes.ServerACL, ""),
             (EventTypes.PowerLevels, ""),
+            (EventTypes.RtcSlot, None),
         ]
 
         room_type = old_room_create_event.content.get(EventContentFields.ROOM_TYPE)

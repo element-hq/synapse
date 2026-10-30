@@ -187,6 +187,8 @@ class EventTypes:
 
     RoomPolicy: Final = "m.room.policy"
 
+    RtcSlot: Final = "m.rtc.slot"
+
 
 class ToDeviceEventTypes:
     RoomKeyRequest: Final = "m.room_key_request"
