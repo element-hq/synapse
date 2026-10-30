@@ -1200,6 +1200,17 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         knock.event_id, txn_id, requester, content
                     )
 
+                # or perhaps a knock on a remote room was denied with a ban
+                # (MSC4233). We have no state for the room to build a leave
+                # against, and the room would reject a leave from a banned
+                # user in any case.
+                elif current_membership_type == Membership.BAN:
+                    raise SynapseError(
+                        403,
+                        "Cannot leave a room you were banned from",
+                        errcode=Codes.BAD_STATE,
+                    )
+
         elif effective_membership_state == Membership.KNOCK:
             if not is_host_in_room:
                 # we used to add the domain of the room ID to remote_room_hosts.
