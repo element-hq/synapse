@@ -245,7 +245,7 @@ class ExperimentalConfig(Config):
         ).get("enabled", False):
             raise ConfigError(
                 "MSC4388 requires matrix_authentication_service to be enabled",
-                ("experimental", "msc4388_enabled"),
+                ("experimental", "msc4388_mode"),
             )
 
         # How long a rendezvous session lasts before it expires. MSC4388
