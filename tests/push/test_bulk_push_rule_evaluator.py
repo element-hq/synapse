@@ -31,14 +31,17 @@ from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
-from synapse.push.bulk_push_rule_evaluator import BulkPushRuleEvaluator
+from synapse.push.bulk_push_rule_evaluator import (
+    BulkPushRuleEvaluator,
+    _coerce_power_level,
+)
 from synapse.rest import admin
-from synapse.rest.client import login, push_rule, register, room
+from synapse.rest.client import knock, login, push_rule, register, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
 
-from tests.unittest import HomeserverTestCase, override_config
+from tests.unittest import HomeserverTestCase, TestCase, override_config
 
 
 class TestBulkPushRuleEvaluator(HomeserverTestCase):
@@ -788,3 +791,172 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         self.assertIn(
             "global/override/.org.matrix.msc4075.rule.rtc.invite_for_room", rule_ids
         )
+
+
+class TestKnockPushRules(HomeserverTestCase):
+    """Tests for the MSC4506 knock push rule (`.org.matrix.msc4506.rule.knock`
+    with the `recipient_permission` condition): a knock should notify exactly
+    the members of the room whose power level lets them act on it.
+    """
+
+    servlets = [
+        admin.register_servlets_for_client_rest_resource,
+        room.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        register.register_servlets,
+        push_rule.register_servlets,
+    ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.alice = self.register_user("alice", "pass")
+        self.alice_token = self.login(self.alice, "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_token = self.login(self.bob, "pass")
+        self.charlie = self.register_user("charlie", "pass")
+        self.charlie_token = self.login(self.charlie, "pass")
+
+    def _knock_and_get_event_id(
+        self,
+        power_levels: JsonDict | None = None,
+        room_version: str = "11",
+    ) -> str:
+        """Set up a knockable room and knock on it.
+
+        Alice creates the room and Bob joins it, then Charlie knocks on it.
+        `power_levels` becomes the room's `m.room.power_levels` content; by
+        default it puts Alice at PL 100 and requires PL 50 to invite, so Alice
+        can act on the knock and Bob cannot. Room version 12 and later reject
+        a creator listed in `users`, hence the older default `room_version`.
+        Returns the knock event id.
+        """
+        if power_levels is None:
+            power_levels = {"users": {self.alice: 100}, "invite": 50}
+
+        room_id = self.helper.create_room_as(
+            self.alice,
+            is_public=True,
+            room_version=room_version,
+            tok=self.alice_token,
+        )
+        self.helper.join(room_id, self.bob, tok=self.bob_token)
+        self.helper.send_state(
+            room_id,
+            "m.room.power_levels",
+            power_levels,
+            self.alice_token,
+        )
+        self.helper.send_state(
+            room_id,
+            "m.room.join_rules",
+            {"join_rule": "knock"},
+            self.alice_token,
+        )
+        self.helper.knock(room=room_id, user=self.charlie, tok=self.charlie_token)
+
+        state = self.get_success(
+            self.hs.get_storage_controllers().state.get_current_state(room_id)
+        )
+        return state[("m.room.member", self.charlie)].event_id
+
+    def _notified_users(self, event_id: str) -> set[str]:
+        """The users with a `notify` push action recorded for the given event."""
+        return set(
+            self.get_success(
+                self.hs.get_datastores().main.db_pool.simple_select_onecol(
+                    table="event_push_actions",
+                    keyvalues={"event_id": event_id, "notif": 1},
+                    retcol="user_id",
+                    desc="get_event_push_actions",
+                )
+            )
+        )
+
+    @override_config({"experimental_features": {"msc4506_enabled": True}})
+    def test_knock_notifies_only_users_who_can_act(self) -> None:
+        """Alice can invite the knocker, so she is notified; Bob cannot, and
+        Charlie is never notified of his own knock.
+        """
+        knock_event_id = self._knock_and_get_event_id()
+
+        self.assertIncludes(
+            self._notified_users(knock_event_id), {self.alice}, exact=True
+        )
+
+    def test_knock_notifies_nobody_when_disabled(self) -> None:
+        """The same knock notifies nobody while `msc4506_enabled` is off."""
+        knock_event_id = self._knock_and_get_event_id()
+
+        self.assertIncludes(self._notified_users(knock_event_id), set(), exact=True)
+
+    @override_config({"experimental_features": {"msc4506_enabled": True}})
+    def test_knock_notifies_everyone_when_invite_level_absent(self) -> None:
+        """An `invite` level absent from `m.room.power_levels` defaults to 0,
+        so every member of the room can act on the knock.
+        """
+        knock_event_id = self._knock_and_get_event_id(
+            power_levels={"users": {self.alice: 100}}
+        )
+
+        self.assertIncludes(
+            self._notified_users(knock_event_id), {self.alice, self.bob}, exact=True
+        )
+
+    @override_config({"experimental_features": {"msc4506_enabled": True}})
+    def test_knock_notifies_room_creator(self) -> None:
+        """A room creator can act on the knock even though room versions with
+        MSC4289 leave them out of `m.room.power_levels->users`.
+        """
+        knock_event_id = self._knock_and_get_event_id(
+            power_levels={"invite": 50}, room_version="12"
+        )
+
+        self.assertIncludes(
+            self._notified_users(knock_event_id), {self.alice}, exact=True
+        )
+
+    @override_config({"experimental_features": {"msc4506_enabled": True}})
+    def test_knock_notifies_creator_who_is_only_member(self) -> None:
+        """A knock on a room whose only joined member is its creator notifies
+        the creator. The knocker is not joined, so the evaluator still has a
+        local user other than the sender to evaluate rules for.
+        """
+        room_id = self.helper.create_room_as(
+            self.alice, is_public=True, room_version="12", tok=self.alice_token
+        )
+        self.helper.send_state(
+            room_id,
+            "m.room.join_rules",
+            {"join_rule": "knock"},
+            self.alice_token,
+        )
+        self.helper.knock(room=room_id, user=self.charlie, tok=self.charlie_token)
+
+        state = self.get_success(
+            self.hs.get_storage_controllers().state.get_current_state(room_id)
+        )
+        knock_event_id = state[("m.room.member", self.charlie)].event_id
+
+        self.assertIncludes(
+            self._notified_users(knock_event_id), {self.alice}, exact=True
+        )
+
+
+class TestCoercePowerLevel(TestCase):
+    """Tests for `_coerce_power_level`, which reads the levels the MSC4506
+    `recipient_permission` condition compares against.
+
+    A room whose `m.room.power_levels` holds a null or otherwise non-integer
+    level cannot be built locally (`_check_power_levels` rejects one), so this
+    covers that federated state directly.
+    """
+
+    def test_levels_coerce_to_int_or_to_the_default(self) -> None:
+        self.assertEqual(_coerce_power_level(50, 0), 50)
+        self.assertEqual(_coerce_power_level("50", 0), 50)
+        self.assertEqual(_coerce_power_level(50.5, 0), 50)
+        # An explicit null reads as the default, as it does in `get_named_level`.
+        self.assertEqual(_coerce_power_level(None, 50), 50)
+        self.assertEqual(_coerce_power_level("fifty", 50), 50)
