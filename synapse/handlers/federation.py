@@ -1663,6 +1663,22 @@ class FederationHandler:
     async def do_remotely_reject_invite(
         self, target_hosts: Iterable[str], room_id: str, user_id: str, content: JsonDict
     ) -> tuple[EventBase, int]:
+        """Leave a room we are not resident in, via the make_leave/send_leave dance.
+
+        Used both to reject an out-of-band invite and, under MSC4233, to
+        rescind an out-of-band knock through the server the knock was
+        fulfilled through: the two are the same federation dance and differ
+        only in which hosts we are given.
+
+        Args:
+            target_hosts: The servers to try, in order.
+            room_id: The room to leave.
+            user_id: The local user leaving.
+            content: The content for the leave event.
+
+        Returns:
+            The persisted leave event and its stream ID.
+        """
         origin, event, room_version = await self._make_and_verify_event(
             target_hosts, room_id, user_id, "leave", content=content
         )
