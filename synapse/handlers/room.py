@@ -120,8 +120,8 @@ class EventContext:
     events_after: list[FilteredEvent]
     state: list[EventBase]
     aggregations: dict[str, BundledAggregations]
-    start: str
-    end: str
+    start: str | None
+    end: str | None
 
 
 class RoomCreationHandler:
@@ -2068,6 +2068,30 @@ class RoomContextHandler:
         filtered = await filter_evts([event])
         if not filtered:
             raise AuthError(403, "You don't have permission to access that event.")
+
+        if (
+            event.internal_metadata.outlier
+            and event.type == EventTypes.Member
+            and event.state_key == user.to_string()
+        ):
+            # An out-of-band membership (a remote invite, a knock, or a leave that
+            # rejects either) is an outlier: it has no state group, so
+            # get_state_for_events below raises for it. Its stream position points into
+            # a room whose history we do not hold, so the surrounding events and
+            # pagination tokens derived from it would describe nothing. Return the
+            # event alone.
+            #
+            # Any other outlier still raises. Only the admin API can reach one, since
+            # the visibility filter drops them for everyone else.
+            return EventContext(
+                events_before=[],
+                event=filtered[0],
+                events_after=[],
+                state=[],
+                aggregations={},
+                start=None,
+                end=None,
+            )
 
         results = await self.store.get_events_around(
             room_id, event_id, before_limit, after_limit, event_filter

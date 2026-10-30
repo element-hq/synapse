@@ -1280,7 +1280,7 @@ class RoomEventContextServlet(RestServlet):
         serializer_options = await self._event_serializer.create_config(
             requester=requester
         )
-        results = {
+        results: JsonDict = {
             "events_before": await self._event_serializer.serialize_events(
                 event_context.events_before,
                 time_now,
@@ -1304,9 +1304,15 @@ class RoomEventContextServlet(RestServlet):
                 time_now,
                 config=serializer_options,
             ),
-            "start": event_context.start,
-            "end": event_context.end,
         }
+
+        # An out-of-band membership event cannot be placed in the room's stream,
+        # so the handler has no tokens to give for it. Every other response
+        # carries both.
+        if event_context.start is not None:
+            results["start"] = event_context.start
+        if event_context.end is not None:
+            results["end"] = event_context.end
 
         return 200, results
 
