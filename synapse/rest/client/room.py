@@ -1280,6 +1280,19 @@ class RoomEventContextServlet(RestServlet):
         serializer_options = await self._event_serializer.create_config(
             requester=requester
         )
+
+        if event_context.synthetic_event is not None:
+            event = self._event_serializer.serialize_synthetic_event(
+                event_context.synthetic_event, serializer_options
+            )
+        else:
+            event = await self._event_serializer.serialize_event(
+                event_context.event,
+                time_now,
+                bundle_aggregations=event_context.aggregations,
+                config=serializer_options,
+            )
+
         results = {
             "events_before": await self._event_serializer.serialize_events(
                 event_context.events_before,
@@ -1287,12 +1300,7 @@ class RoomEventContextServlet(RestServlet):
                 bundle_aggregations=event_context.aggregations,
                 config=serializer_options,
             ),
-            "event": await self._event_serializer.serialize_event(
-                event_context.event,
-                time_now,
-                bundle_aggregations=event_context.aggregations,
-                config=serializer_options,
-            ),
+            "event": event,
             "events_after": await self._event_serializer.serialize_events(
                 event_context.events_after,
                 time_now,

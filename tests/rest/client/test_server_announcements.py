@@ -18,7 +18,8 @@ from twisted.internet.testing import MemoryReactor
 import synapse.rest.admin
 from synapse.api.constants import EventTypes, RelationTypes
 from synapse.config.server_announcements import ServerAnnouncementRoom
-from synapse.rest.client import login, relations, room
+from synapse.handlers.server_announcements import make_synthetic_join_event_id
+from synapse.rest.client import login, relations, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -52,12 +53,13 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
         room.register_deprecated_servlets,
         relations.register_servlets,
+        sync.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.announcer = self.register_user("announcer", "pass")
         self.announcer_tok = self.login("announcer", "pass")
-        reader = self.register_user("reader", "pass")
+        self.reader = self.register_user("reader", "pass")
         self.reader_tok = self.login("reader", "pass")
 
         room_config = ServerAnnouncementRoom(
@@ -82,7 +84,7 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
                     room_topic=room_config.room_topic,
                     room_avatar_url=room_config.room_avatar_url,
                     room_avatar_path=room_config.room_avatar_path,
-                    allowed_user_ids=[self.announcer, reader],
+                    allowed_user_ids=[self.announcer, self.reader],
                 )
             ]
             self.get_success(handler.reconcile_rooms())
@@ -134,6 +136,84 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
         """The reader can load the announcement with its surrounding events."""
         body = self._get(f"/rooms/{self.room_id}/context/{self.announcement_id}")
         self.assertEqual(body["event"]["event_id"], self.announcement_id)
+
+    def _get_synthetic_join(self) -> JsonDict:
+        """Get the reader's synthetic join from `/sync`."""
+        room = self._get("/sync")["rooms"]["join"][self.room_id]
+        return next(
+            event
+            for event in room["state"]["events"]
+            if event["type"] == EventTypes.Member and event["state_key"] == self.reader
+        )
+
+    def test_context_of_synthetic_join(self) -> None:
+        """The reader can load the synthetic join they received in `/sync`."""
+        join = self._get_synthetic_join()
+
+        body = self._get(f"/rooms/{self.room_id}/context/{join['event_id']}")
+        self.assertEqual(
+            body["event"], {**join, "room_id": self.room_id, "user_id": self.reader}
+        )
+
+    def test_context_of_synthetic_join_forward_pagination(self) -> None:
+        """The reader can paginate forwards from the synthetic join to the
+        announcement."""
+        join = self._get_synthetic_join()
+
+        context = self._get(f"/rooms/{self.room_id}/context/{join['event_id']}")
+        body = self._get(
+            f"/rooms/{self.room_id}/messages?dir=f&limit=100&from={context['end']}"
+        )
+        self.assertIn(
+            self.announcement_id, [event["event_id"] for event in body["chunk"]]
+        )
+
+    def test_context_of_synthetic_join_surrounding_events(self) -> None:
+        """The synthetic join comes first in the room, followed by the events the
+        reader can see."""
+        join = self._get_synthetic_join()
+
+        body = self._get(f"/rooms/{self.room_id}/context/{join['event_id']}?limit=100")
+        self.assertEqual(body["events_before"], [])
+        self.assertIn(
+            self.announcement_id, [event["event_id"] for event in body["events_after"]]
+        )
+
+    def test_context_of_synthetic_join_of_another_user(self) -> None:
+        """The reader cannot load the synthetic join of another user."""
+        event_id = make_synthetic_join_event_id(self.room_id, self.announcer)
+
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/context/{event_id}",
+            access_token=self.reader_tok,
+        )
+        self.assertEqual(channel.code, 404, channel.json_body)
+
+    def test_context_of_synthetic_join_after_promotion(self) -> None:
+        """The reader can still load the synthetic join they received in `/sync`
+        after a configuration change makes them a sender, and so a member."""
+        join = self._get_synthetic_join()
+
+        config = self.hs.config.serverannouncements
+        room_config = config.rooms[0]
+        config.rooms = [
+            ServerAnnouncementRoom(
+                config_id=room_config.config_id,
+                room_name=room_config.room_name,
+                room_topic=room_config.room_topic,
+                room_avatar_url=room_config.room_avatar_url,
+                room_avatar_path=room_config.room_avatar_path,
+                allowed_user_ids=[self.announcer, self.reader],
+            )
+        ]
+        self.get_success(self.hs.get_server_announcements_handler().reconcile_rooms())
+        self.assertIn(self.room_id, self._get("/joined_rooms")["joined_rooms"])
+
+        body = self._get(f"/rooms/{self.room_id}/context/{join['event_id']}")
+        self.assertEqual(
+            body["event"], {**join, "room_id": self.room_id, "user_id": self.reader}
+        )
 
     def test_event(self) -> None:
         """The reader can fetch the announcement by its ID."""
