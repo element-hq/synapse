@@ -44,7 +44,7 @@ import attr
 from twisted.internet.testing import MemoryReactorClock
 from twisted.web.server import Site
 
-from synapse.api.constants import EventTypes, Membership, ReceiptTypes
+from synapse.api.constants import EventTypes, Membership, ReceiptTypes, StickyEvent
 from synapse.api.errors import Codes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -654,6 +654,7 @@ class RestHelper:
         delay: Duration,
         content: JsonDict,
         state_key: str | None = None,
+        sticky_duration: Duration | None = None,
     ) -> JsonDict:
         """Build the request body for scheduling a delayed event via the dedicated endpoint."""
         body = {
@@ -662,6 +663,8 @@ class RestHelper:
         }
         if state_key is not None:
             body["state_key"] = state_key
+        if sticky_duration is not None:
+            body[StickyEvent.REQUEST_PARAM_NAME] = sticky_duration.as_millis()
         return body
 
     def upload_media(
