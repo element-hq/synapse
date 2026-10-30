@@ -28,6 +28,7 @@ import attr
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
 from synapse.config._base import Config, read_file
+from synapse.config.ratelimiting import RatelimitSettings
 from synapse.types import JsonDict, StrSequence
 
 
@@ -247,8 +248,59 @@ class ExperimentalConfig(Config):
         ).get("enabled", False):
             raise ConfigError(
                 "MSC4388 requires matrix_authentication_service to be enabled",
-                ("experimental", "msc4388_enabled"),
+                ("experimental", "msc4388_mode"),
             )
+
+        # How long a rendezvous session lasts before it expires. MSC4388
+        # recommends at least 2 minutes for usability, to allow the user time to
+        # complete the sign in including any extra steps such as MFA, and at
+        # most 5 minutes for security.
+        self.msc4388_session_ttl_ms = self.parse_duration(
+            experimental.get("msc4388_session_ttl", "2m")
+        )
+        if not 2 * 60 * 1000 <= self.msc4388_session_ttl_ms <= 5 * 60 * 1000:
+            raise ConfigError(
+                "msc4388_session_ttl must be between 2 and 5 minutes",
+                ("experimental", "msc4388_session_ttl"),
+            )
+
+        # The maximum number of rendezvous sessions that can be live at once.
+        # New sessions are refused while at this limit, rather than evicting
+        # live ones, so that sign ins in progress cannot be disrupted. Each
+        # session uses up to around 32KiB, for its payload and the transaction
+        # IDs recorded against it.
+        self.msc4388_max_sessions: int = experimental.get("msc4388_max_sessions", 1000)
+        if (
+            not isinstance(self.msc4388_max_sessions, int)
+            or self.msc4388_max_sessions < 1
+        ):
+            raise ConfigError(
+                "msc4388_max_sessions must be a positive integer",
+                ("experimental", "msc4388_max_sessions"),
+            )
+
+        # MSC4388 requests are ratelimited by client IP address, as most are
+        # unauthenticated: only discovery and creating a session may carry an
+        # access token, and even then it is not used for ratelimiting.
+        #
+        # Creating a session is limited more strictly than other requests, so
+        # that a single client cannot use up the capacity for live sessions. A
+        # client using these defaults can hold at most around 20 live sessions
+        # at once with the default session TTL of 2 minutes, or 40 with the
+        # maximum of 5 minutes.
+        self.msc4388_rc_create = RatelimitSettings.parse(
+            experimental,
+            "msc4388_rc_create",
+            defaults={"per_second": 0.1, "burst_count": 10},
+        )
+        # Every other rendezvous request: discovery, and receiving, sending or
+        # cancelling on a session. This needs to allow for both devices polling
+        # for new payloads, possibly from behind the same IP address.
+        self.msc4388_rc_requests = RatelimitSettings.parse(
+            experimental,
+            "msc4388_rc_requests",
+            defaults={"per_second": 5, "burst_count": 20},
+        )
 
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)

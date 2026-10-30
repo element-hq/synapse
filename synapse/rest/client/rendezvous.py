@@ -24,6 +24,8 @@ from http import HTTPStatus
 from http.client import TEMPORARY_REDIRECT
 from typing import TYPE_CHECKING, Any
 
+from synapse.api.errors import Codes, SynapseError
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.http.server import HttpServer, respond_with_redirect
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
@@ -74,24 +76,55 @@ class MSC4388CreateRendezvousServlet(RestServlet):
         "/io.element.msc4388/rendezvous$", releases=[], v1=False, unstable=True
     )
 
-    def __init__(self, hs: "HomeServer") -> None:
+    def __init__(
+        self,
+        hs: "HomeServer",
+        create_ratelimiter: Ratelimiter,
+        requests_ratelimiter: Ratelimiter,
+    ) -> None:
         super().__init__()
         self._handler = hs.get_msc4388_rendezvous_handler()
         self.auth = hs.get_auth()
         self.require_authentication = (
             hs.config.experimental.msc4388_requires_authentication
         )
+        self._create_ratelimiter = create_ratelimiter
+        self._requests_ratelimiter = requests_ratelimiter
+
+    async def _can_create(self, request: SynapseRequest) -> bool:
+        """Whether the requester is permitted by server policy to create a
+        rendezvous session.
+
+        An access token which is supplied must be valid, even if authentication
+        is not required: the MSC requires that an invalid or expired token gets
+        the usual error response, rather than the request being treated as
+        unauthenticated, so that the client can tell that its token needs
+        refreshing rather than that server policy does not permit it to create
+        a session.
+        """
+        # This will raise if the token is invalid or needs a refresh
+        requester = await self.auth.get_optional_user_by_req(request)
+
+        # Creation is allowed if authenticated or authentication isn't
+        # required
+        return requester is not None or not self.require_authentication
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, Any]:
-        if self.require_authentication:
-            # This will raise if the user is not authenticated or the token needs a refresh
-            await self.auth.get_user_by_req(request)
-        return HTTPStatus.OK, {"create_available": True}
+        await self._requests_ratelimiter.ratelimit(
+            None, request.getClientAddress().host
+        )
+        # A requester which is not permitted to create a session is told so in
+        # the response, rather than by an error.
+        return HTTPStatus.OK, {"create_available": await self._can_create(request)}
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, Any]:
-        if self.require_authentication:
-            # This will raise if the user is not authenticated or the token needs a refresh
-            await self.auth.get_user_by_req(request)
+        await self._create_ratelimiter.ratelimit(None, request.getClientAddress().host)
+        if not await self._can_create(request):
+            raise SynapseError(
+                HTTPStatus.FORBIDDEN,
+                "Authentication is required to create a rendezvous session",
+                Codes.FORBIDDEN,
+            )
         return self._handler.handle_post(request)
 
 
@@ -103,16 +136,25 @@ class MSC4388UpdateRendezvousServlet(RestServlet):
         unstable=True,
     )
 
-    def __init__(self, hs: "HomeServer") -> None:
+    def __init__(self, hs: "HomeServer", requests_ratelimiter: Ratelimiter) -> None:
         super().__init__()
         self._handler = hs.get_msc4388_rendezvous_handler()
+        self._requests_ratelimiter = requests_ratelimiter
 
-    def on_GET(self, request: SynapseRequest, rendezvous_id: str) -> tuple[int, Any]:
+    async def on_GET(
+        self, request: SynapseRequest, rendezvous_id: str
+    ) -> tuple[int, Any]:
+        await self._requests_ratelimiter.ratelimit(
+            None, request.getClientAddress().host
+        )
         return self._handler.handle_get(rendezvous_id, request)
 
-    def on_DELETE(
-        self, _request: SynapseRequest, rendezvous_id: str
+    async def on_DELETE(
+        self, request: SynapseRequest, rendezvous_id: str
     ) -> tuple[int, Any]:
+        await self._requests_ratelimiter.ratelimit(
+            None, request.getClientAddress().host
+        )
         return self._handler.handle_delete(rendezvous_id)
 
 
@@ -131,13 +173,17 @@ class MSC4388SendRendezvousServlet(RestServlet):
         unstable=True,
     )
 
-    def __init__(self, hs: "HomeServer") -> None:
+    def __init__(self, hs: "HomeServer", requests_ratelimiter: Ratelimiter) -> None:
         super().__init__()
         self._handler = hs.get_msc4388_rendezvous_handler()
+        self._requests_ratelimiter = requests_ratelimiter
 
-    def on_PUT(
+    async def on_PUT(
         self, request: SynapseRequest, rendezvous_id: str, txn_id: str
     ) -> tuple[int, Any]:
+        await self._requests_ratelimiter.ratelimit(
+            None, request.getClientAddress().host
+        )
         return self._handler.handle_put(rendezvous_id, txn_id, request)
 
 
@@ -149,6 +195,20 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
         MSC4108DelegationRendezvousServlet(hs).register(http_server)
 
     if hs.config.experimental.msc4388_enabled:
-        MSC4388CreateRendezvousServlet(hs).register(http_server)
-        MSC4388UpdateRendezvousServlet(hs).register(http_server)
-        MSC4388SendRendezvousServlet(hs).register(http_server)
+        # The rendezvous endpoints are ratelimited by client IP address, with
+        # the ratelimiters shared between the servlets.
+        create_ratelimiter = Ratelimiter(
+            store=hs.get_datastores().main,
+            clock=hs.get_clock(),
+            cfg=hs.config.experimental.msc4388_rc_create,
+        )
+        requests_ratelimiter = Ratelimiter(
+            store=hs.get_datastores().main,
+            clock=hs.get_clock(),
+            cfg=hs.config.experimental.msc4388_rc_requests,
+        )
+        MSC4388CreateRendezvousServlet(
+            hs, create_ratelimiter, requests_ratelimiter
+        ).register(http_server)
+        MSC4388UpdateRendezvousServlet(hs, requests_ratelimiter).register(http_server)
+        MSC4388SendRendezvousServlet(hs, requests_ratelimiter).register(http_server)

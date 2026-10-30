@@ -1214,7 +1214,11 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_msc4388_rendezvous_handler(self) -> MSC4388RendezvousHandler:
-        return MSC4388RendezvousHandler(self)
+        return MSC4388RendezvousHandler(
+            self,
+            max_sessions=self.config.experimental.msc4388_max_sessions,
+            ttl=self.config.experimental.msc4388_session_ttl_ms,
+        )
 
     @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":
