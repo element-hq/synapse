@@ -26,11 +26,17 @@ from parameterized import parameterized, parameterized_class
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, ProfileFields
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventTypes,
+    JoinRules,
+    Membership,
+    ProfileFields,
+)
 from synapse.api.errors import Codes, ResourceLimitError
 from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
-from synapse.events import EventBase
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sync import (
     LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE,
@@ -3314,6 +3320,321 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
         )
 
         self.assertEqual(state, {})
+
+
+class SyncOutOfBandMembershipTestCase(tests.unittest.FederatingHomeserverTestCase):
+    """Tests the Sync Handler with memberships in rooms the server is not in."""
+
+    servlets = [
+        admin.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.sync_handler = self.hs.get_sync_handler()
+        self.inviter = "@inviter:" + self.OTHER_SERVER_NAME
+        self.room_version = RoomVersions.V10
+
+    def _receive_invite(self, room_id: str, user_id: str) -> str:
+        """Receive an invite for `user_id` from `self.inviter` over federation.
+
+        Returns:
+            The ID of the invite event.
+        """
+        invite_pdu: JsonDict = {
+            "room_id": room_id,
+            "depth": 1,
+            "auth_events": [],
+            "prev_events": [],
+            "origin_server_ts": 1,
+            "sender": self.inviter,
+            "type": EventTypes.Member,
+            "state_key": user_id,
+            "content": {"membership": Membership.INVITE},
+        }
+        self.add_hashes_and_signatures_from_other_server(invite_pdu, self.room_version)
+        invite_event_id = make_event_from_dict(invite_pdu, self.room_version).event_id
+        self.get_success(
+            self.hs.get_federation_server().on_invite_request(
+                origin=self.OTHER_SERVER_NAME,
+                expected_room_id=room_id,
+                expected_event_id=invite_event_id,
+                event_json=invite_pdu,
+                room_version_id=self.room_version.identifier,
+            )
+        )
+        return invite_event_id
+
+    def _receive_rescission(
+        self, room_id: str, user_id: str, invite_event_id: str
+    ) -> EventBase:
+        """Receive a leave over federation from `self.inviter` rescinding the invite.
+
+        Returns:
+            The rescinding leave event.
+        """
+        leave_pdu: JsonDict = {
+            "room_id": room_id,
+            "depth": 2,
+            "auth_events": [invite_event_id],
+            "prev_events": [invite_event_id],
+            "origin_server_ts": 2,
+            "sender": self.inviter,
+            "type": EventTypes.Member,
+            "state_key": user_id,
+            "content": {"membership": Membership.LEAVE},
+        }
+        self.add_hashes_and_signatures_from_other_server(leave_pdu, self.room_version)
+        leave_event = make_event_from_dict(leave_pdu, self.room_version)
+        self.get_success(
+            self.hs.get_federation_event_handler().on_receive_pdu(
+                self.OTHER_SERVER_NAME, leave_event
+            )
+        )
+        return leave_event
+
+    def _sync(
+        self,
+        user_id: str,
+        filter_dict: JsonDict,
+        since_token: StreamToken | None = None,
+        use_state_after: bool = False,
+    ) -> SyncResult:
+        return self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                create_requester(user_id),
+                generate_sync_config(
+                    user_id,
+                    filter_collection=FilterCollection(self.hs, filter_dict),
+                    use_state_after=use_state_after,
+                ),
+                request_key=generate_request_key(),
+                since_token=since_token,
+            )
+        )
+
+    @parameterized.expand(
+        [
+            ("initial_sync", True, {"include_leave": True}, False),
+            ("initial_sync_without_include_leave", True, {}, False),
+            (
+                "initial_sync_lazy_load_members",
+                True,
+                {"include_leave": True, "state": {"lazy_load_members": True}},
+                False,
+            ),
+            ("initial_sync_state_after", True, {"include_leave": True}, True),
+            ("incremental_sync", False, {"include_leave": True}, False),
+            ("incremental_sync_without_include_leave", False, {}, False),
+        ]
+    )
+    def test_rescinded_invite(
+        self,
+        _: str,
+        initial_sync: bool,
+        room_filter: JsonDict,
+        use_state_after: bool,
+    ) -> None:
+        """A remote invite rescinded by the inviter is returned as an archived room
+        with the rescinding leave in its timeline, with or without `include_leave`,
+        like any other room the user was kicked from."""
+        user = self.register_user("user", "password")
+        room_id = "!room:" + self.OTHER_SERVER_NAME
+
+        invite_event_id = self._receive_invite(room_id, user)
+        since_token = self._sync(user, {}).next_batch
+        leave_event = self._receive_rescission(room_id, user, invite_event_id)
+
+        sync_result = self._sync(
+            user,
+            {"room": room_filter},
+            since_token=None if initial_sync else since_token,
+            use_state_after=use_state_after,
+        )
+
+        self.assertEqual([r.room_id for r in sync_result.archived], [room_id])
+        self.assertEqual(
+            [e.event.event_id for e in sync_result.archived[0].timeline.events],
+            [leave_event.event_id],
+        )
+
+    def test_rejected_invite_initial_sync(self) -> None:
+        """A remote invite the user rejected is returned as an archived room with
+        the rejection in its timeline on an initial sync with `include_leave`."""
+        user = self.register_user("user", "password")
+        room_id = "!room:" + self.OTHER_SERVER_NAME
+
+        invite_event_id = self._receive_invite(room_id, user)
+        # Make rejecting the invite through the inviting server fail, so the server
+        # rejects it locally as an out of band leave.
+        with patch.object(
+            self.hs.get_federation_handler(),
+            "do_remotely_reject_invite",
+            side_effect=Exception(),
+        ):
+            reject_event_id, _ = self.get_success(
+                self.hs.get_room_member_handler().remote_reject_invite(
+                    invite_event_id,
+                    txn_id=None,
+                    requester=create_requester(user),
+                    content={},
+                )
+            )
+
+        sync_result = self._sync(user, {"room": {"include_leave": True}})
+
+        self.assertEqual([r.room_id for r in sync_result.archived], [room_id])
+        self.assertEqual(
+            [e.event.event_id for e in sync_result.archived[0].timeline.events],
+            [reject_event_id],
+        )
+
+    def test_initial_sync_only_passes_out_of_band_leaves(self) -> None:
+        """`_load_filtered_recents` relies on an initial sync passing no
+        `potential_recents` other than an out of band leave. Check every kind of
+        room membership an initial sync handles."""
+        user = self.register_user("user", "password")
+        tok = self.login("user", "password")
+        other = self.register_user("other", "password")
+        other_tok = self.login("other", "password")
+
+        # Joined.
+        self.helper.create_room_as(user, tok=tok)
+
+        # Left.
+        left_room = self.helper.create_room_as(user, tok=tok)
+        self.helper.leave(left_room, user, tok=tok)
+
+        # Kicked.
+        kicked_room = self.helper.create_room_as(other, tok=other_tok)
+        self.helper.join(kicked_room, user, tok=tok)
+        self.helper.change_membership(
+            kicked_room,
+            src=other,
+            targ=user,
+            membership=Membership.LEAVE,
+            tok=other_tok,
+        )
+
+        # Banned.
+        banned_room = self.helper.create_room_as(other, tok=other_tok)
+        self.helper.join(banned_room, user, tok=tok)
+        self.helper.ban(banned_room, src=other, targ=user, tok=other_tok)
+
+        # Invited. Not a room entry, so never reaches `_load_filtered_recents`.
+        # Included so that this test fails if it becomes one that passes events.
+        invite_room = self.helper.create_room_as(other, tok=other_tok)
+        self.helper.invite(invite_room, src=other, targ=user, tok=other_tok)
+
+        # Knocked. Not a room entry, so never reaches `_load_filtered_recents`.
+        # Included so that this test fails if it becomes one that passes events.
+        knock_room = self.helper.create_room_as(
+            other, room_version=self.room_version.identifier, tok=other_tok
+        )
+        self.helper.send_state(
+            knock_room,
+            EventTypes.JoinRules,
+            {"join_rule": JoinRules.KNOCK},
+            tok=other_tok,
+        )
+        channel = self.make_request(
+            "POST", f"/_matrix/client/v3/knock/{knock_room}", {}, tok
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # Out of band leave.
+        remote_room_id = "!room:" + self.OTHER_SERVER_NAME
+        invite_event_id = self._receive_invite(remote_room_id, user)
+        self._receive_rescission(remote_room_id, user, invite_event_id)
+
+        with patch.object(
+            self.sync_handler,
+            "_load_filtered_recents",
+            AsyncMock(wraps=self.sync_handler._load_filtered_recents),
+        ) as load_filtered_recents:
+            self._sync(user, {"room": {"include_leave": True}})
+
+        passed_recents = [
+            call.kwargs["potential_recents"]
+            for call in load_filtered_recents.call_args_list
+        ]
+        for potential_recents in passed_recents:
+            if potential_recents is not None:
+                # The only events an initial sync may pass are a single out of band
+                # leave, which `_load_filtered_recents` sends after the history.
+                self.assertEqual(len(potential_recents), 1)
+                self.assertTrue(
+                    potential_recents[0].internal_metadata.is_out_of_band_membership()
+                )
+        # The out of band leave was passed, so the check above is not vacuous.
+        self.assertEqual(
+            len([r for r in passed_recents if r is not None]), 1, passed_recents
+        )
+
+    @parameterized.expand(
+        [
+            ("limit_1", 1, False),
+            ("limit_3", 3, False),
+            ("limit_3_with_gap", 3, True),
+        ]
+    )
+    def test_rescinded_invite_after_leaving_initial_sync(
+        self, _: str, timeline_limit: int, with_gap: bool
+    ) -> None:
+        """When the user was previously in the room, an initial sync returns the
+        history they can see followed by the rescinding leave, and the state at
+        the start of that timeline. This holds when the room's history has a gap."""
+        user = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        room_id = self.helper.create_room_as(
+            user, room_version=self.room_version.identifier, tok=tok
+        )
+        name_event_id = self.helper.send_state(
+            room_id, EventTypes.Name, {"name": "the room"}, tok=tok
+        )["event_id"]
+        message_event_id = self.helper.send(room_id, "message", tok=tok)["event_id"]
+        if with_gap:
+            store = self.hs.get_datastores().main
+            message_position = self.get_success(
+                store.get_position_for_event(message_event_id)
+            )
+            self.get_success(
+                store.db_pool.simple_insert(
+                    "timeline_gaps",
+                    {
+                        "room_id": room_id,
+                        "instance_name": message_position.instance_name,
+                        "stream_ordering": message_position.stream,
+                    },
+                )
+            )
+        own_leave_event_id = self.helper.leave(room_id, user, tok=tok)["event_id"]
+
+        invite_event_id = self._receive_invite(room_id, user)
+        leave_event = self._receive_rescission(room_id, user, invite_event_id)
+
+        sync_result = self._sync(
+            user,
+            {"room": {"include_leave": True, "timeline": {"limit": timeline_limit}}},
+        )
+
+        self.assertEqual([r.room_id for r in sync_result.archived], [room_id])
+        room_result = sync_result.archived[0]
+        # Sync keeps the most recent `timeline_limit` events.
+        expected_timeline = [message_event_id, own_leave_event_id, leave_event.event_id]
+        self.assertEqual(
+            [e.event.event_id for e in room_result.timeline.events],
+            expected_timeline[-timeline_limit:],
+        )
+        # The room's earlier history, such as its creation, doesn't fit.
+        self.assertTrue(room_result.timeline.limited)
+        self.assertEqual(
+            room_result.state[(EventTypes.Name, "")].event_id, name_event_id
+        )
 
 
 class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
