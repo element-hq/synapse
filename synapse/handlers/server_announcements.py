@@ -30,6 +30,28 @@ logger = logging.getLogger(__name__)
 SYNTHETIC_JOIN_EVENT_ID_PREFIX = "$fake_announcement_join"
 
 
+def make_synthetic_join_event_id(room_id: str, user_id: str) -> str:
+    """Build the event ID of the synthetic join of a user in an announcement room.
+
+    Args:
+        room_id: The announcement room.
+        user_id: The user receiving the event.
+
+    Returns:
+        The event ID, which is the same every time for a given room and user.
+    """
+    return "-".join(
+        [
+            SYNTHETIC_JOIN_EVENT_ID_PREFIX,
+            # 8 first chars of room_id and user_id localpart for debugging
+            room_id[1:9],
+            UserID.from_string(user_id).localpart[:8],
+            # hash of room_id + user_id for uniqueness & staying under 255 bytes length
+            sha256_and_url_safe_base64(f"{room_id}\0{user_id}"),
+        ]
+    )
+
+
 def make_synthetic_join_event(
     room_id: str, user_id: str, origin_server_ts: int
 ) -> JsonDict:
@@ -55,16 +77,7 @@ def make_synthetic_join_event(
     return {
         "room_id": room_id,
         "type": EventTypes.Member,
-        "event_id": "-".join(
-            [
-                SYNTHETIC_JOIN_EVENT_ID_PREFIX,
-                # 8 first chars of room_id and user_id localpart for debugging
-                room_id[1:9],
-                UserID.from_string(user_id).localpart[:8],
-                # hash of room_id + user_id for uniqueness & staying under 255 bytes length
-                sha256_and_url_safe_base64(f"{room_id}\0{user_id}"),
-            ]
-        ),
+        "event_id": make_synthetic_join_event_id(room_id, user_id),
         "sender": user_id,
         "state_key": user_id,
         "origin_server_ts": origin_server_ts,

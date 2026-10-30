@@ -75,6 +75,10 @@ from synapse.events.utils import (
     copy_and_fixup_power_levels_contents,
 )
 from synapse.handlers.relations import BundledAggregations
+from synapse.handlers.server_announcements import (
+    make_synthetic_join_event,
+    make_synthetic_join_event_id,
+)
 from synapse.rest.admin._base import assert_user_is_admin
 from synapse.streams import EventSource
 from synapse.types import (
@@ -122,6 +126,7 @@ class EventContext:
     aggregations: dict[str, BundledAggregations]
     start: str
     end: str
+    synthetic_event: JsonDict | None = None
 
 
 class RoomCreationHandler:
@@ -2022,6 +2027,10 @@ class RoomContextHandler:
         """Retrieves events, pagination tokens and state around a given event
         in a room.
 
+        The requester's synthetic join in an announcement room is never persisted.
+        It is returned as the `synthetic_event` of the result, at the position of
+        the room's create event, which is not itself returned to the requester.
+
         Args:
             requester
             room_id
@@ -2059,13 +2068,35 @@ class RoomContextHandler:
                 is_peeking=is_peeking,
             )
 
+        # When requesting the context of a synthetic announcement room membership
+        # the context displayed will be based on the create event
+        synthetic_join = None
+        if (
+            not use_admin_priviledge
+            and event_id == make_synthetic_join_event_id(room_id, user.to_string())
+            and await self.store.get_server_announcement_id(room_id) is not None
+        ):
+            create_event = await self.store.get_create_event_for_room(room_id)
+            synthetic_join = make_synthetic_join_event(
+                room_id, user.to_string(), create_event.origin_server_ts
+            )
+            event_id = create_event.event_id
+
         event = await self.store.get_event(
             event_id, get_prev_content=True, allow_none=True
         )
         if not event:
             return None
 
-        filtered = await filter_evts([event])
+        if synthetic_join is not None:
+            # Here the `event` is the create event of the room. A user peeking at the
+            # room cannot pass filter_evts() on it, since the history_visibility is set
+            # after the create event. This is fine as the event is not returned to the
+            # requester.
+            filtered = [FilteredEvent.state(event)]
+        else:
+            filtered = await filter_evts([event])
+
         if not filtered:
             raise AuthError(403, "You don't have permission to access that event.")
 
@@ -2139,6 +2170,7 @@ class RoomContextHandler:
             end=await token.copy_and_replace(StreamKeyType.ROOM, results.end).to_string(
                 self.store
             ),
+            synthetic_event=synthetic_join,
         )
 
 
