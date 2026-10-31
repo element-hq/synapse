@@ -5,7 +5,7 @@ name: Build release artifacts
 on:
   # we build on PRs and develop to (hopefully) get early warning
   # of things breaking (but only build one set of debs). PRs skip
-  # building wheels on ARM.
+  # building wheels and debs on ARM.
   pull_request:
   push:
     branches: ["develop", "release-*"]
@@ -47,8 +47,8 @@ jobs:
   # now build the packages with a matrix build.
   build-debs:
     needs: get-distros
-    name: "Build .deb packages"
-    runs-on: ubuntu-latest
+    name: "Build .deb packages (${{ matrix.distro }}, ${{ matrix.platform.arch }})"
+    runs-on: ${{ matrix.platform.runner }}
     strategy:
       # Prevent all Debian package builds from being cancelled
       # when one of them fails. Especially helpful when things are
@@ -58,6 +58,21 @@ jobs:
       fail-fast: false
       matrix:
         distro: ${{ fromJson(needs.get-distros.outputs.distros) }}
+        # The source package is only built on amd64: building it on every
+        # architecture would produce conflicting `.dsc`/`.tar.xz` files with the
+        # same names when the artifacts are merged.
+        platform:
+          - { arch: amd64, runner: ubuntu-latest, build_args: "" }
+          - { arch: arm64, runner: ubuntu-24.04-arm, build_args: "--binary-only" }
+        # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
+        # It is not read by the rest of the workflow.
+        is_pr:
+          - ${{ startsWith(github.ref, 'refs/pull/') }}
+
+        exclude:
+          # Don't build arm64 debs on PR CI.
+          - is_pr: true
+            platform: { arch: arm64, runner: ubuntu-24.04-arm, build_args: "--binary-only" }
 
     steps:
       - name: Checkout
@@ -73,9 +88,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          key: ${{ runner.os }}-${{ matrix.platform.arch }}-buildx-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-buildx-
+            ${{ runner.os }}-${{ matrix.platform.arch }}-buildx-
 
       - name: Set up python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -86,7 +101,7 @@ jobs:
         # see https://github.com/docker/build-push-action/issues/252
         # for the cache magic here
         run: |
-          ./src/scripts-dev/build_debian_packages.py \
+          ./src/scripts-dev/build_debian_packages.py ${{ matrix.platform.build_args }} \
             --docker-build-arg=--cache-from=type=local,src=/tmp/.buildx-cache \
             --docker-build-arg=--cache-to=type=local,mode=max,dest=/tmp/.buildx-cache-new \
             --docker-build-arg=--progress=plain \
@@ -98,11 +113,12 @@ jobs:
       - name: Artifact name
         id: artifact-name
         # We can't have colons in the upload name of the artifact, so we convert
-        # e.g. `debian:sid` to `sid`.
+        # e.g. `debian:sid` to `sid-amd64`.
         env:
           DISTRO: ${{ matrix.distro }}
+          ARCH: ${{ matrix.platform.arch }}
         run: |
-          echo "ARTIFACT_NAME=${DISTRO#*:}" >> "$GITHUB_OUTPUT"
+          echo "ARTIFACT_NAME=${DISTRO#*:}-${ARCH}" >> "$GITHUB_OUTPUT"
 
       - name: Upload debs as artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

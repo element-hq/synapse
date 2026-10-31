@@ -57,7 +57,9 @@ class Builder:
         self._lock = threading.Lock()
         self._failed = False
 
-    def run_build(self, dist: str, skip_tests: bool = False) -> None:
+    def run_build(
+        self, dist: str, skip_tests: bool = False, binary_only: bool = False
+    ) -> None:
         """Build deb for a single distribution"""
 
         if self._failed:
@@ -65,13 +67,15 @@ class Builder:
             raise Exception("failed")
 
         try:
-            self._inner_build(dist, skip_tests)
+            self._inner_build(dist, skip_tests, binary_only)
         except Exception as e:
             print("build of %s failed: %s" % (dist, e), file=sys.stderr)
             self._failed = True
             raise
 
-    def _inner_build(self, dist: str, skip_tests: bool = False) -> None:
+    def _inner_build(
+        self, dist: str, skip_tests: bool = False, binary_only: bool = False
+    ) -> None:
         tag = dist.split(":", 1)[1]
 
         # Make the dir where the debs will live.
@@ -134,6 +138,8 @@ class Builder:
                 "TARGET_GROUPID=%i" % (os.getgid(),),
                 "-e",
                 "DEB_BUILD_OPTIONS=%s" % ("nocheck" if skip_tests else ""),
+                "-e",
+                "BINARY_ONLY=%s" % ("1" if binary_only else ""),
                 "dh-venv-builder:" + tag,
             ],
             stdout=stdout,
@@ -166,7 +172,11 @@ class Builder:
 
 
 def run_builds(
-    builder: Builder, dists: Collection[str], jobs: int = 1, skip_tests: bool = False
+    builder: Builder,
+    dists: Collection[str],
+    jobs: int = 1,
+    skip_tests: bool = False,
+    binary_only: bool = False,
 ) -> None:
     def sig(signum: int, _frame: FrameType | None) -> None:
         print("Caught SIGINT")
@@ -175,7 +185,9 @@ def run_builds(
     signal.signal(signal.SIGINT, sig)
 
     with ThreadPoolExecutor(max_workers=jobs) as e:
-        res = e.map(lambda dist: builder.run_build(dist, skip_tests), dists)
+        res = e.map(
+            lambda dist: builder.run_build(dist, skip_tests, binary_only), dists
+        )
 
     # make sure we consume the iterable so that exceptions are raised.
     for _ in res:
@@ -197,6 +209,11 @@ if __name__ == "__main__":
         "--no-check",
         action="store_true",
         help="skip running tests after building",
+    )
+    parser.add_argument(
+        "--binary-only",
+        action="store_true",
+        help="only build the architecture-dependent binary packages, not the source package",
     )
     parser.add_argument(
         "--docker-build-arg",
@@ -226,4 +243,5 @@ if __name__ == "__main__":
             dists=args.dist,
             jobs=args.jobs,
             skip_tests=args.no_check,
+            binary_only=args.binary_only,
         )
