@@ -1,0 +1,1 @@
+Fix a bug introduced in Synapse 1.109.0 where a Postgres failover and fail-back could leave stream positions ahead of their sequences, so that Synapse failed to start with `IncorrectDatabaseSetup`.

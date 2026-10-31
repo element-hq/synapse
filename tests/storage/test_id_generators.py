@@ -552,7 +552,7 @@ class WorkerMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         id_gen = self._create_id_generator("first", writers=["first", "second"])
 
         # When the writer is created, it assumes its own position is the current head of
-        # the sequence
+        # the stream
         self.assertEqual(id_gen.get_positions(), {"first": 5, "second": 5})
 
         self.assertEqual(id_gen.get_persisted_upto_position(), 5)
@@ -750,6 +750,20 @@ class WorkerMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
                 self.assertEqual(stream_id, 27)
 
         self.get_success(_get_next_async())
+
+    def test_sequence_ahead_of_stream(self) -> None:
+        """Test that a writer's position doesn't come from the sequence, which
+        on a promoted Postgres standby can be up to 32 ahead of any ID handed out.
+        """
+        self._insert_rows("master", 3)
+
+        def _setval(txn: Cursor) -> None:
+            txn.execute("SELECT setval('foobar_seq', 35)")
+
+        self.get_success(self.db_pool.runInteraction("_setval", _setval))
+
+        id_gen = self._create_id_generator()
+        self.assertEqual(id_gen.get_positions(), {"master": 3})
 
     def test_minimal_local_token(self) -> None:
         self._insert_rows("first", 3)
