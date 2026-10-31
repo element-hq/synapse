@@ -54,9 +54,8 @@ pub enum GlobMatchType {
     Word,
 }
 
-/// Convert a "glob" style expression to a regex, anchoring either to the entire
-/// input or to individual words.
-pub fn glob_to_regex(glob: &str, match_type: GlobMatchType) -> Result<Regex, Error> {
+/// Convert a "glob" style expression to an unanchored regex pattern string.
+pub fn glob_to_pattern(glob: &str) -> String {
     let mut chunks = Vec::new();
 
     // Patterns with wildcards must be simplified to avoid performance cliffs
@@ -82,7 +81,13 @@ pub fn glob_to_regex(glob: &str, match_type: GlobMatchType) -> Result<Regex, Err
         }
     }
 
-    let joined = chunks.join("");
+    chunks.join("")
+}
+
+/// Convert a "glob" style expression to a regex, anchoring either to the entire
+/// input or to individual words.
+pub fn glob_to_regex(glob: &str, match_type: GlobMatchType) -> Result<Regex, Error> {
+    let joined = glob_to_pattern(glob);
 
     let regex_str = match match_type {
         GlobMatchType::Whole => format!(r"\A{joined}\z"),
