@@ -1,0 +1,1 @@
+Ignore events from other rooms in `latest_events` when handling experimental [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242) state DAG `/get_missing_events` requests.

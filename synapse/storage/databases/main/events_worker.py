@@ -611,6 +611,7 @@ class EventsWorkerStore(SQLBaseStore):
         redact_behaviour: EventRedactBehaviour = EventRedactBehaviour.redact,
         get_prev_content: bool = False,
         allow_rejected: bool = False,
+        check_room_id: str | None = None,
     ) -> dict[str, EventBase]:
         """Get events from the database
 
@@ -633,6 +634,9 @@ class EventsWorkerStore(SQLBaseStore):
             allow_rejected: If True, return rejected events. Otherwise,
                 omits rejected events from the response.
 
+            check_room_id: if not None, check the room ID of the events in `event_ids`.
+                If there is a mismatch, drop that event.
+
         Returns:
             A mapping from event_id to event.
         """
@@ -646,6 +650,7 @@ class EventsWorkerStore(SQLBaseStore):
             redact_behaviour=redact_behaviour,
             get_prev_content=get_prev_content,
             allow_rejected=allow_rejected,
+            check_room_id=check_room_id,
         )
 
         return {e.event_id: e for e in events}
@@ -659,6 +664,7 @@ class EventsWorkerStore(SQLBaseStore):
         redact_behaviour: EventRedactBehaviour = EventRedactBehaviour.redact,
         get_prev_content: bool = False,
         allow_rejected: bool = False,
+        check_room_id: str | None = None,
     ) -> list[EventBase]:
         """Get events from the database and return in a list in the same order
         as given by `event_ids` arg.
@@ -680,6 +686,9 @@ class EventsWorkerStore(SQLBaseStore):
 
             allow_rejected: If True, return rejected events. Otherwise,
                 omits rejected events from the response.
+
+            check_room_id: if not None, check the room ID of the events in `event_ids`.
+                If there is a mismatch, drop that event.
 
         Returns:
             List of events fetched from the database. The events are in the same
@@ -705,6 +714,9 @@ class EventsWorkerStore(SQLBaseStore):
         for event_id in event_ids:
             entry = event_entry_map.get(event_id, None)
             if not entry:
+                continue
+
+            if check_room_id is not None and entry.event.room_id != check_room_id:
                 continue
 
             if not allow_rejected:
