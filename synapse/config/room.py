@@ -86,3 +86,23 @@ class RoomConfig(Config):
         # When enabled, users will forget rooms when they leave them, either via a
         # leave, kick or ban.
         self.forget_on_leave: bool = config.get("forget_rooms_on_leave", False)
+        
+        # Event types to copy when upgrading a room
+        self.event_types_to_copy_on_room_upgrade: list[tuple[str, str | None]] = []
+        event_types_to_copy_on_room_upgrade = config.get("event_types_to_copy_on_room_upgrade", [])
+        if event_types_to_copy_on_room_upgrade:
+            for event_type in event_types_to_copy_on_room_upgrade:
+                if not isinstance(event_type, (list, tuple)) or len(event_type) != 2:
+                    raise ConfigError(
+                        "copy_event_types_on_room_upgrade entries must be [event_type, state_key] tuples"
+                    )
+                event_type, state_key = event_type
+                if not isinstance(event_type, str):
+                    raise ConfigError(
+                        f"Event type must be a string, got {event_type(event_type).__name__}"
+                    )
+                if state_key is not None and not isinstance(state_key, str):
+                    raise ConfigError(
+                        f"State key must be a string or null, got {event_type(state_key).__name__}"
+                    )
+                self.event_types_to_copy_on_room_upgrade.append((event_type, state_key))
