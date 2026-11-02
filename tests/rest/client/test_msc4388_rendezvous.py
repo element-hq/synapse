@@ -687,7 +687,9 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
 
-    @override_config({"experimental_features": {"msc4388_max_sessions": 10}})
+    @override_config(
+        {"experimental_features": {"msc4388_max_unauthenticated_sessions": 10}}
+    )
     def test_capacity(self) -> None:
         """
         Test that new sessions are refused while at capacity, rather than live
@@ -773,6 +775,80 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             access_token=None,
         )
         self.assertEqual(channel.code, 429)
+
+    @override_config(
+        {"experimental_features": {"msc4388_max_unauthenticated_sessions": 2}}
+    )
+    def test_capacity_authenticated(self) -> None:
+        """
+        Test that sessions created with an access token do not count towards,
+        and are not refused by, the unauthenticated session limit.
+        """
+        self.setup_mock_oauth()
+        alice_token = self.register_oauth_user("alice", "device1")
+
+        # Fill up the unauthenticated capacity
+        for _ in range(2):
+            channel = self.make_request(
+                "POST",
+                rz_endpoint,
+                {"data": "foo=bar"},
+                access_token=None,
+            )
+            self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 429)
+
+        # Authenticated sessions can still be created
+        for _ in range(3):
+            channel = self.make_request(
+                "POST",
+                rz_endpoint,
+                {"data": "foo=bar"},
+                access_token=alice_token,
+            )
+            self.assertEqual(channel.code, 200)
+
+    @override_config(
+        {"experimental_features": {"msc4388_max_unauthenticated_sessions": 1}}
+    )
+    def test_capacity_delete_expired(self) -> None:
+        """
+        Test that deleting an expired session before it has been evicted frees
+        up its capacity.
+        """
+        # Offset the session from the eviction interval (60 seconds), so that
+        # it expires between two eviction runs
+        self.reactor.advance(30)
+
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        session_endpoint = rz_endpoint + "/" + channel.json_body["id"]
+
+        # Let the session expire, but delete it before the eviction runs
+        self.reactor.advance(121)
+        channel = self.make_request("DELETE", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 404)
+
+        # The deleted session no longer takes up capacity
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
 
     def test_data_type(self) -> None:
         """

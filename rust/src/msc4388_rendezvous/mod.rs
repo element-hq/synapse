@@ -13,7 +13,7 @@
  */
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     time::{Duration, SystemTime},
 };
 
@@ -44,7 +44,11 @@ mod session;
 struct MSC4388RendezvousHandler {
     runtime: RustRuntime,
     sessions: BTreeMap<Ulid, Session>,
-    max_sessions: usize,
+    /// The set of currently unauthenticated sessions. This is used to enforce
+    /// the limit on the number of unauthenticated sessions that can be live at
+    /// once.
+    unauthenticated_sessions: BTreeSet<Ulid>,
+    max_unauthenticated_sessions: usize,
     max_content_length: u64,
     ttl: Duration,
 }
@@ -87,13 +91,19 @@ fn parse_json_body<T: DeserializeOwned>(body: &[u8]) -> PyResult<T> {
 }
 
 impl MSC4388RendezvousHandler {
-    /// Evict expired sessions.
+    /// Evict expired unauthenticated sessions.
     ///
     /// Live sessions are never evicted to make room for new ones, as otherwise
     /// anyone could disrupt sign ins that are in progress by creating lots of
-    /// sessions. Instead, new sessions are refused while at capacity.
+    /// sessions. Instead, new unauthenticated sessions are refused while at
+    /// capacity.
     fn evict(&mut self, now: SystemTime) {
         self.sessions.retain(|_, session| !session.expired(now));
+
+        // Clean up any unauthenticated sessions that no longer exist in the
+        // main session map.
+        self.unauthenticated_sessions
+            .retain(|id| self.sessions.contains_key(id));
     }
 }
 
@@ -111,11 +121,11 @@ pub struct PutRequest {
 #[pymethods]
 impl MSC4388RendezvousHandler {
     #[new]
-    #[pyo3(signature = (homeserver, /, max_sessions=1000, max_content_length=4*1024, eviction_interval=60*1000, ttl=2*60*1000))]
+    #[pyo3(signature = (homeserver, /, max_unauthenticated_sessions=1000, max_content_length=4*1024, eviction_interval=60*1000, ttl=2*60*1000))]
     fn new(
         py: Python<'_>,
         homeserver: HomeServer,
-        max_sessions: usize,
+        max_unauthenticated_sessions: usize,
         max_content_length: u64,
         eviction_interval: u64,
         ttl: u64,
@@ -130,7 +140,8 @@ impl MSC4388RendezvousHandler {
             Self {
                 runtime,
                 sessions: BTreeMap::new(),
-                max_sessions,
+                unauthenticated_sessions: BTreeSet::new(),
+                max_unauthenticated_sessions,
                 max_content_length,
                 ttl: Duration::from_millis(ttl),
             },
@@ -153,7 +164,11 @@ impl MSC4388RendezvousHandler {
         Ok(())
     }
 
-    fn handle_post(&mut self, twisted_request: &Bound<'_, PyAny>) -> PyResult<(u8, PostResponse)> {
+    fn handle_post(
+        &mut self,
+        twisted_request: &Bound<'_, PyAny>,
+        authenticated: bool,
+    ) -> PyResult<(u8, PostResponse)> {
         let now = self.runtime.clock().now();
 
         // Generate a new ULID for the session from the current time.
@@ -165,24 +180,30 @@ impl MSC4388RendezvousHandler {
         let data: String = post_request.data;
         check_data_length(&data, self.max_content_length)?;
 
-        // If we're at capacity, evict expired sessions now rather than waiting
-        // for the next eviction run, in case that frees up some room.
-        if self.sessions.len() >= self.max_sessions {
-            self.evict(now);
-        }
-        if self.sessions.len() >= self.max_sessions {
-            return Err(SynapseError::new(
-                StatusCode::TOO_MANY_REQUESTS,
-                "Too many rendezvous sessions in progress, try again later".to_owned(),
-                "M_LIMIT_EXCEEDED",
-                None,
-                None,
-            ));
+        if !authenticated {
+            // If we're at capacity, evict expired sessions now rather than waiting
+            // for the next eviction run, in case that frees up some room.
+            if self.unauthenticated_sessions.len() >= self.max_unauthenticated_sessions {
+                self.evict(now);
+            }
+
+            if self.unauthenticated_sessions.len() >= self.max_unauthenticated_sessions {
+                return Err(SynapseError::new(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "Too many rendezvous sessions in progress, try again later".to_owned(),
+                    "M_LIMIT_EXCEEDED",
+                    None,
+                    None,
+                ));
+            }
         }
 
         let session = Session::new(id, data, now, self.ttl);
         let response = session.post_response(now);
         self.sessions.insert(id, session);
+        if !authenticated {
+            self.unauthenticated_sessions.insert(id);
+        }
 
         Ok((200, response))
     }
@@ -364,6 +385,11 @@ impl MSC4388RendezvousHandler {
         let now = self.runtime.clock().now();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
+
+        // Remove the session from the set of unauthenticated sessions, if
+        // present.
+        self.unauthenticated_sessions.remove(&id);
+
         // An expired session may not have been evicted yet, but it should be
         // treated as if it no longer exists.
         let _session = self

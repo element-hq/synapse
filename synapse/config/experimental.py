@@ -261,24 +261,26 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4388_session_ttl"),
             )
 
-        # The maximum number of rendezvous sessions that can be live at once.
-        # New sessions are refused while at this limit, rather than evicting
-        # live ones, so that sign ins in progress cannot be disrupted. Each
-        # session uses up to around 32KiB, for its payload and the transaction
-        # IDs recorded against it.
-        self.msc4388_max_sessions: int = experimental.get("msc4388_max_sessions", 1000)
+        # The maximum number of unauthenticated rendezvous sessions that can be
+        # live at once. New unauthenticated sessions are refused while at this
+        # limit, rather than evicting live ones, so that sign ins in progress
+        # cannot be disrupted. Each session uses up to around 32KiB, for its
+        # payload and the transaction IDs recorded against it.
+        self.msc4388_max_unauthenticated_sessions: int = experimental.get(
+            "msc4388_max_unauthenticated_sessions", 1000
+        )
         if (
-            not isinstance(self.msc4388_max_sessions, int)
-            or self.msc4388_max_sessions < 1
+            not isinstance(self.msc4388_max_unauthenticated_sessions, int)
+            or self.msc4388_max_unauthenticated_sessions < 1
         ):
             raise ConfigError(
-                "msc4388_max_sessions must be a positive integer",
-                ("experimental", "msc4388_max_sessions"),
+                "msc4388_max_unauthenticated_sessions must be a positive integer",
+                ("experimental", "msc4388_max_unauthenticated_sessions"),
             )
 
-        # MSC4388 requests are ratelimited by client IP address, as most are
-        # unauthenticated: only discovery and creating a session may carry an
-        # access token, and even then it is not used for ratelimiting.
+        # Most MSC4388 requests are ratelimited by client IP address, as they
+        # are unauthenticated. Creating a session is ratelimited by requester if
+        # authenticated, and by client IP address if not.
         #
         # Creating a session is limited more strictly than other requests, so
         # that a single client cannot use up the capacity for live sessions. A

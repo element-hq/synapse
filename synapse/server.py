@@ -1211,7 +1211,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     def get_msc4388_rendezvous_handler(self) -> MSC4388RendezvousHandler:
         return MSC4388RendezvousHandler(
             self,
-            max_sessions=self.config.experimental.msc4388_max_sessions,
+            max_unauthenticated_sessions=self.config.experimental.msc4388_max_unauthenticated_sessions,
             ttl=self.config.experimental.msc4388_session_ttl_ms,
         )
 
