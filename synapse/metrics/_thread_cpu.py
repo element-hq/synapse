@@ -50,8 +50,8 @@ class _ThreadSample:
 class ThreadCPUMetrics(Collector):
     """Reports the CPU time used by each type of thread in the process.
 
-    Threads are grouped by what they run: the main (reactor) thread, each
-    registered threadpool, the tokio runtime, and `other` for everything else.
+    Threads are grouped by what they run: the main (reactor) thread, a
+    registered type, the `tokio` runtime, and `other` for everything else.
 
     Linux only, as it reads `/proc/self/task`. The kernel only reports CPU time
     for live threads, so the collector sums the CPU time each thread used
