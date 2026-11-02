@@ -202,6 +202,7 @@ from twisted.web.http import Request
 from twisted.web.http_headers import Headers
 
 from synapse.config import ConfigError
+from synapse.metrics._thread_cpu import thread_cpu_metrics
 from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
@@ -493,12 +494,21 @@ def init_tracer(hs: "HomeServer") -> None:
         tracer = config.create_tracer(RustReporter(), config.sampler)
         opentracing.set_global_tracer(tracer)
     else:
+        # Register the jaeger tracing thread with the CPU metrics system.
+        #
+        # jaeger-client's reporter sends spans from a thread it starts without a
+        # name, so we have to manually register its CPU time with a type of its
+        # own. To do this we find all threads that started during the
+        # initialisation and register them.
+        #
+        # This is best effort, but works in practice for the jaeger reporter
+        # thread. Technically other Python threads could be started during this
+        # period (though unlikely to happen during Synapse startup), or newer
+        # versions of the library could defer starting of threads. At worse this
+        # means that some threads CPU time may be incorrectly attributed to
+        # `jaeger-reporter` or `other`.
         threads_before = set(threading.enumerate())
         config.initialize_tracer()
-
-        # jaeger-client's reporter sends spans from a thread it starts without
-        # a name. Give its CPU time a type of its own.
-        from synapse.metrics._thread_cpu import thread_cpu_metrics
 
         for thread in threading.enumerate():
             if thread not in threads_before:
