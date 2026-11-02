@@ -1,3 +1,12 @@
+# Synapse 1.164.2 (2026-11-02)
+
+## Bugfixes
+
+- Restore the unstable [MSC2965](https://github.com/matrix-org/matrix-spec-proposals/pull/2965) `/auth_metadata` endpoint, which Element X clients still request after upgrading from Synapse 1.162 or earlier, causing them to fail to refresh their access token. ([\#20460](https://github.com/element-hq/synapse/issues/20460))
+
+
+
+
 # Synapse 1.164.1 (2026-10-28)
 
 ## Bugfixes
