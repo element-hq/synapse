@@ -1,1 +1,0 @@
-Remove unused `lxml` packaging and type-stub dependencies, and update URL-preview tests to check for BeautifulSoup instead.

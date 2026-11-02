@@ -1,1 +1,0 @@
-[MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Reject requests to schedule a delayed event that the sender could not send at that time, such as in a room they are not joined to, unless the event changes their own membership.
