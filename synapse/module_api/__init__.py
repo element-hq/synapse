@@ -1766,7 +1766,10 @@ class ModuleApi:
             The return value of the function once ran in a thread.
         """
         # Report the CPU time of the module's threads under the pool's name.
-        thread_cpu_metrics.register_threadpool(threadpool.name or "module", threadpool)
+        thread_pool_name = "module-other"
+        if threadpool.name:
+            thread_pool_name = "module-" + threadpool.name
+        thread_cpu_metrics.register_threadpool(thread_pool_name, threadpool)
 
         return await defer_to_threadpool(
             self._hs.get_reactor(), threadpool, f, *args, **kwargs
