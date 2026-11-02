@@ -21,12 +21,15 @@ class MSC4388RendezvousHandler:
         self,
         homeserver: HomeServer,
         /,
-        max_sessions: int = 1000,  # New sessions are refused while this many are live
+        # The limit of unauthenticated sessions that can be live at once
+        max_unauthenticated_sessions: int = 1000,
         max_content_length: int = 4 * 1024,  # MSC4388 specifies maximum of 4KB
         eviction_interval: int = 60 * 1000,
         ttl: int = 2 * 60 * 1000,  # MSC4388 specifies minimum of 120 seconds
     ) -> None: ...
-    def handle_post(self, request: IRequest) -> tuple[int, Any]: ...
+    def handle_post(
+        self, request: IRequest, authenticated: bool
+    ) -> tuple[int, Any]: ...
     def handle_get(self, session_id: str, request: IRequest) -> tuple[int, Any]: ...
     def handle_put(
         self, session_id: str, txn_id: str, request: IRequest
