@@ -35,12 +35,16 @@ logger = logging.getLogger(__name__)
 class _ThreadSample:
     """A thread's CPU usage as of one scrape."""
 
-    # When the thread started, in ticks since boot. Tells apart a new thread
-    # that reuses the ID of one that exited.
     start_time: int
-    # The user and system CPU the thread had used, in ticks.
+    """When the thread started, in ticks since boot. Used to distinguish a new
+    thread that reuses the ID of one that exited.
+    """
+
     utime: int
+    """User CPU time used by the thread, in ticks."""
+
     stime: int
+    """System CPU time used by the thread, in ticks."""
 
 
 class ThreadCPUMetrics(Collector):
