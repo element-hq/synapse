@@ -138,7 +138,10 @@ class ThreadCPUMetrics(Collector):
 
     def collect(self) -> Iterable[Metric]:
         """Add the CPU time each live thread used since the previous scrape to
-        its type's total, and report the totals."""
+        its type's total, and report the totals.
+
+        A thread that exits loses the CPU it used since the last scrape.
+        """
         try:
             tids = [int(tid) for tid in os.listdir("/proc/self/task")]
         except OSError:
