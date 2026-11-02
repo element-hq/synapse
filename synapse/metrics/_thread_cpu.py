@@ -157,7 +157,13 @@ class ThreadCPUMetrics(Collector):
                     continue
 
                 # The thread name may contain spaces or brackets, so split after
-                # its closing bracket. See `man 5 proc` for the field numbers.
+                # its closing bracket. See `man 5 proc_pid_stat` for the field
+                # numbers (note they're off by three due to zero-based indexing
+                # and we have split off the first two fields).
+                #
+                # Example of the start of such a line:
+                #
+                #    171453 (cat) R 30798 171453 ...
                 fields = line.rsplit(")", 1)[1].split()
                 utime = int(fields[11])
                 stime = int(fields[12])
