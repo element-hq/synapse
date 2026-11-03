@@ -107,7 +107,26 @@ class ReceiptsHandler:
                 )
                 continue
 
+            if not isinstance(room_values, dict):
+                logger.info(
+                    "Ignoring malformed receipt content for room %r from server %s: expected an object, got %r",
+                    room_id,
+                    origin,
+                    room_values,
+                )
+                continue
+
             for receipt_type, users in room_values.items():
+                if not isinstance(users, dict):
+                    logger.info(
+                        "Ignoring malformed receipt content for room %r, receipt type %r from server %s: expected an object, got %r",
+                        room_id,
+                        receipt_type,
+                        origin,
+                        users,
+                    )
+                    continue
+
                 for user_id, user_values in users.items():
                     if get_domain_from_id(user_id) != origin:
                         logger.info(
@@ -125,8 +144,22 @@ class ReceiptsHandler:
                         )
                         continue
 
+                    if not isinstance(user_values, dict) or not isinstance(
+                        user_values.get("event_ids"), list
+                    ):
+                        logger.info(
+                            "Ignoring malformed receipt content for room %r, user %r from server %s: expected an object with an 'event_ids' list, got %r",
+                            room_id,
+                            user_id,
+                            origin,
+                            user_values,
+                        )
+                        continue
+
                     # Check if these receipts apply to a thread.
                     data = user_values.get("data", {})
+                    if not isinstance(data, dict):
+                        data = {}
                     thread_id = data.get("thread_id")
                     # If the thread ID is invalid, consider it missing.
                     if not isinstance(thread_id, str):

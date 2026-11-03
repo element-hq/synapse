@@ -410,3 +410,55 @@ class FederationReceiptsTestCase(unittest.FederatingHomeserverTestCase):
             ),
             {},
         )
+
+    def test_malformed_receipt_edu_does_not_drop_wellformed_receipts(self) -> None:
+        """A remote server sends a receipt EDU where one room's content is
+        malformed (a string instead of an object, as seen in a real-world
+        federation bug report: https://github.com/matrix-org/synapse/issues/10376).
+        The malformed room should be ignored, but a well-formed receipt for
+        another room in the same EDU should still be stored.
+        """
+        local_user_id = self.register_user("alice", "pass")
+        local_user_token = self.login("alice", "pass")
+        room_id = self.helper.create_room_as(local_user_id, tok=local_user_token)
+        event_id = self.helper.send(room_id, tok=local_user_token)["event_id"]
+
+        other_room_id = self.helper.create_room_as(local_user_id, tok=local_user_token)
+
+        remote_user_id = f"@john:{self.OTHER_SERVER_NAME}"
+        self.inject_room_member(room_id, remote_user_id, Membership.JOIN)
+        self.inject_room_member(other_room_id, remote_user_id, Membership.JOIN)
+
+        channel = self.make_signed_federation_request(
+            "PUT",
+            "/_matrix/federation/v1/send/txn",
+            {
+                "edus": [
+                    {
+                        "edu_type": EduTypes.RECEIPT,
+                        "content": {
+                            # Malformed: value should be an object keyed by
+                            # receipt type, not a string.
+                            other_room_id: "some string",
+                            room_id: {
+                                ReceiptTypes.READ: {
+                                    remote_user_id: {
+                                        "event_ids": [event_id],
+                                        "data": {"ts": 1436451550453},
+                                    }
+                                }
+                            },
+                        },
+                    }
+                ]
+            },
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        store = self.hs.get_datastores().main
+        self.assertEqual(
+            self.get_success(
+                store.get_receipts_for_user(remote_user_id, [ReceiptTypes.READ])
+            ),
+            {room_id: event_id},
+        )
