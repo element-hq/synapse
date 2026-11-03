@@ -2371,7 +2371,7 @@ class SyncHandler:
         synthetic_join_announcement_room_ids = frozenset(
             room_id
             for room_id in sync_config.filter_collection.filter_rooms(
-                await self.store.get_server_announcement_room_ids()
+                await self.store.get_server_announcement_room_ids_for_user(user_id)
             )
             if room_id not in mutable_joined_room_ids
             and room_id not in mutable_rooms_to_exclude
