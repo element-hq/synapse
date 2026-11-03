@@ -122,54 +122,40 @@ class SlidingSyncExtensionHandler:
             from_token: The point in the stream to sync from.
         """
 
-        if sync_config.extensions is None:
-            # If no extensions are enabled, shortcut out.
-
-            if self._enable_sticky_events:
-                # The sticky events extension tracks per-room state even while it
-                # isn't enabled on the request, so that re-enabling it doesn't miss anything.
-                # (But only if the MSC4354 experimental feature is enabled)
-                await self._record_sticky_events_in_out_of_scope_rooms(
-                    previous_connection_state=previous_connection_state,
-                    new_connection_state=new_connection_state,
-                    relevant_room_ids=set(),
-                    to_token=to_token,
-                    from_token=from_token,
-                )
-            return SlidingSyncResult.Extensions()
+        extensions = sync_config.extensions or SlidingSyncConfig.Extensions()
 
         to_device_coro = None
-        if sync_config.extensions.to_device is not None:
+        if extensions.to_device is not None:
             to_device_coro = self.get_to_device_extension_response(
                 sync_config=sync_config,
-                to_device_request=sync_config.extensions.to_device,
+                to_device_request=extensions.to_device,
                 to_token=to_token,
             )
 
         e2ee_coro = None
-        if sync_config.extensions.e2ee is not None:
+        if extensions.e2ee is not None:
             e2ee_coro = self.get_e2ee_extension_response(
                 sync_config=sync_config,
-                e2ee_request=sync_config.extensions.e2ee,
+                e2ee_request=extensions.e2ee,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         account_data_coro = None
-        if sync_config.extensions.account_data is not None:
+        if extensions.account_data is not None:
             account_data_coro = self.get_account_data_extension_response(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
                 new_connection_state=new_connection_state,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
-                account_data_request=sync_config.extensions.account_data,
+                account_data_request=extensions.account_data,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         receipts_coro = None
-        if sync_config.extensions.receipts is not None:
+        if extensions.receipts is not None:
             receipts_coro = self.get_receipts_extension_response(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
@@ -177,36 +163,38 @@ class SlidingSyncExtensionHandler:
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
-                receipts_request=sync_config.extensions.receipts,
+                receipts_request=extensions.receipts,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         typing_coro = None
-        if sync_config.extensions.typing is not None:
+        if extensions.typing is not None:
             typing_coro = self.get_typing_extension_response(
                 sync_config=sync_config,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
-                typing_request=sync_config.extensions.typing,
+                typing_request=extensions.typing,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         thread_subs_coro = None
         if (
-            sync_config.extensions.thread_subscriptions is not None
+            extensions.thread_subscriptions is not None
             and self._enable_thread_subscriptions
         ):
             thread_subs_coro = self.get_thread_subscriptions_extension_response(
                 sync_config=sync_config,
-                thread_subscriptions_request=sync_config.extensions.thread_subscriptions,
+                thread_subscriptions_request=extensions.thread_subscriptions,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         sticky_events_coro = None
+        # Called even when the request omits the extension, so that sticky events
+        # in out-of-scope rooms are still tracked.
         if self._enable_sticky_events:
             sticky_events_coro = self.get_sticky_events_extension_response(
                 sync_config=sync_config,
@@ -216,16 +204,16 @@ class SlidingSyncExtensionHandler:
                 actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
                 newly_joined_room_ids=newly_joined_room_ids,
-                sticky_events_request=sync_config.extensions.sticky_events,
+                sticky_events_request=extensions.sticky_events,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         profiles_coro = None
-        if sync_config.extensions.profiles is not Absent and self._enable_profiles:
+        if extensions.profiles is not Absent and self._enable_profiles:
             profiles_coro = self.get_profiles_extension_response(
                 sync_config=sync_config,
-                profiles_request=sync_config.extensions.profiles,
+                profiles_request=extensions.profiles,
                 actual_room_ids=actual_room_ids,
                 to_token=to_token,
                 from_token=from_token,

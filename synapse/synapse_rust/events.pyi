@@ -436,6 +436,20 @@ class SerializeEventConfig:
         """Whether MSC4354 (sticky events) is enabled. When ``True``, the
         remaining stickiness TTL is computed and added to ``unsigned``."""
 
+class SerializeEventFilter:
+    """
+    Filters on events applied at serialisation time.
+    """
+
+    def __init__(self, *, sticky_only: bool = False) -> None: ...
+    @property
+    def sticky_only(self) -> bool:
+        """
+        Only serialise events that are sticky and haven't expired.
+        When set, all serialised events are guaranteed to have a `unsigned.sticky_duration_remaining_ms` field
+        (and the field will have a positive value).
+        """
+
 def serialize_events(
     events: list[tuple[Event, str | None]],
     time_now_ms: int,
@@ -444,7 +458,8 @@ def serialize_events(
     bundle_aggregations: Mapping[str, BundledAggregations] | None = None,
     redaction_map: Mapping[str, Event] | None = None,
     unsigned_additions: Mapping[str, JsonDict] | None = None,
-) -> list[JsonDict]:
+    filter: SerializeEventFilter | None = None,
+) -> list[JsonDict | None]:
     """Synchronously serialize a batch of events for clients using pre-fetched data.
 
     All DB/IO must already have been done by the caller; the keyword maps below
