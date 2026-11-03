@@ -188,6 +188,40 @@ class ServerAnnouncementsConfigTestCase(TestCase):
             self._read_room({"excluded_user_ids": []}).rooms[0].excluded_user_ids, []
         )
 
+    @parameterized.expand(
+        [
+            ("not_a_list", "@bot:example.com", ("excluded_user_ids",)),
+            ("not_a_string", [42], ("excluded_user_ids", "<item 0>")),
+            (
+                "invalid_user_id",
+                ["not-a-user-id"],
+                ("excluded_user_ids", "<item 0>"),
+            ),
+            (
+                "remote_user",
+                ["@bot:remote.example"],
+                ("excluded_user_ids", "<item 0>"),
+            ),
+        ]
+    )
+    def test_invalid_excluded_user_ids(
+        self, _name: str, excluded_user_ids: object, path_suffix: tuple[str, ...]
+    ) -> None:
+        """Invalid `excluded_user_ids` are rejected at the offending config path."""
+        with self.assertRaises(ConfigError) as err:
+            self._read_room({"excluded_user_ids": excluded_user_ids})
+
+        self.assertEqual(
+            err.exception.path,
+            (
+                "experimental_features",
+                "server_announcements",
+                "rooms",
+                "<item 0>",
+                *path_suffix,
+            ),
+        )
+
     def test_duplicate_id(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Duplicate") as err:
             self._read_config(
