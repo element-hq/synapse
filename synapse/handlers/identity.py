@@ -760,6 +760,9 @@ class IdentityHandler:
                 invite_config,
                 {"Authorization": create_id_access_token_header(id_access_token)},
             )
+        except HttpResponseException as e:
+            logger.info("Proxied store-invite failed: %r", e)
+            raise e.to_synapse_error()
         except RequestTimedOutError:
             raise SynapseError(500, "Timed out contacting identity server")
 

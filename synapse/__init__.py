@@ -39,8 +39,8 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Note that we use an (unneeded) variable here so that pyupgrade doesn't nuke the
 # if-statement completely.
 py_version = sys.version_info
-if py_version < (3, 10):
-    print("Synapse requires Python 3.10 or above.")
+if py_version < (3, 11):
+    print("Synapse requires Python 3.11 or above.")
     sys.exit(1)
 
 # Allow using the asyncio reactor via env var.
@@ -95,9 +95,10 @@ import synapse.util  # noqa: E402
 
 __version__ = synapse.util.SYNAPSE_VERSION
 
+# Introduced for usage with SyTest to check that log contexts are correctly handled when
+# running a real homeserver. (our own unit tests apply the same patch unconditionally,
+# in `tests/__init__.py`.)
 if bool(os.environ.get("SYNAPSE_TEST_PATCH_LOG_CONTEXTS", False)):
-    # We import here so that we don't have to install a bunch of deps when
-    # running the packaging tox test.
     from synapse.util.patch_inline_callbacks import do_patch
 
     do_patch()

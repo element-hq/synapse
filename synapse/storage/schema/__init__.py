@@ -186,6 +186,7 @@ Changes in SCHEMA_VERSION = 95
       that have been sent, cancelled, or failed to be sent due to an error.
     - MSC4140: Add an index on `delayed_events` to rank finalised delayed events per user.
     - `event_edges.is_state` is no longer read from (it has not been written to since SCHEMA_VERSION 72).
+    - Add `server_announcement_rooms` table.
 """
 
 
