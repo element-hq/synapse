@@ -1,0 +1,1 @@
+Bump `msgpack` from `1.2.1` to `1.2.4` to address [`GHSA-j586-36cw-2gc2`](https://github.com/msgpack/msgpack-python/security/advisories/GHSA-j586-36cw-2gc2) which can cause memory exhaustion problems when malformed tokens are used with the public room list API's.

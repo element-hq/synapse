@@ -129,6 +129,7 @@ from synapse.handlers.room_policy import RoomPolicyHandler
 from synapse.handlers.room_summary import RoomSummaryHandler
 from synapse.handlers.search import SearchHandler
 from synapse.handlers.send_email import SendEmailHandler
+from synapse.handlers.server_announcements import ServerAnnouncementsHandler
 from synapse.handlers.set_password import SetPasswordHandler
 from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sso import SsoHandler
@@ -1069,6 +1070,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_federation_registry(self) -> FederationHandlerRegistry:
         return FederationHandlerRegistry(self)
+
+    @cache_in_self
+    def get_server_announcements_handler(self) -> ServerAnnouncementsHandler:
+        return ServerAnnouncementsHandler(self)
 
     @cache_in_self
     def get_server_notices_manager(self) -> ServerNoticesManager:

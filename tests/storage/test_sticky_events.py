@@ -299,6 +299,74 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             ),
         )
 
+    def test_get_rooms_with_sticky_events_between(self) -> None:
+        """
+        Tests `get_rooms_with_sticky_events_between` returns only the rooms with
+        sticky events in the given stream range.
+        """
+        other_room_id = self.helper.create_room_as(self.user_id, tok=self.token)
+        room_ids = [self.room_id, other_room_id]
+
+        start_token = self.store.get_sticky_events_stream_token()
+
+        self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "message 1", "msgtype": "m.text"},
+            tok=self.token,
+        )
+        mid_token = self.store.get_sticky_events_stream_token()
+
+        self.helper.send_sticky_event(
+            other_room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "message 2", "msgtype": "m.text"},
+            tok=self.token,
+        )
+        end_token = self.store.get_sticky_events_stream_token()
+
+        # Both rooms changed over the whole range
+        self.assertEqual(
+            self.get_success(
+                self.store.get_rooms_with_sticky_events_between(
+                    room_ids, from_token=start_token, to_token=end_token
+                )
+            ),
+            {self.room_id, other_room_id},
+        )
+
+        # Only the other room changed in the second half of the range
+        self.assertEqual(
+            self.get_success(
+                self.store.get_rooms_with_sticky_events_between(
+                    room_ids, from_token=mid_token, to_token=end_token
+                )
+            ),
+            {other_room_id},
+        )
+
+        # Nothing changed in an empty range
+        self.assertEqual(
+            self.get_success(
+                self.store.get_rooms_with_sticky_events_between(
+                    room_ids, from_token=end_token, to_token=end_token
+                )
+            ),
+            set(),
+        )
+
+        # Rooms we didn't ask about are not returned
+        self.assertEqual(
+            self.get_success(
+                self.store.get_rooms_with_sticky_events_between(
+                    [self.room_id], from_token=start_token, to_token=end_token
+                )
+            ),
+            {self.room_id},
+        )
+
     def test_outlier_events_not_in_table(self) -> None:
         """
         Tests the behaviour of outliered and then de-outliered events in the

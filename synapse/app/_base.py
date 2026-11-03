@@ -731,6 +731,11 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
     # If we've configured an expiry time for caches, start the background job now.
     setup_expire_lru_cache_entries(hs)
 
+    # Only reconcile server announcement rooms on the main process.
+    if not hs.config.worker.worker_app and hs.config.serverannouncements.rooms:
+        await hs.get_server_announcements_handler().validate_configuration()
+        await hs.get_server_announcements_handler().reconcile_rooms()
+
     # It is now safe to start your Synapse.
     hs.start_listening()
     hs.get_datastores().main.db_pool.start_profiling()

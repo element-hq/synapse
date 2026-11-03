@@ -1,0 +1,1 @@
+Bump `rustls-webpki` to `0.103.16` to actively distrust [compromised eMudhra intermediate CA certificates](https://emudhra.we-have-a-problem.com/).

@@ -64,6 +64,9 @@ class ExperimentalConfig(Config):
     ) -> None:
         experimental = config.get("experimental_features") or {}
 
+        # Server announcement rooms (incomplete; not part of the public config).
+        # Tracking issue: https://github.com/element-hq/synapse/issues/20240
+
         # MSC1763 (retention policy configuration endpoint)
         self.msc1763_enabled: bool = experimental.get("msc1763_enabled", False)
 
@@ -250,7 +253,13 @@ class ExperimentalConfig(Config):
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
-        # MSC4143: Matrix RTC Transport using Livekit Backend
+        # MSC4143: MatrixRTC – Real-time communication over Matrix
+        #
+        # Note that MSC4143 covers only the core of MatrixRTC. For servers, this
+        # includes the /rtc/transports endpoint and retaining m.rtc.slot events
+        # on room upgrades.
+        #
+        # Tracked in: https://github.com/element-hq/synapse/issues/20447
         self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
 
         # MSC4169: Backwards-compatible redaction sending using `/send`

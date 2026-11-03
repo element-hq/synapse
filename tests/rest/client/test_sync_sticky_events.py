@@ -331,6 +331,50 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
             [sticky_event_id],
         )
 
+    @unittest.override_config({"caches": {"sync_response_cache_duration": "2m"}})
+    def test_sticky_event_expiring_before_serialisation_not_in_sticky_section(
+        self,
+    ) -> None:
+        """
+        Test that a sticky event which expires during sync response processing
+        is not sent down.
+
+        On this (v3) Sync, we also have the response cache to be cautious about
+        and indeed this test is a regression test against the response cache
+        causing expired sticky events to be served.
+
+        The most important property to bear in mind is that the
+        sticky events should be filtered with the same timestamp
+        as the one used for serialisation.
+        """
+        sticky_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(seconds=10),
+            content={"body": "sticky message", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+
+        path = f"/sync?filter={quote(NO_TIMELINE_FILTER)}"
+
+        channel = self.make_request("GET", path, access_token=self.token)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        sticky_events = channel.json_body["rooms"]["join"][self.room_id][
+            "msc4354_sticky"
+        ]["events"]
+        self.assertEqual([e["event_id"] for e in sticky_events], [sticky_event_id])
+
+        # Advance enough for the sticky event to expire,
+        # but stay within the sync response cache duration so the same `SyncResult` is reused.
+        self.reactor.advance(11)
+
+        channel = self.make_request("GET", path, access_token=self.token)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body["rooms"]["join"][self.room_id]["msc4354_sticky"],
+            {"events": []},
+        )
+
     def test_redacted_sticky_event_not_in_sync(self) -> None:
         """
         Test that a sticky event which has since been redacted is not returned in the
