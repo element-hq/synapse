@@ -55,8 +55,6 @@ tmp/
 /.coverage*
 /.mypy_cache/
 /.ruff_cache/
-/.tox
-/.tox-pg-container
 /build/
 /coverage.*
 /dist/

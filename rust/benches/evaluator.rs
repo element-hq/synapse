@@ -215,6 +215,7 @@ fn bench_eval_message(b: &mut Bencher) {
         false,
         false,
         false,
+        false,
     );
 
     b.iter(|| eval.run(&rules, Some("bob"), Some("person"), None));

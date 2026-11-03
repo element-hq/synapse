@@ -99,7 +99,7 @@ jobs:
       #
       # For same-repo PRs, we can do this directly and we are done.
       - name: Post sticky PR comment
-        uses: marocchino/sticky-pull-request-comment@3d7b8546315c63df45a03981d50a43ec19237f80 # v3
+        uses: marocchino/sticky-pull-request-comment@28ad303d6acb4ccfc50f20c0044188e7e294b8c4 # v3
         # Only run for same-repo PRs
         if: always() && github.event.pull_request.head.repo.full_name == github.repository
         with:

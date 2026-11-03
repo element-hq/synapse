@@ -33,6 +33,20 @@ from tests import unittest
 
 
 class ServerConfigTestCase(unittest.TestCase):
+    def test_request_token_inhibit_3pid_errors_defaults_to_true(self) -> None:
+        config = ServerConfig(RootConfig())
+        config.read_config(
+            yaml.safe_load(
+                HomeServerConfig().generate_config(
+                    config_dir_path="CONFDIR",
+                    data_dir_path="/data_dir_path",
+                    server_name="che.org",
+                )
+            )
+        )
+
+        self.assertTrue(config.request_token_inhibit_3pid_errors)
+
     def test_is_threepid_reserved(self) -> None:
         user1 = {"medium": "email", "address": "user1@example.com"}
         user2 = {"medium": "email", "address": "user2@example.com"}
@@ -228,6 +242,30 @@ class ServerConfigTestCase(unittest.TestCase):
         for disallowed_value in (-1, 0.5):
             with self.assertRaises(ConfigError):
                 _read_config(generate_config(disallowed_value))
+
+    def test_limit_profile_requests_requires_auth(self) -> None:
+        """
+        Test that `limit_profile_requests_to_users_who_share_rooms` can only be
+        enabled together with `require_auth_for_profile_requests`, as the shared-room
+        check is only applied to authenticated requests
+        """
+
+        def generate_config(limit: bool, require_auth: bool) -> JsonDict:
+            return {
+                "limit_profile_requests_to_users_who_share_rooms": limit,
+                "require_auth_for_profile_requests": require_auth,
+            }
+
+        _read_config(generate_config(limit=False, require_auth=False))
+        _read_config(generate_config(limit=False, require_auth=True))
+        _read_config(generate_config(limit=True, require_auth=True))
+
+        with self.assertRaises(ConfigError):
+            _read_config(generate_config(limit=True, require_auth=False))
+
+        # `require_auth_for_profile_requests` defaults to false
+        with self.assertRaises(ConfigError):
+            _read_config({"limit_profile_requests_to_users_who_share_rooms": True})
 
     @parameterized.expand(
         [

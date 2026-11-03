@@ -64,6 +64,9 @@ class ExperimentalConfig(Config):
     ) -> None:
         experimental = config.get("experimental_features") or {}
 
+        # Server announcement rooms (incomplete; not part of the public config).
+        # Tracking issue: https://github.com/element-hq/synapse/issues/20240
+
         # MSC1763 (retention policy configuration endpoint)
         self.msc1763_enabled: bool = experimental.get("msc1763_enabled", False)
 
@@ -191,6 +194,9 @@ class ExperimentalConfig(Config):
             "msc4069_profile_inhibit_propagation", False
         )
 
+        # MSC4075: MatrixRTC invites and notifications
+        self.msc4075_enabled: bool = experimental.get("msc4075_enabled", False)
+
         # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version:
         # See: https://github.com/element-hq/synapse/issues/19434
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
@@ -247,17 +253,21 @@ class ExperimentalConfig(Config):
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
-        # MSC4143: Matrix RTC Transport using Livekit Backend
+        # MSC4143: MatrixRTC – Real-time communication over Matrix
+        #
+        # Note that MSC4143 covers only the core of MatrixRTC. For servers, this
+        # includes the /rtc/transports endpoint and retaining m.rtc.slot events
+        # on room upgrades.
+        #
+        # Tracked in: https://github.com/element-hq/synapse/issues/20447
         self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
 
         # MSC4169: Backwards-compatible redaction sending using `/send`
         self.msc4169_enabled: bool = experimental.get("msc4169_enabled", False)
 
         # MSC4210: Remove legacy mentions
-        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
-
-        # MSC4222: Adding `state_after` to sync v2
-        self.msc4222_enabled: bool = experimental.get("msc4222_enabled", False)
+        # TODO: Remove the flag and the legacy rules after 2026-12-01.
+        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", True)
 
         # MSC4076: Add `disable_badge_count`` to pusher configuration
         self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)

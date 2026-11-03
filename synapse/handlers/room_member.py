@@ -887,8 +887,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         if effective_membership_state == Membership.INVITE:
             target_id = target.to_string()
 
-            # block any attempts to invite the server notices mxid
-            if target_id == self._server_notices_mxid:
+            # block any attempts to invite server identities.
+            if target_id in (
+                self._server_notices_mxid,
+                self.config.serverannouncements.room_management_mxid,
+            ):
                 raise SynapseError(HTTPStatus.FORBIDDEN, "Cannot invite this user")
 
             block_invite_result: tuple[Codes, dict] | None = None
@@ -896,8 +899,12 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             if (
                 self._server_notices_mxid is not None
                 and requester.user.to_string() == self._server_notices_mxid
+            ) or (
+                requester.user.to_string()
+                == self.config.serverannouncements.room_management_mxid
+                and request_by_server
             ):
-                # allow the server notices mxid to send invites
+                # Allow internal server identities to manage their room invites.
                 is_requester_admin = True
 
             else:

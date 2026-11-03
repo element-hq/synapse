@@ -1,0 +1,1 @@
+Run lint script over codebase to fix spurious dirty Rust change leftover from [#19996](https://github.com/element-hq/synapse/pull/19996).

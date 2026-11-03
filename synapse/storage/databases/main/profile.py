@@ -854,7 +854,7 @@ class ProfileWorkerStore(SQLBaseStore):
         # Record updates in the profile updates stream
         stream_id = self.record_profile_updates_txn(
             txn=txn,
-            user_id=user_id,
+            users={user_id.to_string()},
             action=ProfileUpdateAction.UPDATE,
             field_names=[field_name],
         )
@@ -885,42 +885,57 @@ class ProfileWorkerStore(SQLBaseStore):
         # Ensure we're working with local users only
         users = {user_id for user_id in joined_users if self.hs.is_mine_id(user_id)}
 
+        # Get the members of the room
+        rows = self.db_pool.simple_select_list_txn(
+            txn=txn,
+            table="local_current_membership",
+            keyvalues={
+                "room_id": room_id,
+                "membership": Membership.JOIN,
+            },
+            retcols=("user_id",),
+        )
+        target_users = {row[0] for row in rows}
+
         # Record the profile updates for each user
-        for user_id in users:
-            self.record_profile_updates_txn(
-                txn=txn,
-                user_id=UserID.from_string(user_id),
-                action=ProfileUpdateAction.JOINED_ROOM,
-                field_names=None,
-                user_rooms={room_id},
-            )
+        self.record_profile_updates_txn(
+            txn=txn,
+            users=users,
+            action=ProfileUpdateAction.JOINED_ROOM,
+            target_users=target_users,
+            field_names=None,
+        )
 
     def record_profile_updates_txn(
         self,
         *,
         txn: LoggingTransaction,
-        user_id: UserID,
+        users: set[str],
         action: ProfileUpdateAction,
         field_names: Collection[str] | None,
-        user_rooms: set[str] | None = None,
         target_users: set[str] | None = None,
+        user_rooms: set[str] | None = None,
     ) -> int | None:
         """
         Record updates into the profile updates stream tables.
+
+        If `target`_users` is not given as a parameter, `users` must be a single user.
 
         Currently, updates are only recorded for local users.
 
         Args:
             txn: Transaction to use
-            user_id: User ID that made the profile update
+            users: A set of user IDs to write the profile updates for.
             action: The profile update action, either `update`, `left_room` or
                 `joined_room`.
             field_names: A list of fields that were set, if ProfileUpdateAction.UPDATE
+            target_users: Optionally, set of users to create per user profile update
+                stream rows for. If not given, and the length of `users` is only
+                a single user, a database lookup will be done based on
+                `user_rooms`, or if that is not set, the result of the rooms lookup.
             user_rooms: Optionally, a set of rooms that the update concerns. If not
                 given, a database lookup will be done to fetch all the users rooms.
-            target_users: Optionally, set of users to create profile update stream rows
-                for. If not given, a database lookup will be done based on `user_rooms`,
-                or if that is not set, the result of the rooms lookup.
+                Only used if `target_users` is not given.
 
         Returns:
             The latest stream ID created in this transaction
@@ -933,15 +948,20 @@ class ProfileWorkerStore(SQLBaseStore):
         else:
             assert not field_names
 
-        if not target_users:
-            if not user_rooms:
+        if target_users is None:
+            # This function must be called with one user only if it needs to
+            # compute the target users. This restriction mainly exists as a
+            # fail safe to ensure we don't abuse the loop of membership fetches here
+            # and ensure calling code makes the necessary optimizations.
+            assert len(users) == 1
+            if user_rooms is None:
                 rows = self.db_pool.simple_select_onecol_txn(
                     txn=txn,
                     table="current_state_events",
                     keyvalues={
                         "type": EventTypes.Member,
                         "membership": Membership.JOIN,
-                        "state_key": user_id.to_string(),
+                        "state_key": list(users)[0],
                     },
                     retcol="room_id",
                 )
@@ -959,40 +979,97 @@ class ProfileWorkerStore(SQLBaseStore):
             )
             target_users = {row[0] for row in rows}
 
+        if action == ProfileUpdateAction.UPDATE:
+            # Always include ourselves when updating field values.
+            # We need to do this as the users updating their profile may not be
+            # in any rooms, and thus wont be collected above, but should still get the
+            # update pushed to their other devices.
+            target_users = target_users.union(users)
+
         # Ensure we only write updates for local users
-        users = {user for user in target_users if self.hs.is_mine_id(user)}
+        target_users = {user for user in target_users if self.hs.is_mine_id(user)}
 
-        if action in (ProfileUpdateAction.JOINED_ROOM, ProfileUpdateAction.LEFT_ROOM):
-            users.discard(user_id.to_string())
-            if not users:
-                # No point writing an update for ourselves, if a membership change and no
-                # other users interested
-                return None
-        elif action == ProfileUpdateAction.UPDATE:
-            # Always include ourselves when updating field values
-            users.add(user_id.to_string())
+        if not target_users:
+            return None
 
-        # Record the profile update
         inserted_ts = self.clock.time_msec()
-        stream_id = self._profile_updates_id_gen.get_next_txn(txn)
+        profile_update_values = {}
+        sorted_field_names = (
+            json_encoder.encode(sorted(field_names)) if field_names else None
+        )
 
-        self.db_pool.simple_insert_txn(
+        # Collect profile updates to add
+        # We don't have stream ID's at this point, so just use a counter, and add in
+        # the stream ID's later. We do this here to avoid generating stream ID's we're
+        # not going to use, because here we'll be dropping any updates which only
+        # contain the user themselves, in a "joined room" or "left room" situation. If
+        # this call contains multiple users for "joined room" or "left room" situations,
+        # we'll filter the user out later in the per user updates.
+        # We also need to maintain a new users list, as it may shring.
+        final_users = []
+        for counter, user_id in enumerate(users):
+            targets = (
+                target_users - {user_id}
+                if action
+                in (ProfileUpdateAction.JOINED_ROOM, ProfileUpdateAction.LEFT_ROOM)
+                else target_users
+            )
+            if not len(targets):
+                # No point writing a joined or left to the user themselves, skip.
+                continue
+            final_users.append(user_id)
+            profile_update_values[counter] = (
+                self._instance_name,
+                user_id,
+                action.value,
+                sorted_field_names,
+                inserted_ts,
+            )
+
+        if not len(profile_update_values):
+            # We found nothing to update, abort.
+            return None
+
+        # Now generate the stream ID's we want to use and add them to the list of
+        # updates.
+        stream_ids = self._profile_updates_id_gen.get_next_mult_txn(
+            txn, len(profile_update_values.keys())
+        )
+        profile_updates = [
+            (stream_id, *values)
+            for stream_id, values in zip(stream_ids, profile_update_values.values())
+        ]
+        # Maintain a map of stream_id to user_id, so we can later filter out rows
+        # when inserting into the per user updates table.
+        stream_ids_to_user_id = dict(list(zip(stream_ids, final_users)))
+
+        self.db_pool.simple_insert_many_txn(
             txn,
             table="profile_updates",
-            values={
-                "stream_id": stream_id,
-                "instance_name": self._instance_name,
-                "user_id": user_id.to_string(),
-                "action": action.value,
-                "affected_fields": json_encoder.encode(sorted(field_names))
-                if field_names
-                else None,
-                "inserted_ts": inserted_ts,
-            },
+            keys=[
+                "stream_id",
+                "instance_name",
+                "user_id",
+                "action",
+                "affected_fields",
+                "inserted_ts",
+            ],
+            values=profile_updates,
         )
 
         # Add per user tracking rows for each generated stream ID
-        per_user_values = [(stream_id, user_id, inserted_ts) for user_id in users]
+        per_user_values = []
+        for stream_id in stream_ids:
+            per_user_values.extend(
+                # Filter out JOINED_ROOM/LEFT_ROOM updates to ourselves.
+                [
+                    (stream_id, user_id, inserted_ts)
+                    for user_id in target_users
+                    if stream_ids_to_user_id[stream_id] != user_id
+                    or action == ProfileUpdateAction.UPDATE
+                ]
+            )
+
         self.db_pool.simple_insert_many_txn(
             txn,
             table="profile_updates_per_user",
@@ -1003,7 +1080,7 @@ class ProfileWorkerStore(SQLBaseStore):
             ],
             values=per_user_values,
         )
-        return stream_id
+        return stream_ids[-1]
 
     async def set_profile_field(
         self,
@@ -1067,7 +1144,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
             stream_id = self.record_profile_updates_txn(
                 txn=txn,
-                user_id=user_id,
+                users={user_id.to_string()},
                 action=ProfileUpdateAction.UPDATE,
                 field_names=[field_name],
             )

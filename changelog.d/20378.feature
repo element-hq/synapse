@@ -1,0 +1,1 @@
+Update support for scheduling [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140) delayed events with a [MSC4354](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) sticky duration.

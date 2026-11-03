@@ -170,6 +170,8 @@ class _EventRow:
 
         stream_ordering: stream ordering for this event
 
+        received_ts: timestamp of receipt of this event on this server, in milliseconds since the Unix epoch.
+
         json: json-encoded event structure
 
         internal_metadata: json-encoded internal metadata dict
@@ -196,6 +198,7 @@ class _EventRow:
 
     event_id: str
     stream_ordering: int
+    received_ts: int | None
     instance_name: str
     json: str
     internal_metadata: str
@@ -1567,6 +1570,7 @@ class EventsWorkerStore(SQLBaseStore):
                 continue
 
             original_ev.internal_metadata.stream_ordering = row.stream_ordering
+            original_ev.internal_metadata.received_ts = row.received_ts
             original_ev.internal_metadata.instance_name = row.instance_name
             original_ev.internal_metadata.outlier = row.outlier
 
@@ -1654,6 +1658,7 @@ class EventsWorkerStore(SQLBaseStore):
                 SELECT
                   e.event_id,
                   e.stream_ordering,
+                  e.received_ts,
                   e.instance_name,
                   ej.internal_metadata,
                   ej.json,
@@ -1678,16 +1683,17 @@ class EventsWorkerStore(SQLBaseStore):
                 event_dict[event_id] = _EventRow(
                     event_id=event_id,
                     stream_ordering=row[1],
+                    received_ts=row[2],
                     # If instance_name is null we default to "master"
-                    instance_name=row[2] or "master",
-                    internal_metadata=row[3],
-                    json=row[4],
-                    format_version=row[5],
-                    room_version_id=row[6],
-                    rejected_reason=row[7],
+                    instance_name=row[3] or "master",
+                    internal_metadata=row[4],
+                    json=row[5],
+                    format_version=row[6],
+                    room_version_id=row[7],
+                    rejected_reason=row[8],
                     unconfirmed_redactions=[],
                     confirmed_redactions=[],
-                    outlier=bool(row[8]),  # This is an int in SQLite3
+                    outlier=bool(row[9]),  # This is an int in SQLite3
                 )
 
             # check for redactions
@@ -1810,13 +1816,18 @@ class EventsWorkerStore(SQLBaseStore):
             # Starting in room version v3, some redactions need to be
             # rechecked if we didn't have the redacted event at the
             # time, so we recheck on read instead.
+            # NOTE: If this logic changes, need to update:
+            # - `_apply_existing_redaction_txn` (persistence of an event that is already redacted)
+            # - `_compute_newly_redacted_event_ids_txn` (persistence of a new redaction)
+            # - `persist_and_notify_client_events` (sort of; applies quality-of-life errors to clients sending
+            #   redactions that wouldn't be valid if they were sent.)
             if redaction_event.internal_metadata.need_to_check_redaction():
                 expected_domain = get_domain_from_id(original_ev.sender)
                 if get_domain_from_id(redaction_event.sender) == expected_domain:
                     # This redaction event is allowed. Mark as not needing a recheck.
                     redaction_event.internal_metadata.recheck_redaction = False
                 else:
-                    # Senders don't match, so the event isn't actually redacted
+                    # Sender servers don't match, so the event isn't actually redacted
                     logger.debug(
                         "%s was redacted by %s but the senders don't match",
                         original_ev.event_id,

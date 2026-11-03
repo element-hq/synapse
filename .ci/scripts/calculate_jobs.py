@@ -39,10 +39,13 @@ IS_PR = os.environ["GITHUB_REF"].startswith("refs/pull/")
 # version that's supported. The oldest version ensures we don't accidentally
 # introduce syntax or code that's too new, and the newest ensures we don't use
 # code that's been dropped in the latest supported Python version.
+#
+# We avoid running all of the in-between Python versions on every PR as it saves on CI
+# time.
 
 trial_sqlite_tests = [
     {
-        "python-version": "3.10",
+        "python-version": "3.11",
         "database": "sqlite",
         "extras": "all",
     },
@@ -53,24 +56,30 @@ trial_sqlite_tests = [
     },
 ]
 
+# For any merged changes, test the rest of the Python versions
 if not IS_PR:
-    # Otherwise, check all supported Python versions.
-    #
-    # Avoiding running all of these versions on every PR saves on CI time.
     trial_sqlite_tests.extend(
         {
             "python-version": version,
             "database": "sqlite",
             "extras": "all",
         }
-        for version in ("3.11", "3.12", "3.13")
+        for version in (
+            # (the first/last supported Python versions are commented out here as
+            # they're already added above)
+            #
+            # "3.11",
+            "3.12",
+            "3.13",
+            # "3.14",
+        )
     )
 
 # Only test postgres against the earliest and latest Python versions that we
 # support in order to save on CI time.
 trial_postgres_tests = [
     {
-        "python-version": "3.10",
+        "python-version": "3.11",
         "database": "postgres",
         "postgres-version": "14",
         "extras": "all",
@@ -86,7 +95,7 @@ trial_postgres_tests = [
 # Ensure that Synapse passes unit tests even with no extra dependencies installed.
 trial_no_extra_tests = [
     {
-        "python-version": "3.10",
+        "python-version": "3.11",
         "database": "sqlite",
         "extras": "",
     }

@@ -78,6 +78,7 @@ class FederationReaderOpenIDListenerTests(HomeserverTestCase):
 
         # Grab the resource from the site that was told to listen
         site = self.reactor.tcpServers[0][1]
+        assert isinstance(site, Site)
         try:
             site.resource.children[b"_matrix"].children[b"federation"]
         except KeyError:
@@ -207,6 +208,7 @@ class SynapseHomeserverOpenIDListenerTests(HomeserverTestCase):
 
         # Grab the resource from the site that was told to listen
         site = self.reactor.tcpServers[0][1]
+        assert isinstance(site, Site)
         try:
             site.resource.children[b"_matrix"].children[b"federation"]
         except KeyError:

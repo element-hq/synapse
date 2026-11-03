@@ -30,7 +30,7 @@ from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.test_utils import SMALL_PNG, FakeResponse
+from tests.test_utils import SMALL_PNG, FakeResponse, list_stored_media_files
 
 
 class TestSSOHandler(unittest.HomeserverTestCase):
@@ -72,6 +72,33 @@ class TestSSOHandler(unittest.HomeserverTestCase):
         self.assertFalse(
             self.get_success(handler.set_avatar(user_id, "http://my.server/me.png"))
         )
+
+    @unittest.override_config(
+        {"media_upload_limits": [{"time_period": "1d", "max_size": "1"}]}
+    )
+    def test_set_avatar_over_media_upload_limit(self) -> None:
+        """Tests that saving an avatar fails when it would exceed one of the
+        configured `media_upload_limits`, without leaving a file behind."""
+        handler = self.hs.get_sso_handler()
+
+        reg_handler = self.hs.get_registration_handler()
+        user_id = self.get_success(reg_handler.register_user(approved=True))
+
+        # Note: the media store path is shared between tests, so we compare
+        # against the files that are already there.
+        files_before = list_stored_media_files(self.hs)
+
+        self.assertFalse(
+            self.get_success(handler.set_avatar(user_id, "http://my.server/me.png"))
+        )
+
+        # No avatar should have been set, and no file should have been left
+        # behind on disk.
+        profile_handler = self.hs.get_profile_handler()
+        profile = self.get_success(profile_handler.get_profile(user_id))
+        self.assertNotIn("avatar_url", profile)
+
+        self.assertEqual(list_stored_media_files(self.hs), files_before)
 
     @unittest.override_config({"allowed_avatar_mimetypes": ["image/jpeg"]})
     def test_set_avatar_incorrect_mime_type(self) -> None:
