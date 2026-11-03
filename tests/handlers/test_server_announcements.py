@@ -21,7 +21,10 @@ from synapse.api.constants import EventTypes
 from synapse.api.errors import SynapseError
 from synapse.config import ConfigError
 from synapse.config.server_announcements import ServerAnnouncementRoom
-from synapse.handlers.server_announcements import ServerAnnouncementsHandler
+from synapse.handlers.server_announcements import (
+    ServerAnnouncementsHandler,
+    make_synthetic_join_event,
+)
 from synapse.rest import admin
 from synapse.rest.client import login, register, room, sync
 from synapse.server import HomeServer
@@ -349,4 +352,37 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             self.get_success(self.store.get_server_announcement_room("updates")),
             room_id,
+        )
+
+
+class SyntheticJoinEventTestCase(unittest.TestCase):
+    def test_event_id(self) -> None:
+        """The event ID is the prefix, the first 8 characters of the room ID and
+        of the user localpart, and a hash of both IDs.
+        """
+        self.assertEqual(
+            make_synthetic_join_event(
+                "!Q8bOeGjhyXNtCVmX7Zvvh-W5KiVu2Q8vBK_2ljoZW7s",
+                "@alexander:example.com",
+                0,
+            )["event_id"],
+            "$fake_announcement_join-Q8bOeGjh-alexande-SVJqkL5sx8x0TXrBVujJXBUw_Kc-c10PNz_sZV5FTnk",
+        )
+
+    def test_event_id_short_localpart(self) -> None:
+        """A localpart shorter than 8 characters is included in full."""
+        self.assertEqual(
+            make_synthetic_join_event(
+                "!Q8bOeGjhyXNtCVmX7Zvvh-W5KiVu2Q8vBK_2ljoZW7s", "@bob:example.com", 0
+            )["event_id"],
+            "$fake_announcement_join-Q8bOeGjh-bob-OkzlBBrE1j2T2pq5aF4ubO-Z1hmIo2cun6rrIXjw2QE",
+        )
+
+    def test_event_id_room_id_with_domain(self) -> None:
+        """For a room ID with a domain, only the start of its localpart is included."""
+        self.assertEqual(
+            make_synthetic_join_event(
+                "!abcdefghijklmnopqr:example.com", "@alexander:example.com", 0
+            )["event_id"],
+            "$fake_announcement_join-abcdefgh-alexande-QdoyrQ6WLSZZBDWVTw4cVhH61QX8Z90v8YIhfWkHTlg",
         )
