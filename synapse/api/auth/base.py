@@ -176,7 +176,7 @@ class BaseAuth(ABC):
 
     async def _is_server_announcement_room(self, room_id: str) -> bool:
         """Whether the room is a server announcement room."""
-        return await self.store.get_server_announcement_id(room_id) is not None
+        return room_id in await self.store.get_server_announcement_room_ids()
 
     async def validate_appservice_can_control_user_id(
         self, app_service: ApplicationService, user_id: str

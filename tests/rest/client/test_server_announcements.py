@@ -169,11 +169,16 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
         )
 
     def test_messages_after_room_is_unconfigured(self) -> None:
-        """The reader can still paginate back to the announcement once the room
-        is removed from the configuration."""
+        """Once the room is removed from the configuration it is treated like
+        any other world-readable room: a reader who never joined can still
+        paginate back to the announcement, but a removed sender only sees the
+        history up to their leave."""
         self.hs.config.serverannouncements.rooms = []
+        self.hs.get_datastores().main.get_server_announcement_room_ids.invalidate_all()
 
         body = self._get(f"/rooms/{self.room_id}/messages?dir=b")
-        self.assertIn(
-            self.announcement_id, [event["event_id"] for event in body["chunk"]]
-        )
+        event_ids = [event["event_id"] for event in body["chunk"]]
+        if self.reader_type == "never_joined":
+            self.assertIn(self.announcement_id, event_ids)
+        else:
+            self.assertNotIn(self.announcement_id, event_ids)
