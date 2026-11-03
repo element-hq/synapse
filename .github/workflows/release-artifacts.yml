@@ -197,10 +197,12 @@ jobs:
       - name: Build a tarball for the debs
         # We need to merge all the debs uploads into one folder, then compress
         # that.
+        #
+        # `xz --threads=0`: use multithreading with automatic number of CPUs
         run: |
           mkdir debs
           mv debs*/* debs/
-          tar -cvJf debs.tar.xz debs
+          tar -I 'xz --threads=0' -cvf debs.tar.xz debs
       - name: Attach to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

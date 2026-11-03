@@ -38,7 +38,16 @@ from synapse.api.constants import (
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.events import EventBase
 from synapse.handlers.server_announcements import SYNTHETIC_JOIN_EVENT_ID_PREFIX
-from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
+from synapse.rest.client import (
+    account_data,
+    devices,
+    knock,
+    login,
+    read_marker,
+    receipts,
+    room,
+    sync,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
 from synapse.util.clock import Clock
@@ -2142,6 +2151,55 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         self.assertNotIn(kick["event_id"], self._timeline_ids(response))
         self.assertIn(kick["event_id"], self._state_ids(response, use_state_after))
 
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_full_state_is_not_filtered_through_cache(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A newly joined room is sent its full (lazy-loaded) state, including
+        the user's own membership, even if the cache claims that membership was
+        already sent.
+
+        This test should only be needed while there are gaps in the lazy-loaded
+        membership cache logic. Specifically, around its handling of concurrent
+        sync requests.
+        """
+
+        # Do a sync before joining a new room.
+        t0 = self._sync(use_state_after)["next_batch"]
+
+        room2 = self.helper.create_room_as(
+            self.bob, tok=self.bob_tok, extra_content={"name": "room 2"}
+        )
+        self.helper.invite(room2, self.bob, self.alice, tok=self.bob_tok)
+        join = self.helper.join(room2, self.alice, tok=self.alice_tok)
+
+        # Push the join out of the 10 event timeline, so that only the state
+        # section can carry alice's membership.
+        for i in range(10):
+            self.helper.send(room2, body=f"welcome {i}", tok=self.bob_tok)
+
+        # Directly change the cache so that it thinks the join was already sent.
+        t0_token = self.get_success(
+            StreamToken.from_string(self.hs.get_datastores().main, t0)
+        )
+        cache = self.hs.get_sync_handler().get_lazy_loaded_members_cache(
+            (self.alice, self.alice_device)
+        )
+        cache.mark_sent(self.alice, join["event_id"], t0_token)
+
+        # Do a sync from t0, which will include the full state for the newly
+        # joined room. Despite what the cache says, the full state should still
+        # include the user's own membership.
+        response = self._sync(use_state_after, t0)
+
+        key = "state_after" if use_state_after else "state"
+        members = [
+            e["state_key"]
+            for e in response["rooms"]["join"][room2][key]["events"]
+            if e["type"] == EventTypes.Member
+        ]
+        self.assertIn(self.alice, members)
+
 
 class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
     """Tests that server announcement rooms are delivered to users who are not
@@ -2153,6 +2211,7 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         room.register_servlets,
         sync.register_servlets,
+        account_data.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -2274,6 +2333,21 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         since = self._sync(self.bob_tok)["next_batch"]
 
         self._assert_not_delivered(self._sync(self.bob_tok, since))
+
+    def test_incremental_sync_after_first_announcement(self) -> None:
+        """A non-member who has synced past an announcement room's first
+        announcement gets a later announcement with only the synthetic join in
+        `state`, as nothing else changed since their token.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+        event_id = self._announce("again")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+        self.assertEqual(
+            [event["type"] for event in room["state"]["events"]], [EventTypes.Member]
+        )
 
     def test_members_get_their_real_membership(self) -> None:
         """Members of an announcement room sync it as a regular room."""
@@ -2490,6 +2564,53 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self._assert_delivered(response, self.bob)
         self.assertEqual(response.get("device_lists", {}).get("changed", []), [])
 
+    def test_marked_unread_without_new_events(self) -> None:
+        """A non-member who marks an announcement room as unread gets
+        `m.marked_unread` on their next incremental sync, even when nothing
+        else happened in the room.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/account_data/m.marked_unread",
+            {"unread": True},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.marked_unread", "content": {"unread": True}}],
+        )
+
+    def test_marked_unread_with_new_announcement(self) -> None:
+        """A non-member who marks an announcement room as unread, followed by a
+        new announcement, gets both the announcement and `m.marked_unread` in
+        the room on their next incremental sync.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/account_data/m.marked_unread",
+            {"unread": True},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        event_id = self._announce("again")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.marked_unread", "content": {"unread": True}}],
+        )
+
     def test_state_after(self) -> None:
         """With `use_state_after`, a non-member gets the synthetic join in
         `state_after`, including a former member whose real leave is in the
@@ -2520,3 +2641,51 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
             ),
             self.bob,
         )
+
+    def test_event_fields(self) -> None:
+        """With an `event_fields` filter, the synthetic join is trimmed to the
+        requested fields like every other event.
+        """
+        self._announce("hello")
+        event_fields = ["type", "content", "state_key"]
+
+        response = self._sync(self.bob_tok, filter={"event_fields": event_fields})
+        room = response["rooms"]["join"][self.room_id]
+
+        events = room["state"]["events"] + room["timeline"]["events"]
+        own_memberships = [
+            event
+            for event in events
+            if event["type"] == EventTypes.Member and event["state_key"] == self.bob
+        ]
+        self.assertEqual(
+            own_memberships,
+            [
+                {
+                    "type": EventTypes.Member,
+                    "content": {"membership": Membership.JOIN},
+                    "state_key": self.bob,
+                }
+            ],
+        )
+        for event in events:
+            self.assertLessEqual(set(event), set(event_fields), event)
+
+    def test_federation_event_format(self) -> None:
+        """With the `federation` event format, the synthetic join carries the
+        room ID like every other event.
+        """
+        self._announce("hello")
+
+        response = self._sync(self.bob_tok, filter={"event_format": "federation"})
+        room = response["rooms"]["join"][self.room_id]
+
+        events = room["state"]["events"] + room["timeline"]["events"]
+        own_memberships = [
+            event
+            for event in events
+            if event["type"] == EventTypes.Member and event["state_key"] == self.bob
+        ]
+        self.assertEqual(len(own_memberships), 1, own_memberships)
+        for event in events:
+            self.assertEqual(event.get("room_id"), self.room_id, event)

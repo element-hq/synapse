@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SYNTHETIC_JOIN_EVENT_ID_PREFIX = "$fake_announcement_join_"
+SYNTHETIC_JOIN_EVENT_ID_PREFIX = "$fake_announcement_join"
 
 SERVER_ANNOUNCEMENT_EVENT_TYPES = SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES - {
     EventTypes.Create
@@ -47,8 +47,15 @@ def make_synthetic_join_event_id(room_id: str, user_id: str) -> str:
 
     See `make_synthetic_join_event`.
     """
-    return SYNTHETIC_JOIN_EVENT_ID_PREFIX + sha256_and_url_safe_base64(
-        f"{room_id}\0{user_id}"
+    return "-".join(
+        [
+            SYNTHETIC_JOIN_EVENT_ID_PREFIX,
+            # 8 first chars of room_id and user_id localpart for debugging
+            room_id[1:9],
+            UserID.from_string(user_id).localpart[:8],
+            # hash of room_id + user_id for uniqueness & staying under 255 bytes length
+            sha256_and_url_safe_base64(f"{room_id}\0{user_id}"),
+        ]
     )
 
 
@@ -72,9 +79,10 @@ def make_synthetic_join_event(
             every time, e.g. that of the room's create event.
 
     Returns:
-        The event, serialized for the client.
+        The event's JSON in federation format.
     """
     return {
+        "room_id": room_id,
         "type": EventTypes.Member,
         "event_id": make_synthetic_join_event_id(room_id, user_id),
         "sender": user_id,

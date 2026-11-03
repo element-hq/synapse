@@ -95,9 +95,10 @@ import synapse.util  # noqa: E402
 
 __version__ = synapse.util.SYNAPSE_VERSION
 
+# Introduced for usage with SyTest to check that log contexts are correctly handled when
+# running a real homeserver. (our own unit tests apply the same patch unconditionally,
+# in `tests/__init__.py`.)
 if bool(os.environ.get("SYNAPSE_TEST_PATCH_LOG_CONTEXTS", False)):
-    # We import here so that we don't have to install a bunch of deps when
-    # running the packaging tox test.
     from synapse.util.patch_inline_callbacks import do_patch
 
     do_patch()

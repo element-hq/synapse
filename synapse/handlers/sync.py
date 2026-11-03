@@ -1438,19 +1438,23 @@ class SyncHandler:
 
                 # Only send members which aren't in our cache (either because
                 # they're new to this client or have been pushed out of the
-                # cache). For an initial sync the cache has already been
-                # cleared.
+                # cache).
                 #
                 # A state change since `since_token` is always sent, regardless
                 # of whether it was previously sent to the client (e.g due to a
                 # client retrying the request).
-                logger.debug("filtering state from %r...", state_ids)
-                state_ids = {
-                    t: event_id
-                    for t, event_id in state_ids.items()
-                    if t in changed_keys or not cache.was_sent(t[1], event_id)
-                }
-                logger.debug("...to %r", state_ids)
+                #
+                # We don't filter the full state as we know this is the first
+                # time the client will see the memberships. For full state the
+                # cache *should* already be cleared by this point.
+                if not full_state:
+                    logger.debug("filtering state from %r...", state_ids)
+                    state_ids = {
+                        t: event_id
+                        for t, event_id in state_ids.items()
+                        if t in changed_keys or not cache.was_sent(t[1], event_id)
+                    }
+                    logger.debug("...to %r", state_ids)
 
                 # add any member IDs we are about to send into our cache
                 for t, event_id in itertools.chain(
@@ -2364,7 +2368,7 @@ class SyncHandler:
         last_membership_by_room_id = {
             event.room_id: event.membership for event in membership_change_events
         }
-        announcement_room_ids = frozenset(
+        synthetic_join_announcement_room_ids = frozenset(
             room_id
             for room_id in sync_config.filter_collection.filter_rooms(
                 await self.store.get_server_announcement_room_ids()
@@ -2381,7 +2385,7 @@ class SyncHandler:
             since_token=since_token,
             now_token=now_token,
             joined_room_ids=joined_room_ids,
-            announcement_room_ids=announcement_room_ids,
+            synthetic_join_announcement_room_ids=synthetic_join_announcement_room_ids,
             excluded_room_ids=frozenset(mutable_rooms_to_exclude),
             forced_newly_joined_room_ids=frozenset(forced_newly_joined_room_ids),
             membership_change_events=membership_change_events,
@@ -2978,7 +2982,9 @@ class SyncHandler:
         ignored_users = await self.store.ignored_users(user_id)
         if since_token:
             room_changes = await self._get_room_changes_for_incremental_sync(
-                sync_result_builder, ignored_users
+                sync_result_builder,
+                ignored_users,
+                account_data_room_ids=account_data_by_room.keys(),
             )
             tags_by_room = await self.store.get_updated_tags(
                 user_id, since_token.account_data_key
@@ -3048,7 +3054,7 @@ class SyncHandler:
         stream_id = since_token.room_key.stream
         for room_id in (
             sync_result_builder.joined_room_ids
-            | sync_result_builder.announcement_room_ids
+            | sync_result_builder.synthetic_join_announcement_room_ids
         ):
             if self.store.has_room_changed_since(room_id, stream_id):
                 return True
@@ -3058,6 +3064,7 @@ class SyncHandler:
         self,
         sync_result_builder: "SyncResultBuilder",
         ignored_users: frozenset[str],
+        account_data_room_ids: AbstractSet[str],
     ) -> _RoomChanges:
         """Determine the changes in rooms to report to the user.
 
@@ -3200,7 +3207,7 @@ class SyncHandler:
                 if knock_room_sync:
                     knocked.append(knock_room_sync)
 
-            if room_id in sync_result_builder.announcement_room_ids:
+            if room_id in sync_result_builder.synthetic_join_announcement_room_ids:
                 left_announcement_room_ids.add(room_id)
                 continue
 
@@ -3314,8 +3321,9 @@ class SyncHandler:
         room_entries.extend(
             await self._get_announcement_room_entries(
                 sync_result_builder,
-                sync_result_builder.announcement_room_ids,
+                sync_result_builder.synthetic_join_announcement_room_ids,
                 left_room_ids=left_announcement_room_ids,
+                account_data_room_ids=account_data_room_ids,
             )
         )
 
@@ -3332,6 +3340,7 @@ class SyncHandler:
         sync_result_builder: "SyncResultBuilder",
         room_ids: AbstractSet[str],
         left_room_ids: AbstractSet[str] = frozenset(),
+        account_data_room_ids: AbstractSet[str] = frozenset(),
     ) -> list["RoomSyncResultBuilder"]:
         """Returns entries for the given announcement rooms that have something
         to show.
@@ -3340,8 +3349,9 @@ class SyncHandler:
         event, so that creating the room and joining its senders does not show
         it to every user. On an incremental sync, a room is included if it has
         had an announcement and there is any new event in it since the
-        `since_token`, such as a sender leaving or a name change. With
-        `full_state` set, a room is also included without any new event. On an
+        `since_token`, such as a sender leaving or a name change, or a change
+        to the user's room account data for it. With `full_state` set, a room
+        is also included without any new event. On an
         initial sync, a room is included if it has ever had an announcement,
         even when later state changes push that announcement out of the
         timeline.
@@ -3350,10 +3360,13 @@ class SyncHandler:
         that the client replaces the user's real membership with the synthetic
         join and gets the room's current state.
 
-        Every entry carries the room's full state rather than the changes since
-        the `since_token`. The first time a room is sent to a user, the client
-        has no earlier state for it, and which users have already received the
-        room is not tracked.
+        An entry carries the full state only if any of:
+        - there is no `since_token`
+        - the first announcement is after the `since_token`
+        - the user left or was removed from the room
+        Otherwise it carries the changes since the `since_token`, as for a
+        joined room: any sync covering a room's first announcement delivers it
+        with full state, so the client already has the room.
 
         Sending an announcement does not wake up waiting syncs, so that an
         announcement does not wake every user's sync at once. A waiting sync
@@ -3368,7 +3381,10 @@ class SyncHandler:
             sync_result_builder
             room_ids: The announcement rooms to consider.
             left_room_ids: Rooms among `room_ids` that the user left or was
-                removed from since the `since_token`.
+                removed from since the `since_token` of `sync_result_builder`.
+            account_data_room_ids: Rooms whose room account data for the user
+                changed since the `since_token` of `sync_result_builder`.
+                They may include rooms that are not in `room_ids`.
         """
         since_token = sync_result_builder.since_token
         now_token = sync_result_builder.now_token
@@ -3383,36 +3399,64 @@ class SyncHandler:
             limit=timeline_limit + 1,
             direction=Direction.BACKWARDS,
         )
+
+        # Rooms with an announcement since the `since_token`.
         announced_room_ids = {
             room_id
             for room_id, (events, _, _) in room_to_events.items()
             if not all(event.is_state() for event in events)
-        } | (left_room_ids & room_ids)
+        }
 
+        # Rooms the user left are included even without an announcement, so
+        # their real membership is replaced by the synthetic join.
+        room_ids_to_include = announced_room_ids | left_room_ids
+
+        # On an incremental sync, `room_ids_to_include` should also include
+        # rooms that have new state events but no new announcement in the
+        # window, or a room account data change, if they had an announcement
+        # before the window.
+        #
+        # On an initial or `full_state` sync, a room is included whenever it
+        # has ever had an announcement, even if it isn't among the recent
+        # events fetched above.
         if not since_token or sync_result_builder.full_state:
-            room_ids_to_check = room_ids - announced_room_ids
+            room_ids_to_check = room_ids - room_ids_to_include
         else:
             room_ids_to_check = {
                 room_id
                 for room_id, (events, _, _) in room_to_events.items()
-                if events and room_id not in announced_room_ids
+                if events and room_id not in left_room_ids
             }
-        announced_room_ids.update(
-            await self.store.get_server_announcement_room_ids_with_announcement(
-                room_ids_to_check, now_token.room_key.stream
+            # Also consider rooms whose account data has changed.
+            room_ids_to_check |= account_data_room_ids & (
+                room_ids - room_ids_to_include
+            )
+        first_announcement_positions = (
+            await self.store.get_first_non_state_event_positions(
+                room_ids_to_check, now_token.room_key.get_max_stream_pos()
             )
         )
+        room_ids_to_include.update(first_announcement_positions)
 
         room_entries = []
-        for room_id in announced_room_ids:
+        for room_id in room_ids_to_include:
             if room_id in room_to_events:
                 events, start_key, _ = room_to_events[room_id]
                 events.reverse()
                 upto_token = now_token.copy_and_replace(StreamKeyType.ROOM, start_key)
             else:
+                # Without a `since_token`, `room_to_events` has an entry for every
+                # room in `room_ids`.
                 assert since_token is not None
                 events = []
                 upto_token = since_token
+
+            first_announcement_position = first_announcement_positions.get(room_id)
+            full_state = (
+                since_token is None
+                or first_announcement_position is None
+                or first_announcement_position.persisted_after(since_token.room_key)
+            )
 
             room_entries.append(
                 RoomSyncResultBuilder(
@@ -3420,7 +3464,7 @@ class SyncHandler:
                     rtype="joined",
                     events=events,
                     newly_joined=False,
-                    full_state=True,
+                    full_state=full_state,
                     since_token=since_token,
                     upto_token=upto_token,
                     end_token=now_token,
@@ -3490,7 +3534,12 @@ class SyncHandler:
                 knock = await self.store.get_event(event.event_id)
                 knocked.append(KnockedSyncResult(room_id=event.room_id, knock=knock))
             elif event.membership in (Membership.LEAVE, Membership.BAN):
-                if event.room_id in sync_result_builder.announcement_room_ids:
+                # Former members of an announcement room get the synthetic join
+                # instead of this leave or ban.
+                if (
+                    event.room_id
+                    in sync_result_builder.synthetic_join_announcement_room_ids
+                ):
                     continue
 
                 # Always send down rooms we were banned from or kicked from.
@@ -3523,7 +3572,8 @@ class SyncHandler:
         room_entries.extend(
             await self._get_announcement_room_entries(
                 sync_result_builder,
-                sync_result_builder.announcement_room_ids - room_ids_in_response,
+                sync_result_builder.synthetic_join_announcement_room_ids
+                - room_ids_in_response,
             )
         )
 
@@ -3760,8 +3810,10 @@ class SyncHandler:
                     summary=summary,
                     unread_count=0,
                     sticky=sticky_events,
-                    is_announcement=room_id
-                    in sync_result_builder.announcement_room_ids,
+                    is_announcement=(
+                        room_id
+                        in sync_result_builder.synthetic_join_announcement_room_ids
+                    ),
                 )
 
                 if room_sync or always_include:
@@ -3957,8 +4009,11 @@ class SyncResultBuilder:
         since_token: The token supplied by user, or None.
         now_token: The token to sync up to.
         joined_room_ids: List of rooms the user is joined to
-        announcement_room_ids: Server announcement rooms the user is not a member
-            of, whose new announcements should still be sent to them.
+        synthetic_join_announcement_room_ids: Server announcement rooms the user
+            is not a member of, whose new announcements should still be sent with
+            a synthetic join. Rooms the user really joined are not included.
+            They are kept apart from `joined_room_ids` because most code that
+            reads `joined_room_ids` relies on the user being a member.
         excluded_room_ids: Set of room ids we should omit from the /sync response.
         forced_newly_joined_room_ids:
             Rooms that should be presented in the /sync response as if they were
@@ -3983,7 +4038,7 @@ class SyncResultBuilder:
     since_token: StreamToken | None
     now_token: StreamToken
     joined_room_ids: frozenset[str]
-    announcement_room_ids: frozenset[str]
+    synthetic_join_announcement_room_ids: frozenset[str]
     excluded_room_ids: frozenset[str]
     forced_newly_joined_room_ids: frozenset[str]
     membership_change_events: list[EventBase]
@@ -4010,7 +4065,7 @@ class SyncResultBuilder:
         newly_left_users = set()
         if self.since_token:
             for joined_sync in self.joined:
-                if joined_sync.room_id in self.announcement_room_ids:
+                if joined_sync.room_id in self.synthetic_join_announcement_room_ids:
                     continue
 
                 it = itertools.chain(

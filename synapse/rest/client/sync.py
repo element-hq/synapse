@@ -39,6 +39,7 @@ from synapse.events.utils import (
     EventFormat,
     FilteredEvent,
     SerializeEventConfig,
+    SerializeEventFilter,
     strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
@@ -606,6 +607,9 @@ class SyncRestServlet(RestServlet):
 
         user_id = sync_config.user.to_string()
         is_announcement = isinstance(room, JoinedSyncResult) and room.is_announcement
+        # A former member gets the room with `is_announcement` set, as they are
+        # no longer a member, but their real leave or ban can still be in the
+        # state or the timeline. Remove it, as the synthetic join replaces it.
         if is_announcement:
             state_dict = {
                 key: event
@@ -652,8 +656,11 @@ class SyncRestServlet(RestServlet):
         if is_announcement:
             create_event = await self.store.get_create_event_for_room(room.room_id)
             serialized_state.append(
-                make_synthetic_join_event(
-                    room.room_id, user_id, create_event.origin_server_ts
+                self._event_serializer.serialize_synthetic_event(
+                    make_synthetic_join_event(
+                        room.room_id, user_id, create_event.origin_server_ts
+                    ),
+                    serialize_options,
                 )
             )
         serialized_timeline = await self._event_serializer.serialize_events(
@@ -697,7 +704,12 @@ class SyncRestServlet(RestServlet):
                 # appearing in the timeline won't appear again here
                 result["msc4354_sticky"] = {
                     "events": await self._event_serializer.serialize_events(
-                        room.sticky, time_now, config=serialize_options
+                        room.sticky,
+                        time_now,
+                        config=serialize_options,
+                        # Drop any sticky events which have expired since they
+                        # were selected (or since this `SyncResult` was cached).
+                        filter=SerializeEventFilter(sticky_only=True),
                     )
                 }
             if room.unread_thread_notifications:
@@ -1058,10 +1070,13 @@ class SlidingSyncRestServlet(RestServlet):
             if room_result.synthetic_join:
                 create_event = await self.store.get_create_event_for_room(room_id)
                 serialized_rooms[room_id].setdefault("required_state", []).append(
-                    make_synthetic_join_event(
-                        room_id,
-                        requester.user.to_string(),
-                        create_event.origin_server_ts,
+                    self.event_serializer.serialize_synthetic_event(
+                        make_synthetic_join_event(
+                            room_id,
+                            requester.user.to_string(),
+                            create_event.origin_server_ts,
+                        ),
+                        serialize_options,
                     )
                 )
 
@@ -1283,7 +1298,12 @@ class SlidingSyncRestServlet(RestServlet):
                 ]
             rooms_out[room_id] = {
                 "events": await self.event_serializer.serialize_events(
-                    sticky_events_to_write, time_now, config=serialize_options
+                    sticky_events_to_write,
+                    time_now,
+                    config=serialize_options,
+                    # Drop any sticky events which have expired since they
+                    # were selected.
+                    filter=SerializeEventFilter(sticky_only=True),
                 )
             }
 
