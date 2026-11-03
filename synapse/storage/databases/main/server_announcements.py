@@ -12,11 +12,8 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-from typing import Collection
-
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
-from synapse.types import PersistedEventPosition
 from synapse.util.caches.descriptors import cached
 
 
@@ -66,45 +63,6 @@ class ServerAnnouncementsStore(CacheInvalidationWorkerStore):
             desc="get_server_announcement_room_ids",
         )
         return frozenset(room_id for (room_id,) in rows)
-
-    async def get_first_non_state_event_positions(
-        self, room_ids: Collection[str], max_stream_ordering: int
-    ) -> dict[str, PersistedEventPosition]:
-        """Return the position of the first non-state event at or before
-        `max_stream_ordering` in each of `room_ids`, leaving out rooms that have
-        none.
-        """
-
-        def _get_first_non_state_event_positions_txn(
-            txn: LoggingTransaction,
-        ) -> dict[str, PersistedEventPosition]:
-            positions = {}
-            for room_id in room_ids:
-                txn.execute(
-                    """
-                    SELECT instance_name, stream_ordering FROM events
-                    WHERE room_id = ? AND stream_ordering <= ?
-                    AND state_key IS NULL
-                    ORDER BY stream_ordering
-                    LIMIT 1
-                    """,
-                    (room_id, max_stream_ordering),
-                )
-                row = txn.fetchone()
-                if row is not None:
-                    instance_name, stream_ordering = row
-                    positions[room_id] = PersistedEventPosition(
-                        instance_name or "master", stream_ordering
-                    )
-            return positions
-
-        if not room_ids:
-            return {}
-
-        return await self.db_pool.runInteraction(
-            "get_first_non_state_event_positions",
-            _get_first_non_state_event_positions_txn,
-        )
 
     async def store_server_announcement_room(
         self, config_id: str, room_id: str

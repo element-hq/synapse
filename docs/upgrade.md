@@ -117,6 +117,20 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.165.0
+
+## Stable MatrixRTC transport discovery
+
+Synapse has added stable support for [MSC4143](https://github.com/matrix-org/matrix-spec-proposals/pull/4143)
+and serves `GET /_matrix/client/v1/rtc/transports` with the transports configured in
+[`matrix_rtc.transports`](usage/configuration/config_documentation.md#matrix_rtc).
+
+Clients that implement the stable LiveKit transport from [MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195)
+expect transports of type `m.livekit`. The `livekit` transport type is deprecated. An
+`m.livekit` config entry should be added for each LiveKit SFU. As long as clients still
+depend on the unstable LiveKit transport from earlier versions of [MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195),
+matching `livekit` entries should still be listed in addition.
+
 # Upgrading to v1.164.0
 
 ## Python 3.11+ is now required

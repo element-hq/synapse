@@ -114,6 +114,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<relations::ThreadAggregation>()?;
     child_module.add_class::<serialize::EventFormat>()?;
     child_module.add_class::<serialize::SerializeEventConfig>()?;
+    child_module.add_class::<serialize::SerializeEventFilter>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_dict, m)?)?;

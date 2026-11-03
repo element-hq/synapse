@@ -157,6 +157,25 @@ impl SerializeEventConfig {
     }
 }
 
+/// Serialisation-time filters on events.
+#[pyclass(frozen, skip_from_py_object, get_all)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct SerializeEventFilter {
+    /// Only serialise events that are sticky and haven't expired.
+    /// When set, all serialised events are guaranteed to have a `unsigned.sticky_duration_remaining_ms` field
+    /// (and the field will have a positive value).
+    sticky_only: bool,
+}
+
+#[pymethods]
+impl SerializeEventFilter {
+    #[new]
+    #[pyo3(signature = (*, sticky_only = false))]
+    fn new(sticky_only: bool) -> Self {
+        Self { sticky_only }
+    }
+}
+
 /// Synchronously serialize a batch of events for clients.
 ///
 /// `events` is a list of `(event, membership)` pairs, where `event` is a
@@ -168,7 +187,16 @@ impl SerializeEventConfig {
 ///
 /// These three maps are shared across the whole batch, so they are read out of
 /// Python once and then reused for every event.
+///
+/// # Filtering
+///
+/// If a filter is supplied, this function can return `None` in the place of events that are filtered out.
+/// Otherwise, this function never returns `None` elements.
+///
+/// (We don't just omit events so that they can still be lined up with the input events, which the caller relies
+/// upon at the time of writing.)
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (
     events,
     time_now_ms,
@@ -177,6 +205,7 @@ impl SerializeEventConfig {
     bundle_aggregations = None,
     redaction_map = None,
     unsigned_additions = None,
+    filter = None,
 ))]
 pub fn serialize_events<'py>(
     py: Python<'py>,
@@ -186,7 +215,8 @@ pub fn serialize_events<'py>(
     bundle_aggregations: Option<HashMap<String, Bound<'py, BundledAggregations>>>,
     redaction_map: Option<HashMap<String, Bound<'py, Event>>>,
     unsigned_additions: Option<HashMap<String, JsonObject>>,
-) -> PyResult<Vec<Bound<'py, PyAny>>> {
+    filter: Option<&SerializeEventFilter>,
+) -> PyResult<Vec<Option<Bound<'py, PyAny>>>> {
     let redaction_map = redaction_map.unwrap_or_default();
     let unsigned_additions = unsigned_additions.unwrap_or_default();
 
@@ -201,8 +231,11 @@ pub fn serialize_events<'py>(
                 bundle_aggregations.as_ref(),
                 &redaction_map,
                 &unsigned_additions,
+                filter,
             )?;
-            Ok(pythonize(py, &Value::Object(serialized))?)
+            Ok(serialized
+                .map(|serialized| pythonize(py, &Value::Object(serialized)))
+                .transpose()?)
         })
         .collect()
 }
@@ -210,6 +243,11 @@ pub fn serialize_events<'py>(
 /// The recursive core: serialize a single event, fold in its redaction,
 /// module-callback additions and field filtering, then recurse into any
 /// bundled aggregations.
+///
+/// # Filtering
+///
+/// If a filter is supplied, this function can return `None` if the event is to be filtered out.
+/// Otherwise, this function never returns `None`.
 #[allow(clippy::too_many_arguments)]
 fn serialize_event(
     event: &Event,
@@ -219,8 +257,14 @@ fn serialize_event(
     bundle_aggregations: Option<&HashMap<String, Bound<'_, BundledAggregations>>>,
     redaction_map: &HashMap<String, Bound<'_, Event>>,
     unsigned_additions: &HashMap<String, JsonObject>,
-) -> PyResult<Map<String, Value>> {
-    let mut serialized = serialize_event_value(event, time_now_ms, config, membership)?;
+    filter: Option<&SerializeEventFilter>,
+) -> PyResult<Option<Map<String, Value>>> {
+    let Some(mut serialized) =
+        serialize_event_value(event, time_now_ms, config, membership, filter)?
+    else {
+        // Event was filtered out
+        return Ok(None);
+    };
 
     // If the event was redacted, include the (pre-fetched) redaction event in
     // the serialized event's unsigned section.
@@ -231,12 +275,10 @@ fn serialize_event(
         );
 
         if let Some(redaction_event) = redaction_map.get(&redacted_by) {
-            let serialized_redaction = Value::Object(serialize_event_value(
-                redaction_event.get(),
-                time_now_ms,
-                config,
-                None,
-            )?);
+            let serialized_redaction = Value::Object(
+                serialize_event_value(redaction_event.get(), time_now_ms, config, None, None)?
+                    .expect("no filter supplied, so the event is never filtered out"),
+            );
             unsigned_mut(&mut serialized)?.insert(
                 unsigned_field::REDACTED_BECAUSE.to_owned(),
                 serialized_redaction.clone(),
@@ -289,7 +331,7 @@ fn serialize_event(
         }
     }
 
-    Ok(serialized)
+    Ok(Some(serialized))
 }
 
 /// Inject an event's bundled aggregations (references, edit, thread summary)
@@ -333,7 +375,9 @@ fn inject_bundled_aggregations(
             None,
             redaction_map,
             unsigned_additions,
-        )?;
+            None,
+        )?
+        .expect("no filter supplied, so the event is never filtered out");
         serialized_aggregations
             .insert(relation_type::REPLACE.to_owned(), Value::Object(serialized));
     }
@@ -350,7 +394,9 @@ fn inject_bundled_aggregations(
             bundle_aggregations,
             redaction_map,
             unsigned_additions,
-        )?;
+            None,
+        )?
+        .expect("no filter supplied, so the event is never filtered out");
 
         let mut thread_summary = Map::new();
         thread_summary.insert("latest_event".to_owned(), Value::Object(serialized_latest));
@@ -381,12 +427,18 @@ fn inject_bundled_aggregations(
 
 /// Serialize a single event to its client JSON shape, without recursing into
 /// redactions or bundled aggregations (those are handled by the caller).
+///
+/// # Filtering
+///
+/// If a filter is supplied, this function can return `None` if the event is to be filtered out.
+/// Otherwise, this function never returns `None`.
 fn serialize_event_value(
     event: &Event,
     time_now_ms: i64,
     config: &SerializeEventConfig,
     membership: Option<&str>,
-) -> PyResult<Map<String, Value>> {
+    filter: Option<&SerializeEventFilter>,
+) -> PyResult<Option<Map<String, Value>>> {
     let mut d: Map<String, Value> = match serde_json::to_value(&event.parsed_event) {
         Ok(Value::Object(map)) => map,
         Ok(_) => {
@@ -519,14 +571,20 @@ fn serialize_event_value(
     }
 
     if config.msc4354_enabled {
-        if let Some(sticky_expiry_until) = event.locally_sticky_until_ts()? {
-            let sticky_remaining_ms = sticky_expiry_until - time_now_ms;
-            if sticky_remaining_ms > 0 {
-                unsigned.insert(
-                    unsigned_field::STICKY_TTL.to_owned(),
-                    Value::Number(Number::from(sticky_remaining_ms)),
-                );
-            }
+        // The remaining stickiness of the event, or `None` if the event is not
+        // sticky or its stickiness has expired.
+        let sticky_remaining_ms = event
+            .locally_sticky_until_ts()?
+            .map(|sticky_expiry_until| sticky_expiry_until - time_now_ms)
+            .filter(|sticky_remaining_ms| *sticky_remaining_ms > 0);
+        if let Some(sticky_remaining_ms) = sticky_remaining_ms {
+            unsigned.insert(
+                unsigned_field::STICKY_TTL.to_owned(),
+                Value::Number(Number::from(sticky_remaining_ms)),
+            );
+        } else if filter.is_some_and(|filter| filter.sticky_only) {
+            // Not sticky, or its stickiness has expired: filter it out.
+            return Ok(None);
         }
     }
 
@@ -537,7 +595,7 @@ fn serialize_event_value(
         );
     }
 
-    Ok(d)
+    Ok(Some(d))
 }
 
 /// Apply the client event format transform in place.
