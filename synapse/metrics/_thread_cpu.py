@@ -68,12 +68,13 @@ class ThreadCPUMetrics(Collector):
         except (ValueError, TypeError, AttributeError):
             pass
 
-        self._threadpools: "WeakKeyDictionary[ThreadPool, str]" = WeakKeyDictionary()
-        self._threads: "WeakKeyDictionary[threading.Thread, str]" = WeakKeyDictionary()
-
         # Guards the fields below, as the metrics listener may scrape from any
         # thread.
         self._lock = threading.Lock()
+
+        self._threadpools: "WeakKeyDictionary[ThreadPool, str]" = WeakKeyDictionary()
+        self._threads: "WeakKeyDictionary[threading.Thread, str]" = WeakKeyDictionary()
+
         # Thread ID to the thread's sample from the previous scrape.
         self._last_seen: dict[int, _ThreadSample] = {}
         # (thread type, mode) to the total ticks used by threads of that type.
@@ -84,11 +85,13 @@ class ThreadCPUMetrics(Collector):
 
         A threadpool keeps the name it was first registered under.
         """
-        self._threadpools.setdefault(threadpool, name)
+        with self._lock:
+            self._threadpools.setdefault(threadpool, name)
 
     def register_thread(self, thread_type: str, thread: threading.Thread) -> None:
         """Report `thread` as the type `thread_type`."""
-        self._threads[thread] = thread_type
+        with self._lock:
+            self._threads[thread] = thread_type
 
     def _registered_thread_types(self) -> dict[int, str]:
         """Map the native IDs of registered threads and threadpool threads to
