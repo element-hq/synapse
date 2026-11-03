@@ -202,6 +202,11 @@ class ServerAnnouncementsConfigTestCase(TestCase):
                 ["@bot:remote.example"],
                 ("excluded_user_ids", "<item 0>"),
             ),
+            (
+                "also_allowed",
+                ["@other:example.com", "@alice:example.com"],
+                ("excluded_user_ids", "<item 1>"),
+            ),
         ]
     )
     def test_invalid_excluded_user_ids(
@@ -209,7 +214,12 @@ class ServerAnnouncementsConfigTestCase(TestCase):
     ) -> None:
         """Invalid `excluded_user_ids` are rejected at the offending config path."""
         with self.assertRaises(ConfigError) as err:
-            self._read_room({"excluded_user_ids": excluded_user_ids})
+            self._read_room(
+                {
+                    "allowed_user_ids": ["@alice:example.com"],
+                    "excluded_user_ids": excluded_user_ids,
+                }
+            )
 
         self.assertEqual(
             err.exception.path,

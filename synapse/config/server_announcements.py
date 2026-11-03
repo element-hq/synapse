@@ -79,7 +79,9 @@ Options for each entry:
   receiving announcements from this room, for example appservice users or audit
   bots.
 
-  Each must be a valid, local user. Defaults to an empty list (excluding nobody).
+  Each must be a valid, local user, and must not be in `allowed_user_ids`: senders
+  are joined to the room, so they always receive its events. Defaults to an empty
+  list (excluding nobody).
 
   Accounts do not need to exist yet. Users on this list may still view announcement
   rooms manually (as they are world-readable). But they will not automatically receive
@@ -363,6 +365,13 @@ class ServerAnnouncementsConfig(Config):
                 if UserID.from_string(user_id).domain != server_name:
                     raise ConfigError(
                         "Must be a local user: server announcement rooms are not federated",
+                        user_config_path,
+                    )
+                if user_id in allowed_user_ids:
+                    raise ConfigError(
+                        "Users in allowed_user_ids are joined to the room and "
+                        "always receive its events, so they cannot also be in "
+                        "excluded_user_ids",
                         user_config_path,
                     )
 
