@@ -53,7 +53,6 @@ from synapse.types import (
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
     MutablePerConnectionState,
-    OperationType,
     PerConnectionState,
     SlidingSyncConfig,
     SlidingSyncResult,
@@ -301,23 +300,13 @@ class SlidingSyncExtensionHandler:
             # A wildcard means we process rooms from all lists
             if list_key == "*":
                 for actual_list in actual_lists.values():
-                    # We only expect a single SYNC operation for any list
-                    assert len(actual_list.ops) == 1
-                    sync_op = actual_list.ops[0]
-                    assert sync_op.op == OperationType.SYNC
-
-                    relevant_room_ids.update(sync_op.room_ids)
+                    relevant_room_ids.update(actual_list.room_ids)
 
                 break
 
             actual_list = actual_lists.get(list_key)
             if actual_list is not None:
-                # We only expect a single SYNC operation for any list
-                assert len(actual_list.ops) == 1
-                sync_op = actual_list.ops[0]
-                assert sync_op.op == OperationType.SYNC
-
-                relevant_room_ids.update(sync_op.room_ids)
+                relevant_room_ids.update(actual_list.room_ids)
 
         return relevant_room_ids
 
@@ -1320,8 +1309,7 @@ class SlidingSyncExtensionHandler:
         if sync_config.lists:
             for list_name, list_data in sync_config.lists.items():
                 if (EventTypes.Member, StateValues.LAZY) in list_data.required_state:
-                    for op in actual_lists[list_name].ops:
-                        lazy_rooms.update(op.room_ids)
+                    lazy_rooms.update(actual_lists[list_name].room_ids)
 
         if lazy_rooms:
             # For rooms configured as lazy, include users based on room response.

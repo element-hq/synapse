@@ -148,7 +148,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
 
         # Make sure the lists have the correct rooms
         self.assertIncludes(
-            set(response_body["lists"]["all"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "all"),
             {
                 invite_room_id,
                 room_id,
@@ -158,17 +158,17 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             exact=True,
         )
         self.assertIncludes(
-            set(response_body["lists"]["dms"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "dms"),
             {invited_dm_room_id, joined_dm_room_id},
             exact=True,
         )
         self.assertIncludes(
-            set(response_body["lists"]["non-dms"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "non-dms"),
             {invite_room_id, room_id},
             exact=True,
         )
         self.assertIncludes(
-            set(response_body["lists"]["room-invites"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "room-invites"),
             {invite_room_id},
             exact=True,
         )
@@ -237,12 +237,12 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
 
         # Make sure the lists have the correct rooms
         self.assertIncludes(
-            set(response_body["lists"]["all-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "all-list"),
             {space_room_id, room_id},
             exact=True,
         )
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {space_room_id},
             exact=True,
         )
@@ -282,12 +282,12 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
 
         # Make sure the lists have the correct rooms even though we `newly_left`
         self.assertIncludes(
-            set(response_body["lists"]["all-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "all-list"),
             {space_room_id, room_id},
             exact=True,
         )
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {space_room_id},
             exact=True,
         )
@@ -327,7 +327,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {dm_room_id},
             exact=True,
         )
@@ -347,7 +347,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -387,7 +387,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
         # No rooms are encrypted yet
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {encrypted_room_id},
             exact=True,
         )
@@ -408,7 +408,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
         # No rooms are encrypted yet
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -461,7 +461,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             sync_body, since=before_rooms_token, tok=user1_tok
         )
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {encrypted_room_id},
             exact=True,
         )
@@ -485,7 +485,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             sync_body, since=before_rooms_token, tok=user1_tok
         )
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -548,7 +548,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             sync_body, since=before_rooms_token, tok=user1_tok
         )
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {encrypted_room_id},
             exact=True,
         )
@@ -572,7 +572,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             sync_body, since=before_rooms_token, tok=user1_tok
         )
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -633,7 +633,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         )
         if self.use_new_tables:
             self.assertIncludes(
-                set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+                self.get_list_room_ids(response_body, "foo-list"),
                 set(),
                 exact=True,
             )
@@ -644,7 +644,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             # to not be a secret given it's often set at the start of the room and it's one
             # of the stripped state events that is normally handed out.
             self.assertIncludes(
-                set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+                self.get_list_room_ids(response_body, "foo-list"),
                 {encrypted_after_we_left_room_id},
                 exact=True,
             )
@@ -667,14 +667,14 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         )
         if self.use_new_tables:
             self.assertIncludes(
-                set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+                self.get_list_room_ids(response_body, "foo-list"),
                 {room_id, encrypted_after_we_left_room_id},
                 exact=True,
             )
         else:
             # Even though we left the room before it was encrypted... (see comment above)
             self.assertIncludes(
-                set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+                self.get_list_room_ids(response_body, "foo-list"),
                 {room_id},
                 exact=True,
             )
@@ -723,7 +723,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # `remote_invite_room_id` should not appear because we can't figure out whether
         # it is encrypted or not (no stripped state, `unsigned.invite_room_state`).
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {encrypted_room_id},
             exact=True,
         )
@@ -745,7 +745,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # `remote_invite_room_id` should not appear because we can't figure out whether
         # it is encrypted or not (no stripped state, `unsigned.invite_room_state`).
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -812,7 +812,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # `remote_invite_room_id` should appear here because it is encrypted
         # according to the stripped state
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {encrypted_room_id, remote_invite_room_id},
             exact=True,
         )
@@ -834,7 +834,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # `remote_invite_room_id` should not appear here because it is encrypted
         # according to the stripped state
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -894,7 +894,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # `remote_invite_room_id` should not appear here because it is unencrypted
         # according to the stripped state
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {encrypted_room_id},
             exact=True,
         )
@@ -916,7 +916,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # `remote_invite_room_id` should appear because it is unencrypted according to
         # the stripped state
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id, remote_invite_room_id},
             exact=True,
         )
@@ -947,7 +947,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
 
         # No rooms are encrypted yet
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             set(),
             exact=True,
         )
@@ -963,7 +963,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # We should see the room now because it's encrypted
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -1000,7 +1000,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {invite_room_id},
             exact=True,
         )
@@ -1020,7 +1020,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -1070,7 +1070,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -1090,7 +1090,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {space_room_id},
             exact=True,
         )
@@ -1110,7 +1110,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id, space_room_id},
             exact=True,
         )
@@ -1130,7 +1130,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {foo_room_id},
             exact=True,
         )
@@ -1151,7 +1151,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             set(),
             exact=True,
         )
@@ -1201,7 +1201,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {space_room_id, foo_room_id},
             exact=True,
         )
@@ -1221,7 +1221,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id, foo_room_id},
             exact=True,
         )
@@ -1241,7 +1241,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {foo_room_id},
             exact=True,
         )
@@ -1264,7 +1264,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         # Nothing matches because nothing is both a normal room and not a normal room
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             set(),
             exact=True,
         )
@@ -1286,7 +1286,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {space_room_id},
             exact=True,
         )
@@ -1307,7 +1307,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id, foo_room_id, space_room_id},
             exact=True,
         )
@@ -1360,7 +1360,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             sync_body, since=before_rooms_token, tok=user1_tok
         )
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -1384,7 +1384,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             sync_body, since=before_rooms_token, tok=user1_tok
         )
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {space_room_id},
             exact=True,
         )
@@ -1446,7 +1446,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             sync_body, since=before_rooms_token, tok=user1_tok
         )
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -1470,7 +1470,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             sync_body, since=before_rooms_token, tok=user1_tok
         )
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {space_room_id},
             exact=True,
         )
@@ -1517,7 +1517,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # room type it is (no stripped state, `unsigned.invite_room_state`)
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -1539,7 +1539,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # room type it is (no stripped state, `unsigned.invite_room_state`)
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {space_room_id},
             exact=True,
         )
@@ -1600,7 +1600,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # `remote_invite_room_id` should not appear here because it is a space room
         # according to the stripped state
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -1622,7 +1622,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # `remote_invite_room_id` should appear here because it is a space room
         # according to the stripped state
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {space_room_id, remote_invite_room_id},
             exact=True,
         )
@@ -1682,7 +1682,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # `remote_invite_room_id` should appear here because it is a normal room
         # according to the stripped state (no room type)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id, remote_invite_room_id},
             exact=True,
         )
@@ -1704,7 +1704,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # `remote_invite_room_id` should not appear here because it is a normal room
         # according to the stripped state (no room type)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {space_room_id},
             exact=True,
         )
@@ -1779,7 +1779,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {foo_room_id, foobar_room_id},
             exact=True,
         )
@@ -1799,7 +1799,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {foo_room_id, bar_room_id, foobar_room_id},
             exact=True,
         )
@@ -1820,7 +1820,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         # No rooms should match
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             set(),
             exact=True,
         )
@@ -1841,7 +1841,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             set(),
             exact=True,
         )
@@ -1905,7 +1905,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {untagged_room_id, bar_room_id},
             exact=True,
         )
@@ -1925,7 +1925,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {untagged_room_id},
             exact=True,
         )
@@ -1948,7 +1948,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         # Nothing matches because nothing is both tagged with "foo" and not tagged with "foo"
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             set(),
             exact=True,
         )
@@ -1969,7 +1969,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {untagged_room_id, foo_room_id, bar_room_id, foobar_room_id},
             exact=True,
         )

@@ -81,28 +81,6 @@ class SlidingSyncConfig(SlidingSyncBody):
     )
 
 
-class OperationType(Enum):
-    """
-    Represents the operation types in a Sliding Sync window.
-
-    Attributes:
-        SYNC: Sets a range of entries. Clients SHOULD discard what they previous knew about
-            entries in this range.
-        INSERT: Sets a single entry. If the position is not empty then clients MUST move
-            entries to the left or the right depending on where the closest empty space is.
-        DELETE: Remove a single entry. Often comes before an INSERT to allow entries to move
-            places.
-        INVALIDATE: Remove a range of entries. Clients MAY persist the invalidated range for
-            offline support, but they should be treated as empty when additional operations
-            which concern indexes in the range arrive from the server.
-    """
-
-    SYNC: Final = "SYNC"
-    INSERT: Final = "INSERT"
-    DELETE: Final = "DELETE"
-    INVALIDATE: Final = "INVALIDATE"
-
-
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class SlidingSyncResult:
     """
@@ -228,27 +206,13 @@ class SlidingSyncResult:
         Attributes:
             count: The total number of entries in the list. Always present if this list
                 is.
-            ops: The sliding list operations to perform.
+            room_ids: The rooms in the requested ranges of this list. This is not
+                sent to the client. The extensions use it to find the rooms for the
+                lists they are scoped to.
         """
 
-        @attr.s(slots=True, frozen=True, auto_attribs=True)
-        class Operation:
-            """
-            Attributes:
-                op: The operation type to perform.
-                range: Which index positions are affected by this operation. These are
-                    both inclusive.
-                room_ids: Which room IDs are affected by this operation. These IDs match
-                    up to the positions in the `range`, so the last room ID in this list
-                    matches the 9th index. The room data is held in a separate object.
-            """
-
-            op: OperationType
-            range: tuple[int, int]
-            room_ids: list[str]
-
         count: int
-        ops: list[Operation]
+        room_ids: set[str]
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class Extensions:

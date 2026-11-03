@@ -1,0 +1,1 @@
+Remove the unused `ops` field from the lists in [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) sliding sync responses, matching the MSC.
