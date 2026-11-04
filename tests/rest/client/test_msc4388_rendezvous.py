@@ -816,6 +816,45 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             self.assertEqual(channel.code, 200)
 
     @override_config(
+        {"experimental_features": {"msc4388_max_unauthenticated_sessions": 2}}
+    )
+    def test_capacity_authenticated_first(self) -> None:
+        """
+        Test that sessions created with an access token do not take up the
+        unauthenticated session capacity.
+        """
+        self.setup_mock_oauth()
+        alice_token = self.register_oauth_user("alice", "device1")
+
+        # Create more authenticated sessions than the unauthenticated limit
+        for _ in range(3):
+            channel = self.make_request(
+                "POST",
+                rz_endpoint,
+                {"data": "foo=bar"},
+                access_token=alice_token,
+            )
+            self.assertEqual(channel.code, 200)
+
+        # The full unauthenticated capacity is still available
+        for _ in range(2):
+            channel = self.make_request(
+                "POST",
+                rz_endpoint,
+                {"data": "foo=bar"},
+                access_token=None,
+            )
+            self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 429)
+
+    @override_config(
         {"experimental_features": {"msc4388_max_unauthenticated_sessions": 1}}
     )
     def test_capacity_expired_before_eviction(self) -> None:
@@ -1164,6 +1203,70 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             rz_endpoint,
             {"data": "foo=bar"},
             access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+
+    @override_config(
+        {
+            "experimental_features": {
+                "msc4388_rc_create": {"per_second": 0.1, "burst_count": 2},
+            },
+        }
+    )
+    def test_create_ratelimited_per_user(self) -> None:
+        """
+        Test that creating a session with an access token is ratelimited by
+        user, rather than by IP address.
+        """
+        self.setup_mock_oauth()
+        alice_token = self.register_oauth_user("alice", "device1")
+        bob_token = self.register_oauth_user("bob", "device1")
+
+        for _ in range(2):
+            channel = self.make_request(
+                "POST",
+                rz_endpoint,
+                {"data": "foo=bar"},
+                access_token=alice_token,
+            )
+            self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=alice_token,
+        )
+        self.assertEqual(channel.code, 429)
+        self.assertEqual(channel.json_body["errcode"], "M_LIMIT_EXCEEDED")
+
+        # Another user from the same IP address is not affected
+        for _ in range(2):
+            channel = self.make_request(
+                "POST",
+                rz_endpoint,
+                {"data": "foo=bar"},
+                access_token=bob_token,
+            )
+            self.assertEqual(channel.code, 200)
+
+        # Nor is an unauthenticated request from the same IP address
+        for _ in range(2):
+            channel = self.make_request(
+                "POST",
+                rz_endpoint,
+                {"data": "foo=bar"},
+                access_token=None,
+            )
+            self.assertEqual(channel.code, 200)
+
+        # Once enough time has passed, the user can create a session again
+        self.reactor.advance(10)
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=alice_token,
         )
         self.assertEqual(channel.code, 200)
 
