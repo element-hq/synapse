@@ -18,7 +18,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import SynapseError
+from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.config import ConfigError
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.handlers.server_announcements import (
@@ -28,7 +28,7 @@ from synapse.handlers.server_announcements import (
 from synapse.rest import admin
 from synapse.rest.client import login, register, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -353,6 +353,114 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
             self.get_success(self.store.get_server_announcement_room("updates")),
             room_id,
         )
+
+    def _send(
+        self, event_type: str, content: JsonDict, config_id: str = "updates"
+    ) -> tuple[str, str]:
+        return self.get_success(
+            self.handler.send_announcement(
+                create_requester("@admin:test"), config_id, event_type, content, None
+            )
+        )
+
+    def test_send_announcement(self) -> None:
+        """Test that an announcement is sent by the management user."""
+        room_id = self._reconcile()
+        content = {"msgtype": "m.text", "body": "Maintenance tonight"}
+        sent_room_id, event_id = self._send(EventTypes.Message, content)
+        self.assertEqual(sent_room_id, room_id)
+
+        event = self.get_success(self.store.get_event(event_id))
+        self.assertEqual(event.room_id, room_id)
+        self.assertEqual(event.sender, self.creator)
+        self.assertEqual(event.type, EventTypes.Message)
+        self.assertEqual(dict(event.content), content)
+
+    @parameterized.expand([("10",), ("12",)])
+    def test_redact_announcement(self, version: str) -> None:
+        """Test that an announcement can be redacted, whether the room version
+        has `redacts` in content or at the top level.
+        """
+        from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+
+        self.hs.config.server.default_room_version = KNOWN_ROOM_VERSIONS[version]
+        self._reconcile()
+        _, event_id = self._send(EventTypes.Message, {"msgtype": "m.text", "body": "x"})
+        _, redaction_id = self._send(EventTypes.Redaction, {"redacts": event_id})
+
+        redaction = self.get_success(self.store.get_event(redaction_id))
+        self.assertEqual(redaction.redacts, event_id)
+        redacted = self.get_success(self.store.get_event(event_id))
+        self.assertEqual(dict(redacted.content), {})
+
+    def test_redaction_requires_redacts(self) -> None:
+        self._reconcile()
+        error = self.get_failure(
+            self.handler.send_announcement(
+                create_requester("@admin:test"),
+                "updates",
+                EventTypes.Redaction,
+                {},
+                None,
+            ),
+            SynapseError,
+        )
+        self.assertEqual(error.value.code, 400)
+        self.assertEqual(error.value.errcode, Codes.MISSING_PARAM)
+
+    def test_send_announcement_unknown_id(self) -> None:
+        self._reconcile()
+        self.get_failure(
+            self.handler.send_announcement(
+                create_requester("@admin:test"),
+                "unknown",
+                EventTypes.Message,
+                {"msgtype": "m.text", "body": "x"},
+                None,
+            ),
+            NotFoundError,
+        )
+
+    def test_send_announcement_rejects_member_events(self) -> None:
+        self._reconcile()
+        error = self.get_failure(
+            self.handler.send_announcement(
+                create_requester("@admin:test"),
+                "updates",
+                EventTypes.Member,
+                {"membership": "join"},
+                None,
+            ),
+            SynapseError,
+        )
+        self.assertEqual(error.value.code, 400)
+        self.assertEqual(error.value.errcode, Codes.INVALID_PARAM)
+
+    def test_send_announcement_management_user_not_joined(self) -> None:
+        """Test that the error names the management user once it has left."""
+        room_id = self._reconcile()
+        self.get_success(
+            self.hs.get_room_member_handler().update_membership(
+                create_requester(self.creator, authenticated_entity="test"),
+                UserID.from_string(self.creator),
+                room_id,
+                "leave",
+                ratelimit=False,
+            )
+        )
+        error = self.get_failure(
+            self.handler.send_announcement(
+                create_requester("@admin:test"),
+                "updates",
+                EventTypes.Message,
+                {"msgtype": "m.text", "body": "x"},
+                None,
+            ),
+            SynapseError,
+        )
+        self.assertEqual(error.value.code, 403)
+        self.assertIn(self.creator, error.value.msg)
+        self.assertIn(room_id, error.value.msg)
 
     def test_room_ids_by_config_id(self) -> None:
         """Test that the mapping is the store's, keyed by config ID."""

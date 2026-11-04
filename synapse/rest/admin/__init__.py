@@ -92,6 +92,7 @@ from synapse.rest.admin.rooms import (
 )
 from synapse.rest.admin.scheduled_tasks import ScheduledTasksRestServlet
 from synapse.rest.admin.server_announcements import (
+    SendServerAnnouncementRestServlet,
     ServerAnnouncementRestServlet,
     ServerAnnouncementsRestServlet,
 )
@@ -348,6 +349,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SendServerNoticeServlet(hs).register(http_server)
     ServerAnnouncementsRestServlet(hs).register(http_server)
     ServerAnnouncementRestServlet(hs).register(http_server)
+    SendServerAnnouncementRestServlet(hs).register(http_server)
     BackgroundUpdateEnabledRestServlet(hs).register(http_server)
     BackgroundUpdateRestServlet(hs).register(http_server)
     BackgroundUpdateStartJobRestServlet(hs).register(http_server)

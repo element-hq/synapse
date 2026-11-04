@@ -15,11 +15,23 @@
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-from synapse.api.errors import NotFoundError
-from synapse.http.servlet import RestServlet
+from synapse.api.constants import EventTypes
+from synapse.api.errors import Codes, NotFoundError, SynapseError
+from synapse.http.server import HttpServer
+from synapse.http.servlet import (
+    RestServlet,
+    assert_params_in_dict,
+    parse_json_object_from_request,
+)
 from synapse.http.site import SynapseRequest
-from synapse.rest.admin._base import admin_patterns, assert_requester_is_admin
-from synapse.types import JsonDict
+from synapse.logging.opentracing import set_tag
+from synapse.rest.admin._base import (
+    admin_patterns,
+    assert_requester_is_admin,
+    assert_user_is_admin,
+)
+from synapse.rest.client.transactions import HttpTransactionCache
+from synapse.types import JsonDict, Requester
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -84,3 +96,89 @@ class ServerAnnouncementRestServlet(RestServlet):
 
         room_ids = await self._handler.get_room_ids_by_config_id()
         return HTTPStatus.OK, self._handler.get_room_info(room, room_ids.get(config_id))
+
+
+class SendServerAnnouncementRestServlet(RestServlet):
+    """Send an event as the management user into a server announcement room.
+
+    POST /_synapse/admin/v1/server_announcements/<config_id>/send
+    PUT /_synapse/admin/v1/server_announcements/<config_id>/send/<txn_id>
+    {
+        "type": "m.room.message",
+        "content": {
+            "msgtype": "m.text",
+            "body": "This is my message"
+        }
+    }
+
+    returns:
+
+    {
+        "event_id": "$1895723857jgskldgujpious",
+        "room_id": "!abc:example.com"
+    }
+    """
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self._config = hs.config.serverannouncements
+        self._handler = hs.get_server_announcements_handler()
+        self.txns = HttpTransactionCache(hs)
+
+    def register(self, json_resource: HttpServer) -> None:
+        PATTERN = "/server_announcements/(?P<config_id>[^/]*)/send"
+        json_resource.register_paths(
+            "POST", admin_patterns(PATTERN + "$"), self.on_POST, self.__class__.__name__
+        )
+        json_resource.register_paths(
+            "PUT",
+            admin_patterns(PATTERN + "/(?P<txn_id>[^/]*)$"),
+            self.on_PUT,
+            self.__class__.__name__,
+        )
+
+    async def _do(
+        self,
+        request: SynapseRequest,
+        requester: Requester,
+        config_id: str,
+        txn_id: str | None,
+    ) -> tuple[int, JsonDict]:
+        await assert_user_is_admin(self._auth, requester)
+        body = parse_json_object_from_request(request)
+        assert_params_in_dict(body, ("content",))
+        event_type = body.get("type", EventTypes.Message)
+
+        # Synapse manages the state of announcement rooms itself.
+        if "state_key" in body:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Cannot send state events to announcement rooms",
+                Codes.INVALID_PARAM,
+            )
+
+        if not self._config.rooms:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Server announcements are not enabled on this server",
+            )
+
+        room_id, event_id = await self._handler.send_announcement(
+            requester, config_id, event_type, body["content"], txn_id
+        )
+        return HTTPStatus.OK, {"event_id": event_id, "room_id": room_id}
+
+    async def on_POST(
+        self, request: SynapseRequest, config_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self._auth.get_user_by_req(request)
+        return await self._do(request, requester, config_id, None)
+
+    async def on_PUT(
+        self, request: SynapseRequest, config_id: str, txn_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self._auth.get_user_by_req(request)
+        set_tag("txn_id", txn_id)
+        return await self.txns.fetch_or_execute_request(
+            request, requester, self._do, request, requester, config_id, txn_id
+        )

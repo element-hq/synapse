@@ -59,3 +59,69 @@ GET /_synapse/admin/v1/server_announcements/{id}
 
 Returns a single entry of `rooms` above, or a 404 with `M_NOT_FOUND` if `id` is
 not in the configuration.
+
+## Send an announcement
+
+```
+POST /_synapse/admin/v1/server_announcements/{id}/send
+```
+
+or:
+
+```
+PUT /_synapse/admin/v1/server_announcements/{id}/send/{txnId}
+```
+
+Sends an event into the announcement room with configuration `id`, as the
+management user. The event reaches every user that the room is delivered to.
+No rate limit applies.
+
+When using the `PUT` form, retransmissions with the same transaction ID will be
+ignored in the same way as with `PUT
+/_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}`. When Synapse
+delegates authentication to the Matrix Authentication Service, the `PUT` form
+needs an access token with a device.
+
+The request body should look something like the following:
+
+```json
+{
+    "content": {
+        "msgtype": "m.text",
+        "body": "Maintenance tonight at 22:00 UTC"
+    }
+}
+```
+
+You can optionally include the following additional parameter:
+
+* `type`: the type of event. Defaults to `m.room.message`. Any non-state event
+  type except `m.room.member` is accepted, so an announcement can be edited by
+  sending an `m.room.message` with `m.new_content` and `m.relates_to`. To
+  retract an announcement, send an `m.room.redaction` with the ID of the event
+  to redact in `content`:
+
+  ```json
+  {
+      "type": "m.room.redaction",
+      "content": {"redacts": "$event_id"}
+  }
+  ```
+
+State events cannot be sent: Synapse manages the room state from the
+configuration, and a request with a `state_key` is rejected with
+`M_INVALID_PARAM`.
+
+Once the event has been sent, the API will return the following response:
+
+```json
+{
+    "event_id": "<event_id>",
+    "room_id": "<room_id>"
+}
+```
+
+The API returns a 400 if no announcement rooms are configured, and a 404 if
+`id` is not in the configuration.
+
+Push notifications are not yet sent for announcements.
