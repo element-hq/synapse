@@ -122,7 +122,7 @@ stacking them up. You can monitor the currently running background updates with
 ## Python 3.11+ is now required
 
 The minimum supported Python version has been increased from v3.10 to v3.11.
-You will need Python 3.11+ to run Synapse v1.164.0.
+You will need Python 3.11+ to run Synapse v1.165.0.
 
 If you use current versions of the
 [matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
