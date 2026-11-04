@@ -294,8 +294,10 @@ class ExperimentalConfig(Config):
             defaults={"per_second": 0.1, "burst_count": 10},
         )
         # Every other rendezvous request: discovery, and receiving, sending or
-        # cancelling on a session. This needs to allow for both devices polling
-        # for new payloads, possibly from behind the same IP address.
+        # cancelling on a session. Also creating a session with an access
+        # token, before the token is validated. This needs to allow for both
+        # devices polling for new payloads, possibly from behind the same IP
+        # address.
         self.msc4388_rc_requests = RatelimitSettings.parse(
             experimental,
             "msc4388_rc_requests",

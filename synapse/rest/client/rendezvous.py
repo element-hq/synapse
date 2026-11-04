@@ -119,17 +119,20 @@ class MSC4388CreateRendezvousServlet(RestServlet):
         return HTTPStatus.OK, {"create_available": self._can_create(requester)}
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, Any]:
+        # Ratelimit by IP before validating any token, as validation could be
+        # expensive. Requests with a token get the looser requests ratelimit,
+        # so that users behind a shared IP aren't held to its creation limit.
+        client_ip = request.getClientAddress().host
+        if self.auth.has_access_token(request):
+            await self._requests_ratelimiter.ratelimit(None, client_ip)
+        else:
+            await self._create_ratelimiter.ratelimit(None, client_ip)
+
         requester = await self._get_requester(request)
 
-        # Apply rate limiting based on whether the requester is authenticated or
-        # not. For unauthenticated requests, rate limiting is applied based on
-        # the client's IP address.
-        if requester:
+        # Authenticated requesters get the creation ratelimit per user, not per IP
+        if requester is not None:
             await self._create_ratelimiter.ratelimit(requester)
-        else:
-            await self._create_ratelimiter.ratelimit(
-                None, request.getClientAddress().host
-            )
 
         if not self._can_create(requester):
             raise SynapseError(
