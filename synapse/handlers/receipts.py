@@ -171,10 +171,22 @@ class ReceiptsHandler:
 
         max_batch_id = self.store.get_max_receipt_stream_id()
 
-        affected_room_ids = list({r.room_id for r in receipts_persisted})
-
+        # Receipts in announcement rooms are only ever shown to their sender,
+        # so only the sender's syncs need waking, not every member's.
+        announcement_room_ids = await self.store.get_server_announcement_room_ids()
         self.notifier.on_new_event(
-            StreamKeyType.RECEIPT, max_batch_id, rooms=affected_room_ids
+            StreamKeyType.RECEIPT,
+            max_batch_id,
+            users={
+                r.user_id
+                for r in receipts_persisted
+                if r.room_id in announcement_room_ids
+            },
+            rooms={
+                r.room_id
+                for r in receipts_persisted
+                if r.room_id not in announcement_room_ids
+            },
         )
         # Note that the min here shouldn't be relied upon to be accurate.
         await self.hs.get_pusherpool().on_new_receipts(

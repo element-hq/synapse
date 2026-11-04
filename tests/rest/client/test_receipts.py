@@ -19,6 +19,7 @@
 #
 #
 from http import HTTPStatus
+from unittest.mock import patch
 
 from twisted.internet.testing import MemoryReactor
 
@@ -45,6 +46,7 @@ from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.server import FakeChannel
 
 
 class ReceiptsTestCase(unittest.HomeserverTestCase):
@@ -624,6 +626,58 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
 
         response = self._sync(self.bob_other_tok, since)
         self.assertEqual(self._receipt_readers(response, event_id), {self.bob})
+
+    def _start_long_poll(self, tok: str, since: str) -> FakeChannel:
+        """Start an incremental `/sync` with a 10 second timeout, without
+        waiting for it to return.
+        """
+        return self.make_request(
+            "GET",
+            f"/sync?since={since}&timeout=10000",
+            access_token=tok,
+            await_result=False,
+        )
+
+    def test_non_member_receipt_wakes_own_other_device(self) -> None:
+        """A non-member's read receipt wakes a long-polling incremental sync of
+        their other devices.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.bob_other_tok)["next_batch"]
+        channel = self._start_long_poll(self.bob_other_tok, since)
+
+        self._send_read_receipt(event_id, self.bob_tok)
+
+        channel.await_result(timeout_ms=1000)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(self._receipt_readers(channel.json_body, event_id), {self.bob})
+
+    def test_non_member_receipt_does_not_wake_sender(self) -> None:
+        """A non-member's read receipt does not wake a long-polling incremental
+        sync of a member of the announcement room.
+
+        A woken sync with nothing new goes back to waiting, so this checks that
+        the sync is not recomputed rather than that it stays pending.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.announcer_tok)["next_batch"]
+        channel = self._start_long_poll(self.announcer_tok, since)
+        sync_handler = self.hs.get_sync_handler()
+
+        with patch.object(
+            sync_handler,
+            "current_sync_for_user",
+            wraps=sync_handler.current_sync_for_user,
+        ) as current_sync_for_user:
+            self._send_read_receipt(event_id, self.bob_tok)
+            self.reactor.advance(1)
+
+        current_sync_for_user.assert_not_called()
+        self.assertFalse(channel.is_finished())
+
+        channel.await_result(timeout_ms=10000)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(self._receipt_readers(channel.json_body, event_id), set())
 
     def test_non_member_receipt_hidden_from_member_sync(self) -> None:
         """A non-member's read receipt is not in the initial or incremental
