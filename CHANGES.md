@@ -35,7 +35,6 @@
 - Remove unused `tox.ini`. ([\#20410](https://github.com/element-hq/synapse/issues/20410))
 - Deliver server announcement rooms to users who are not members of them in legacy `/sync`. ([\#20412](https://github.com/element-hq/synapse/issues/20412))
 - Run lint script over codebase to fix spurious dirty Rust change leftover from [#19996](https://github.com/element-hq/synapse/pull/19996). ([\#20418](https://github.com/element-hq/synapse/issues/20418))
-- Bump `msgpack` from `1.2.1` to `1.2.4` to address [`GHSA-j586-36cw-2gc2`](https://github.com/msgpack/msgpack-python/security/advisories/GHSA-j586-36cw-2gc2) which can cause memory exhaustion problems when malformed tokens are used with the public room list API's. ([\#20421](https://github.com/element-hq/synapse/issues/20421))
 - Let removed senders of a server announcement room keep reading its history. ([\#20423](https://github.com/element-hq/synapse/issues/20423))
 - Keep read receipts in server announcement rooms private to the user who sent them. ([\#20427](https://github.com/element-hq/synapse/issues/20427))
 - Add package build targets for Ubuntu 26.10 'Stonking Stingray'. ([\#20428](https://github.com/element-hq/synapse/issues/20428))
