@@ -43,7 +43,6 @@ notes](https://github.com/element-hq/synapse/blob/release-v1.165/docs/upgrade.md
 
 
 
-
 # Synapse 1.164.2 (2026-11-02)
 
 ## Bugfixes
