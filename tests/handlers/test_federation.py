@@ -480,7 +480,9 @@ class EventsDuringRemoteJoinTestCase(unittest.FederatingHomeserverTestCase):
             await self.clock.sleep(Duration(seconds=1))
 
         helper.join(self.user_id, self.tok, on_send_join=send_message)
-        self.reactor.advance(1)
+        # The message waits in the staging area until the periodic check for old
+        # staged events picks it up, at most a minute after the join.
+        self.reactor.advance(61)
         return sent[0]
 
     def _assert_persisted(self, event: EventBase) -> None:
@@ -490,7 +492,7 @@ class EventsDuringRemoteJoinTestCase(unittest.FederatingHomeserverTestCase):
         )
 
     def test_event_during_join(self) -> None:
-        """The event waits for the join and is persisted after it."""
+        """The event waits in the staging area and is persisted after the join."""
         message = self._join_while_the_resident_sends_a_message()
         self._assert_persisted(message)
 
@@ -557,7 +559,9 @@ class EventsDuringRemoteJoinWithWorkersTestCase(
             await self.clock.sleep(Duration(seconds=1))
 
         helper.join(user_id, tok, on_send_join=send_message)
-        self.reactor.advance(1)
+        # The worker's periodic check for old staged events handles the message,
+        # at most a minute after the join.
+        self.reactor.advance(61)
         self.replicate()
 
         self.assertIsNotNone(
