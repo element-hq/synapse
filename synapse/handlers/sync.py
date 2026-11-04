@@ -39,6 +39,7 @@ from prometheus_client import Counter
 from synapse.api.constants import (
     AccountDataTypes,
     Direction,
+    EduTypes,
     EventContentFields,
     EventTypes,
     Membership,
@@ -63,6 +64,7 @@ from synapse.logging.opentracing import (
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.server_notices.server_notices_manager import SERVER_NOTICE_ROOM_TAG
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
+from synapse.storage.databases.main.receipts import ReceiptInRoom
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.invite_rule import InviteRule
@@ -778,6 +780,23 @@ class SyncHandler:
             for event in receipts:
                 room_id = event["room_id"]
                 ephemeral_by_room.setdefault(room_id, []).append(event)
+
+            announcement_receipts = (
+                await self.store.get_linearized_receipts_for_user_in_rooms(
+                    user_id=sync_config.user.to_string(),
+                    room_ids=sync_result_builder.synthetic_join_announcement_room_ids,
+                    to_key=receipt_key,
+                    from_key=since_token.receipt_key if since_token else None,
+                )
+            )
+            for room_id, room_receipts in announcement_receipts.items():
+                ephemeral_by_room.setdefault(room_id, []).append(
+                    {
+                        "room_id": room_id,
+                        "type": EduTypes.RECEIPT,
+                        "content": ReceiptInRoom.merge_to_content(room_receipts),
+                    }
+                )
 
         return now_token, ephemeral_by_room
 
@@ -2989,12 +3008,13 @@ class SyncHandler:
                 sync_result_builder,
                 ignored_users,
                 account_data_room_ids=account_data_by_room.keys() | tags_by_room.keys(),
+                ephemeral_room_ids=frozenset(ephemeral_by_room),
             )
         else:
+            tags_by_room = await self.store.get_tags_for_user(user_id)
             room_changes = await self._get_room_changes_for_initial_sync(
                 sync_result_builder, ignored_users
             )
-            tags_by_room = await self.store.get_tags_for_user(user_id)
 
         log_kv({"rooms_changed": len(room_changes.room_entries)})
 
@@ -3066,6 +3086,7 @@ class SyncHandler:
         sync_result_builder: "SyncResultBuilder",
         ignored_users: frozenset[str],
         account_data_room_ids: AbstractSet[str],
+        ephemeral_room_ids: AbstractSet[str],
     ) -> _RoomChanges:
         """Determine the changes in rooms to report to the user.
 
@@ -3325,6 +3346,7 @@ class SyncHandler:
                 sync_result_builder.synthetic_join_announcement_room_ids,
                 left_room_ids=left_announcement_room_ids,
                 account_data_room_ids=account_data_room_ids,
+                ephemeral_room_ids=ephemeral_room_ids,
             )
         )
 
@@ -3342,6 +3364,7 @@ class SyncHandler:
         room_ids: AbstractSet[str],
         left_room_ids: AbstractSet[str] = frozenset(),
         account_data_room_ids: AbstractSet[str] = frozenset(),
+        ephemeral_room_ids: AbstractSet[str] = frozenset(),
     ) -> list["RoomSyncResultBuilder"]:
         """Returns entries for the given announcement rooms that have something
         to show.
@@ -3350,9 +3373,10 @@ class SyncHandler:
         event, so that creating the room and joining its senders does not show
         it to every user. On an incremental sync, a room is included if it has
         had an announcement and there is any new event in it since the
-        `since_token`, such as a sender leaving or a name change, or a change
-        to the user's room account data for it. With `full_state` set, a room
-        is also included without any new event. On an
+        `since_token`, such as a sender leaving or a name change, a change
+        to the user's room account data for it, or any new ephemeral event
+        for the user, such as their own read receipt. With `full_state` set,
+        a room is also included without any new event. On an
         initial sync, a room is included if it has ever had an announcement,
         even when later state changes push that announcement out of the
         timeline.
@@ -3387,6 +3411,8 @@ class SyncHandler:
                 including tags, changed since the `since_token` of
                 `sync_result_builder`. They may include rooms that are not in
                 `room_ids`.
+            ephemeral_room_ids: Rooms with new ephemeral events for the user
+                since the `since_token` of `sync_result_builder`.
         """
         since_token = sync_result_builder.since_token
         now_token = sync_result_builder.now_token
@@ -3429,8 +3455,9 @@ class SyncHandler:
                 for room_id, (events, _, _) in room_to_events.items()
                 if events and room_id not in left_room_ids
             }
-            # Also consider rooms whose account data has changed.
-            room_ids_to_check |= account_data_room_ids & (
+            # Also consider rooms whose account data has changed, or with new
+            # ephemeral events for the user.
+            room_ids_to_check |= (account_data_room_ids | ephemeral_room_ids) & (
                 room_ids - room_ids_to_include
             )
         first_announcement_positions = (
