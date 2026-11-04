@@ -21,7 +21,7 @@ incomplete.
 ## server_announcements
 
 This feature allows homeserver admins to create and manage "announcement" rooms. These
-rooms and their events will be visible to all users on the homeserver, except those
+rooms and their events are delivered to all users on the homeserver, except those
 listed in the room's `excluded_user_ids`.
 
 Read-only users don't *actually* join announcement rooms, but they will see it in their
@@ -76,8 +76,8 @@ Options for each entry:
   rooms are not federated. Defaults to an empty list, allowing no users to send
   announcements. Sender accounts must already exist and must not be deactivated.
 * `excluded_user_ids` (array): Full Matrix user IDs excluded from automatically
-  receiving announcements from this room, for example appservice users or audit
-  bots.
+  receiving announcements from this room, for example bots that act on the messages
+  they receive.
 
   Each must be a valid, local user, and must not be in `allowed_user_ids`: senders
   are joined to the room, so they always receive its events. Defaults to an empty
@@ -86,6 +86,11 @@ Options for each entry:
   Accounts do not need to exist yet. Users on this list may still view announcement
   rooms manually (as they are world-readable). But they will not automatically receive
   announcement events.
+
+  Changes to this list do not remove rooms that clients already have. Clients of a
+  newly excluded user keep the room but stop receiving its events. A user removed
+  from the list receives new events, but not the room's state, until their client does
+  an initial sync.
 
 The internal room manager user (which is used to create announcement rooms and update
 their room state) is configured with `room_management_localpart` below. It is a
