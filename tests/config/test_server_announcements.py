@@ -277,6 +277,20 @@ class ServerAnnouncementsConfigTestCase(TestCase):
             ),
         )
 
+    def test_empty_id(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "nonempty string") as err:
+            self._read_room({"id": ""})
+        self.assertEqual(
+            err.exception.path,
+            (
+                "experimental_features",
+                "server_announcements",
+                "rooms",
+                "<item 0>",
+                "id",
+            ),
+        )
+
     def test_id_with_dots_and_dashes(self) -> None:
         config = self._read_room({"id": "it-ops.general_2"})
         self.assertEqual(config.rooms[0].config_id, "it-ops.general_2")
