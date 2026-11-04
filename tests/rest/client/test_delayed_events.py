@@ -2079,21 +2079,19 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
             [], self.get_success(store.get_all_delayed_events_for_user("user1"))
         )
 
+        # Assert that the oldest of user1's delayed events are pruned.
+        self.get_failure(
+            store.get_delayed_event_for_user(user1_delay_ids[0], "user1"),
+            NotFoundError,
+        )
+
+        # Assert that the remainder of user1's delayed events are pruned/finalised.
         if erase:
-            # Assert that both delayed events are pruned.
-            for delay_id in user1_delay_ids:
-                self.get_failure(
-                    store.get_delayed_event_for_user(delay_id, "user1"),
-                    NotFoundError,
-                )
-        else:
-            # Assert that the oldest of user1's delayed events are pruned.
             self.get_failure(
-                store.get_delayed_event_for_user(user1_delay_ids[0], "user1"),
+                store.get_delayed_event_for_user(user1_delay_ids[1], "user1"),
                 NotFoundError,
             )
-
-            # Assert that the newest of user1's delayed events are finalised.
+        else:
             self.assertIsNotNone(
                 self.get_success(
                     store.get_delayed_event_for_user(user1_delay_ids[1], "user1")
@@ -2355,19 +2353,17 @@ class DelayedEventsWorkerTestCase(
             [], self.get_success(store.get_all_delayed_events_for_user("user"))
         )
 
-        if erase:
-            # Assert that both delayed events are pruned.
-            for delay_id in delay_ids:
-                self.get_failure(
-                    store.get_delayed_event_for_user(delay_id, "user"), NotFoundError
-                )
-        else:
-            # Assert that the oldest of user1's delayed events are pruned.
-            self.get_failure(
-                store.get_delayed_event_for_user(delay_ids[0], "user"), NotFoundError
-            )
+        # Assert that the oldest of user1's delayed events are pruned.
+        self.get_failure(
+            store.get_delayed_event_for_user(delay_ids[0], "user"), NotFoundError
+        )
 
-            # Assert that the newest of user1's delayed events are finalised.
+        # Assert that the remainder of user1's delayed events are pruned/finalised.
+        if erase:
+            self.get_failure(
+                store.get_delayed_event_for_user(delay_ids[1], "user"), NotFoundError
+            )
+        else:
             self.assertIsNotNone(
                 self.get_success(
                     store.get_delayed_event_for_user(delay_ids[1], "user")
