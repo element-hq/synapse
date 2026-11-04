@@ -5,7 +5,7 @@ notes](https://github.com/element-hq/synapse/blob/release-v1.165/docs/upgrade.md
 
 ## Features
 
-- Updated experimental support for [MSC4388: Secure out-of-band channel for sign in with QR](https://github.com/matrix-org/matrix-spec-proposals/pull/4388). ([\#19906](https://github.com/element-hq/synapse/issues/19906))
+- Update experimental [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388) (sign-in with QR code) implementation to incorporate the latest changes from the MSC. ([\#19906](https://github.com/element-hq/synapse/issues/19906))
 - Update the [MSC4480](https://github.com/matrix-org/matrix-spec-proposals/pull/4480) sticky events sliding sync extension to use the global `pos` and [MSC4508](https://github.com/matrix-org/matrix-spec-proposals/pull/4508) scoping. ([\#20363](https://github.com/element-hq/synapse/issues/20363))
 - Avoid reading media from disk when answering a `HEAD` request to the media download endpoints. ([\#20368](https://github.com/element-hq/synapse/issues/20368))
 - Update support for scheduling [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140) delayed events with a [MSC4354](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) sticky duration. ([\#20378](https://github.com/element-hq/synapse/issues/20378))
