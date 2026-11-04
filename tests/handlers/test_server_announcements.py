@@ -461,8 +461,9 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
 
     @parameterized.expand([("10",), ("12",)])
     def test_redact_announcement(self, version: str) -> None:
-        """Test that an announcement can be redacted, whether the room version
-        has `redacts` in content or at the top level.
+        """Test that an announcement can be redacted with `redacts` given in
+        content, whether the room version puts it in the event's content or at
+        its top level.
         """
         from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 

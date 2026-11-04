@@ -101,7 +101,8 @@ You can optionally include the following additional parameter:
   type except `m.room.member` is accepted, so an announcement can be edited by
   sending an `m.room.message` with `m.new_content` and `m.relates_to`. To
   retract an announcement, send an `m.room.redaction` with the ID of the event
-  to redact in `content`:
+  to redact in `content.redacts`, whatever the room version. Synapse moves it
+  to the top level of the event for rooms before version 11:
 
   ```json
   {
