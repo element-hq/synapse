@@ -264,7 +264,8 @@ class ServerAnnouncementsConfig(Config):
                 raise ConfigError("Must be a nonempty string", config_path + ("id",))
             if not _CONFIG_ID_PATTERN.fullmatch(room_unique_identifier):
                 raise ConfigError(
-                    "Must only contain ASCII letters, digits, '.', '_' and '-'",
+                    "Must only contain ASCII letters, digits, '.', '_' and '-': "
+                    f"{room_unique_identifier!r}",
                     config_path + ("id",),
                 )
             if room_unique_identifier in room_unique_identifiers:
