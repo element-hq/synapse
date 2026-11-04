@@ -24,7 +24,13 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 import attr
 
-from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
+from synapse.api.constants import (
+    AccountDataTypes,
+    EduTypes,
+    EventTypes,
+    Membership,
+    PresenceState,
+)
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
@@ -37,6 +43,7 @@ from synapse.events.utils import (
     strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
+from synapse.handlers.server_announcements import make_synthetic_join_event
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
 from synapse.handlers.sync import (
     ArchivedSyncResult,
@@ -598,6 +605,26 @@ class SyncRestServlet(RestServlet):
         state_dict = room.state
         timeline_events = room.timeline.events
 
+        user_id = sync_config.user.to_string()
+        is_announcement = isinstance(room, JoinedSyncResult) and room.is_announcement
+        # A former member gets the room with `is_announcement` set, as they are
+        # no longer a member, but their real leave or ban can still be in the
+        # state or the timeline. Remove it, as the synthetic join replaces it.
+        if is_announcement:
+            state_dict = {
+                key: event
+                for key, event in state_dict.items()
+                if key != (EventTypes.Member, user_id)
+            }
+            timeline_events = [
+                filtered_event
+                for filtered_event in timeline_events
+                if not (
+                    filtered_event.event.type == EventTypes.Member
+                    and filtered_event.event.state_key == user_id
+                )
+            ]
+
         state_events = state_dict.values()
 
         for event in state_events:
@@ -626,6 +653,16 @@ class SyncRestServlet(RestServlet):
             time_now,
             config=serialize_options,
         )
+        if is_announcement:
+            create_event = await self.store.get_create_event_for_room(room.room_id)
+            serialized_state.append(
+                self._event_serializer.serialize_synthetic_event(
+                    make_synthetic_join_event(
+                        room.room_id, user_id, create_event.origin_server_ts
+                    ),
+                    serialize_options,
+                )
+            )
         serialized_timeline = await self._event_serializer.serialize_events(
             timeline_events,
             time_now,

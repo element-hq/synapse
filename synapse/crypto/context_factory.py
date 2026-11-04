@@ -25,8 +25,7 @@ from service_identity import VerificationError
 from service_identity.pyopenssl import verify_hostname, verify_ip_address
 from zope.interface import implementer
 
-from OpenSSL import SSL, crypto
-from twisted.internet._sslverify import _defaultCurveName
+from OpenSSL import SSL
 from twisted.internet.abstract import isIPAddress, isIPv6Address
 from twisted.internet.interfaces import IOpenSSLClientConnectionCreator
 from twisted.internet.ssl import (
@@ -74,12 +73,6 @@ class ServerContextFactory(ContextFactory):
 
     @staticmethod
     def configure_context(context: SSL.Context, config: HomeServerConfig) -> None:
-        try:
-            _ecCurve = crypto.get_elliptic_curve(_defaultCurveName)
-            context.set_tmp_ecdh(_ecCurve)
-        except Exception:
-            logger.exception("Failed to enable elliptic curve for TLS")
-
         context.set_options(
             SSL.OP_NO_SSLv2 | SSL.OP_NO_SSLv3 | SSL.OP_NO_TLSv1 | SSL.OP_NO_TLSv1_1
         )
