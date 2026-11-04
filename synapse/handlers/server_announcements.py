@@ -158,6 +158,13 @@ class ServerAnnouncementsHandler:
                     user_id,
                 )
 
+        # Set the profile of the management user to that of the room (to keep things
+        # simple).
+        join_profile = {
+            "displayname": room.room_name,
+            "avatar_url": room.room_avatar_url,
+        }
+
         # Check whether this room already exists.
         room_id = await self._store.get_server_announcement_room(room.config_id)
         if room_id is None:
@@ -189,7 +196,7 @@ class ServerAnnouncementsHandler:
                     ],
                 },
                 ratelimit=False,
-                creator_join_profile={},
+                creator_join_profile=join_profile,
                 # We definitely don't want these rooms to be encrypted.
                 ignore_forced_encryption=True,
             )
@@ -276,6 +283,19 @@ class ServerAnnouncementsHandler:
         allowed = set(room.allowed_user_ids)
         for (_, user_id), event in members.items():
             if user_id == self._creator:
+                # Keep the management user's room profile in sync with the room.
+                if any(
+                    event.content.get(key) != value
+                    for key, value in join_profile.items()
+                ):
+                    await self._room_member.update_membership(
+                        self._requester,
+                        self._requester.user,
+                        room_id,
+                        Membership.JOIN,
+                        ratelimit=False,
+                        content=join_profile,
+                    )
                 continue
 
             # Kick the user if they're no longer in the configured list.
