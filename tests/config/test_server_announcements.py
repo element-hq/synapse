@@ -255,6 +255,32 @@ class ServerAnnouncementsConfigTestCase(TestCase):
             ),
         )
 
+    @parameterized.expand(
+        [
+            ("slash", "general/news"),
+            ("space", "general news"),
+            ("non_ascii", "général"),
+        ]
+    )
+    def test_invalid_id_characters(self, _name: str, config_id: str) -> None:
+        """An `id` with characters outside `[A-Za-z0-9._-]` is rejected."""
+        with self.assertRaisesRegex(ConfigError, "ASCII letters, digits") as err:
+            self._read_room({"id": config_id})
+        self.assertEqual(
+            err.exception.path,
+            (
+                "experimental_features",
+                "server_announcements",
+                "rooms",
+                "<item 0>",
+                "id",
+            ),
+        )
+
+    def test_id_with_dots_and_dashes(self) -> None:
+        config = self._read_room({"id": "it-ops.general_2"})
+        self.assertEqual(config.rooms[0].config_id, "it-ops.general_2")
+
     def test_avatar_options_mutually_exclusive(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Cannot specify both") as err:
             self._read_room(

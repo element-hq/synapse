@@ -52,7 +52,8 @@ every startup).
 Options for each entry:
 
 * `id` (string, required): A unique, nonempty configuration identifier, not a
-  Matrix room ID. Do not change it after the associated room has been created.
+  Matrix room ID. It may only contain ASCII letters, digits, `.`, `_` and `-`.
+  Do not change it after the associated room has been created.
   It maps the configuration entry to its existing room. Purging the room
   deletes its mapping, allowing the same `id` to map to a new room.
 * `room_name` (string, required): The name of the room. Shown publicly to all users.
@@ -148,6 +149,7 @@ Example configuration:
               - "@full_time_phil:example.com"
 """
 
+import re
 from typing import Any
 
 import attr
@@ -158,6 +160,10 @@ from synapse.types import JsonDict, UserID, contains_invalid_mxid_characters
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
 from ._base import Config, ConfigError
+
+# The admin API uses the id as a URL path segment, which must not need
+# percent-encoding.
+_CONFIG_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -249,9 +255,14 @@ class ServerAnnouncementsConfig(Config):
             room_unique_identifier = room.get("id")
             if (
                 not isinstance(room_unique_identifier, str)
-                or not room_unique_identifier.strip()
+                or not room_unique_identifier
             ):
                 raise ConfigError("Must be a nonempty string", config_path + ("id",))
+            if not _CONFIG_ID_PATTERN.fullmatch(room_unique_identifier):
+                raise ConfigError(
+                    "Must only contain ASCII letters, digits, '.', '_' and '-'",
+                    config_path + ("id",),
+                )
             if room_unique_identifier in room_unique_identifiers:
                 raise ConfigError(
                     f"Duplicate server announcement id: {room_unique_identifier!r}",
