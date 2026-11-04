@@ -92,11 +92,8 @@ class MSC4388CreateRendezvousServlet(RestServlet):
         self._create_ratelimiter = create_ratelimiter
         self._requests_ratelimiter = requests_ratelimiter
 
-    async def _can_create(
-        self, request: SynapseRequest
-    ) -> tuple[bool, Requester | None]:
-        """Whether the requester is permitted by server policy to create a
-        rendezvous session, and whether they are authenticated.
+    async def _get_requester(self, request: SynapseRequest) -> Requester | None:
+        """Get the requester, or None if no access token was supplied.
 
         An access token which is supplied must be valid, even if authentication
         is not required: the MSC requires that an invalid or expired token gets
@@ -104,18 +101,13 @@ class MSC4388CreateRendezvousServlet(RestServlet):
         unauthenticated, so that the client can tell that its token needs
         refreshing rather than that server policy does not permit it to create
         a session.
-
-        Returns:
-            A tuple of whether creation is permitted, and the requester if
-            authenticated.
         """
         # This will raise if the token is invalid or needs a refresh
-        requester = await self.auth.get_optional_user_by_req(request)
-        authenticated = requester is not None
+        return await self.auth.get_optional_user_by_req(request)
 
-        # Creation is allowed if authenticated or authentication isn't
-        # required
-        return authenticated or not self.require_authentication, requester
+    def _can_create(self, requester: Requester | None) -> bool:
+        """Whether server policy permits the requester to create a session."""
+        return requester is not None or not self.require_authentication
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, Any]:
         await self._requests_ratelimiter.ratelimit(
@@ -123,11 +115,11 @@ class MSC4388CreateRendezvousServlet(RestServlet):
         )
         # A requester which is not permitted to create a session is told so in
         # the response, rather than by an error.
-        can_create, _ = await self._can_create(request)
-        return HTTPStatus.OK, {"create_available": can_create}
+        requester = await self._get_requester(request)
+        return HTTPStatus.OK, {"create_available": self._can_create(requester)}
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, Any]:
-        can_create, requester = await self._can_create(request)
+        requester = await self._get_requester(request)
 
         # Apply rate limiting based on whether the requester is authenticated or
         # not. For unauthenticated requests, rate limiting is applied based on
@@ -139,7 +131,7 @@ class MSC4388CreateRendezvousServlet(RestServlet):
                 None, request.getClientAddress().host
             )
 
-        if not can_create:
+        if not self._can_create(requester):
             raise SynapseError(
                 HTTPStatus.FORBIDDEN,
                 "Authentication is required to create a rendezvous session",
