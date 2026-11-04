@@ -1,0 +1,1 @@
+Fix event signature verification failing when a notary that answered last returned a server key that expires sooner than one already stored.
