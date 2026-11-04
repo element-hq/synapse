@@ -502,7 +502,7 @@ def init_tracer(hs: "HomeServer") -> None:
         # initialisation and register them.
         #
         # This is best effort, but works in practice for the jaeger reporter
-        # thread. Technically other Python threads could be started during this
+        # thread. Technically, other Python threads could be started during this
         # period (though unlikely to happen during Synapse startup), or newer
         # versions of the library could defer starting of threads. At worse this
         # means that some threads CPU time may be incorrectly attributed to
