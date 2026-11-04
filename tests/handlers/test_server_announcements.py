@@ -28,7 +28,7 @@ from synapse.handlers.server_announcements import (
 from synapse.rest import admin
 from synapse.rest.client import login, register, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -520,16 +520,23 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(error.value.code, 400)
         self.assertEqual(error.value.errcode, Codes.INVALID_PARAM)
 
-    def test_send_announcement_management_user_not_joined(self) -> None:
-        """Test that the error names the management user once it has left."""
+    def test_send_announcement_after_room_shutdown(self) -> None:
+        """Test that sending into a room that was shut down without being purged
+        fails with an error naming the management user.
+        """
         room_id = self._reconcile()
         self.get_success(
-            self.hs.get_room_member_handler().update_membership(
-                create_requester(self.creator, authenticated_entity="test"),
-                UserID.from_string(self.creator),
+            self.hs.get_room_shutdown_handler().shutdown_room(
                 room_id,
-                "leave",
-                ratelimit=False,
+                {
+                    "requester_user_id": "@admin:test",
+                    "new_room_user_id": None,
+                    "new_room_name": None,
+                    "message": None,
+                    "block": False,
+                    "purge": False,
+                    "force_purge": False,
+                },
             )
         )
         error = self.get_failure(
