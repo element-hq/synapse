@@ -32,17 +32,13 @@ notes](https://github.com/element-hq/synapse/blob/release-v1.165/docs/upgrade.md
 
 - Switch the MatrixRTC notification push rules to `event_property_is`. ([\#20366](https://github.com/element-hq/synapse/issues/20366))
 - Add an index on `lower(name)` to the `users` table, to speed up checking whether a username is available. ([\#20369](https://github.com/element-hq/synapse/issues/20369))
-- Add initial, experimental support for server-wide announcement rooms. ([\#20372](https://github.com/element-hq/synapse/issues/20372), [\#20407](https://github.com/element-hq/synapse/issues/20407), [\#20465](https://github.com/element-hq/synapse/issues/20465), [\#20467](https://github.com/element-hq/synapse/issues/20467), [\#20469](https://github.com/element-hq/synapse/issues/20469))
+- Add initial, experimental support for server-wide announcement rooms. ([\#20372](https://github.com/element-hq/synapse/issues/20372), [\#20407](https://github.com/element-hq/synapse/issues/20407), [\#20465](https://github.com/element-hq/synapse/issues/20465), [\#20467](https://github.com/element-hq/synapse/issues/20467), [\#20469](https://github.com/element-hq/synapse/issues/20469), [\#20412](https://github.com/element-hq/synapse/issues/20412), [\#20423](https://github.com/element-hq/synapse/issues/20423), [\#20427](https://github.com/element-hq/synapse/issues/20427), [\#20448](https://github.com/element-hq/synapse/issues/20448), [\#20468](https://github.com/element-hq/synapse/issues/20468))
 - Unbreak CI by bumping locked dependencies to support Python 3.15 wheels. ([\#20386](https://github.com/element-hq/synapse/issues/20386))
 - Remove unused `tox.ini`. ([\#20410](https://github.com/element-hq/synapse/issues/20410))
-- Deliver server announcement rooms to users who are not members of them in legacy `/sync`. ([\#20412](https://github.com/element-hq/synapse/issues/20412))
 - Run lint script over codebase to fix spurious dirty Rust change leftover from [#19996](https://github.com/element-hq/synapse/pull/19996). ([\#20418](https://github.com/element-hq/synapse/issues/20418))
-- Let removed senders of a server announcement room keep reading its history. ([\#20423](https://github.com/element-hq/synapse/issues/20423))
-- Keep read receipts in server announcement rooms private to the user who sent them. ([\#20427](https://github.com/element-hq/synapse/issues/20427))
 - Add package build targets for Ubuntu 26.10 'Stonking Stingray'. ([\#20428](https://github.com/element-hq/synapse/issues/20428))
 - Remove duplicative early exit in sliding sync processing. ([\#20431](https://github.com/element-hq/synapse/issues/20431))
-- Let users who are not members of a server announcement room tag it, and deliver those tags in legacy `/sync`. ([\#20448](https://github.com/element-hq/synapse/issues/20448))
-- Set the profile information of server announcement management users to that of the announcement room. ([\#20468](https://github.com/element-hq/synapse/issues/20468))
+
 
 
 
