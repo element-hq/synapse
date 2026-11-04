@@ -1,3 +1,57 @@
+# Synapse 1.165.0rc1 (2026-11-04)
+
+## Features
+
+- Updated experimental support for [MSC4388: Secure out-of-band channel for sign in with QR](https://github.com/matrix-org/matrix-spec-proposals/pull/4388). ([\#19906](https://github.com/element-hq/synapse/issues/19906))
+- Move the sticky events sliding sync extension to the global `pos` and MSC4508 scoping. ([\#20363](https://github.com/element-hq/synapse/issues/20363))
+- Avoid reading media from disk when answering a `HEAD` request to the media download endpoints. ([\#20368](https://github.com/element-hq/synapse/issues/20368))
+- Update support for scheduling [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140) delayed events with a [MSC4354](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) sticky duration. ([\#20378](https://github.com/element-hq/synapse/issues/20378))
+- Add stable support for `/rtc/transports` and copy `m.rtc.slot` state events during room upgrades as per [MSC4143](https://github.com/matrix-org/matrix-spec-proposals/pull/4143) and [MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195). ([\#20425](https://github.com/element-hq/synapse/issues/20425))
+
+## Bugfixes
+
+- Fix [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) that expired during sync processing being returned as expired events in the sticky section of the sync response. ([\#20349](https://github.com/element-hq/synapse/issues/20349))
+- Fix TLS listeners only offering the P-256 group for key exchange, which prevented the use of the X25519 and post-quantum X25519MLKEM768 groups. ([\#20374](https://github.com/element-hq/synapse/issues/20374))
+- Fix a bug where an error from the identity server during a third-party invite caused Synapse to return a 500 error instead of passing the error to the client. Contributed by @RaphaelFakhri. ([\#20401](https://github.com/element-hq/synapse/issues/20401))
+- Fix event signature verification failing when a notary that answered last returned a server key that expires sooner than one already stored. ([\#20406](https://github.com/element-hq/synapse/issues/20406))
+- Fix clearing user status for clients that send a `null` profile field value.
+
+  When `include_profile_updates_in_sync` is enabled, Synapse will continue to accept `null` custom profile field values
+  until clients have had a sufficient time to change their behaviour. This special casing is tracked in [this issue](https://github.com/element-hq/synapse/issues/20424). ([\#20422](https://github.com/element-hq/synapse/issues/20422))
+- Fix race where an initial sync did not return some memberships in rooms when another sync for the device was in-flight. Introduced in v1.163.0. ([\#20433](https://github.com/element-hq/synapse/issues/20433))
+
+## Improved Documentation
+
+- Remove `$server_port` from the `Host` header in the nginx reverse proxy example, as it can cause an SSO redirect loop. ([\#20391](https://github.com/element-hq/synapse/issues/20391))
+- Clarify config docs that manhole uses SSH (not Telnet). ([\#20417](https://github.com/element-hq/synapse/issues/20417))
+
+## Deprecations and Removals
+
+- Remove support for Python 3.10. ([\#20359](https://github.com/element-hq/synapse/issues/20359))
+
+## Internal Changes
+
+- Switch the MatrixRTC notification push rules to `event_property_is`. ([\#20366](https://github.com/element-hq/synapse/issues/20366))
+- Add an index on `lower(name)` to the `users` table, to speed up checking whether a username is available. ([\#20369](https://github.com/element-hq/synapse/issues/20369))
+- Add initial, experimental support for server-wide announcement rooms. ([\#20372](https://github.com/element-hq/synapse/issues/20372), [\#20407](https://github.com/element-hq/synapse/issues/20407), [\#20465](https://github.com/element-hq/synapse/issues/20465), [\#20467](https://github.com/element-hq/synapse/issues/20467), [\#20469](https://github.com/element-hq/synapse/issues/20469))
+- Unbreak CI by bumping locked dependencies to support Python 3.15 wheels. ([\#20386](https://github.com/element-hq/synapse/issues/20386))
+- Update `certifi` to `2026.10.19` to address [GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2). This only affects TLS connections made by the Sentry SDK when `sentry` is configured, SAML, and a couple utility scripts; federation and Synapse's other outbound HTTP requests use the system trust store. ([\#20387](https://github.com/element-hq/synapse/issues/20387))
+- Bump `rustls-webpki` to `0.103.16` to actively distrust [compromised eMudhra intermediate CA certificates](https://emudhra.we-have-a-problem.com/). ([\#20392](https://github.com/element-hq/synapse/issues/20392))
+- Slightly speed up the 'release artifacts' CI release steps. ([\#20397](https://github.com/element-hq/synapse/issues/20397))
+- Remove unused `tox.ini`. ([\#20410](https://github.com/element-hq/synapse/issues/20410))
+- Deliver server announcement rooms to users who are not members of them in legacy `/sync`. ([\#20412](https://github.com/element-hq/synapse/issues/20412))
+- Run lint script over codebase to fix spurious dirty Rust change leftover from [#19996](https://github.com/element-hq/synapse/pull/19996). ([\#20418](https://github.com/element-hq/synapse/issues/20418))
+- Bump `msgpack` from `1.2.1` to `1.2.4` to address [`GHSA-j586-36cw-2gc2`](https://github.com/msgpack/msgpack-python/security/advisories/GHSA-j586-36cw-2gc2) which can cause memory exhaustion problems when malformed tokens are used with the public room list API's. ([\#20421](https://github.com/element-hq/synapse/issues/20421))
+- Let removed senders of a server announcement room keep reading its history. ([\#20423](https://github.com/element-hq/synapse/issues/20423))
+- Keep read receipts in server announcement rooms private to the user who sent them. ([\#20427](https://github.com/element-hq/synapse/issues/20427))
+- Add package build targets for Ubuntu 26.10 'Stonking Stingray'. ([\#20428](https://github.com/element-hq/synapse/issues/20428))
+- Remove duplicative early exit in sliding sync processing. ([\#20431](https://github.com/element-hq/synapse/issues/20431))
+- Let users who are not members of a server announcement room tag it, and deliver those tags in legacy `/sync`. ([\#20448](https://github.com/element-hq/synapse/issues/20448))
+- Set the profile information of server announcement management users to that of the announcement room. ([\#20468](https://github.com/element-hq/synapse/issues/20468))
+
+
+
+
 # Synapse 1.164.2 (2026-11-02)
 
 ## Bugfixes
