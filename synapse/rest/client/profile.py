@@ -51,6 +51,10 @@ PROFILE_QUERY_MAX_TARGET_USERS = 100
 query endpoint. Defined in MSC4536.
 """
 
+PROFILE_QUERY_MAX_FIELD_NAMES = 30
+"""Maximum amount of field names to allow quering via the profile query endpoint.
+Defined in MSC4536."""
+
 
 def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
     # This will always be set by the time Twisted calls us.
@@ -374,7 +378,12 @@ class ProfileQueryRestServlet(RestServlet):
         List of user IDs to query profiles for.
         """
 
-        fields: Annotated[list[str], Field(min_length=1)] | AbsentType = Absent
+        fields: (
+            Annotated[
+                list[str], Field(min_length=1, max_length=PROFILE_QUERY_MAX_FIELD_NAMES)
+            ]
+            | AbsentType
+        ) = Absent
         """
         If specified, the profile fields to return.
 
