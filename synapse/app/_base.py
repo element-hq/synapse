@@ -78,7 +78,6 @@ from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
 from synapse.logging.context import LoggingContext, PreserveLoggingContext
 from synapse.metrics import install_gc_manager, register_threadpool
-from synapse.metrics._thread_cpu import thread_cpu_metrics
 from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
@@ -346,9 +345,6 @@ def listen_metrics(
             port, addr=host, registry=RegistryProxy
         )
         servers.append((server, thread))
-
-        thread_cpu_metrics.register_thread("prometheus", thread)
-
     return servers
 
 
