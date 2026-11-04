@@ -1458,28 +1458,6 @@ class FederationServer(FederationBase):
                 pdu.room_id, room_version, lock, origin, pdu
             )
 
-    async def handle_staged_events_in_room(self, room_id: str) -> None:
-        """Start handling the events in the staging area for the given room,
-        unless another process already does.
-
-        A remote join holds the room's inbound event lock: the events received
-        meanwhile wait in the staging area, and this hands them over afterwards.
-
-        Args:
-            room_id: the room whose staged events to handle.
-        """
-        try:
-            room_version = await self.store.get_room_version(room_id)
-        except (NotFoundError, UnsupportedRoomVersionError):
-            # Nothing can have been staged for the room.
-            return
-
-        lock = await self.store.try_acquire_lock(
-            INBOUND_EVENT_HANDLING_LOCK_NAME, room_id
-        )
-        if lock:
-            self._process_incoming_pdus_in_room_inner(room_id, room_version, lock)
-
     async def _get_next_nonspam_staged_event_for_room(
         self, room_id: str, room_version: RoomVersion
     ) -> tuple[str, EventBase] | None:
