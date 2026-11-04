@@ -1,5 +1,8 @@
 # Synapse 1.165.0rc1 (2026-11-04)
 
+Please check the [relevant section in the upgrade
+notes](https://github.com/element-hq/synapse/blob/release-v1.165/docs/upgrade.md#upgrading-to-v11650) as support for Python 3.10 was removed (Python 3.11+ is now required). And a note around `m.livekit`/`livekit` MatrixRTC transport discovery.
+
 ## Features
 
 - Updated experimental support for [MSC4388: Secure out-of-band channel for sign in with QR](https://github.com/matrix-org/matrix-spec-proposals/pull/4388). ([\#19906](https://github.com/element-hq/synapse/issues/19906))
