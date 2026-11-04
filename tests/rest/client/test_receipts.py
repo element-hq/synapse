@@ -32,7 +32,14 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes
 from synapse.config.server_announcements import ServerAnnouncementRoom
-from synapse.rest.client import login, read_marker, receipts, room, sync
+from synapse.rest.client import (
+    initial_sync,
+    login,
+    read_marker,
+    receipts,
+    room,
+    sync,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -436,6 +443,7 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
 
     servlets = [
         synapse.rest.admin.register_servlets,
+        initial_sync.register_servlets,
         login.register_servlets,
         read_marker.register_servlets,
         receipts.register_servlets,
@@ -446,6 +454,9 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.announcer = self.register_user("announcer", "pass")
         self.announcer_tok = self.login("announcer", "pass")
+        self.announcer_other_tok = self.login("announcer", "pass")
+        self.announcer2 = self.register_user("announcer2", "pass")
+        self.announcer2_tok = self.login("announcer2", "pass")
         self.bob = self.register_user("bob", "pass")
         self.bob_tok = self.login("bob", "pass")
         self.bob_other_tok = self.login("bob", "pass")
@@ -459,7 +470,7 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
                 room_topic="News from the server",
                 room_avatar_url=None,
                 room_avatar_path=None,
-                allowed_user_ids=[self.announcer],
+                allowed_user_ids=[self.announcer, self.announcer2],
             )
         ]
         self.store = hs.get_datastores().main
@@ -533,6 +544,15 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
+    def _set_fully_read(self, event_id: str, tok: str) -> None:
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/read_markers",
+            {ReceiptTypes.FULLY_READ: event_id},
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
     def _sync(self, tok: str, since: str | None = None) -> JsonDict:
         url = "/sync" if since is None else f"/sync?since={since}"
         channel = self.make_request("GET", url, access_token=tok)
@@ -569,6 +589,16 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
         announcement room's ephemeral events of a `/sync` response.
         """
         return set(self._receipt_data(response, event_id, receipt_type))
+
+    def _fully_read_event_id(self, response: JsonDict) -> str | None:
+        """Return the event ID of the fully read marker in the announcement
+        room's account data of a `/sync` response.
+        """
+        room = response.get("rooms", {}).get("join", {}).get(self.room_id, {})
+        for event in room.get("account_data", {}).get("events", []):
+            if event["type"] == ReceiptTypes.FULLY_READ:
+                return event["content"]["event_id"]
+        return None
 
     def _assert_room_in_sync(self, response: JsonDict) -> None:
         self.assertIn(self.room_id, response.get("rooms", {}).get("join", {}))
@@ -773,3 +803,75 @@ class ServerAnnouncementsReceiptsTestCase(unittest.HomeserverTestCase):
             response = self._sync(tok)
             self._assert_room_in_sync(response)
             self.assertEqual(self._receipt_readers(response, event_id), set())
+
+    def test_non_member_fully_read_marker_on_sync_of_other_device(self) -> None:
+        """A non-member's fully read marker set alone with `/read_markers` is in
+        the initial and next incremental sync of their other devices, without a
+        read receipt.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.bob_other_tok)["next_batch"]
+
+        self._set_fully_read(event_id, self.bob_tok)
+
+        for response in (
+            self._sync(self.bob_other_tok),
+            self._sync(self.bob_other_tok, since),
+        ):
+            self._assert_room_in_sync(response)
+            self.assertEqual(self._fully_read_event_id(response), event_id)
+            self.assertEqual(self._receipt_readers(response, event_id), set())
+
+    def test_sender_receipt_on_sync_of_other_device(self) -> None:
+        """A sender's read receipt in the announcement room is in the initial
+        and next incremental sync of their other devices.
+        """
+        event_id = self._announce("hello")
+        since = self._sync(self.announcer_other_tok)["next_batch"]
+
+        self._send_read_receipt(event_id, self.announcer_tok)
+
+        for response in (
+            self._sync(self.announcer_other_tok),
+            self._sync(self.announcer_other_tok, since),
+        ):
+            self.assertEqual(
+                self._receipt_readers(response, event_id), {self.announcer}
+            )
+
+    def test_sender_receipt_hidden_from_other_users_sync(self) -> None:
+        """A sender's read receipt in the announcement room is not in the
+        initial or incremental sync of another sender, nor of a non-member.
+        """
+        event_id = self._announce("hello")
+        tokens = (self.announcer2_tok, self.dan_tok)
+        since_by_tok = {tok: self._sync(tok)["next_batch"] for tok in tokens}
+
+        self._send_read_receipt(event_id, self.announcer_tok)
+        self._announce("again")
+
+        for tok in tokens:
+            for response in (self._sync(tok), self._sync(tok, since_by_tok[tok])):
+                self._assert_room_in_sync(response)
+                self.assertEqual(self._receipt_readers(response, event_id), set())
+
+    def test_sender_receipt_hidden_from_other_sender_initial_sync(self) -> None:
+        """A sender's read receipt in the announcement room is not in the
+        `/initialSync` of another sender.
+        """
+        event_id = self._announce("hello")
+
+        self._send_read_receipt(event_id, self.announcer_tok)
+
+        channel = self.make_request(
+            "GET", "/initialSync", access_token=self.announcer2_tok
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertIn(self.room_id, [r["room_id"] for r in channel.json_body["rooms"]])
+        readers = {
+            user_id
+            for event in channel.json_body["receipts"]
+            if event["room_id"] == self.room_id
+            for user_id in event["content"].get(event_id, {}).get(ReceiptTypes.READ, {})
+        }
+        self.assertEqual(readers, set())
