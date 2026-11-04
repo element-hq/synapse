@@ -818,10 +818,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
     @override_config(
         {"experimental_features": {"msc4388_max_unauthenticated_sessions": 1}}
     )
-    def test_capacity_delete_expired(self) -> None:
+    def test_capacity_expired_before_eviction(self) -> None:
         """
-        Test that deleting an expired session before it has been evicted frees
-        up its capacity.
+        Test that a session which has expired but not yet been evicted is
+        treated as gone: deleting it returns 404, and it does not take up
+        capacity.
         """
         # Offset the session from the eviction interval (60 seconds), so that
         # it expires between two eviction runs
@@ -836,12 +837,13 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         session_endpoint = rz_endpoint + "/" + channel.json_body["id"]
 
-        # Let the session expire, but delete it before the eviction runs
+        # Let the session expire, but not be evicted. Deleting it fails, as it
+        # no longer exists.
         self.reactor.advance(121)
         channel = self.make_request("DELETE", session_endpoint, access_token=None)
         self.assertEqual(channel.code, 404)
 
-        # The deleted session no longer takes up capacity
+        # The expired session does not take up capacity
         channel = self.make_request(
             "POST",
             rz_endpoint,
