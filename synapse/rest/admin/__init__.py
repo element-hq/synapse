@@ -91,6 +91,10 @@ from synapse.rest.admin.rooms import (
     RoomTimestampToEventRestServlet,
 )
 from synapse.rest.admin.scheduled_tasks import ScheduledTasksRestServlet
+from synapse.rest.admin.server_announcements import (
+    ServerAnnouncementRestServlet,
+    ServerAnnouncementsRestServlet,
+)
 from synapse.rest.admin.server_notice_servlet import SendServerNoticeServlet
 from synapse.rest.admin.statistics import (
     LargestRoomsStatistics,
@@ -342,6 +346,8 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     DevicesRestServlet(hs).register(http_server)
     DeleteDevicesRestServlet(hs).register(http_server)
     SendServerNoticeServlet(hs).register(http_server)
+    ServerAnnouncementsRestServlet(hs).register(http_server)
+    ServerAnnouncementRestServlet(hs).register(http_server)
     BackgroundUpdateEnabledRestServlet(hs).register(http_server)
     BackgroundUpdateRestServlet(hs).register(http_server)
     BackgroundUpdateStartJobRestServlet(hs).register(http_server)

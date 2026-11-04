@@ -354,6 +354,32 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
             room_id,
         )
 
+    def test_room_ids_by_config_id(self) -> None:
+        """Test that the mapping is the store's, keyed by config ID."""
+        self.assertEqual(self.get_success(self.handler.get_room_ids_by_config_id()), {})
+        self.config.rooms.append(
+            attr.evolve(self.room_config, config_id="maintenance", allowed_user_ids=[])
+        )
+        self._reconcile()
+        mapping = self.get_success(self.handler.get_room_ids_by_config_id())
+        self.assertEqual(
+            mapping,
+            {
+                "updates": self.get_success(
+                    self.store.get_server_announcement_room("updates")
+                ),
+                "maintenance": self.get_success(
+                    self.store.get_server_announcement_room("maintenance")
+                ),
+            },
+        )
+        self.assertEqual(
+            {room_id: config_id for config_id, room_id in mapping.items()},
+            self.get_success(
+                self.store.get_server_announcement_config_ids_by_room_id()
+            ),
+        )
+
 
 class SyntheticJoinEventTestCase(unittest.TestCase):
     def test_event_id(self) -> None:
