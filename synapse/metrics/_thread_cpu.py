@@ -95,7 +95,13 @@ class ThreadCPUMetrics(Collector):
 
     def _registered_thread_types(self) -> dict[int, str]:
         """Map the native IDs of registered threads and threadpool threads to
-        their thread type."""
+        their thread type.
+
+        Requires the caller to hold `self._lock`.
+        """
+
+        assert self._lock.locked()
+
         types: dict[int, str] = {}
         for thread, thread_type in list(self._threads.items()):
             if thread.native_id is not None and thread.is_alive():
@@ -150,9 +156,9 @@ class ThreadCPUMetrics(Collector):
         except OSError:
             return
 
-        registered_types = self._registered_thread_types()
-
         with self._lock:
+            registered_types = self._registered_thread_types()
+
             last_seen: dict[int, _ThreadSample] = {}
             for tid in tids:
                 try:
