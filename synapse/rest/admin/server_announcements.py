@@ -169,7 +169,16 @@ class SendServerAnnouncementRestServlet(RestServlet):
         await assert_user_is_admin(self._auth, requester)
         body = parse_json_object_from_request(request)
         assert_params_in_dict(body, ("content",))
+        content = body["content"]
+        if not isinstance(content, dict):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "'content' must be an object", Codes.BAD_JSON
+            )
         event_type = body.get("type", EventTypes.Message)
+        if not isinstance(event_type, str):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "'type' must be a string", Codes.BAD_JSON
+            )
 
         # Synapse manages the state of announcement rooms itself.
         if "state_key" in body:
@@ -186,7 +195,7 @@ class SendServerAnnouncementRestServlet(RestServlet):
             )
 
         room_id, event_id = await self._handler.send_announcement(
-            requester, config_id, event_type, body["content"], txn_id
+            requester, config_id, event_type, content, txn_id
         )
         return HTTPStatus.OK, {"event_id": event_id, "room_id": room_id}
 

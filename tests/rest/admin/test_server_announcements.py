@@ -12,6 +12,8 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+from parameterized import parameterized
+
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
@@ -278,6 +280,18 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self._reconcile()
         body = self._send({"type": "m.room.message"}, expected_code=400)
         self.assertEqual(Codes.MISSING_PARAM, body["errcode"])
+
+    @parameterized.expand(
+        [
+            ("content_string", {"content": "x"}),
+            ("content_list", {"content": [1]}),
+            ("type_number", {"type": 42, "content": {"body": "x"}}),
+        ]
+    )
+    def test_send_malformed_body(self, _name: str, request_body: JsonDict) -> None:
+        self._reconcile()
+        body = self._send(request_body, expected_code=400)
+        self.assertEqual(Codes.BAD_JSON, body["errcode"])
 
     def test_send_state_key_rejected(self) -> None:
         self._reconcile()
