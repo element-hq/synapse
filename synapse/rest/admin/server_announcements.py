@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import Codes, NotFoundError, SynapseError
+from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
@@ -37,6 +38,24 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
+def _serialize_room(room: ServerAnnouncementRoom, room_id: str | None) -> JsonDict:
+    """Describe a configured announcement room, as returned by the admin API.
+
+    Args:
+        room: The room's configuration entry.
+        room_id: The room's Matrix room ID, or None if it has not been created.
+    """
+    return {
+        "id": room.config_id,
+        "room_id": room_id,
+        "room_name": room.room_name,
+        "room_topic": room.room_topic,
+        "room_avatar_url": room.room_avatar_url,
+        "allowed_user_ids": list(room.allowed_user_ids),
+        "excluded_user_ids": list(room.excluded_user_ids),
+    }
+
+
 class ServerAnnouncementsRestServlet(RestServlet):
     """List the configured server announcement rooms.
 
@@ -55,16 +74,18 @@ class ServerAnnouncementsRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
         self._config = hs.config.serverannouncements
-        self._handler = hs.get_server_announcements_handler()
+        self._store = hs.get_datastores().main
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
-        room_ids = await self._handler.get_room_ids_by_config_id()
         return HTTPStatus.OK, {
             "management_user_id": self._config.room_management_mxid,
             "rooms": [
-                self._handler.get_room_info(room, room_ids.get(room.config_id))
+                _serialize_room(
+                    room,
+                    await self._store.get_server_announcement_room(room.config_id),
+                )
                 for room in self._config.rooms
             ],
         }
@@ -81,6 +102,7 @@ class ServerAnnouncementRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
         self._handler = hs.get_server_announcements_handler()
+        self._store = hs.get_datastores().main
 
     async def on_GET(
         self, request: SynapseRequest, config_id: str
@@ -94,8 +116,8 @@ class ServerAnnouncementRestServlet(RestServlet):
                 "experimental_features.server_announcements.rooms"
             )
 
-        room_ids = await self._handler.get_room_ids_by_config_id()
-        return HTTPStatus.OK, self._handler.get_room_info(room, room_ids.get(config_id))
+        room_id = await self._store.get_server_announcement_room(config_id)
+        return HTTPStatus.OK, _serialize_room(room, room_id)
 
 
 class SendServerAnnouncementRestServlet(RestServlet):

@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 import logging
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import EventTypes, HistoryVisibility, JoinRules, Membership
 from synapse.api.errors import Codes, NotFoundError, SynapseError
@@ -114,36 +114,6 @@ class ServerAnnouncementsHandler:
                 return room
         return None
 
-    async def get_room_ids_by_config_id(self) -> Mapping[str, str]:
-        """Return the room ID of each configured announcement room that has been
-        created, keyed by config ID.
-        """
-        return {
-            config_id: room_id
-            for room_id, config_id in (
-                await self._store.get_server_announcement_config_ids_by_room_id()
-            ).items()
-        }
-
-    def get_room_info(
-        self, room: ServerAnnouncementRoom, room_id: str | None
-    ) -> JsonDict:
-        """Describe a configured announcement room, as returned by the admin API.
-
-        Args:
-            room: The room's configuration entry.
-            room_id: The room's Matrix room ID, or None if it has not been created.
-        """
-        return {
-            "id": room.config_id,
-            "room_id": room_id,
-            "room_name": room.room_name,
-            "room_topic": room.room_topic,
-            "room_avatar_url": room.room_avatar_url,
-            "allowed_user_ids": list(room.allowed_user_ids),
-            "excluded_user_ids": list(room.excluded_user_ids),
-        }
-
     async def send_announcement(
         self,
         admin_requester: Requester,
@@ -176,7 +146,7 @@ class ServerAnnouncementsHandler:
                 "experimental_features.server_announcements.rooms"
             )
 
-        room_id = (await self.get_room_ids_by_config_id()).get(config_id)
+        room_id = await self._store.get_server_announcement_room(config_id)
         if room_id is None:
             raise SynapseError(
                 500,
