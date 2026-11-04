@@ -87,9 +87,9 @@ Options for each entry:
   rooms manually (as they are world-readable). But they will not automatically receive
   announcement events.
 
-  Changes to this list do not update rooms that clients already have. Clients of a
+  Changes to this list do not remove rooms that clients already have. Clients of a
   newly excluded user keep the room but stop receiving its events. A user removed
-  from the list receives new events but not the room's state until their client does
+  from the list receives new events, but not the room's state, until their client does
   an initial sync.
 
 The internal room manager user (which is used to create announcement rooms and update
