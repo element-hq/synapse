@@ -91,19 +91,21 @@ fn parse_json_body<T: DeserializeOwned>(body: &[u8]) -> PyResult<T> {
 }
 
 impl MSC4388RendezvousHandler {
-    /// Evict expired unauthenticated sessions.
+    /// Evict expired sessions.
     ///
     /// Live sessions are never evicted to make room for new ones, as otherwise
     /// anyone could disrupt sign ins that are in progress by creating lots of
     /// sessions. Instead, new unauthenticated sessions are refused while at
     /// capacity.
     fn evict(&mut self, now: SystemTime) {
-        self.sessions.retain(|_, session| !session.expired(now));
-
-        // Clean up any unauthenticated sessions that no longer exist in the
-        // main session map.
-        self.unauthenticated_sessions
-            .retain(|id| self.sessions.contains_key(id));
+        let unauthenticated_sessions = &mut self.unauthenticated_sessions;
+        self.sessions.retain(|id, session| {
+            let expired = session.expired(now);
+            if expired {
+                unauthenticated_sessions.remove(id);
+            }
+            !expired
+        });
     }
 }
 
