@@ -12,6 +12,8 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+from typing import Mapping
+
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.util.caches.descriptors import cached
@@ -23,7 +25,8 @@ class ServerAnnouncementsStore(CacheInvalidationWorkerStore):
     The unique announcement `id` identifies the same room even when its configured
     details change. It is separate from the actual room ID.
 
-    Only the set of configured room IDs is cached, as it is read on every sync.
+    Only the mapping from room ID to config ID is cached, as it is read on every
+    sync.
     """
 
     async def get_server_announcement_room(self, config_id: str) -> str | None:
@@ -47,8 +50,11 @@ class ServerAnnouncementsStore(CacheInvalidationWorkerStore):
         )
 
     @cached(num_args=0)
-    async def get_server_announcement_room_ids(self) -> frozenset[str]:
-        """Return the room IDs of the currently configured announcement rooms.
+    async def get_server_announcement_config_ids_by_room_id(
+        self,
+    ) -> Mapping[str, str]:
+        """Return the config ID of each currently configured announcement room,
+        keyed by room ID.
 
         Rooms whose config ID is no longer in the config are left out, as
         are configured rooms that have not been created yet.
@@ -59,10 +65,36 @@ class ServerAnnouncementsStore(CacheInvalidationWorkerStore):
             iterable=[
                 room.config_id for room in self.hs.config.serverannouncements.rooms
             ],
-            retcols=("room_id",),
-            desc="get_server_announcement_room_ids",
+            retcols=("room_id", "config_id"),
+            desc="get_server_announcement_config_ids_by_room_id",
         )
-        return frozenset(room_id for (room_id,) in rows)
+        return dict(rows)
+
+    async def get_server_announcement_room_ids(self) -> frozenset[str]:
+        """Return the room IDs of the currently configured announcement rooms,
+        as in `get_server_announcement_config_ids_by_room_id`.
+        """
+        return frozenset(await self.get_server_announcement_config_ids_by_room_id())
+
+    async def get_server_announcement_room_ids_for_user(
+        self, user_id: str
+    ) -> frozenset[str]:
+        """Return the room IDs of the announcement rooms delivered to a user:
+        the currently configured ones, minus those listing the user in
+        `excluded_user_ids`.
+        """
+        excluded_config_ids = {
+            room.config_id
+            for room in self.hs.config.serverannouncements.rooms
+            if user_id in room.excluded_user_ids
+        }
+        return frozenset(
+            room_id
+            for room_id, config_id in (
+                await self.get_server_announcement_config_ids_by_room_id()
+            ).items()
+            if config_id not in excluded_config_ids
+        )
 
     async def store_server_announcement_room(
         self, config_id: str, room_id: str
@@ -76,7 +108,7 @@ class ServerAnnouncementsStore(CacheInvalidationWorkerStore):
                 values={"config_id": config_id, "room_id": room_id},
             )
             self._invalidate_cache_and_stream(
-                txn, self.get_server_announcement_room_ids, ()
+                txn, self.get_server_announcement_config_ids_by_room_id, ()
             )
 
         await self.db_pool.runInteraction(

@@ -2486,6 +2486,48 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
             self._sync(self.bob_tok, since, full_state=True, filter=filter)
         )
 
+    def test_excluded_user(self) -> None:
+        """A user in `excluded_user_ids` is not delivered the room, while other
+        non-members still are.
+        """
+        carol = self.register_user("carol", "pass")
+        carol_tok = self.login("carol", "pass")
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], excluded_user_ids=[self.bob])
+        ]
+        self._announce("hello")
+
+        since = self._sync(self.bob_tok)["next_batch"]
+        self._announce("again")
+
+        self._assert_not_delivered(self._sync(self.bob_tok))
+        self._assert_not_delivered(self._sync(self.bob_tok, since))
+        self._assert_not_delivered(self._sync(self.bob_tok, since, full_state=True))
+        self._assert_delivered(self._sync(carol_tok), carol)
+
+    def test_excluded_former_member(self) -> None:
+        """A member removed from the room by the config and excluded from it
+        gets their real leave instead of the synthetic join.
+        """
+        since = self._sync(self.former_tok)["next_batch"]
+
+        self.config.rooms = [
+            attr.evolve(
+                self.config.rooms[0],
+                allowed_user_ids=[self.announcer],
+                excluded_user_ids=[self.former],
+            )
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+        self._announce("hello")
+
+        for response in (
+            self._sync(self.former_tok, since),
+            self._sync(self.former_tok),
+        ):
+            self.assertNotIn(self.room_id, response["rooms"].get("join", {}))
+            self.assertIn(self.room_id, response["rooms"]["leave"])
+
     def test_removed_member(self) -> None:
         """A member removed from the room by the config switches straight to the
         synthetic join and the room's current power levels, then gets later
