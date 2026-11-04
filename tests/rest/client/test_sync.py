@@ -2795,6 +2795,30 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
             [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
         )
 
+    def test_excluded_user_cannot_tag(self) -> None:
+        """A user in `excluded_user_ids` has no membership in the announcement
+        room to tag it with, and may remove `m.server_notice` from it.
+        """
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], excluded_user_ids=[self.bob])
+        ]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.server_notice",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
     def test_server_notice_tag_removable_from_other_rooms(self) -> None:
         """A user can still remove the `m.server_notice` tag from a room that isn't
         an announcement room.

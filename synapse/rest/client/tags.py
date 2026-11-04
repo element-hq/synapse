@@ -123,7 +123,8 @@ class TagServlet(RestServlet):
 
         if (
             tag == SERVER_NOTICE_ROOM_TAG
-            and room_id in await self.store.get_server_announcement_room_ids()
+            and room_id
+            in await self.store.get_server_announcement_room_ids_for_user(user_id)
         ):
             raise AuthError(
                 403,
