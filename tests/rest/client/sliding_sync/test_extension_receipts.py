@@ -12,16 +12,18 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 import logging
+from http import HTTPStatus
 
-from parameterized import parameterized_class
+from parameterized import parameterized, parameterized_class
 
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EduTypes, ReceiptTypes
-from synapse.rest.client import login, receipts, room, sync
+from synapse.api.constants import EduTypes, EventTypes, ReceiptTypes, RelationTypes
+from synapse.config.server_announcements import ServerAnnouncementRoom
+from synapse.rest.client import login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
-from synapse.types import StreamKeyType
+from synapse.types import JsonDict, StreamKeyType
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -932,3 +934,178 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
             {user2_id},
             exact=True,
         )
+
+
+# The ways a receipt can be set, see `_set_receipt`.
+RECEIPT_KINDS = [("read",), ("private",), ("threaded",), ("read_markers",)]
+
+
+@parameterized_class(
+    ("use_new_tables",),
+    [
+        (True,),
+        (False,),
+    ],
+    class_name_func=lambda cls,
+    num,
+    params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+)
+class SlidingSyncReceiptsExtensionServerAnnouncementsTestCase(SlidingSyncBase):
+    """Tests that receipts in server announcement rooms are only sent to the
+    user who set them, whatever their type.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        read_marker.register_servlets,
+        receipts.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
+        self.alice = self.register_user("alice", "pass")
+        self.alice_tok = self.login("alice", "pass")
+        self.alice_other_tok = self.login("alice", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_tok = self.login("bob", "pass")
+
+        # Configured senders are joined to the room when it is reconciled.
+        hs.config.serverannouncements.rooms = [
+            ServerAnnouncementRoom(
+                config_id="news",
+                room_name="Server News",
+                room_topic="News from the server",
+                room_avatar_url=None,
+                room_avatar_path=None,
+                allowed_user_ids=[self.alice, self.bob],
+            )
+        ]
+        store = hs.get_datastores().main
+        self.get_success(hs.get_server_announcements_handler().reconcile_rooms())
+        room_id = self.get_success(store.get_server_announcement_room("news"))
+        assert room_id is not None
+        self.room_id = room_id
+
+    def _announce(self) -> tuple[str, str]:
+        """Send an announcement and a reply in its thread, and return the IDs
+        of the thread root and of the reply.
+        """
+        root_id = self.helper.send(self.room_id, "hello", tok=self.bob_tok)["event_id"]
+        reply_id = self.helper.send_event(
+            self.room_id,
+            EventTypes.Message,
+            content={
+                "msgtype": "m.text",
+                "body": "reply",
+                "m.relates_to": {"rel_type": RelationTypes.THREAD, "event_id": root_id},
+            },
+            tok=self.bob_tok,
+        )["event_id"]
+        return root_id, reply_id
+
+    def _set_receipt(self, kind: str, root_id: str, reply_id: str, tok: str) -> None:
+        if kind == "read_markers":
+            channel = self.make_request(
+                "POST",
+                f"/rooms/{self.room_id}/read_markers",
+                {ReceiptTypes.FULLY_READ: reply_id, ReceiptTypes.READ: reply_id},
+                access_token=tok,
+            )
+        else:
+            receipt_type = (
+                ReceiptTypes.READ_PRIVATE if kind == "private" else ReceiptTypes.READ
+            )
+            channel = self.make_request(
+                "POST",
+                f"/rooms/{self.room_id}/receipt/{receipt_type}/{reply_id}",
+                {"thread_id": root_id} if kind == "threaded" else {},
+                access_token=tok,
+            )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+    def _receipts_sync_body(self) -> JsonDict:
+        return {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 9]],
+                    "required_state": [],
+                    "timeline_limit": 10,
+                }
+            },
+            "extensions": {"receipts": {"enabled": True}},
+        }
+
+    def _receipt_readers(
+        self, response_body: JsonDict, kind: str, event_id: str
+    ) -> set[str]:
+        """Return the users with a receipt of the given kind on `event_id` in
+        the announcement room's receipts of a sliding sync response.
+        """
+        receipt_type = (
+            ReceiptTypes.READ_PRIVATE if kind == "private" else ReceiptTypes.READ
+        )
+        receipt = (
+            response_body["extensions"]["receipts"].get("rooms", {}).get(self.room_id)
+        )
+        if receipt is None:
+            return set()
+        self.assertEqual(receipt["type"], EduTypes.RECEIPT)
+        return set(receipt["content"].get(event_id, {}).get(receipt_type, {}))
+
+    @parameterized.expand(RECEIPT_KINDS)
+    def test_member_receipt_hidden_on_initial_sync(self, kind: str) -> None:
+        """Another member's receipt is not sent on a new connection, while the
+        user's own receipt from another device is.
+        """
+        root_id, reply_id = self._announce()
+        self._set_receipt(kind, root_id, reply_id, self.bob_tok)
+        self._set_receipt(kind, root_id, reply_id, self.alice_tok)
+
+        response_body, _ = self.do_sync(
+            self._receipts_sync_body(), tok=self.alice_other_tok
+        )
+        self.assertIn(self.room_id, response_body["rooms"])
+        self.assertEqual(
+            self._receipt_readers(response_body, kind, reply_id), {self.alice}
+        )
+
+    @parameterized.expand(RECEIPT_KINDS)
+    def test_member_receipt_hidden_on_incremental_sync(self, kind: str) -> None:
+        """Another member's receipt is not sent on an existing connection,
+        while the user's own receipt from another device is.
+        """
+        root_id, reply_id = self._announce()
+        sync_body = self._receipts_sync_body()
+        _, from_token = self.do_sync(sync_body, tok=self.alice_other_tok)
+
+        self._set_receipt(kind, root_id, reply_id, self.bob_tok)
+        self._set_receipt(kind, root_id, reply_id, self.alice_tok)
+
+        response_body, _ = self.do_sync(
+            sync_body, since=from_token, tok=self.alice_other_tok
+        )
+        self.assertEqual(
+            self._receipt_readers(response_body, kind, reply_id), {self.alice}
+        )
+
+    @parameterized.expand(RECEIPT_KINDS)
+    def test_member_receipt_hidden_without_own_receipt(self, kind: str) -> None:
+        """Another member's receipt is not sent on a new or existing connection
+        of a member who has set no receipt.
+        """
+        root_id, reply_id = self._announce()
+        sync_body = self._receipts_sync_body()
+        _, from_token = self.do_sync(sync_body, tok=self.alice_tok)
+
+        self._set_receipt(kind, root_id, reply_id, self.bob_tok)
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.alice_tok)
+        self.assertEqual(self._receipt_readers(response_body, kind, reply_id), set())
+
+        response_body, _ = self.do_sync(sync_body, tok=self.alice_other_tok)
+        self.assertIn(self.room_id, response_body["rooms"])
+        self.assertEqual(self._receipt_readers(response_body, kind, reply_id), set())
