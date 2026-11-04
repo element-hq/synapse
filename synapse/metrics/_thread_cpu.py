@@ -165,7 +165,13 @@ class ThreadCPUMetrics(Collector):
                     with open(f"/proc/self/task/{tid}/stat") as f:
                         line = f.read()
                 except OSError:
-                    # The thread exited since we listed it.
+                    # The thread exited since we listed it. We lose this bit of
+                    # CPU tracing, but it's hard to recover it after the thread
+                    # has exited.
+                    #
+                    # We can see in the metrics how much thread CPU has been
+                    # lost, by comparing total CPU vs. the sum of CPU used by
+                    # all threads.
                     continue
 
                 # The thread name may contain spaces or brackets, so split after
