@@ -266,6 +266,11 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         )
 
     def test_stored_key_with_longest_validity_wins_over_latest_response(self) -> None:
+        """When several notaries answered for one key, the stored entry valid for
+        longest is used even if another notary answered more recently.
+
+        See https://github.com/element-hq/synapse/issues/20358
+        """
         key1 = signedjson.key.generate_signing_key("1")
         self._store_key_from_notary(
             key1, "long.example.com", ts_added_ms=1000, valid_until_ts=5000
