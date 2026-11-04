@@ -70,10 +70,10 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         assert room_id is not None
         return room_id
 
-    def _content(self, room_id: str, event_type: str) -> JsonDict:
+    def _content(self, room_id: str, event_type: str, state_key: str = "") -> JsonDict:
         """Pull a state event from the database and return its `content` dict."""
         event = self.get_success(
-            self.state.get_current_state_event(room_id, event_type, "")
+            self.state.get_current_state_event(room_id, event_type, state_key)
         )
         assert event is not None
         return dict(event.content)
@@ -102,6 +102,14 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             self._content(room_id, EventTypes.RoomAvatar), {"url": "mxc://test/avatar"}
         )
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Server Updates",
+                "avatar_url": "mxc://test/avatar",
+            },
+        )
         powers = self._content(room_id, EventTypes.PowerLevels)
         self.assertEqual(powers["users"][self.alice], 50)
         self.assertEqual(powers["state_default"], 100)
@@ -116,7 +124,13 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
     def test_multiple_rooms_including_empty_allowlist(self) -> None:
         """Test that configuring multiple rooms works."""
         self.config.rooms.append(
-            attr.evolve(self.room_config, config_id="maintenance", allowed_user_ids=[])
+            attr.evolve(
+                self.room_config,
+                config_id="maintenance",
+                room_name="Maintenance",
+                room_avatar_url=None,
+                allowed_user_ids=[],
+            )
         )
         first = self._reconcile()
         second = self.get_success(
@@ -126,6 +140,71 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(
             self.get_success(self.store.get_users_in_room(second)), [self.creator]
+        )
+        self._reconcile()
+        self.assertEqual(
+            self._content(first, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Server Updates",
+                "avatar_url": "mxc://test/avatar",
+            },
+        )
+        self.assertEqual(
+            self._content(second, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Maintenance",
+                "avatar_url": None,
+            },
+        )
+
+    @parameterized.expand(
+        [
+            ("Renamed", "mxc://test/avatar"),
+            ("Server Updates", "mxc://test/new-avatar"),
+            ("Server Updates", None),
+        ]
+    )
+    def test_management_profile_changes(
+        self, name: str, avatar_url: str | None
+    ) -> None:
+        """
+        Test that reconcilitation of management user profiles works, and doesn't send
+        unnecessary events.
+        """
+        # Create the room.
+        room_id = self._reconcile()
+        before = self.get_success(self.state.get_current_state_ids(room_id))
+        self.assertEqual(self._reconcile(), room_id)
+        self.assertEqual(
+            self.get_success(self.state.get_current_state_ids(room_id)), before
+        )
+
+        # Update the room name and avatar in the config.
+        #
+        # We expect the management user's name and avatar in the room to match that of
+        # the room.
+        self.config.rooms = [
+            attr.evolve(self.room_config, room_name=name, room_avatar_url=avatar_url)
+        ]
+        self.assertEqual(self._reconcile(), room_id)
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {"membership": "join", "displayname": name, "avatar_url": avatar_url},
+        )
+
+        # Check that the management user's profile info changed.
+        after = self.get_success(self.state.get_current_state_ids(room_id))
+        self.assertNotEqual(
+            before[(EventTypes.Member, self.creator)],
+            after[(EventTypes.Member, self.creator)],
+        )
+
+        # Check that reconciling again doesn't send another join event.
+        self.assertEqual(self._reconcile(), room_id)
+        self.assertEqual(
+            self.get_success(self.state.get_current_state_ids(room_id)), after
         )
 
     def test_metadata_and_allowlist_changes(self) -> None:
@@ -148,6 +227,10 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self._content(room_id, EventTypes.Name), {"name": "Renamed"})
         self.assertEqual(self._content(room_id, EventTypes.Topic), {"topic": ""})
         self.assertEqual(self._content(room_id, EventTypes.RoomAvatar), {})
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {"membership": "join", "displayname": "Renamed", "avatar_url": None},
+        )
 
         # Check that bob was added to the room, and alice was removed.
         self.assertCountEqual(
