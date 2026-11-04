@@ -9,7 +9,9 @@ for how to configure the rooms.
 Each room is identified by the `id` of its configuration entry, not by its
 Matrix room ID.
 
-You will need to authenticate with an access token for an admin user.
+You will need to
+[authenticate with an access token](https://element-hq.github.io/synapse/latest/usage/administration/admin_api/#authenticate-as-a-server-admin)
+for an admin user.
 
 ## List announcement rooms
 
