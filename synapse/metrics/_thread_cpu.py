@@ -53,6 +53,8 @@ class ThreadCPUMetrics(Collector):
     Threads are grouped by what they run: the main (reactor) thread, a
     registered type, the `tokio` runtime, and `other` for everything else.
 
+    Note: "other" can include threads like prometheus HTTP server threads.
+
     Linux only, as it reads `/proc/self/task`. The kernel only reports CPU time
     for live threads, so the collector sums the CPU time each thread used
     between scrapes. The CPU time a thread uses between the last scrape and
