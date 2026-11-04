@@ -124,9 +124,28 @@ class ProfileHandler:
         self._set_profile_field_client = ReplicationProfileSetField.make_client(self.hs)
         self._profile_updates_writer_instance = self.hs.config.worker.writers.events[0]
 
-    async def get_profiles(
+    async def get_locally_known_profiles(
         self, user_ids: set[str], field_names: set[str] | None = None
     ) -> dict[str, dict[str, JsonValue | dict[str, JsonValue]]]:
+        """
+        Get locally known profiles as a dictionary.
+
+        Similar to `get_profile`, but for several user IDs. Different to that
+        function in that using this will not trigger a fetch from remote
+        servers. This function will only return profile information on users
+        that we already have locally.
+
+        Basically, until https://github.com/matrix-org/matrix-spec-proposals/pull/4259
+        is implemented, this means local profiles only.
+
+        Args:
+            user_ids: Set of user IDs to fetch profile information for.
+            field_names: Optional set of field names to filter profile
+                information on.
+
+        Returns:
+            A dictionary of JSON dictionaries.
+        """
         return await self.store.get_profile_data_for_users(user_ids, field_names)
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
