@@ -127,7 +127,8 @@ is empty, and sends announcements through the admin API. It must not appear in
 `allowed_user_ids`.
 
 This localpart cannot change after a room has been created. To use a different creator,
-purge the existing announcement rooms and recreate them with the new value.
+purge the existing announcement rooms, then restart Synapse to recreate them
+with the new management user.
 Purging deletes their mappings, so the same configuration IDs can be reused.
 
 Example configuration:

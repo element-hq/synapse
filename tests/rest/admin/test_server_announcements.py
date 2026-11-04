@@ -97,7 +97,7 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
             self.assertEqual(401, channel.code, msg=channel.json_body)
             self.assertEqual(Codes.MISSING_TOKEN, channel.json_body["errcode"])
 
-    def test_get_requester_is_no_admin(self) -> None:
+    def test_get_requester_is_not_admin(self) -> None:
         for url in (
             "/_synapse/admin/v1/server_announcements",
             "/_synapse/admin/v1/server_announcements/general",
@@ -220,7 +220,7 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(401, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.MISSING_TOKEN, channel.json_body["errcode"])
 
-    def test_send_requester_is_no_admin(self) -> None:
+    def test_send_requester_is_not_admin(self) -> None:
         body = self._send(
             {"content": {"msgtype": "m.text", "body": "x"}},
             access_token=self.other_user_tok,
