@@ -38,10 +38,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fc00cfc0.js";
+            window.path_to_searchindex_js = "searchindex-12b75b54.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-64310643.js"></script>
+        <script src="toc-8fc16911.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -15756,6 +15756,109 @@ ignored in the same way as with <code>PUT /_matrix/client/r0/rooms/{roomId}/send
 </code></pre>
 <p>Note that server notices must be enabled in <code>homeserver.yaml</code> before this API
 can be used. See <a href="#server-notices">the server notices documentation</a> for more information.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="server-announcements"><a class="header" href="#server-announcements">Server Announcements</a></h1>
+<p>These APIs read and send to the server announcement rooms configured under
+<code>experimental_features.server_announcements.rooms</code> in <code>homeserver.yaml</code>. The
+feature is experimental; see the
+<a href="https://github.com/element-hq/synapse/blob/develop/synapse/config/server_announcements.py">configuration module</a>
+for how to configure the rooms.</p>
+<p>Each room is identified by the <code>id</code> of its configuration entry, not by its
+Matrix room ID.</p>
+<p>You will need to
+<a href="https://element-hq.github.io/synapse/latest/usage/administration/admin_api/#authenticate-as-a-server-admin">authenticate with an access token</a>
+for an admin user.</p>
+<h2 id="list-announcement-rooms"><a class="header" href="#list-announcement-rooms">List announcement rooms</a></h2>
+<pre><code>GET /_synapse/admin/v1/server_announcements
+</code></pre>
+<p>Returns the configured announcement rooms:</p>
+<pre><code class="language-json">{
+    "management_user_id": "@_server_announcements:example.com",
+    "rooms": [
+        {
+            "id": "general",
+            "room_id": "!abc:example.com",
+            "room_name": "Server announcements",
+            "room_topic": "Planned maintenance and incidents",
+            "room_avatar_url": "mxc://example.com/xyz",
+            "allowed_user_ids": ["@comms:example.com"],
+            "excluded_user_ids": []
+        }
+    ]
+}
+</code></pre>
+<ul>
+<li><code>management_user_id</code>: the user that creates and manages the rooms, and sends
+the announcements posted through this API.</li>
+<li><code>rooms</code>: one entry per configured room, in configuration order. Empty if no
+rooms are configured.
+<ul>
+<li><code>id</code>: the <code>id</code> of the configuration entry.</li>
+<li><code>room_id</code>: the Matrix room ID. <code>null</code> if the room has not been created,
+which happens after the room is purged while Synapse is running. Synapse
+creates it again on the next restart.</li>
+<li><code>room_name</code>, <code>room_topic</code>, <code>room_avatar_url</code>: the values from the
+configuration, which Synapse applies to the room at startup. Use the
+<a href="#room-details-api">room details API</a> for the room’s current state.</li>
+<li><code>allowed_user_ids</code>, <code>excluded_user_ids</code>: as configured.</li>
+</ul>
+</li>
+</ul>
+<p>Rooms whose configuration entry was removed are not listed.</p>
+<h2 id="get-an-announcement-room"><a class="header" href="#get-an-announcement-room">Get an announcement room</a></h2>
+<pre><code>GET /_synapse/admin/v1/server_announcements/{id}
+</code></pre>
+<p>Returns a single entry of <code>rooms</code> above, or a 404 with <code>M_NOT_FOUND</code> if <code>id</code> is
+not in the configuration.</p>
+<h2 id="send-an-announcement"><a class="header" href="#send-an-announcement">Send an announcement</a></h2>
+<pre><code>POST /_synapse/admin/v1/server_announcements/{id}/send
+</code></pre>
+<p>or:</p>
+<pre><code>PUT /_synapse/admin/v1/server_announcements/{id}/send/{txnId}
+</code></pre>
+<p>Sends an event into the announcement room with configuration <code>id</code>, as the
+management user. The event reaches every user that the room is delivered to.
+No rate limit applies.</p>
+<p>When using the <code>PUT</code> form, retransmissions with the same transaction ID will be
+ignored in the same way as with <code>PUT /_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}</code>. When Synapse
+delegates authentication to the Matrix Authentication Service, the <code>PUT</code> form
+needs an access token with a device.</p>
+<p>The request body should look something like the following:</p>
+<pre><code class="language-json">{
+    "content": {
+        "msgtype": "m.text",
+        "body": "Maintenance tonight at 22:00 UTC"
+    }
+}
+</code></pre>
+<p>You can optionally include the following additional parameter:</p>
+<ul>
+<li>
+<p><code>type</code>: the type of event. Defaults to <code>m.room.message</code>. Any non-state event
+type except <code>m.room.member</code> is accepted, so an announcement can be edited by
+sending an <code>m.room.message</code> with <code>m.new_content</code> and <code>m.relates_to</code>. To
+retract an announcement, send an <code>m.room.redaction</code> with the ID of the event
+to redact in <code>content.redacts</code>, whatever the room version. Synapse moves it
+to the top level of the event for rooms before version 11:</p>
+<pre><code class="language-json">{
+    "type": "m.room.redaction",
+    "content": {"redacts": "$event_id"}
+}
+</code></pre>
+</li>
+</ul>
+<p>State events cannot be sent: Synapse manages the room state from the
+configuration, and a request with a <code>state_key</code> is rejected with
+<code>M_INVALID_PARAM</code>.</p>
+<p>Once the event has been sent, the API will return the following response:</p>
+<pre><code class="language-json">{
+    "event_id": "&lt;event_id&gt;",
+    "room_id": "&lt;room_id&gt;"
+}
+</code></pre>
+<p>The API returns a 400 if no announcement rooms are configured, and a 404 if
+<code>id</code> is not in the configuration.</p>
+<p>Push notifications are not yet sent for announcements.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="users-media-usage-statistics"><a class="header" href="#users-media-usage-statistics">Users’ media usage statistics</a></h1>
 <p>Returns information about all local media usage of users. Gives the
