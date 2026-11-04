@@ -21,7 +21,10 @@ from synapse.api.constants import EventTypes
 from synapse.api.errors import SynapseError
 from synapse.config import ConfigError
 from synapse.config.server_announcements import ServerAnnouncementRoom
-from synapse.handlers.server_announcements import ServerAnnouncementsHandler
+from synapse.handlers.server_announcements import (
+    ServerAnnouncementsHandler,
+    make_synthetic_join_event,
+)
 from synapse.rest import admin
 from synapse.rest.client import login, register, room, sync
 from synapse.server import HomeServer
@@ -67,10 +70,10 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         assert room_id is not None
         return room_id
 
-    def _content(self, room_id: str, event_type: str) -> JsonDict:
+    def _content(self, room_id: str, event_type: str, state_key: str = "") -> JsonDict:
         """Pull a state event from the database and return its `content` dict."""
         event = self.get_success(
-            self.state.get_current_state_event(room_id, event_type, "")
+            self.state.get_current_state_event(room_id, event_type, state_key)
         )
         assert event is not None
         return dict(event.content)
@@ -99,6 +102,14 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             self._content(room_id, EventTypes.RoomAvatar), {"url": "mxc://test/avatar"}
         )
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Server Updates",
+                "avatar_url": "mxc://test/avatar",
+            },
+        )
         powers = self._content(room_id, EventTypes.PowerLevels)
         self.assertEqual(powers["users"][self.alice], 50)
         self.assertEqual(powers["state_default"], 100)
@@ -113,7 +124,13 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
     def test_multiple_rooms_including_empty_allowlist(self) -> None:
         """Test that configuring multiple rooms works."""
         self.config.rooms.append(
-            attr.evolve(self.room_config, config_id="maintenance", allowed_user_ids=[])
+            attr.evolve(
+                self.room_config,
+                config_id="maintenance",
+                room_name="Maintenance",
+                room_avatar_url=None,
+                allowed_user_ids=[],
+            )
         )
         first = self._reconcile()
         second = self.get_success(
@@ -123,6 +140,71 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(
             self.get_success(self.store.get_users_in_room(second)), [self.creator]
+        )
+        self._reconcile()
+        self.assertEqual(
+            self._content(first, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Server Updates",
+                "avatar_url": "mxc://test/avatar",
+            },
+        )
+        self.assertEqual(
+            self._content(second, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Maintenance",
+                "avatar_url": None,
+            },
+        )
+
+    @parameterized.expand(
+        [
+            ("Renamed", "mxc://test/avatar"),
+            ("Server Updates", "mxc://test/new-avatar"),
+            ("Server Updates", None),
+        ]
+    )
+    def test_management_profile_changes(
+        self, name: str, avatar_url: str | None
+    ) -> None:
+        """
+        Test that reconcilitation of management user profiles works, and doesn't send
+        unnecessary events.
+        """
+        # Create the room.
+        room_id = self._reconcile()
+        before = self.get_success(self.state.get_current_state_ids(room_id))
+        self.assertEqual(self._reconcile(), room_id)
+        self.assertEqual(
+            self.get_success(self.state.get_current_state_ids(room_id)), before
+        )
+
+        # Update the room name and avatar in the config.
+        #
+        # We expect the management user's name and avatar in the room to match that of
+        # the room.
+        self.config.rooms = [
+            attr.evolve(self.room_config, room_name=name, room_avatar_url=avatar_url)
+        ]
+        self.assertEqual(self._reconcile(), room_id)
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {"membership": "join", "displayname": name, "avatar_url": avatar_url},
+        )
+
+        # Check that the management user's profile info changed.
+        after = self.get_success(self.state.get_current_state_ids(room_id))
+        self.assertNotEqual(
+            before[(EventTypes.Member, self.creator)],
+            after[(EventTypes.Member, self.creator)],
+        )
+
+        # Check that reconciling again doesn't send another join event.
+        self.assertEqual(self._reconcile(), room_id)
+        self.assertEqual(
+            self.get_success(self.state.get_current_state_ids(room_id)), after
         )
 
     def test_metadata_and_allowlist_changes(self) -> None:
@@ -145,6 +227,10 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self._content(room_id, EventTypes.Name), {"name": "Renamed"})
         self.assertEqual(self._content(room_id, EventTypes.Topic), {"topic": ""})
         self.assertEqual(self._content(room_id, EventTypes.RoomAvatar), {})
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {"membership": "join", "displayname": "Renamed", "avatar_url": None},
+        )
 
         # Check that bob was added to the room, and alice was removed.
         self.assertCountEqual(
@@ -349,4 +435,37 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             self.get_success(self.store.get_server_announcement_room("updates")),
             room_id,
+        )
+
+
+class SyntheticJoinEventTestCase(unittest.TestCase):
+    def test_event_id(self) -> None:
+        """The event ID is the prefix, the first 8 characters of the room ID and
+        of the user localpart, and a hash of both IDs.
+        """
+        self.assertEqual(
+            make_synthetic_join_event(
+                "!Q8bOeGjhyXNtCVmX7Zvvh-W5KiVu2Q8vBK_2ljoZW7s",
+                "@alexander:example.com",
+                0,
+            )["event_id"],
+            "$fake_announcement_join-Q8bOeGjh-alexande-SVJqkL5sx8x0TXrBVujJXBUw_Kc-c10PNz_sZV5FTnk",
+        )
+
+    def test_event_id_short_localpart(self) -> None:
+        """A localpart shorter than 8 characters is included in full."""
+        self.assertEqual(
+            make_synthetic_join_event(
+                "!Q8bOeGjhyXNtCVmX7Zvvh-W5KiVu2Q8vBK_2ljoZW7s", "@bob:example.com", 0
+            )["event_id"],
+            "$fake_announcement_join-Q8bOeGjh-bob-OkzlBBrE1j2T2pq5aF4ubO-Z1hmIo2cun6rrIXjw2QE",
+        )
+
+    def test_event_id_room_id_with_domain(self) -> None:
+        """For a room ID with a domain, only the start of its localpart is included."""
+        self.assertEqual(
+            make_synthetic_join_event(
+                "!abcdefghijklmnopqr:example.com", "@alexander:example.com", 0
+            )["event_id"],
+            "$fake_announcement_join-abcdefgh-alexande-QdoyrQ6WLSZZBDWVTw4cVhH61QX8Z90v8YIhfWkHTlg",
         )

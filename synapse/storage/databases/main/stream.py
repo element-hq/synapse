@@ -1841,6 +1841,46 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return results
 
+    async def get_first_non_state_event_positions(
+        self, room_ids: Collection[str], max_stream_ordering: int
+    ) -> dict[str, PersistedEventPosition]:
+        """Return the position of the first non-state, non-outlier event at or
+        before `max_stream_ordering` in each of `room_ids`, leaving out rooms that
+        have none.
+        """
+
+        def _get_first_non_state_event_positions_txn(
+            txn: LoggingTransaction,
+        ) -> dict[str, PersistedEventPosition]:
+            positions = {}
+            for room_id in room_ids:
+                txn.execute(
+                    """
+                    SELECT instance_name, stream_ordering FROM events
+                    WHERE room_id = ? AND stream_ordering <= ?
+                    AND state_key IS NULL
+                    AND NOT outlier
+                    ORDER BY stream_ordering
+                    LIMIT 1
+                    """,
+                    (room_id, max_stream_ordering),
+                )
+                row = txn.fetchone()
+                if row is not None:
+                    instance_name, stream_ordering = row
+                    positions[room_id] = PersistedEventPosition(
+                        instance_name or "master", stream_ordering
+                    )
+            return positions
+
+        if not room_ids:
+            return {}
+
+        return await self.db_pool.runInteraction(
+            "get_first_non_state_event_positions",
+            _get_first_non_state_event_positions_txn,
+        )
+
     async def get_current_room_stream_token_for_room_id(
         self, room_id: str
     ) -> RoomStreamToken:
