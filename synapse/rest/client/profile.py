@@ -386,7 +386,7 @@ class ProfileQueryRestServlet(RestServlet):
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,
                     f"Invalid user id {user_id}",
-                    Codes.INVALID_PARAM,
+                    Codes.BAD_JSON,
                 )
 
         filtered_profiles = (

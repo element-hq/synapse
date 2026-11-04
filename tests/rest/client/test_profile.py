@@ -989,7 +989,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
-        self.assertEqual(channel.json_body.get("errcode"), Codes.INVALID_PARAM)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_no_users_passed_in(
