@@ -72,10 +72,11 @@ Options for each entry:
   The file's path, content hash, and uploaded MXC URI are stored, so unchanged
   images are not uploaded again on each restart. Replacing the file at the same
   path updates the avatar on the next restart.
-* `allowed_user_ids` (array): Full Matrix user IDs allowed to send announcements.
-  Each must be a valid, local user; remote users are not supported because these
-  rooms are not federated. Defaults to an empty list, allowing no users to send
-  announcements. Sender accounts must already exist and must not be deactivated.
+* `allowed_user_ids` (array): Full Matrix user IDs allowed to post announcements
+  from a normal Matrix client. Each must be a valid, local user; remote users are
+  not supported because these rooms are not federated. Defaults to an empty list:
+  announcements can still be sent through the admin API. Sender accounts must
+  already exist and must not be deactivated.
 * `excluded_user_ids` (array): Full Matrix user IDs excluded from automatically
   receiving announcements from this room, for example bots that act on the messages
   they receive.
@@ -94,9 +95,11 @@ Options for each entry:
   an initial sync.
 
 The internal room manager user (which is used to create announcement rooms and update
-their room state) is configured with `room_management_localpart` below. It is a
-management identity, not a user-visible sender, and must not be included in
-`allowed_user_ids`. Create separate accounts for senders.
+their room state) is configured with `room_management_localpart` below. It sends
+the announcements posted through the admin API (see
+`docs/admin_api/server_announcements.md`). It has no account, so it must not be
+included in `allowed_user_ids`; create separate accounts for people posting from a
+normal client.
 
 Removing an room entry does not delete the room. The room is retained and no longer
 reconciled. Re-adding the same `id` resumes management of the room.
@@ -119,8 +122,9 @@ Do not register an account for this identity. Synapse uses it without registrati
 and refuses to start with announcement rooms configured if an account with this
 ID already exists.
 
-This identity stays joined solely to manage rooms, including when `allowed_user_ids`
-is empty, and cannot send announcements. It must not appear in `allowed_user_ids`.
+This identity stays joined to manage rooms, including when `allowed_user_ids`
+is empty, and sends announcements through the admin API. It must not appear in
+`allowed_user_ids`.
 
 This localpart cannot change after a room has been created. To use a different creator,
 purge the existing announcement rooms and recreate them with the new value.
@@ -357,9 +361,9 @@ class ServerAnnouncementsConfig(Config):
                     )
                 if user_id == self.room_management_mxid:
                     raise ConfigError(
-                        "The internal server announcements creator is used to "
-                        "create and manage rooms, not send messages in them. It "
-                        "cannot be included in allowed_user_ids",
+                        "The internal server announcements creator has no "
+                        "account; announcements from it go through the admin API. "
+                        "It cannot be included in allowed_user_ids",
                         user_config_path,
                     )
 
