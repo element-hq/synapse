@@ -36,7 +36,7 @@ use pyo3::{
     types::{PyAnyMethods, PyDict, PyDictMethods},
     Bound, PyAny, PyResult, Python,
 };
-use pythonize::pythonize;
+use pythonize::{depythonize, pythonize};
 use serde_json::{Map, Number, Value};
 
 use crate::{
@@ -634,6 +634,33 @@ fn format_for_client_v2(d: &mut Map<String, Value>) {
     for key in V2_DROP_KEYS {
         d.remove(key);
     }
+}
+
+/// Serialize an event that only exists as JSON, such as a synthetic event that
+/// is never persisted.
+///
+/// Only the event format and the field allowlist from `config` apply: there is
+/// no stored event to take the age, transaction ID, redaction or bundled
+/// aggregations from.
+#[pyfunction]
+pub fn serialize_synthetic_event<'py>(
+    py: Python<'py>,
+    event: Bound<'py, PyAny>,
+    config: &SerializeEventConfig,
+) -> PyResult<Bound<'py, PyAny>> {
+    let mut d: Map<String, Value> = depythonize(&event)?;
+
+    if config.as_client_event {
+        apply_event_format(config.event_format, &mut d);
+    }
+
+    if let Some(fields) = &config.event_field_allowlist {
+        if !fields.is_empty() {
+            d = only_fields(&d, fields)?;
+        }
+    }
+
+    Ok(pythonize(py, &Value::Object(d))?)
 }
 
 // Standalone versions of the client format transforms, re-exported from
