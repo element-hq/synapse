@@ -283,10 +283,11 @@ class ExperimentalConfig(Config):
         # authenticated, and by client IP address if not.
         #
         # Creating a session is limited more strictly than other requests, so
-        # that a single client cannot use up the capacity for live sessions. A
-        # client using these defaults can hold at most around 20 live sessions
-        # at once with the default session TTL of 2 minutes, or 40 with the
-        # maximum of 5 minutes.
+        # that a single unauthenticated client cannot use up the capacity for
+        # live unauthenticated sessions. This is the only limit on how many
+        # sessions an authenticated user can hold. With these defaults, a client
+        # or user can hold at most around 20 live sessions at once with the
+        # default session TTL of 2 minutes, or 40 with the maximum of 5 minutes.
         self.msc4388_rc_create = RatelimitSettings.parse(
             experimental,
             "msc4388_rc_create",
