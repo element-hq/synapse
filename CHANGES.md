@@ -14,7 +14,6 @@
 - Fix TLS listeners only offering the P-256 group for key exchange, which prevented the use of the X25519 and post-quantum X25519MLKEM768 groups. ([\#20374](https://github.com/element-hq/synapse/issues/20374))
 - Fix a bug where an error from the identity server during a third-party invite caused Synapse to return a 500 error instead of passing the error to the client. Contributed by @RaphaelFakhri. ([\#20401](https://github.com/element-hq/synapse/issues/20401))
 - Fix event signature verification failing when a notary that answered last returned a server key that expires sooner than one already stored. ([\#20406](https://github.com/element-hq/synapse/issues/20406))
-- Fix clearing user status for clients that send a `null` profile field value. When `include_profile_updates_in_sync` is enabled, Synapse will continue to accept `null` custom profile field values until clients have had a sufficient time to change their behaviour. This special casing is tracked in [this issue](https://github.com/element-hq/synapse/issues/20424). ([\#20422](https://github.com/element-hq/synapse/issues/20422))
 - Fix race where an initial sync did not return some memberships in rooms when another sync for the device was in-flight. Introduced in v1.163.0. ([\#20433](https://github.com/element-hq/synapse/issues/20433))
 
 ## Improved Documentation
