@@ -308,9 +308,7 @@ class DelayedEventsHandler:
             self._schedule_next_at_or_none(next_send_ts)
         self._schedule_prune_finalised_or_none(min_finalised_ts)
 
-    async def cancel_all_for_user(
-        self, user_localpart: str, erase_data: bool = False
-    ) -> None:
+    async def cancel_all_for_user(self, user_localpart: str, erase_data: bool) -> None:
         """
         Cancels the scheduled delivery of all delayed events owned by the local user
         with the given localpart, e.g. because their account is being deactivated.
@@ -329,6 +327,7 @@ class DelayedEventsHandler:
             await self._cancel_all_for_user_client(
                 instance_name=MAIN_PROCESS_INSTANCE_NAME,
                 user_localpart=user_localpart,
+                erase_data=erase_data,
             )
             return
 

@@ -2316,10 +2316,13 @@ class DelayedEventsWorkerTestCase(
         self.reactor.advance(Duration(seconds=1).as_secs())
         self._check_for_delayed_event_in_sync(self.access_token, delay_id, True)
 
+    @parameterized.expand((("erase", True), ("preserve", False)))
     @unittest.override_config(
         {"experimental_features": {"msc4140_finalised_retention_limit_per_user": 1}}
     )
-    def test_delayed_events_are_cancelled_on_deactivation_from_worker(self) -> None:
+    def test_delayed_events_are_cancelled_on_deactivation_from_worker(
+        self, _name: str, erase: bool
+    ) -> None:
         worker_hs = self.make_worker_hs("synapse.app.generic_worker")
         store = self.hs.get_datastores().main
         handler = self.hs.get_delayed_events_handler()
@@ -2342,7 +2345,7 @@ class DelayedEventsWorkerTestCase(
         self.get_success(
             worker_hs.get_deactivate_account_handler().deactivate_account(
                 self.user_id,
-                erase_data=False,
+                erase_data=erase,
                 requester=create_requester(self.user_id),
             )
         )
@@ -2352,16 +2355,23 @@ class DelayedEventsWorkerTestCase(
             [], self.get_success(store.get_all_delayed_events_for_user("user"))
         )
 
-        # Assert that the oldest of user1's delayed events are pruned.
-        self.get_failure(
-            store.get_delayed_event_for_user(delay_ids[0], "user"), NotFoundError
-        )
+        if erase:
+            # Assert that both delayed events are pruned.
+            for delay_id in delay_ids:
+                self.get_failure(
+                    store.get_delayed_event_for_user(delay_id, "user"), NotFoundError
+                )
+        else:
+            # Assert that the oldest of user1's delayed events are pruned.
+            self.get_failure(
+                store.get_delayed_event_for_user(delay_ids[0], "user"), NotFoundError
+            )
 
-        # Assert that the newest of user1's delayed events are finalised.
-        self.assertIsNotNone(
-            self.get_success(
-                store.get_delayed_event_for_user(delay_ids[1], "user")
-            ).finalised
-        )
+            # Assert that the newest of user1's delayed events are finalised.
+            self.assertIsNotNone(
+                self.get_success(
+                    store.get_delayed_event_for_user(delay_ids[1], "user")
+                ).finalised
+            )
 
         self.assertIsNone(handler._next_delayed_event_call)

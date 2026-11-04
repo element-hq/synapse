@@ -65,7 +65,9 @@ class ReplicationCancelDelayedEventsForUserRestServlet(ReplicationEndpoint):
 
         POST /_synapse/replication/cancel_delayed_events_for_user/:user_localpart
 
-        {}
+        {
+            "erase_data": false,
+        }
     """
 
     NAME = "cancel_delayed_events_for_user"
@@ -78,17 +80,27 @@ class ReplicationCancelDelayedEventsForUserRestServlet(ReplicationEndpoint):
         self.handler = hs.get_delayed_events_handler()
 
     @staticmethod
-    async def _serialize_payload(user_localpart: str) -> JsonDict:  # type: ignore[override]
+    async def _serialize_payload(  # type: ignore[override]
+        user_localpart: str,
+        erase_data: bool,
+    ) -> JsonDict:
         """
         Args:
             user_localpart: The localpart of the local user whose delayed events to cancel.
+            erase_data: Whether to completely erase cancelled delayed events, rather than
+                retaining them as finalised delayed events that the user may query later.
         """
-        return {}
+        return {
+            "erase_data": erase_data,
+        }
 
     async def _handle_request(  # type: ignore[override]
-        self, request: Request, content: JsonDict, user_localpart: str
+        self,
+        request: Request,
+        content: JsonDict,
+        user_localpart: str,
     ) -> tuple[int, JsonDict]:
-        await self.handler.cancel_all_for_user(user_localpart)
+        await self.handler.cancel_all_for_user(user_localpart, content["erase_data"])
 
         return 200, {}
 
