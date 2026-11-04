@@ -114,10 +114,12 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<relations::ThreadAggregation>()?;
     child_module.add_class::<serialize::EventFormat>()?;
     child_module.add_class::<serialize::SerializeEventConfig>()?;
+    child_module.add_class::<serialize::SerializeEventFilter>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_dict, m)?)?;
     child_module.add_function(wrap_pyfunction!(serialize::serialize_events, m)?)?;
+    child_module.add_function(wrap_pyfunction!(serialize::serialize_synthetic_event, m)?)?;
     child_module.add_function(wrap_pyfunction!(serialize::format_event_raw, m)?)?;
     child_module.add_function(wrap_pyfunction!(serialize::format_event_for_client_v1, m)?)?;
     child_module.add_function(wrap_pyfunction!(serialize::format_event_for_client_v2, m)?)?;
@@ -434,9 +436,13 @@ impl Event {
         };
 
         // Check for a valid duration field. The MSC requires `duration_ms` to
-        // be a non-negative integer. If it's missing or invalid, we treat the
+        // be a strictly positive integer. If it's missing or invalid, we treat the
         // event as non-sticky by returning `None`.
-        let Some(duration_ms) = sticky_obj.get("duration_ms").and_then(|v| v.as_u64()) else {
+        let Some(duration_ms) = sticky_obj
+            .get("duration_ms")
+            .and_then(|v| v.as_u64())
+            .filter(|duration| *duration > 0)
+        else {
             return Ok(None);
         };
 

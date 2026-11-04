@@ -1,1 +1,0 @@
-Fix verbose Pydantic validation error messages leaking internal details in client API error responses.

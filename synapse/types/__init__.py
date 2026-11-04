@@ -208,26 +208,6 @@ class AbsentType(Enum):
             python_schema=pydantic_core.core_schema.is_instance_schema(cls),
         )
 
-    def __copy__(self) -> "AbsentType":
-        """
-        Copy implementation used by `copy.copy()`.
-        Always use the same instance.
-
-        Without this and the deep version `__deepcopy__`,
-        `copy.copy(Absent)` on Python 3.10 (olddeps)
-        had a problem where it tried to construct a new Absent
-        as part of a deepcopy operation and resulted in:
-            ValueError: <object object at 0x7f64b3b6d930> is not a valid AbsentType
-        """
-        return self
-
-    def __deepcopy__(self, memo: object) -> "AbsentType":
-        """
-        Copy implementation used by `copy.deepcopy()`.
-        Always use the same instance.
-        """
-        return self
-
     def __bool__(self) -> Literal[False]:
         return False
 
@@ -436,7 +416,7 @@ class UserID(DomainSpecificString):
     def is_valid_strict(cls, s: str) -> bool:
         """
         Parses the input string and attempts to ensure it is a valid and compliant user
-        ID according to https://spec.matrix.org/v1.17/appendices/#historical-user-ids.
+        ID according to https://spec.matrix.org/v1.19/appendices/#historical-user-ids.
 
         This should be used with care: there are existing non-compliant user IDs in the
         wild with empty or non-ASCII localparts, which will be rejected by this method.
@@ -575,7 +555,7 @@ def is_compliant_user_id_localpart(localpart: str) -> bool:
     """
     Validates that the given user ID localpart is within the "compliant" range,
     i.e. not empty and all characters are between U+0021 and U+007E inclusive.
-    See https://spec.matrix.org/v1.17/appendices/#historical-user-ids
+    See https://spec.matrix.org/v1.19/appendices/#historical-user-ids
 
     To check if a localpart is non-historical, use contains_invalid_mxid_characters instead.
 
@@ -591,6 +571,26 @@ def is_compliant_user_id_localpart(localpart: str) -> bool:
     if not localpart:
         return False
     return all(0x21 <= ord(c) <= 0x7E for c in localpart)
+
+
+def is_compliant_user_id(user_id: str) -> bool:
+    """
+    Validates that the localpart of the given user ID is within the "compliant"
+    range. See `is_compliant_user_id_localpart`.
+
+    Unlike parsing the user ID with `UserID.from_string`, this never raises on a
+    malformed user ID.
+
+    Args:
+        user_id: the user ID to be checked
+
+    Returns:
+        True if the localpart of the user ID is compliant, False otherwise
+    """
+    if not user_id.startswith(UserID.SIGIL):
+        return False
+    localpart, _, _ = user_id[1:].partition(":")
+    return is_compliant_user_id_localpart(localpart)
 
 
 UPPER_CASE_PATTERN = re.compile(b"[A-Z_]")

@@ -44,6 +44,7 @@ from synapse.types import (
     UserID,
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
+    is_compliant_user_id,
 )
 from synapse.util.async_helpers import Linearizer, concurrently_execute
 from synapse.util.cancellation import cancellable
@@ -1833,6 +1834,14 @@ class SigningKeyEduUpdater:
 
         if get_domain_from_id(user_id) != origin:
             logger.warning("Got signing key update edu for %r from %r", user_id, origin)
+            return
+
+        if not is_compliant_user_id(user_id):
+            logger.warning(
+                "Dropping signing key update edu for non-compliant user ID %r from %r",
+                user_id,
+                origin,
+            )
             return
 
         room_ids = await self.store.get_rooms_for_user(user_id)

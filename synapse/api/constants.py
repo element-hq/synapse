@@ -187,6 +187,8 @@ class EventTypes:
 
     RoomPolicy: Final = "m.room.policy"
 
+    RtcSlot: Final = "m.rtc.slot"
+
 
 class ToDeviceEventTypes:
     RoomKeyRequest: Final = "m.room_key_request"
@@ -517,4 +519,8 @@ class StateDag:
     Max number of events to return in a single /get_missing_events response.
     Arbitrary, servers usually never get this high so it's mostly to bound the max size of
     a single /get_missing_events response.
+    """
+    MAX_PREV_STATE_EVENTS: Final = 20
+    """
+    Max number of prev_state_events allowed on an MSC4242 event as per the MSC.
     """

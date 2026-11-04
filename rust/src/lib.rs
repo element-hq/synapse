@@ -11,6 +11,7 @@ pub mod acl;
 pub mod canonical_json;
 pub mod clock;
 pub mod config;
+pub mod database;
 pub mod deferred;
 pub mod duration;
 pub mod errors;
@@ -88,6 +89,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     acl::register_module(py, m)?;
     logging::context::register_module(py, m)?;
     deferred::register_module(py, m)?;
+    database::register_module(py, m)?;
     push::register_module(py, m)?;
     events::register_module(py, m)?;
     handlers::register_module(py, m)?;

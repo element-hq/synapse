@@ -48,6 +48,20 @@ A filter that excludes message events, so that the sticky events come down
 the sticky section rather than the timeline section.
 """
 
+NO_TIMELINE_FILTER_WITH_LAZY_LOADING = json.dumps(
+    {
+        "room": {
+            "timeline": {"types": ["io.element.example"]},
+            "state": {"lazy_load_members": True},
+        }
+    }
+)
+"""
+A filter that excludes message events, so that the sticky events come down
+the sticky section rather than the timeline section.
+This one also has lazy-loading members enabled.
+"""
+
 
 class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
     """
@@ -315,6 +329,50 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             received_sticky_event_ids,
             [sticky_event_id],
+        )
+
+    @unittest.override_config({"caches": {"sync_response_cache_duration": "2m"}})
+    def test_sticky_event_expiring_before_serialisation_not_in_sticky_section(
+        self,
+    ) -> None:
+        """
+        Test that a sticky event which expires during sync response processing
+        is not sent down.
+
+        On this (v3) Sync, we also have the response cache to be cautious about
+        and indeed this test is a regression test against the response cache
+        causing expired sticky events to be served.
+
+        The most important property to bear in mind is that the
+        sticky events should be filtered with the same timestamp
+        as the one used for serialisation.
+        """
+        sticky_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(seconds=10),
+            content={"body": "sticky message", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+
+        path = f"/sync?filter={quote(NO_TIMELINE_FILTER)}"
+
+        channel = self.make_request("GET", path, access_token=self.token)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        sticky_events = channel.json_body["rooms"]["join"][self.room_id][
+            "msc4354_sticky"
+        ]["events"]
+        self.assertEqual([e["event_id"] for e in sticky_events], [sticky_event_id])
+
+        # Advance enough for the sticky event to expire,
+        # but stay within the sync response cache duration so the same `SyncResult` is reused.
+        self.reactor.advance(11)
+
+        channel = self.make_request("GET", path, access_token=self.token)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body["rooms"]["join"][self.room_id]["msc4354_sticky"],
+            {"events": []},
         )
 
     def test_redacted_sticky_event_not_in_sync(self) -> None:
@@ -675,3 +733,80 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         # Finally, expect an empty incremental sync at the end
         sync4 = self._do_sync(since=sync3.next_batch, filter_json=NO_TIMELINE_FILTER)
         self.assertEqual(sync4.sticky_event_ids, [])
+
+    def test_sticky_event_sender_membership_is_lazy_loaded(self) -> None:
+        """
+        Test that, when lazy-loading members, receiving a sticky event in the sticky
+        section causes the membership of the sticky event's sender to be sent down
+        in the room's state.
+        """
+        # Give the room a name to avoid heroes interfering with the test
+        self.helper.send_state(
+            self.room_id, EventTypes.Name, {"name": "A room"}, tok=self.token
+        )
+
+        user2_id = self.register_user("user2", "pass")
+        user2_token = self.login(user2_id, "pass")
+        self.helper.join(self.room_id, user2_id, tok=user2_token)
+        user3_id = self.register_user("user3", "pass")
+        user3_token = self.login(user3_id, "pass")
+        self.helper.join(self.room_id, user3_id, tok=user3_token)
+
+        # Have user2 send a sticky event
+        user2_sticky_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "sticky from user2", "msgtype": "m.text"},
+            tok=user2_token,
+        )["event_id"]
+
+        # Initial sync:
+        # Expect to get user2's sticky event and user2's lazy-loaded membership
+        channel = self.make_request(
+            "GET",
+            f"/sync?filter={quote(NO_TIMELINE_FILTER_WITH_LAZY_LOADING)}",
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        room_entry = channel.json_body["rooms"]["join"][self.room_id]
+        self.assertEqual(
+            [e["event_id"] for e in room_entry["msc4354_sticky"]["events"]],
+            [user2_sticky_event_id],
+        )
+        state_members = {
+            e["state_key"]
+            for e in room_entry["state"]["events"]
+            if e["type"] == EventTypes.Member
+        }
+        self.assertEqual(state_members, {self.user_id, user2_id})
+        since = channel.json_body["next_batch"]
+
+        # Now have user3 send a sticky event
+        user3_sticky_event_id = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "sticky from user3", "msgtype": "m.text"},
+            tok=user3_token,
+        )["event_id"]
+
+        # Incremental sync:
+        # Expect to get user3's sticky event and user3's membership.
+        channel = self.make_request(
+            "GET",
+            f"/sync?filter={quote(NO_TIMELINE_FILTER_WITH_LAZY_LOADING)}&since={since}",
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        room_entry = channel.json_body["rooms"]["join"][self.room_id]
+        self.assertEqual(
+            [e["event_id"] for e in room_entry["msc4354_sticky"]["events"]],
+            [user3_sticky_event_id],
+        )
+        state_members = {
+            e["state_key"]
+            for e in room_entry["state"]["events"]
+            if e["type"] == EventTypes.Member
+        }
+        self.assertEqual(state_members, {user3_id})

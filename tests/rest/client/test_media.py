@@ -1605,7 +1605,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
 
 # We test this here because this endpoint must still work
-# even if lxml is not installed.
+# even if beautifulsoup4 is not installed.
 class URLPreviewDisabledTests(unittest.HomeserverTestCase):
     servlets = [
         admin.register_servlets,
@@ -1625,26 +1625,12 @@ class URLPreviewDisabledTests(unittest.HomeserverTestCase):
             "experimental_features": {"msc4452_enabled": False},
         }
     )
-    def test_disabled_previews(self) -> None:
-        """Tests that disabling URL previews gives back a sane response."""
-        channel = self.make_request(
-            "GET",
-            "/_matrix/client/v1/media/preview_url?url=" + quote("http://example.com"),
-            access_token=self.tok,
-        )
-        self.assertEqual(channel.code, 404, channel.result)
-        self.assertEqual(
-            channel.json_body,
-            {"errcode": "M_UNRECOGNIZED", "error": "Unrecognized request"},
-        )
-
     @override_config(
         {
             "url_preview_enabled": False,
-            "experimental_features": {"msc4452_enabled": True},
         }
     )
-    def test_disabled_previews_with_msc4452(self) -> None:
+    def test_disabled_previews(self) -> None:
         """Tests that disabling URL previews gives back a sane response."""
         channel = self.make_request(
             "GET",
@@ -2665,6 +2651,37 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
+
+    def test_head_download_does_not_read_file(self) -> None:
+        channel = self.make_request(
+            "POST",
+            "_matrix/media/v3/upload?filename=test_png_upload",
+            SMALL_PNG,
+            self.tok,
+            shorthand=False,
+            content_type=b"image/png",
+        )
+        self.assertEqual(channel.code, 200)
+        uri = channel.json_body["content_uri"].split("mxc://")[1]
+
+        with patch(
+            "synapse.media._base.ThreadedFileSender.beginFileTransfer"
+        ) as begin_file_transfer:
+            channel = self.make_request(
+                "HEAD",
+                f"_matrix/client/v1/media/download/{uri}",
+                access_token=self.tok,
+                shorthand=False,
+            )
+
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.headers.getRawHeaders(b"Content-Length"),
+            [str(len(SMALL_PNG)).encode()],
+        )
+        self.assertEqual(channel.headers.getRawHeaders(b"Content-Type"), [b"image/png"])
+        self.assertEqual(channel.result.get("body", b""), b"")
+        begin_file_transfer.assert_not_called()
 
     def test_authenticated_media(self) -> None:
         # upload some local media with authentication on

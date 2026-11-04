@@ -273,6 +273,57 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         )
         return cast(list[tuple[int, str, str]], txn.fetchall())
 
+    async def get_rooms_with_sticky_events_between(
+        self,
+        room_ids: Collection[str],
+        *,
+        from_token: MultiWriterStreamToken,
+        to_token: MultiWriterStreamToken,
+    ) -> set[str]:
+        """Given a set of room IDs, find out which of them have sticky events
+        in the `sticky_events` table (which may be expired and awaiting cleanup)
+        with sticky stream positions after `from_token` and at or before `to_token`.
+
+        Bounds: from_token < ... <= to_token
+
+        Args:
+            room_ids: The room IDs to check.
+            from_token: The sticky stream position to check from (exclusive).
+            to_token: The sticky stream position to check to (inclusive).
+        Returns:
+            The subset of `room_ids` that have sticky events in the range.
+        """
+        if len(room_ids) == 0 or to_token.is_before_or_eq(from_token):
+            return set()
+
+        def _get_rooms_with_sticky_events_between_txn(
+            txn: LoggingTransaction,
+        ) -> set[str]:
+            room_id_in_list_clause, room_id_in_list_values = make_in_list_sql_clause(
+                txn.database_engine, "room_id", room_ids
+            )
+            stream_clause, stream_values = make_multiwriter_sharded_token_bounds_sql(
+                self.database_engine,
+                stream_id_column="stream_id",
+                instance_name_column="instance_name",
+                from_token_exclusive=from_token,
+                to_token_inclusive=to_token,
+            )
+            txn.execute(
+                f"""
+                SELECT DISTINCT room_id
+                FROM sticky_events
+                WHERE {stream_clause} AND {room_id_in_list_clause}
+                """,
+                (*stream_values, *room_id_in_list_values),
+            )
+            return {room_id for (room_id,) in txn}
+
+        return await self.db_pool.runInteraction(
+            "get_rooms_with_sticky_events_between",
+            _get_rooms_with_sticky_events_between_txn,
+        )
+
     async def get_updated_sticky_events(
         self, *, from_id: int, to_id: int, limit: int
     ) -> list[StickyEventUpdate]:
@@ -1004,6 +1055,66 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         return await self.db_pool.runInteraction(
             "get_backlogged_sticky_events_for_destination",
             _get_backlogged_sticky_events_for_destination_txn,
+        )
+
+    def mark_backlogged_sticky_events_for_newly_joined_servers_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        destinations: Set[str],
+    ) -> None:
+        """
+        For the given `destinations`, update the `destination_rooms_sticky_events_backlog`
+        table to mark this room as backlogged for those destinations if it contains
+        any sticky events.
+
+        This lets us remember that we need to send historical sticky events to the server.
+        """
+
+        if not destinations:
+            return
+
+        now_millis = self.clock.time_msec()
+
+        # Find the first unexpired, locally-originating sticky event in the room;
+        # the newly-joined servers need to be sent everything from there onwards.
+        txn.execute(
+            """
+            SELECT MIN(stream_id)
+            FROM sticky_events
+            WHERE room_id = ?
+                AND ? < expires_at
+                -- filter to locally-originating sticky events
+                AND sender LIKE ?
+            """,
+            (room_id, now_millis, user_is_local_like_pattern(self.hs)),
+        )
+        row = txn.fetchone()
+        # MIN() returns NULL over no rows
+        assert row is not None
+        min_sticky_events_stream_id: int | None
+        (min_sticky_events_stream_id,) = row
+
+        if min_sticky_events_stream_id is None:
+            # No sticky events in the room to send
+            return
+
+        txn.execute_batch(
+            """
+            INSERT INTO destination_rooms_sticky_events_backlog AS backlog
+                (destination, room_id, sticky_events_stream_position)
+            VALUES (?, ?, ?)
+            ON CONFLICT (destination, room_id)
+            DO
+                UPDATE SET sticky_events_stream_position = EXCLUDED.sticky_events_stream_position
+                -- Only move the position _backwards_
+                -- (Not sure there is a concrete race this fixes, but seems like good hygiene.)
+                WHERE EXCLUDED.sticky_events_stream_position < backlog.sticky_events_stream_position
+            """,
+            [
+                (destination, room_id, min_sticky_events_stream_id)
+                for destination in destinations
+            ],
         )
 
     async def mark_backlogged_sticky_events_after_catchup_transaction(
