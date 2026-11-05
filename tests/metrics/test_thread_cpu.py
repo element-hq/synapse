@@ -90,7 +90,6 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         # Note that the thread name only gets passed to the kernel from Python
         # 3.14 onwards.
         thread = threading.Thread(target=run_on_thread, name="a) b) (c")
-        thread.start()
 
         # Cleanup functions are run in reverse order, so first we set the
         # release event (to wake the thread up), and then we wait for it exit.
@@ -98,6 +97,8 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         self.addCleanup(release.set)
 
         metrics.register_thread("test-thread", thread)
+
+        thread.start()
 
         # Wait for the separate thread to burn CPU before continuing.
         self.assertTrue(burnt.wait(timeout=Duration(seconds=10).as_secs()))
