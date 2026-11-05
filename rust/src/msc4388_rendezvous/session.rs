@@ -58,6 +58,9 @@ pub struct Session {
     transactions: VecDeque<(OpaqueIdentifier, String)>,
     last_modified: SystemTime,
     expires: SystemTime,
+    /// Whether the session was created with an access token. Unauthenticated
+    /// sessions count towards the limit on live unauthenticated sessions.
+    authenticated: bool,
 }
 
 #[derive(Serialize)]
@@ -117,7 +120,13 @@ impl<'source> IntoPyObject<'source> for PutResponse {
 
 impl Session {
     /// Create a new session with the given data and time-to-live.
-    pub fn new(id: Ulid, data: String, now: SystemTime, ttl: Duration) -> Self {
+    pub fn new(
+        id: Ulid,
+        data: String,
+        now: SystemTime,
+        ttl: Duration,
+        authenticated: bool,
+    ) -> Self {
         Self {
             id,
             data,
@@ -125,12 +134,18 @@ impl Session {
             transactions: VecDeque::new(),
             expires: now + ttl,
             last_modified: now,
+            authenticated,
         }
     }
 
     /// Returns true if the session has expired at the given time.
     pub fn expired(&self, now: SystemTime) -> bool {
         self.expires <= now
+    }
+
+    /// Returns true if the session was created with an access token.
+    pub fn authenticated(&self) -> bool {
+        self.authenticated
     }
 
     /// Handle a send (`PUT`) for this session: perform the compare-and-swap

@@ -13,7 +13,7 @@
  */
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     time::{Duration, SystemTime},
 };
 
@@ -44,10 +44,10 @@ mod session;
 struct MSC4388RendezvousHandler {
     runtime: RustRuntime,
     sessions: BTreeMap<Ulid, Session>,
-    /// The set of currently unauthenticated sessions. This is used to enforce
-    /// the limit on the number of unauthenticated sessions that can be live at
-    /// once.
-    unauthenticated_sessions: BTreeSet<Ulid>,
+    /// The number of unauthenticated sessions in `sessions`, used to enforce
+    /// the limit on how many can be live at once. It is recounted on each
+    /// eviction, so cannot drift from `sessions` for longer than that.
+    unauthenticated_sessions: usize,
     max_unauthenticated_sessions: usize,
     max_content_length: u64,
     ttl: Duration,
@@ -98,13 +98,15 @@ impl MSC4388RendezvousHandler {
     /// sessions. Instead, new unauthenticated sessions are refused while at
     /// capacity.
     fn evict(&mut self, now: SystemTime) {
-        self.sessions.retain(|id, session| {
-            let expired = session.expired(now);
-            if expired {
-                self.unauthenticated_sessions.remove(id);
+        let mut unauthenticated_sessions = 0;
+        self.sessions.retain(|_, session| {
+            let keep = !session.expired(now);
+            if keep && !session.authenticated() {
+                unauthenticated_sessions += 1;
             }
-            !expired
+            keep
         });
+        self.unauthenticated_sessions = unauthenticated_sessions;
     }
 }
 
@@ -141,7 +143,7 @@ impl MSC4388RendezvousHandler {
             Self {
                 runtime,
                 sessions: BTreeMap::new(),
-                unauthenticated_sessions: BTreeSet::new(),
+                unauthenticated_sessions: 0,
                 max_unauthenticated_sessions,
                 max_content_length,
                 ttl: Duration::from_millis(ttl),
@@ -184,11 +186,11 @@ impl MSC4388RendezvousHandler {
         if !authenticated {
             // If we're at capacity, evict expired sessions now rather than waiting
             // for the next eviction run, in case that frees up some room.
-            if self.unauthenticated_sessions.len() >= self.max_unauthenticated_sessions {
+            if self.unauthenticated_sessions >= self.max_unauthenticated_sessions {
                 self.evict(now);
             }
 
-            if self.unauthenticated_sessions.len() >= self.max_unauthenticated_sessions {
+            if self.unauthenticated_sessions >= self.max_unauthenticated_sessions {
                 return Err(SynapseError::new(
                     StatusCode::TOO_MANY_REQUESTS,
                     "Too many rendezvous sessions in progress, try again later".to_owned(),
@@ -199,11 +201,11 @@ impl MSC4388RendezvousHandler {
             }
         }
 
-        let session = Session::new(id, data, now, self.ttl);
+        let session = Session::new(id, data, now, self.ttl, authenticated);
         let response = session.post_response(now);
         self.sessions.insert(id, session);
         if !authenticated {
-            self.unauthenticated_sessions.insert(id);
+            self.unauthenticated_sessions += 1;
         }
 
         Ok((200, response))
@@ -387,17 +389,16 @@ impl MSC4388RendezvousHandler {
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
 
-        // Remove the session from the set of unauthenticated sessions, if
-        // present.
-        self.unauthenticated_sessions.remove(&id);
+        let session = self.sessions.remove(&id).ok_or_else(NotFoundError::new)?;
+        if !session.authenticated() {
+            self.unauthenticated_sessions = self.unauthenticated_sessions.saturating_sub(1);
+        }
 
         // An expired session may not have been evicted yet, but it should be
         // treated as if it no longer exists.
-        let _session = self
-            .sessions
-            .remove(&id)
-            .filter(|s| !s.expired(now))
-            .ok_or_else(NotFoundError::new)?;
+        if session.expired(now) {
+            return Err(NotFoundError::new());
+        }
 
         // Respond with an empty JSON object, as is the convention for endpoints
         // with no response body to return.
