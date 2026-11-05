@@ -1892,3 +1892,58 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
             response_body["lists"]["main"]["ops"][0]["room_ids"], [room_id]
         )
         self._assert_sticky_events_response(response_body, None)
+
+    def test_scope_does_not_leak_between_lists(self) -> None:
+        """
+        Test that a room only in a list that is out of scope for the extension
+        doesn't get sticky events, even when it comes after a room that is in both
+        an in-scope list and that out-of-scope list.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Rooms from oldest to most recent activity. Room 3 just makes the lists
+        # bigger than their ranges, so that they get sorted (by recency).
+        room_id_3 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_3, user1_id, tok=user1_tok)
+
+        room_id_2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_2, user1_id, tok=user1_tok)
+        self._send_sticky_event(room_id_2, user2_tok, body="room 2")
+
+        room_id_1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_1, user1_id, tok=user1_tok)
+        sticky_event_id_1 = self._send_sticky_event(room_id_1, user2_tok, body="room 1")
+
+        sync_body = {
+            "lists": {
+                # Just room 1, in scope
+                "in-scope": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                # Rooms 1 and 2, out of scope
+                "out-of-scope": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "extensions": {
+                STICKY_EVENTS_EXT: {"enabled": True, "lists": ["in-scope"], "rooms": []}
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertEqual(
+            response_body["lists"]["in-scope"]["ops"][0]["room_ids"], [room_id_1]
+        )
+        self.assertEqual(
+            response_body["lists"]["out-of-scope"]["ops"][0]["room_ids"],
+            [room_id_1, room_id_2],
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id_1: [sticky_event_id_1]}
+        )

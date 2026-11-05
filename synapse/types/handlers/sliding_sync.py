@@ -547,21 +547,32 @@ class RoomSyncConfig:
         required_state_map: Map from state event type to state_keys requested for the
             room. The values are close to `StateKey` but actually use a syntax where you
             can provide `*` wildcard and `$LAZY` for lazy-loading room members.
+
+        sticky_events: Whether to fetch the sticky events (MSC4354) for the room, i.e.
+            whether the room is in scope for the sticky events extension (MSC4480),
+            as per the extension's `lists`/`rooms`. This is per-request, so isn't
+            persisted in the per-connection state (which tracks sticky events
+            separately), nor taken into account when comparing configs.
     """
 
     timeline_limit: int
     required_state_map: Mapping[str, AbstractSet[str]]
+    sticky_events: bool = attr.ib(default=False, eq=False)
 
     @classmethod
     def from_room_config(
         cls,
         room_params: SlidingSyncConfig.CommonRoomParameters,
+        *,
+        sticky_events: bool = False,
     ) -> "RoomSyncConfig":
         """
         Create a `RoomSyncConfig` from a `SlidingSyncList`/`RoomSubscription` config.
 
         Args:
             room_params: `SlidingSyncConfig.SlidingSyncList` or `SlidingSyncConfig.RoomSubscription`
+            sticky_events: Whether the list/room subscription is in scope for the
+                sticky events extension (MSC4480).
         """
         required_state_map: dict[str, set[str]] = {}
         for (
@@ -620,6 +631,7 @@ class RoomSyncConfig:
         return cls(
             timeline_limit=room_params.timeline_limit,
             required_state_map=required_state_map,
+            sticky_events=sticky_events,
         )
 
     def combine_room_sync_config(
@@ -704,7 +716,11 @@ class RoomSyncConfig:
                     else:
                         required_state_map[state_type].add(state_key)
 
-        return RoomSyncConfig(timeline_limit, required_state_map)
+        return RoomSyncConfig(
+            timeline_limit,
+            required_state_map,
+            sticky_events=self.sticky_events or other_room_sync_config.sticky_events,
+        )
 
     def must_await_full_state(
         self,

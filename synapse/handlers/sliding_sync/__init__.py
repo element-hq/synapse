@@ -318,8 +318,6 @@ class SlidingSyncHandler:
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
                 newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
-                include_sticky_events=room_id
-                in interested_rooms.sticky_events_room_ids,
             )
 
             rooms[room_id] = room_sync_result
@@ -590,7 +588,6 @@ class SlidingSyncHandler:
         newly_joined: bool,
         newly_left: bool,
         is_dm: bool,
-        include_sticky_events: bool,
     ) -> SlidingSyncResult.RoomResult:
         """
         Fetch room data for the sync response.
@@ -609,9 +606,6 @@ class SlidingSyncHandler:
             newly_joined: If the user has newly joined the room
             newly_left: If the user has newly left the room
             is_dm: Whether the room is a DM room
-            include_sticky_events: Whether the room is in scope for the sticky
-                events extension (MSC4480), and so we should fetch the sticky events
-                to return for it.
         """
         user = sync_config.user
 
@@ -857,7 +851,7 @@ class SlidingSyncHandler:
         # here, alongside the timeline, as their senders count as timeline senders for
         # the purposes of lazy-loading room members (MSC4480).
         sticky_events: list[FilteredEvent] | None = None
-        if include_sticky_events:
+        if room_sync_config.sticky_events:
             sticky_events = await self._get_sticky_events_for_room(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
