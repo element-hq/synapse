@@ -153,7 +153,7 @@ class RemoteKeyResourceTestCase(BaseRemoteKeyResourceTestCase):
         server_name = "remote.server"
         testkey = signedjson.key.generate_signing_key("ver1")
         self.expect_outgoing_key_request(server_name, testkey)
-        content = {"server_keys": {server_name: {"ed25519:ver1": {}}}}
+        content: JsonDict = {"server_keys": {server_name: {"ed25519:ver1": {}}}}
 
         channel = self.make_request("POST", "/_matrix/key/v2/query", content)
         self.assertEqual(channel.code, 200, channel.json_body)
