@@ -66,8 +66,11 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         # reports process-level metrics, so it has no `SERVER_NAME_LABEL`.
         metrics = ThreadCPUMetrics()  # type: ignore[missing-server-name-label]
 
+        # First record the base CPU metrics.
         before = _collect(metrics)
         process_before = sum(os.times()[:2])
+
+        # First we setup and burn some CPU on a separate thread.
 
         # The collector only sees live threads, so the thread waits for
         # `release` until after the second scrape.
@@ -79,25 +82,29 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
             burnt.set()
             release.wait(timeout=Duration(seconds=10).as_secs())
 
-        # `/proc/<tid>/stat` puts the thread name in brackets. Closing
-        # brackets and spaces in the name check that parsing finds the right
-        # fields. Python passes the name to the kernel from 3.14 onwards.
+        # Since `/proc/<tid>/stat` puts the thread name in brackets and uses
+        # spaces as field separators, choose a thread name with those characters
+        # to ensure we parse it correctly.
+        #
+        # Note that the thread name only gets passed to the kernel from Python
+        # 3.14 onwards.
         thread = threading.Thread(target=run_on_thread, name="a) b) (c")
         thread.start()
         self.addCleanup(thread.join)
         self.addCleanup(release.set)
         metrics.register_thread("test-thread", thread)
+
+        # Wait for the separate thread to burn CPU before continuing.
         self.assertTrue(burnt.wait(timeout=Duration(seconds=10).as_secs()))
 
+        # Next burn some CPU on the main thread.
         _burn_cpu()
 
+        # Now collect the CPU metrics after burning on both threads.
         after = _collect(metrics)
         process_delta = sum(os.times()[:2]) - process_before
 
-        # The sum over threads can lag the process total by up to a tick per
-        # thread. Allow a couple more ticks for the scrapes themselves.
-        tick = 1 / os.sysconf("SC_CLK_TCK")
-        slack = (len(os.listdir("/proc/self/task")) + 2) * tick
+        # Check that each thread burned at least the expected amount of CPU.
 
         def delta(thread_type: str) -> Duration:
             secs = after[thread_type] - before.get(thread_type, 0.0)
@@ -106,4 +113,13 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         threads_delta = sum(after.values()) - sum(before.values())
         self.assertGreaterEqual(delta("main"), BURN - TOLERANCE)
         self.assertGreaterEqual(delta("test-thread"), BURN - TOLERANCE)
+
+        # Check that the sum of the per-thread CPU deltas is (more-or-less) the
+        # same as the whole process CPU delta.
+
+        # The sum over threads can lag the process total by up to a tick per
+        # thread. Allow a couple more ticks for the scrapes themselves.
+        tick = 1 / os.sysconf("SC_CLK_TCK")
+        slack = (len(os.listdir("/proc/self/task")) + 2) * tick
+
         self.assertLessEqual(abs(threads_delta - process_delta), slack)
