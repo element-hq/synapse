@@ -22,17 +22,17 @@ from synapse.util.duration import Duration
 from tests import unittest
 
 # How much CPU time to burn on each thread, in seconds.
-BURN_SECONDS = 0.2
+BURN = Duration(milliseconds=200)
 
 # How far a thread's reported CPU may fall short of its burn. The kernel
 # reports CPU time in whole ticks, rounded down.
-TOLERANCE_SECONDS = 0.05
+TOLERANCE = Duration(milliseconds=50)
 
 
 def _burn_cpu() -> None:
     """Spin on the calling thread until it has used `BURN_SECONDS` of CPU."""
     start = time.thread_time()
-    while time.thread_time() - start < BURN_SECONDS:
+    while time.thread_time() - start < BURN.as_secs():
         pass
 
 
@@ -99,10 +99,11 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         tick = 1 / os.sysconf("SC_CLK_TCK")
         slack = (len(os.listdir("/proc/self/task")) + 2) * tick
 
-        def delta(thread_type: str) -> float:
-            return after[thread_type] - before.get(thread_type, 0.0)
+        def delta(thread_type: str) -> Duration:
+            secs = after[thread_type] - before.get(thread_type, 0.0)
+            return Duration(seconds=secs)
 
         threads_delta = sum(after.values()) - sum(before.values())
-        self.assertGreaterEqual(delta("main"), BURN_SECONDS - TOLERANCE_SECONDS)
-        self.assertGreaterEqual(delta("test-thread"), BURN_SECONDS - TOLERANCE_SECONDS)
+        self.assertGreaterEqual(delta("main"), BURN - TOLERANCE)
+        self.assertGreaterEqual(delta("test-thread"), BURN - TOLERANCE)
         self.assertLessEqual(abs(threads_delta - process_delta), slack)
