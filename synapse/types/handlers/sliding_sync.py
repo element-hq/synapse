@@ -111,7 +111,9 @@ class SlidingSyncResult:
     Attributes:
         next_pos: The next position token in the sliding window to request (next_batch).
         lists: Sliding window API. A map of list key to list results.
-        rooms: Room subscription API. A map of room ID to room results.
+        rooms: Room subscription API. A map of room ID to room results. This
+            includes rooms without any updates, which shouldn't be returned to the
+            client (see `RoomResult.__bool__`).
         extensions: Extensions API. A map of extension key to extension results.
     """
 
@@ -502,7 +504,7 @@ class SlidingSyncResult:
         # there are no changes, and b) since we're sorting rooms by `stream_ordering` of
         # the latest activity, anything that would cause the order to change would end
         # up in `self.rooms` and cause us to send down the change.
-        return bool(self.rooms or self.extensions)
+        return any(self.rooms.values()) or bool(self.extensions)
 
     @staticmethod
     def empty(next_pos: SlidingSyncStreamToken) -> "SlidingSyncResult":

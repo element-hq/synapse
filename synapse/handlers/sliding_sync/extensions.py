@@ -31,7 +31,6 @@ from synapse.api.constants import (
     EventTypes,
     ProfileUpdateAction,
 )
-from synapse.events.utils import FilteredEvent
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
@@ -100,7 +99,6 @@ class SlidingSyncExtensionHandler:
         actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         sticky_events_room_ids: AbstractSet[str],
-        sticky_events_by_room: Mapping[str, list[FilteredEvent]],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions:
@@ -115,11 +113,10 @@ class SlidingSyncExtensionHandler:
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
             actual_room_response_map: A map of room ID to room results in the the
-                Sliding Sync response.
+                Sliding Sync response. This includes rooms without updates, which
+                won't be returned to the client (see `RoomResult.__bool__`).
             sticky_events_room_ids: The rooms in scope for the sticky events
                 extension (MSC4480).
-            sticky_events_by_room: The sticky events (MSC4354) that were fetched
-                alongside the rooms, for the rooms that have any to send.
             to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
@@ -203,7 +200,7 @@ class SlidingSyncExtensionHandler:
                 new_connection_state=new_connection_state,
                 sticky_events_request=extensions.sticky_events,
                 sticky_events_room_ids=sticky_events_room_ids,
-                sticky_events_by_room=sticky_events_by_room,
+                actual_room_response_map=actual_room_response_map,
                 to_token=to_token,
                 from_token=from_token,
             )
@@ -218,7 +215,6 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
                 actual_room_response_map=actual_room_response_map,
                 actual_lists=actual_lists,
-                sticky_events_by_room=sticky_events_by_room,
             )
 
         (
@@ -744,7 +740,8 @@ class SlidingSyncExtensionHandler:
                 # (see the "XXX: Odd behavior" in
                 # `synapse.handlers.sliding_sync`).
                 room_result = actual_room_response_map.get(room_id)
-                if room_result is not None:
+                # Only consider rooms that are actually in the response.
+                if room_result:
                     if room_result.initial or room_result.unstable_expanded_timeline:
                         initial_rooms.add(room_id)
                         continue
@@ -1029,7 +1026,7 @@ class SlidingSyncExtensionHandler:
             SlidingSyncConfig.Extensions.StickyEventsExtension | AbsentType
         ),
         sticky_events_room_ids: AbstractSet[str],
-        sticky_events_by_room: Mapping[str, list[FilteredEvent]],
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions.StickyEventsExtension | None:
@@ -1038,7 +1035,8 @@ class SlidingSyncExtensionHandler:
         The sticky events themselves are fetched per-room, alongside the rest of the
         room data (see `SlidingSyncHandler.get_room_sync_data(...)`), so that their
         senders can be included in the lazy-loaded members of the room. All that is
-        left to do here is to keep track of the rooms that are out of scope.
+        left to do here is to collect them, and keep track of the rooms that are out
+        of scope.
 
         Args:
             previous_connection_state: The current per-connection state
@@ -1048,7 +1046,8 @@ class SlidingSyncExtensionHandler:
                 or absent if the request didn't include it.
             sticky_events_room_ids: The rooms in scope for the extension (empty if
                 the extension is disabled).
-            sticky_events_by_room: The sticky events fetched alongside the rooms.
+            actual_room_response_map: A map of room ID to room results, including
+                rooms without other updates.
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
@@ -1068,7 +1067,11 @@ class SlidingSyncExtensionHandler:
             return None
 
         return SlidingSyncResult.Extensions.StickyEventsExtension(
-            room_id_to_sticky_events=sticky_events_by_room,
+            room_id_to_sticky_events={
+                room_id: room_result.sticky_events
+                for room_id, room_result in actual_room_response_map.items()
+                if room_result.sticky_events
+            },
         )
 
     async def _record_sticky_events_in_out_of_scope_rooms(
@@ -1122,7 +1125,6 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
-        sticky_events_by_room: Mapping[str, list[FilteredEvent]],
     ) -> tuple[set[str], set[str]]:
         """
         Calculate target user profiles as candiates to include in the profile
@@ -1146,8 +1148,6 @@ class SlidingSyncExtensionHandler:
             actual_room_response_map: A calculated map of responses per room.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
-            sticky_events_by_room: The sticky events returned in the sticky events
-                extension.
 
         Returns:
             Tuple containing two sets:
@@ -1183,6 +1183,9 @@ class SlidingSyncExtensionHandler:
                 # Include users from timeline events
                 for timeline_event in room_data.timeline_events:
                     lazy_profile_user_ids.add(timeline_event.event.sender)
+                # Sticky event senders count as timeline senders (MSC4480)
+                for sticky_event in room_data.sticky_events:
+                    lazy_profile_user_ids.add(sticky_event.event.sender)
                 # Include users from required state
                 for state_event in room_data.required_state:
                     if state_event.type == EventTypes.Member:
@@ -1191,16 +1194,6 @@ class SlidingSyncExtensionHandler:
                 if room_data.heroes:
                     for hero in room_data.heroes:
                         lazy_profile_user_ids.add(hero.user_id)
-
-            # Sticky event senders count as timeline senders (MSC4480). This is
-            # separate from the above as a room can have sticky events to return
-            # without having any other updates (and so not be in
-            # `actual_room_response_map`).
-            for room_id, sticky_events in sticky_events_by_room.items():
-                if room_id not in lazy_rooms:
-                    continue
-                for sticky_event in sticky_events:
-                    lazy_profile_user_ids.add(sticky_event.event.sender)
 
         non_lazy_rooms = actual_room_ids.difference(lazy_rooms)
         # If we still have non-lazy rooms, get their members.
@@ -1297,7 +1290,6 @@ class SlidingSyncExtensionHandler:
         from_token: SlidingSyncStreamToken | None,
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
-        sticky_events_by_room: Mapping[str, list[FilteredEvent]],
     ) -> SlidingSyncResult.Extensions.ProfilesExtension | None:
         """
         Generate a response for the profiles extension.
@@ -1311,8 +1303,6 @@ class SlidingSyncExtensionHandler:
             actual_room_response_map: A calculated map of responses per room.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
-            sticky_events_by_room: The sticky events returned in the sticky events
-                extension.
 
         Returns:
             - A SlidingSyncResult.Extensions.ProfilesExtension object containing
@@ -1340,7 +1330,6 @@ class SlidingSyncExtensionHandler:
             sync_config=sync_config,
             actual_room_response_map=actual_room_response_map,
             actual_lists=actual_lists,
-            sticky_events_by_room=sticky_events_by_room,
         )
 
         if from_token is None:

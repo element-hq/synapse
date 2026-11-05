@@ -293,11 +293,11 @@ class SlidingSyncHandler:
         relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
 
         # Fetch room data
+        #
+        # This includes the results for all of the rooms we computed, including
+        # those without any updates. Whether a room is actually returned in the
+        # response is up to `bool(room_result)`.
         rooms: dict[str, SlidingSyncResult.RoomResult] = {}
-        # The sticky events (MSC4354) to return in the sticky events extension
-        # (MSC4480). These are collected separately from `rooms`, as a room can have
-        # sticky events to return without having any other updates.
-        sticky_events_by_room: dict[str, list[FilteredEvent]] = {}
 
         new_connection_state = previous_connection_state.get_mutable()
 
@@ -322,12 +322,7 @@ class SlidingSyncHandler:
                 in interested_rooms.sticky_events_room_ids,
             )
 
-            # Filter out empty room results during incremental sync
-            if room_sync_result or not from_token:
-                rooms[room_id] = room_sync_result
-
-            if room_sync_result.sticky_events:
-                sticky_events_by_room[room_id] = room_sync_result.sticky_events
+            rooms[room_id] = room_sync_result
 
         if relevant_rooms_to_send_map:
             with start_active_span("sliding_sync.generate_room_entries"):
@@ -346,7 +341,6 @@ class SlidingSyncHandler:
             actual_room_ids=set(relevant_room_map.keys()),
             actual_room_response_map=rooms,
             sticky_events_room_ids=interested_rooms.sticky_events_room_ids,
-            sticky_events_by_room=sticky_events_by_room,
             from_token=from_token,
             to_token=to_token,
         )
