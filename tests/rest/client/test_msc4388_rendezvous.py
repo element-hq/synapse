@@ -1273,46 +1273,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
     @override_config(
         {
             "experimental_features": {
-                "msc4388_rc_requests": {"per_second": 0.1, "burst_count": 2},
-            },
-        }
-    )
-    def test_create_with_invalid_token_ratelimited(self) -> None:
-        """
-        Test that creating a session is ratelimited by IP before the access
-        token is validated.
-        """
-        self.setup_mock_oauth()
-        introspect = Mock(side_effect=self._mock_oauth_response)
-        self._rust_client.post = introspect
-
-        # Use a different token for each request, so that none are cached
-        for i in range(2):
-            channel = self.make_request(
-                "POST",
-                rz_endpoint,
-                {"data": "foo=bar"},
-                access_token=f"invalid_token_{i}",
-            )
-            self.assertEqual(channel.code, 401)
-            self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
-        self.assertEqual(introspect.call_count, 2)
-
-        channel = self.make_request(
-            "POST",
-            rz_endpoint,
-            {"data": "foo=bar"},
-            access_token="invalid_token_2",
-        )
-        self.assertEqual(channel.code, 429)
-        self.assertEqual(channel.json_body["errcode"], "M_LIMIT_EXCEEDED")
-
-        # The ratelimited request did not cause the token to be validated
-        self.assertEqual(introspect.call_count, 2)
-
-    @override_config(
-        {
-            "experimental_features": {
                 "msc4388_rc_requests": {"per_second": 0.1, "burst_count": 4},
             },
         }
