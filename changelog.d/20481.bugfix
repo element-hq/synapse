@@ -1,0 +1,1 @@
+Fix a bug introduced in Synapse v1.124.0 where, when using workers, joining or rejecting an invite received over federation in a room the server was already in could fail to be sent to other servers.
