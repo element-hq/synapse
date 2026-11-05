@@ -192,6 +192,12 @@ class ThreadCPUMetrics(Collector):
                 prev = self._last_seen.get(tid)
                 if prev is not None and prev.start_time == start_time:
                     prev_utime, prev_stime = prev.utime, prev.stime
+
+                    # It's possible (though unlikely) that a thread has exited
+                    # and got reused in the same tick, so ensure that times have
+                    # strictly increased.
+                    if utime < prev_utime or stime < prev_stime:
+                        prev_utime = prev_stime = 0
                 else:
                     prev_utime = prev_stime = 0
 
