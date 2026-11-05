@@ -91,8 +91,12 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         # 3.14 onwards.
         thread = threading.Thread(target=run_on_thread, name="a) b) (c")
         thread.start()
+
+        # Cleanup functions are run in reverse order, so first we set the
+        # release event (to wake the thread up), and then we wait for it exit.
         self.addCleanup(thread.join)
         self.addCleanup(release.set)
+
         metrics.register_thread("test-thread", thread)
 
         # Wait for the separate thread to burn CPU before continuing.
