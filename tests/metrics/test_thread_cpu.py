@@ -74,7 +74,7 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         burnt = threading.Event()
         release = threading.Event()
 
-        def run() -> None:
+        def run_on_thread() -> None:
             _burn_cpu()
             burnt.set()
             release.wait(timeout=Duration(seconds=10).as_secs())
@@ -82,7 +82,7 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         # `/proc/<tid>/stat` puts the thread name in brackets. Closing
         # brackets and spaces in the name check that parsing finds the right
         # fields. Python passes the name to the kernel from 3.14 onwards.
-        thread = threading.Thread(target=run, name="a) b) (c")
+        thread = threading.Thread(target=run_on_thread, name="a) b) (c")
         thread.start()
         self.addCleanup(thread.join)
         self.addCleanup(release.set)
