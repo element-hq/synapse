@@ -20,6 +20,7 @@
 #
 
 from copy import deepcopy
+from unittest.mock import AsyncMock, patch
 
 from twisted.internet.testing import MemoryReactor
 
@@ -27,7 +28,7 @@ from synapse.api.constants import EduTypes, Membership, ReceiptTypes
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, ReadReceipt
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -36,6 +37,7 @@ from tests import unittest
 class ReceiptsTestCase(unittest.HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.event_source = hs.get_event_sources().sources.receipt
+        self.receipts_handler = hs.get_receipts_handler()
 
     def test_filters_out_private_receipt(self) -> None:
         self._test_filters_private(
@@ -255,6 +257,74 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
                     "room_id": "!jEsUZKDJdhlrceRyVU:example.org",
                     "type": EduTypes.RECEIPT,
                 },
+            ],
+        )
+
+    def test_received_remote_receipt_ignores_malformed_entries(self) -> None:
+        """
+        A malformed `m.receipt` EDU from a remote server (e.g. a room's value,
+        a receipt type's value, or a user's value being a string instead of an
+        object) should not raise, and should not prevent other, well-formed
+        receipts in the same EDU from being processed.
+
+        Context: https://github.com/home-assistant/core/issues/153638 is an
+        unrelated report, but https://github.com/matrix-org/synapse/issues/10376
+        is the original report of this crash.
+        """
+        room_id = "!room:remote.example.org"
+        good_user_id = "@good:remote.example.org"
+
+        content: JsonDict = {
+            # The whole room's value is a string, not an object.
+            "!malformed-room-value:remote.example.org": "not a dict",
+            room_id: {
+                # The receipt type's value is a string, not an object.
+                ReceiptTypes.READ: "not a dict",
+                "a.receipt.type": {
+                    good_user_id: {
+                        "event_ids": ["$event:remote.example.org"],
+                        "data": {"ts": 1436451550453},
+                    },
+                    # This user's value is a string, not an object.
+                    "@malformed:remote.example.org": "not a dict",
+                    # This user's event_ids list has non-string elements.
+                    "@malformed-event-ids:remote.example.org": {
+                        "event_ids": [1, None],
+                    },
+                },
+            },
+        }
+
+        with patch.object(
+            self.receipts_handler.event_auth_handler,
+            "is_host_in_room",
+            new=AsyncMock(return_value=True),
+        ), patch.object(
+            self.receipts_handler._storage_controllers.state,
+            "get_current_hosts_in_room_or_partial_state_approximation",
+            new=AsyncMock(return_value=["remote.example.org"]),
+        ), patch.object(
+            self.receipts_handler, "_handle_new_receipts", new=AsyncMock()
+        ) as mock_handle_new_receipts:
+            self.get_success(
+                self.receipts_handler._received_remote_receipt(
+                    "remote.example.org", content
+                )
+            )
+
+        mock_handle_new_receipts.assert_called_once()
+        (received_receipts,) = mock_handle_new_receipts.call_args.args
+        self.assertEqual(
+            received_receipts,
+            [
+                ReadReceipt(
+                    room_id=room_id,
+                    receipt_type="a.receipt.type",
+                    user_id=good_user_id,
+                    event_ids=["$event:remote.example.org"],
+                    thread_id=None,
+                    data={"ts": 1436451550453},
+                )
             ],
         )
 
