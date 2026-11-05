@@ -43,7 +43,6 @@ from synapse.events.utils import (
     strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
-from synapse.handlers.server_announcements import make_synthetic_join_event
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
 from synapse.handlers.sync import (
     ArchivedSyncResult,
@@ -136,6 +135,7 @@ class SyncRestServlet(RestServlet):
         self.presence_handler = hs.get_presence_handler()
         self._server_notices_sender = hs.get_server_notices_sender()
         self._event_serializer = hs.get_event_client_serializer()
+        self._server_announcements = hs.get_server_announcements_handler()
         self._msc2654_enabled = hs.config.experimental.msc2654_enabled
         self._msc3773_enabled = hs.config.experimental.msc3773_enabled
         self._include_profile_updates_in_sync = (
@@ -654,11 +654,10 @@ class SyncRestServlet(RestServlet):
             config=serialize_options,
         )
         if is_announcement:
-            create_event = await self.store.get_create_event_for_room(room.room_id)
             serialized_state.append(
                 self._event_serializer.serialize_synthetic_event(
-                    make_synthetic_join_event(
-                        room.room_id, user_id, create_event.origin_server_ts
+                    await self._server_announcements.get_synthetic_join_event(
+                        room.room_id, user_id
                     ),
                     serialize_options,
                 )
