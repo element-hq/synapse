@@ -142,10 +142,11 @@ class SlidingSyncResult:
                 counts (or edits, threads), even if some of the reaction events were skipped
                 over in a gappy sync.
             sticky_events: The unexpired sticky events (MSC4354) to return for the room,
-                ordered by the sticky events stream. Only populated when the room is in
-                scope for the sticky events extension (MSC4480). These are returned in
-                the extension rather than in the room itself, so they don't count as an
-                update to the room. (They aren't deduplicated against `timeline` yet.)
+                ordered by the sticky events stream, or `None` if we didn't fetch them
+                because the room is not in scope for the sticky events extension
+                (MSC4480). These are returned in the extension rather than in the room
+                itself, so they don't count as an update to the room. (They aren't
+                deduplicated against `timeline` yet.)
             stripped_state: Stripped state events (for rooms where the usre is
                 invited/knocked). Same as `rooms.invite.$room_id.invite_state` in sync v2,
                 absent on joined/left rooms
@@ -195,7 +196,7 @@ class SlidingSyncResult:
         # Should be empty for invite/knock rooms with `stripped_state`
         timeline_events: list[FilteredEvent]
         bundled_aggregations: dict[str, "BundledAggregations"] | None
-        sticky_events: list[FilteredEvent]
+        sticky_events: list[FilteredEvent] | None
         # Optional because it's only relevant to invite/knock rooms
         stripped_state: list[JsonDict]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`

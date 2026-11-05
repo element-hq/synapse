@@ -109,7 +109,6 @@ class SlidingSyncHandler:
         self.relations_handler = hs.get_relations_handler()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
-        self._enable_sticky_events = hs.config.experimental.msc4354_enabled
 
         self.connection_store = SlidingSyncConnectionStore(self.clock, self.store)
         self.extensions = SlidingSyncExtensionHandler(hs)
@@ -293,18 +292,6 @@ class SlidingSyncHandler:
         room_membership_for_user_map = interested_rooms.room_membership_for_user_map
         relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
 
-        # The rooms that we should fetch sticky events (MSC4354) for, alongside
-        # the rest of the room data.
-        sticky_events_room_ids: AbstractSet[str] = set()
-        if self._enable_sticky_events:
-            sticky_events_room_ids = (
-                SlidingSyncExtensionHandler.find_sticky_events_room_ids(
-                    sync_config,
-                    actual_lists=lists,
-                    actual_room_ids=relevant_room_map.keys(),
-                )
-            )
-
         # Fetch room data
         #
         # This includes the results for all of the rooms we computed, including
@@ -331,7 +318,8 @@ class SlidingSyncHandler:
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
                 newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
-                include_sticky_events=room_id in sticky_events_room_ids,
+                include_sticky_events=room_id
+                in interested_rooms.sticky_events_room_ids,
             )
 
             rooms[room_id] = room_sync_result
@@ -868,7 +856,7 @@ class SlidingSyncHandler:
         # Fetch the sticky events to return in the sticky events extension. We do this
         # here, alongside the timeline, as their senders count as timeline senders for
         # the purposes of lazy-loading room members (MSC4480).
-        sticky_events: list[FilteredEvent] = []
+        sticky_events: list[FilteredEvent] | None = None
         if include_sticky_events:
             sticky_events = await self._get_sticky_events_for_room(
                 sync_config=sync_config,
@@ -1159,7 +1147,7 @@ class SlidingSyncHandler:
                             # (MSC4480).
                             timeline_membership.update(
                                 sticky_event.event.sender
-                                for sticky_event in sticky_events
+                                for sticky_event in sticky_events or ()
                             )
 
                             # The client needs to know the membership of everyone in
