@@ -345,6 +345,11 @@ def listen_metrics(
             port, addr=host, registry=RegistryProxy
         )
         servers.append((server, thread))
+
+        # Note that we do not register these threads with `ThreadCPUMetrics` as
+        # they simply spawn a thread per-request. We could track them with
+        # `ThreadCPUMetrics` if needed, but we assume they won't use much CPU
+        # and so are OK with them being tracked in the "other" bucket.
     return servers
 
 
