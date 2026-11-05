@@ -98,11 +98,10 @@ impl MSC4388RendezvousHandler {
     /// sessions. Instead, new unauthenticated sessions are refused while at
     /// capacity.
     fn evict(&mut self, now: SystemTime) {
-        let unauthenticated_sessions = &mut self.unauthenticated_sessions;
         self.sessions.retain(|id, session| {
             let expired = session.expired(now);
             if expired {
-                unauthenticated_sessions.remove(id);
+                self.unauthenticated_sessions.remove(id);
             }
             !expired
         });
