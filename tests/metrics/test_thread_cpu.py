@@ -57,7 +57,9 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         type, and the types add up to the CPU the whole process used.
         """
         if not os.path.isdir("/proc/self/task"):
-            self.skipTest("Skipping as `ThreadCPUMetrics` tests require /proc/self/task (Linux only)")
+            self.skipTest(
+                "Skipping as `ThreadCPUMetrics` tests require /proc/self/task (Linux only)"
+            )
 
         # A fresh collector, so threads registered elsewhere don't count. It
         # reports process-level metrics, so it has no `SERVER_NAME_LABEL`.
