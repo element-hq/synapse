@@ -2404,6 +2404,46 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self._timeline_ids(room), event_ids[-2:])
         self.assertTrue(room["timeline"]["limited"])
 
+    def test_summary_counts_reader(self) -> None:
+        """The room summary of an announcement room delivered to a non-member
+        counts them among the joined members, matching the synthetic join in
+        `state`.
+        """
+        self._announce("hello")
+        filter = {"room": {"state": {"lazy_load_members": True}}}
+
+        room = self._assert_delivered(self._sync(self.bob_tok, filter=filter), self.bob)
+        # The management identity, the announcer and the former member, plus
+        # the reader.
+        self.assertEqual(
+            room["summary"],
+            {"m.joined_member_count": 4, "m.invited_member_count": 0},
+        )
+
+        room = self._sync(self.announcer_tok, filter=filter)["rooms"]["join"][
+            self.room_id
+        ]
+        self.assertEqual(
+            room["summary"],
+            {"m.joined_member_count": 3, "m.invited_member_count": 0},
+        )
+
+    def test_incremental_sync_summary_counts_reader(self) -> None:
+        """An announcement room first delivered on an incremental sync has a
+        room summary counting the reader.
+        """
+        filter = {"room": {"state": {"lazy_load_members": True}}}
+        since = self._sync(self.bob_tok, filter=filter)["next_batch"]
+        self._announce("hello")
+
+        room = self._assert_delivered(
+            self._sync(self.bob_tok, since, filter=filter), self.bob
+        )
+        self.assertEqual(
+            room["summary"],
+            {"m.joined_member_count": 4, "m.invited_member_count": 0},
+        )
+
     def test_state_changes_after_last_announcement(self) -> None:
         """An announcement room is delivered on initial, incremental and
         `full_state` syncs even when state changes push its last announcement
@@ -2576,6 +2616,30 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self.assertNotIn(self.room_id, response["rooms"].get("leave", {}))
         room = self._assert_delivered(response, self.former)
         self.assertEqual(self._timeline_ids(room)[-2:], event_ids)
+
+    def test_removed_member_summary_counts_reader(self) -> None:
+        """A member removed from the room by the config is counted among the
+        joined members in the summary of the announcement room delivered to
+        them.
+        """
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], allowed_user_ids=[self.announcer])
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+        self._announce("hello")
+
+        room = self._assert_delivered(
+            self._sync(
+                self.former_tok,
+                filter={"room": {"state": {"lazy_load_members": True}}},
+            ),
+            self.former,
+        )
+        # The management identity and the announcer, plus the reader.
+        self.assertEqual(
+            room["summary"],
+            {"m.joined_member_count": 3, "m.invited_member_count": 0},
+        )
 
     def test_member_leaving(self) -> None:
         """A member who leaves the room on their own switches straight to the
