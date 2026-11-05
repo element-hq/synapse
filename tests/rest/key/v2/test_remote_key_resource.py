@@ -148,6 +148,114 @@ class RemoteKeyResourceTestCase(BaseRemoteKeyResourceTestCase):
         # the requested key should be present in the verify_keys section
         self.assertIn("ed25519:ver1", keys[0]["verify_keys"])
 
+    def test_post_key_without_minimum_validity(self) -> None:
+        """Omitted validity criteria default to now, rather than half-lifetime."""
+        server_name = "remote.server"
+        testkey = signedjson.key.generate_signing_key("ver1")
+        self.expect_outgoing_key_request(server_name, testkey)
+        content = {"server_keys": {server_name: {"ed25519:ver1": {}}}}
+
+        channel = self.make_request("POST", "/_matrix/key/v2/query", content)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        keys = channel.json_body["server_keys"]
+        self.assertEqual(len(keys), 1)
+        self.assertEqual(list(keys[0]["verify_keys"]), ["ed25519:ver1"])
+        self.assertIn(server_name, keys[0]["signatures"])
+        self.assertIn(self.hs.hostname, keys[0]["signatures"])
+
+        # Seed the signed response with a known cache lifetime.
+        now = self.hs.get_clock().time_msec()
+        valid_until = now + 100_000
+        second_key = signedjson.key.generate_signing_key("ver2")
+        keys[0]["verify_keys"]["ed25519:ver2"] = {
+            "key": signedjson.key.encode_verify_key_base64(
+                signedjson.key.get_verify_key(second_key)
+            )
+        }
+        keys[0]["valid_until_ts"] = valid_until
+        sign_json(keys[0], server_name, testkey)
+        self.get_success(
+            self.hs.get_datastores().main.store_server_keys_response(
+                server_name,
+                from_server=server_name,
+                ts_added_ms=now,
+                verify_keys={
+                    "ed25519:ver1": FetchKeyResult(
+                        verify_key=signedjson.key.get_verify_key(testkey),
+                        valid_until_ts=valid_until,
+                    ),
+                    "ed25519:ver2": FetchKeyResult(
+                        verify_key=signedjson.key.get_verify_key(second_key),
+                        valid_until_ts=valid_until,
+                    ),
+                },
+                response_json=keys[0],
+            )
+        )
+        self.http_client.get_json.reset_mock()
+        self.reactor.advance(60)
+
+        channel = self.make_request("POST", "/_matrix/key/v2/query", content)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(
+            channel.json_body["server_keys"][0]["valid_until_ts"], valid_until
+        )
+        self.http_client.get_json.assert_not_called()
+
+        self.reactor.advance(41)
+        channel = self.make_request("POST", "/_matrix/key/v2/query", content)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.http_client.get_json.assert_called_once()
+
+        # Mixed criteria must preserve explicit timestamps (including zero) and
+        # the existing half-lifetime behaviour of explicit null.
+        for minimum, fetch_count in ((0, 0), (valid_until + 1, 1), (None, 1)):
+            with self.subTest(minimum=minimum):
+                self.http_client.get_json.reset_mock()
+                channel = self.make_request(
+                    "POST",
+                    "/_matrix/key/v2/query",
+                    {
+                        "server_keys": {
+                            server_name: {
+                                "ed25519:ver1": {},
+                                "ed25519:ver2": {"minimum_valid_until_ts": minimum},
+                            }
+                        }
+                    },
+                )
+                self.assertEqual(channel.code, 200, channel.json_body)
+                self.assertEqual(self.http_client.get_json.call_count, fetch_count)
+
+        # Requesting all cached keys still ignores their validity.
+        self.http_client.get_json.reset_mock()
+        channel = self.make_request(
+            "POST", "/_matrix/key/v2/query", {"server_keys": {server_name: {}}}
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertTrue(channel.json_body["server_keys"])
+        self.http_client.get_json.assert_not_called()
+
+    def test_post_invalid_criteria(self) -> None:
+        for minimum in ("123", True, 1.5):
+            with self.subTest(minimum=minimum):
+                channel = self.make_request(
+                    "POST",
+                    "/_matrix/key/v2/query",
+                    {
+                        "server_keys": {
+                            "remote.server": {
+                                "ed25519:ver1": {"minimum_valid_until_ts": minimum}
+                            }
+                        }
+                    },
+                )
+                self.assertEqual(channel.code, 400, channel.json_body)
+
+        channel = self.make_request("POST", "/_matrix/key/v2/query", {})
+        self.assertEqual(channel.code, 400, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_MISSING_PARAM")
+
 
 class EndToEndPerspectivesTests(BaseRemoteKeyResourceTestCase):
     """End-to-end tests of the perspectives fetch case

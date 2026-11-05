@@ -1,0 +1,1 @@
+Fix notary key queries without a minimum validity timestamp being rejected, defaulting omitted timestamps to the current time.

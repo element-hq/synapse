@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 class _KeyQueryCriteriaDataModel(RequestBodyModel):
     model_config = ConfigDict(extra="allow")
 
-    minimum_valid_until_ts: StrictInt | None
+    minimum_valid_until_ts: StrictInt | None = None
 
 
 class RemoteKey(RestServlet):
@@ -171,6 +171,15 @@ class RemoteKey(RestServlet):
         content = parse_and_validate_json_object_from_request(request, self.PostBody)
 
         query = content.server_keys
+        time_now_ms = self.clock.time_msec()
+        for key_ids in query.values():
+            for key_id, criteria in key_ids.items():
+                if "minimum_valid_until_ts" not in criteria.model_fields_set:
+                    # Only omitted timestamps default to now; explicit null keeps
+                    # the existing half-lifetime cache behaviour.
+                    key_ids[key_id] = criteria.model_copy(
+                        update={"minimum_valid_until_ts": time_now_ms}
+                    )
 
         return 200, await self.query_keys(query, query_remote_on_cache_miss=True)
 
