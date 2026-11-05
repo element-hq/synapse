@@ -1,1 +1,0 @@
-Add an index on `lower(name)` to the `users` table, to speed up checking whether a username is available.

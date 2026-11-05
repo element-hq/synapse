@@ -138,6 +138,38 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         # actually done :/
         self.get_success(test_ensure_media())
 
+    @parameterized.expand([("local_provider", True), ("temp_file", False)])
+    def test_store_into_file_removes_file_on_write_failure(
+        self, _name: str, use_local_provider: bool
+    ) -> None:
+        """If the caller fails while writing into the file (e.g. a remote media
+        download errors part way through), the file should be removed rather
+        than left orphaned on disk with no database entry.
+        """
+        media_storage = self.media_storage
+        if not use_local_provider:
+            media_storage = MediaStorage(self.hs, self.filepaths, [], None)
+
+        file_info = FileInfo(None, "some_media_id")
+        media_filepaths: list[str] = []
+
+        class WriteFailedError(Exception):
+            pass
+
+        async def store_and_fail() -> None:
+            async with media_storage.store_into_file(file_info) as (
+                f,
+                media_filepath,
+            ):
+                media_filepaths.append(media_filepath)
+                f.write(b"partial")
+                raise WriteFailedError()
+
+        self.get_failure(store_and_fail(), WriteFailedError)
+
+        self.assertEqual(len(media_filepaths), 1)
+        self.assertFalse(os.path.exists(media_filepaths[0]))
+
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
 class TestImage:
