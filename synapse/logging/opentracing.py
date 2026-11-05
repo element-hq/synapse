@@ -202,7 +202,7 @@ from twisted.web.http import Request
 from twisted.web.http_headers import Headers
 
 from synapse.config import ConfigError
-from synapse.metrics._thread_cpu import thread_cpu_metrics
+from synapse.metrics.thread_cpu import thread_cpu_metrics
 from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:

@@ -16,7 +16,7 @@ import os
 import threading
 import time
 
-from synapse.metrics._thread_cpu import ThreadCPUMetrics
+from synapse.metrics.thread_cpu import ThreadCPUMetrics
 from synapse.util.duration import Duration
 
 from tests import unittest

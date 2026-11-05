@@ -79,10 +79,10 @@ from synapse.logging.context import (
     make_deferred_yieldable,
     run_in_background,
 )
-from synapse.metrics._thread_cpu import thread_cpu_metrics
 from synapse.metrics.background_process_metrics import (
     run_as_background_process as _run_as_background_process,
 )
+from synapse.metrics.thread_cpu import thread_cpu_metrics
 from synapse.module_api.callbacks.account_validity_callbacks import (
     IS_USER_EXPIRED_CALLBACK,
     ON_LEGACY_ADMIN_REQUEST,
