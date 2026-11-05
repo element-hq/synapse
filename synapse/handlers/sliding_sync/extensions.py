@@ -98,7 +98,6 @@ class SlidingSyncExtensionHandler:
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
-        sticky_events_room_ids: AbstractSet[str],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions:
@@ -115,8 +114,6 @@ class SlidingSyncExtensionHandler:
             actual_room_response_map: A map of room ID to room results in the the
                 Sliding Sync response. This includes rooms without updates, which
                 won't be returned to the client (see `RoomResult.__bool__`).
-            sticky_events_room_ids: The rooms in scope for the sticky events
-                extension (MSC4480).
             to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
@@ -196,10 +193,11 @@ class SlidingSyncExtensionHandler:
         # in out-of-scope rooms are still tracked.
         if self._enable_sticky_events:
             sticky_events_coro = self.get_sticky_events_extension_response(
+                sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
                 new_connection_state=new_connection_state,
-                sticky_events_request=extensions.sticky_events,
-                sticky_events_room_ids=sticky_events_room_ids,
+                actual_lists=actual_lists,
+                actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
                 to_token=to_token,
                 from_token=from_token,
@@ -316,6 +314,44 @@ class SlidingSyncExtensionHandler:
                 relevant_room_ids.update(sync_op.room_ids)
 
         return relevant_room_ids
+
+    @staticmethod
+    def find_sticky_events_room_ids(
+        sync_config: SlidingSyncConfig,
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_room_ids: AbstractSet[str],
+    ) -> set[str]:
+        """Get the rooms that are in scope for the sticky events extension
+        (MSC4480), as per the `lists`/`rooms` of the extension request (see
+        `find_relevant_room_ids_for_extension(...)`).
+
+        This is needed in a few places, as sticky events are fetched alongside the
+        rest of the room data rather than in the extension itself.
+
+        Callers must check that sticky events (MSC4354) are enabled.
+
+        Args:
+            sync_config: Sync configuration
+            actual_lists: The actual lists from the Sliding Sync response.
+            actual_room_ids: The actual room IDs in the Sliding Sync response.
+
+        Returns:
+            The rooms in scope, or empty if the extension isn't enabled in the
+            request.
+        """
+        if sync_config.extensions is None:
+            return set()
+
+        sticky_events_request = sync_config.extensions.sticky_events
+        if sticky_events_request is Absent or not sticky_events_request.enabled:
+            return set()
+
+        return SlidingSyncExtensionHandler.find_relevant_room_ids_for_extension(
+            requested_lists=sticky_events_request.lists,
+            requested_room_ids=sticky_events_request.rooms,
+            actual_lists=actual_lists,
+            actual_room_ids=actual_room_ids,
+        )
 
     @trace
     async def get_to_device_extension_response(
@@ -1020,12 +1056,11 @@ class SlidingSyncExtensionHandler:
 
     async def get_sticky_events_extension_response(
         self,
+        sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        sticky_events_request: (
-            SlidingSyncConfig.Extensions.StickyEventsExtension | AbsentType
-        ),
-        sticky_events_room_ids: AbstractSet[str],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
@@ -1039,13 +1074,13 @@ class SlidingSyncExtensionHandler:
         of scope.
 
         Args:
+            sync_config: Sync configuration
             previous_connection_state: The current per-connection state
             new_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state.
-            sticky_events_request: The sticky_events extension from the request,
-                or absent if the request didn't include it.
-            sticky_events_room_ids: The rooms in scope for the extension (empty if
-                the extension is disabled).
+            actual_lists: Sliding window API. A map of list key to list results in the
+                Sliding Sync response.
+            actual_room_ids: The actual room IDs in the the Sliding Sync response.
             actual_room_response_map: A map of room ID to room results, including
                 rooms without other updates.
             to_token: The point in the stream to sync up to.
@@ -1058,14 +1093,22 @@ class SlidingSyncExtensionHandler:
         await self._record_sticky_events_in_out_of_scope_rooms(
             previous_connection_state=previous_connection_state,
             new_connection_state=new_connection_state,
-            relevant_room_ids=sticky_events_room_ids,
+            relevant_room_ids=self.find_sticky_events_room_ids(
+                sync_config,
+                actual_lists=actual_lists,
+                actual_room_ids=actual_room_ids,
+            ),
             to_token=to_token,
             from_token=from_token,
         )
 
+        sticky_events_request = (
+            sync_config.extensions or SlidingSyncConfig.Extensions()
+        ).sticky_events
         if sticky_events_request is Absent or not sticky_events_request.enabled:
             return None
 
+        # `RoomResult.sticky_events` is only populated for rooms in scope.
         return SlidingSyncResult.Extensions.StickyEventsExtension(
             room_id_to_sticky_events={
                 room_id: room_result.sticky_events
