@@ -1,0 +1,1 @@
+The reverse proxy documentation now explains that proxies should return standard Matrix errors when rejecting Matrix requests.
