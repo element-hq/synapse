@@ -1,1 +1,1 @@
-Fix notary key queries without a minimum validity timestamp being rejected, defaulting omitted timestamps to the current time.
+Fix notary key queries without a `minimum_valid_until_ts` being rejected since the switch to Pydantic v2.
