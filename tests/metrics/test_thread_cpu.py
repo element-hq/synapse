@@ -24,8 +24,9 @@ from tests import unittest
 # How much CPU time to burn on each thread, in seconds.
 BURN = Duration(milliseconds=200)
 
-# How far a thread's reported CPU may fall short of its burn. The kernel
-# reports CPU time in whole ticks, rounded down.
+# How far a thread's reported CPU may fall short of its burn. The kernel reports
+# CPU time in whole ticks (rounded down), so we allow some tolerance (here ~5
+# ticks).
 TOLERANCE = Duration(milliseconds=50)
 
 
