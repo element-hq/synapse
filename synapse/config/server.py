@@ -994,7 +994,8 @@ class ServerConfig(Config):
             self.max_event_delay_duration = Duration()
 
         # The maximum number of delayed events a user may have scheduled at a time.
-        # (Defined here despite being experimental to be near the other MSC4140 config)
+        # (Defined here despite being experimental to be near the other MSC4140 config,
+        # because either config controls whether delayed events are enabled or not)
         experimental = config.get("experimental_features") or {}
         self.max_delayed_events_per_user: int = experimental.get(
             "msc4140_max_delayed_events_per_user", 100
