@@ -431,6 +431,25 @@ class ProfileQueryRestServlet(RestServlet):
                     Codes.BAD_JSON,
                 )
 
+        if field_names is not None:
+            for field_name in field_names:
+                if not field_name:
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST,
+                        "Field name too short",
+                        Codes.BAD_JSON,
+                    )
+                # Match the limit enforced for custom profile fields, measured
+                # in UTF-8 bytes.
+                # Note, the error is a `BAD_JSON` instead of a `KEY_TOO_LARGE`
+                # to match other errors from this endpoint.
+                if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST,
+                        f"Field name too long (max {MAX_CUSTOM_FIELD_LEN} bytes)",
+                        Codes.BAD_JSON,
+                    )
+
         filtered_profiles = (
             await self.profile_handler.check_profile_query_allowed_for_users(
                 target_users=target_users,

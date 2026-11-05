@@ -33,6 +33,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import Codes
+from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
 from synapse.rest import admin
 from synapse.rest.client import login, profile, room
 from synapse.server import HomeServer
@@ -1119,6 +1120,44 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
         self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
+
+    @parameterized.expand(
+        [
+            # Empty field names are not allowed.
+            ("empty", "", HTTPStatus.BAD_REQUEST),
+            # Exactly at the limit.
+            ("at_limit", "a" * MAX_CUSTOM_FIELD_LEN, HTTPStatus.OK),
+            # One byte over the limit.
+            ("over_limit", "a" * (MAX_CUSTOM_FIELD_LEN + 1), HTTPStatus.BAD_REQUEST),
+            # Under the limit in characters, but over it in UTF-8 bytes
+            # ("é" is 2 bytes).
+            (
+                "over_limit_multibyte",
+                "é" * (MAX_CUSTOM_FIELD_LEN // 2 + 1),
+                HTTPStatus.BAD_REQUEST,
+            ),
+        ]
+    )
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_field_name_length(
+        self, _label: str, field_name: str, expected_code: HTTPStatus
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should reject empty
+        field names, and field names longer than the maximum custom profile field
+        name length, measured in UTF-8 bytes.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [self.owner],
+                "fields": ["displayname", field_name],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, expected_code, channel.result)
+        if expected_code == HTTPStatus.BAD_REQUEST:
+            self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_returns_profile_data(
