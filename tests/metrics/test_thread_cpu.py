@@ -17,6 +17,7 @@ import threading
 import time
 
 from synapse.metrics._thread_cpu import ThreadCPUMetrics
+from synapse.util.duration import Duration
 
 from tests import unittest
 
@@ -76,7 +77,7 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         def run() -> None:
             _burn_cpu()
             burnt.set()
-            release.wait(timeout=10)
+            release.wait(timeout=Duration(seconds=10).as_secs())
 
         # `/proc/<tid>/stat` puts the thread name in brackets. Closing
         # brackets and spaces in the name check that parsing finds the right
@@ -86,7 +87,7 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
         self.addCleanup(thread.join)
         self.addCleanup(release.set)
         metrics.register_thread("test-thread", thread)
-        self.assertTrue(burnt.wait(timeout=10))
+        self.assertTrue(burnt.wait(timeout=Duration(seconds=10).as_secs()))
 
         _burn_cpu()
 
