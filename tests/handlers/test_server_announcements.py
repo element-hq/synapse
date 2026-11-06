@@ -564,6 +564,8 @@ class SyntheticJoinEventTestCase(unittest.TestCase):
                 "!Q8bOeGjhyXNtCVmX7Zvvh-W5KiVu2Q8vBK_2ljoZW7s",
                 "@alexander:example.com",
                 0,
+                displayname=None,
+                avatar_url=None,
             )["event_id"],
             "$fake_announcement_join-Q8bOeGjh-alexande-SVJqkL5sx8x0TXrBVujJXBUw_Kc-c10PNz_sZV5FTnk",
         )
@@ -572,7 +574,11 @@ class SyntheticJoinEventTestCase(unittest.TestCase):
         """A localpart shorter than 8 characters is included in full."""
         self.assertEqual(
             make_synthetic_join_event(
-                "!Q8bOeGjhyXNtCVmX7Zvvh-W5KiVu2Q8vBK_2ljoZW7s", "@bob:example.com", 0
+                "!Q8bOeGjhyXNtCVmX7Zvvh-W5KiVu2Q8vBK_2ljoZW7s",
+                "@bob:example.com",
+                0,
+                displayname=None,
+                avatar_url=None,
             )["event_id"],
             "$fake_announcement_join-Q8bOeGjh-bob-OkzlBBrE1j2T2pq5aF4ubO-Z1hmIo2cun6rrIXjw2QE",
         )
@@ -581,7 +587,60 @@ class SyntheticJoinEventTestCase(unittest.TestCase):
         """For a room ID with a domain, only the start of its localpart is included."""
         self.assertEqual(
             make_synthetic_join_event(
-                "!abcdefghijklmnopqr:example.com", "@alexander:example.com", 0
+                "!abcdefghijklmnopqr:example.com",
+                "@alexander:example.com",
+                0,
+                displayname=None,
+                avatar_url=None,
             )["event_id"],
             "$fake_announcement_join-abcdefgh-alexande-QdoyrQ6WLSZZBDWVTw4cVhH61QX8Z90v8YIhfWkHTlg",
+        )
+
+    def test_content_with_profile(self) -> None:
+        """The display name and avatar URL are included in the content."""
+        self.assertEqual(
+            make_synthetic_join_event(
+                "!room:example.com",
+                "@bob:example.com",
+                0,
+                displayname="Bob",
+                avatar_url="mxc://example.com/bob",
+            )["content"],
+            {
+                "membership": "join",
+                "displayname": "Bob",
+                "avatar_url": "mxc://example.com/bob",
+            },
+        )
+
+    def test_content_without_profile(self) -> None:
+        """Unset profile fields are omitted from the content."""
+        self.assertEqual(
+            make_synthetic_join_event(
+                "!room:example.com",
+                "@bob:example.com",
+                0,
+                displayname=None,
+                avatar_url=None,
+            )["content"],
+            {"membership": "join"},
+        )
+
+    def test_event_id_ignores_profile(self) -> None:
+        """The event ID does not depend on the profile."""
+        self.assertEqual(
+            make_synthetic_join_event(
+                "!room:example.com",
+                "@bob:example.com",
+                0,
+                displayname="Bob",
+                avatar_url="mxc://example.com/bob",
+            )["event_id"],
+            make_synthetic_join_event(
+                "!room:example.com",
+                "@bob:example.com",
+                0,
+                displayname=None,
+                avatar_url=None,
+            )["event_id"],
         )
