@@ -134,6 +134,17 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
         self.assertTrue(channel.json_body["unstable_features"]["com.beeper.msc4446"])
 
+    def test_msc4448_false_by_default(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertFalse(channel.json_body["unstable_features"]["org.matrix.msc4448"])
+
+    @unittest.override_config({"experimental_features": {"msc4448_enabled": True}})
+    def test_msc4448_true_if_enabled(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertTrue(channel.json_body["unstable_features"]["org.matrix.msc4448"])
+
     def test_msc4502_false_by_default(self) -> None:
         channel = self.make_request("GET", "/_matrix/client/versions")
         self.assertEqual(channel.code, 200, channel.result)
