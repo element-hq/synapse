@@ -1,0 +1,1 @@
+Fix a race where an inbound remote join could be persisted before an in-flight local event in the same room, delaying the server receiving the local event until a new one was sent. Contributed by @FrenchGithubUser and @nikzen @Famedly.
