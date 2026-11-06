@@ -42,6 +42,7 @@ from synapse.config._util import parse_and_validate_mapping
 from synapse.config.server import (
     DIRECT_TCP_ERROR,
     TCPListenerConfig,
+    check_for_duplicate_systemd_sockets,
     parse_listener_def,
 )
 from synapse.types import JsonDict
@@ -232,6 +233,7 @@ class WorkerConfig(Config):
             parse_listener_def(i, x)
             for i, x in enumerate(config.get("worker_listeners", []))
         ]
+        check_for_duplicate_systemd_sockets(self.worker_listeners)
         self.worker_daemonize = bool(config.get("worker_daemonize"))
         self.worker_pid_file = config.get("worker_pid_file")
 
