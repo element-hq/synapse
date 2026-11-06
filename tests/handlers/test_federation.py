@@ -423,12 +423,15 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         return join_event
 
     def test_send_join_repairs_in_flight_local_event(self) -> None:
-        """A /send_join response repairs a concurrent local DAG fork.
+        """A remote join repairs a concurrent local DAG fork.
 
         The local event has selected prev_events before the join, but is persisted
-        after it. The join handler must wait for that event, then send a dummy event
-        which references both resulting forward extremities. This lets the joining
-        server discover and backfill the otherwise-unreferenced local event.
+        after it. Once that event lands, a dummy event must be sent which references
+        both resulting forward extremities. This lets the joining server discover and
+        backfill the otherwise-unreferenced local event.
+
+        The repair happens in the background: the /send_join response must not wait
+        for the in-flight local event.
         """
         local_user_id = self.register_user("local", "test")
         local_access_token = self.login("local", "test")
@@ -493,12 +496,21 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
                 )
             )
 
-            self.pump()
-            self.assertNoResult(send_join_deferred)
+            # The response is not held up by the in-flight local event...
+            self.get_success(send_join_deferred)
+
+            # ...so at this point the join is the room's only forward extremity and
+            # the repair is still waiting for the local event.
+            self.assertEqual(
+                self.get_success(self.store.get_latest_event_ids_in_room(room_id)),
+                frozenset({join_event.event_id}),
+            )
 
             unblock_persistence.callback(None)
             local_event, local_stream_id = self.get_success(local_event_deferred)
-            self.get_success(send_join_deferred)
+
+        # Let the background repair notice that the local event has landed.
+        self.pump(1)
 
         join_stream_id = self.get_success(
             self.store.get_position_for_event(join_event.event_id)

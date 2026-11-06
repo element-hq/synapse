@@ -441,9 +441,8 @@ class SlidingSyncHandler:
             Membership.BAN,
         ):
             # TODO: `get_state_ids_at(...)` doesn't take into account the "current
-            # state". Maybe we need to use
-            # `get_forward_extremities_for_room_at_stream_ordering(...)` to "Fetch the
-            # current state at the time."
+            # state". Maybe we need to fetch the room's forward extremities at the
+            # given stream ordering to "Fetch the current state at the time."
             state_ids = await self.storage_controllers.state.get_state_ids_at(
                 room_id,
                 stream_position=to_token.copy_and_replace(

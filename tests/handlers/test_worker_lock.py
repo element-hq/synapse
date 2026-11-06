@@ -82,9 +82,30 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         self.get_success(lock2.__aenter__())
 
         self.get_success(lock1.__aexit__(None, None, None))
-        self.get_success(wait)
+        self.assertTrue(self.get_success(wait))
 
         self.get_success(lock2.__aexit__(None, None, None))
+
+    def test_wait_for_current_read_lock_holders_times_out(self) -> None:
+        """Waiting gives up, rather than hanging, once the timeout has elapsed."""
+        lock1 = self.worker_lock_handler.acquire_read_write_lock(
+            "name", "key", write=False
+        )
+        self.get_success(lock1.__aenter__())
+
+        wait = defer.ensureDeferred(
+            self.worker_lock_handler.wait_for_current_read_write_lock_holders(
+                "name", "key", write=False, timeout=Duration(seconds=10)
+            )
+        )
+        self.pump()
+        self.assertNoResult(wait)
+
+        # The lock is never released, so the waiter should give up by itself.
+        self._pump_by(amount=Duration(seconds=11), by=Duration(seconds=1))
+        self.assertFalse(self.get_success(wait))
+
+        self.get_success(lock1.__aexit__(None, None, None))
 
     def test_timeouts_for_lock_locally(self) -> None:
         """
