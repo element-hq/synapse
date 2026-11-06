@@ -3813,7 +3813,8 @@ class SyncHandler:
                     # we recalculate the summary:
                     #   if there are membership changes in the timeline, or
                     #   if membership has changed during a gappy sync, or
-                    #   if this is an initial sync.
+                    #   if this is an initial sync, or
+                    #   if an announcement room is sent with its full state.
                     any(ev.event.type == EventTypes.Member for ev in batch.events)
                     or (
                         # XXX: this may include false positives in the form of LL
@@ -3822,11 +3823,24 @@ class SyncHandler:
                         and any(t == EventTypes.Member for (t, k) in state)
                     )
                     or since_token is None
+                    or (
+                        room_builder.full_state
+                        and room_id
+                        in sync_result_builder.synthetic_join_announcement_room_ids
+                    )
                 )
             ):
                 summary = await self.compute_summary(
                     room_id, sync_config, batch, state, now_token
                 )
+                if (
+                    summary is not None
+                    and room_id
+                    in sync_result_builder.synthetic_join_announcement_room_ids
+                ):
+                    # The reader is not among the joined members in the stored
+                    # counts, but the response gives them a synthetic join.
+                    summary["m.joined_member_count"] += 1
 
             if room_builder.rtype == "joined":
                 unread_notifications: dict[str, int] = {}
