@@ -416,7 +416,12 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         if len(self._on_new_event_callbacks) == 0:
             return
 
-        event = await self.store.get_event(event_id)
+        # Rejected events are not shown to modules. Without `allow_rejected` a
+        # rejected event raises NotFoundError here, which propagates out of the
+        # notifier into the caller persisting further federation events.
+        event = await self.store.get_event(event_id, allow_rejected=True)
+        if event.rejected_reason is not None:
+            return
 
         # We *don't* want to wait for the full state here, because waiting for full
         # state will persist event, which in turn will call this method.
