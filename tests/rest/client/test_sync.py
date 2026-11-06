@@ -2299,6 +2299,39 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         response = self._sync(use_state_after, y0)
         self.assertIn(charlie, self._members_in_state(response, use_state_after))
 
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_initial_sync_after_other_client(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """An initial sync that ends where another client of the device already
+        is must not record what it sent. That client has not seen it.
+
+        As in `test_two_clients_on_one_device_do_not_trust_each_other`, but
+        the incremental sync comes first, so the initial sync is the response
+        that must not record.
+        """
+        x0 = self._sync(use_state_after)["next_batch"]
+        self.helper.send(self.room_id, body="b", tok=self.bob_tok)
+        self.helper.send(self.room_id, body="a", tok=self.alice_tok)
+
+        # Client X does an incremental sync that only gets alice's message,
+        # not bob's.
+        rx = self._sync(use_state_after, x0, timeline_limit=1)
+        x1 = rx["next_batch"]
+        self.assertNotIn(self.bob, self._members_in_state(rx, use_state_after))
+
+        # Client Y does an initial sync that includes bob's message. It ends at
+        # the same position as X's sync.
+        ry = self._sync(use_state_after, timeline_limit=2)
+        self.assertEqual(ry["next_batch"], x1)
+        self.assertIn(self.bob, self._members_in_state(ry, use_state_after))
+
+        # Client X does an incremental sync including a new message from bob,
+        # and must get bob's membership.
+        self.helper.send(self.room_id, body="c", tok=self.bob_tok)
+        rx2 = self._sync(use_state_after, x1, timeline_limit=1)
+        self.assertIn(self.bob, self._members_in_state(rx2, use_state_after))
+
     def test_cache_kept_while_device_keeps_syncing(self) -> None:
         """The cache's rules only hold within one cache object, so a device
         that keeps syncing must keep its object. Only a device idle for the
