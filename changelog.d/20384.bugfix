@@ -1,0 +1,1 @@
+Fix unread notification counts being reset when a user changes their display name or avatar, in rooms where they have no unthreaded read receipt.
