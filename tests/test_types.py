@@ -37,6 +37,7 @@ from synapse.types import (
     UserID,
     get_domain_from_id,
     get_localpart_from_id,
+    is_compliant_user_id,
     map_username_to_mxid_localpart,
 )
 
@@ -140,6 +141,21 @@ class MapUsernameTestCase(unittest.TestCase):
         # this should work with either a unicode or a bytes
         self.assertEqual(map_username_to_mxid_localpart("têst"), "t=c3=aast")
         self.assertEqual(map_username_to_mxid_localpart("têst".encode()), "t=c3=aast")
+
+
+class IsCompliantUserIdTestCase(unittest.TestCase):
+    def test_compliant(self) -> None:
+        self.assertTrue(is_compliant_user_id("@test_1234:test"))
+        self.assertTrue(is_compliant_user_id("@TEST!~:test"))
+
+    def test_non_compliant(self) -> None:
+        self.assertFalse(is_compliant_user_id("@têst:test"))
+        self.assertFalse(is_compliant_user_id("@te st:test"))
+        self.assertFalse(is_compliant_user_id("@:test"))
+
+    def test_malformed_does_not_raise(self) -> None:
+        self.assertFalse(is_compliant_user_id(""))
+        self.assertFalse(is_compliant_user_id("@"))
 
 
 @parameterized_class(

@@ -198,9 +198,9 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         )
         self.get_success(
             self.handler.on_invite_request(
-                remote_server,
-                invite_event,
-                invite_event.room_version,
+                origin=remote_server,
+                event=invite_event,
+                room_version=invite_event.room_version,
             )
         )
 
@@ -324,9 +324,9 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             )
             self.get_success(
                 self.handler.on_invite_request(
-                    remote_server,
-                    invite_event,
-                    invite_event.room_version,
+                    origin=remote_server,
+                    event=invite_event,
+                    room_version=invite_event.room_version,
                 )
             )
         else:

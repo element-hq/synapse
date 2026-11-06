@@ -37,13 +37,13 @@ from synapse.api.constants import (
     CANONICALJSON_MAX_INT,
     CANONICALJSON_MIN_INT,
     MAX_PDU_SIZE,
-    EventTypes,
 )
 from synapse.api.errors import Codes, SynapseError
 from synapse.logging.opentracing import SynapseTags, set_tag, trace
 from synapse.synapse_rust.events import (
     EventFormat,
     SerializeEventConfig,
+    SerializeEventFilter,
     Unsigned,
     format_event_for_client_v1,
     format_event_for_client_v2,
@@ -51,11 +51,12 @@ from synapse.synapse_rust.events import (
     format_event_raw,
     redact_event,
     serialize_events,
+    serialize_synthetic_event,
 )
 from synapse.synapse_rust.types import Requester
 from synapse.types import JsonDict
 
-from . import EventBase, StrippedStateEvent
+from . import EventBase
 
 # These are imported only to re-export them (callers import them from this
 # module); listing them in __all__ stops the unused-import lint flagging them
@@ -68,6 +69,7 @@ from . import EventBase, StrippedStateEvent
 __all__ = [
     "EventFormat",
     "SerializeEventConfig",
+    "SerializeEventFilter",
     "format_event_for_client_v1",
     "format_event_for_client_v2",
     "format_event_for_client_v2_without_room_id",
@@ -260,14 +262,17 @@ class EventClientSerializer:
             [event], bundle_aggregations, redaction_map
         )
 
-        return serialize_events(
+        (serialized,) = serialize_events(
             [(event.event, event.membership)],
             time_now,
             config,
             bundle_aggregations=bundle_aggregations,
             redaction_map=redaction_map,
             unsigned_additions=unsigned_additions,
-        )[0]
+        )
+        # We didn't pass a filter, so the event can't have been filtered out.
+        assert serialized is not None
+        return serialized
 
     async def _prepare_serialization(
         self,
@@ -358,8 +363,12 @@ class EventClientSerializer:
         *,
         config: SerializeEventConfig | None = None,
         bundle_aggregations: dict[str, "BundledAggregations"] | None = None,
+        filter: SerializeEventFilter | None = None,
     ) -> list[JsonDict]:
         """Serializes multiple events.
+
+        Intended to be used with `FilteredEvent` objects,
+        but (to support legacy code) accepts `JsonDict` objects and passes those straight through.
 
         Args:
             event
@@ -368,6 +377,8 @@ class EventClientSerializer:
             bundle_aggregations: Whether to include the bundled aggregations for this
                 event. Only applies to non-state events. (State events never include
                 bundled aggregations.)
+            filter: If provided, events rejected by this filter are omitted from the result.
+                (Non-`FilteredEvent` objects are unaffected.)
 
         Returns:
             The list of serialized events
@@ -397,6 +408,7 @@ class EventClientSerializer:
                 bundle_aggregations=bundle_aggregations,
                 redaction_map=redaction_map,
                 unsigned_additions=unsigned_additions,
+                filter=filter,
             )
         )
 
@@ -406,10 +418,27 @@ class EventClientSerializer:
         # FIXME: Ideally we would only call `serialize_events` with
         # `FilteredEvent`s. Currently though some of the old `/events` code paths
         # pass through presence events and the like.
-        return [
-            event if not isinstance(event, FilteredEvent) else next(serialized)
+        stitched = (
+            next(serialized) if isinstance(event, FilteredEvent) else event
             for event in events
-        ]
+        )
+        return [event for event in stitched if event is not None]
+
+    def serialize_synthetic_event(
+        self, event: JsonDict, config: SerializeEventConfig
+    ) -> JsonDict:
+        """Serializes an event that only exists as JSON, such as a synthetic
+        event that is never persisted, applying the event format and field
+        allowlist from `config`.
+
+        Args:
+            event: The event's JSON, in federation format.
+            config: Event serialization config
+
+        Returns:
+            The serialized event
+        """
+        return serialize_synthetic_event(event, config)
 
     def register_add_extra_fields_to_unsigned_client_event_callback(
         self, callback: ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
@@ -549,45 +578,9 @@ def strip_event(event: EventBase) -> JsonDict:
     Stripped state events can only have the `sender`, `type`, `state_key` and `content`
     properties present.
     """
-    # MSC4311: Ensure the create event is available on invites and knocks.
-    # TODO: Implement the rest of MSC4311
-    if (
-        event.room_version.msc4291_room_ids_as_hashes
-        and event.type == EventTypes.Create
-        and event.get_state_key() == ""
-    ):
-        return event.get_pdu_json()
-
     return {
         "type": event.type,
         "state_key": event.state_key,
         "content": dict(event.content),
         "sender": event.sender,
     }
-
-
-def parse_stripped_state_event(raw_stripped_event: Any) -> StrippedStateEvent | None:
-    """
-    Given a raw value from an event's `unsigned` field, attempt to parse it into a
-    `StrippedStateEvent`.
-    """
-    if isinstance(raw_stripped_event, dict):
-        # All of these fields are required
-        type = raw_stripped_event.get("type")
-        state_key = raw_stripped_event.get("state_key")
-        sender = raw_stripped_event.get("sender")
-        content = raw_stripped_event.get("content")
-        if (
-            isinstance(type, str)
-            and isinstance(state_key, str)
-            and isinstance(sender, str)
-            and isinstance(content, dict)
-        ):
-            return StrippedStateEvent(
-                type=type,
-                state_key=state_key,
-                sender=sender,
-                content=content,
-            )
-
-    return None

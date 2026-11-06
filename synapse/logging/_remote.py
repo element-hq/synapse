@@ -128,7 +128,7 @@ class RemoteHandler(logging.Handler):
         if _reactor is None:
             from twisted.internet import reactor
 
-            _reactor = reactor  # type: ignore[assignment]
+            _reactor = reactor
 
         try:
             ip = ip_address(self.host)

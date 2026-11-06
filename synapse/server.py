@@ -129,6 +129,7 @@ from synapse.handlers.room_policy import RoomPolicyHandler
 from synapse.handlers.room_summary import RoomSummaryHandler
 from synapse.handlers.search import SearchHandler
 from synapse.handlers.send_email import SendEmailHandler
+from synapse.handlers.server_announcements import ServerAnnouncementsHandler
 from synapse.handlers.set_password import SetPasswordHandler
 from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sso import SsoHandler
@@ -177,6 +178,7 @@ from synapse.streams.events import EventSources
 from synapse.synapse_rust.handlers import RustHandlers
 from synapse.synapse_rust.msc4388_rendezvous import MSC4388RendezvousHandler
 from synapse.synapse_rust.rendezvous import RendezvousHandler
+from synapse.synapse_rust.runtime import RustRuntime
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches import CACHE_METRIC_REGISTRY
@@ -973,6 +975,18 @@ class HomeServer(metaclass=abc.ABCMeta):
         return RustHandlers(self)
 
     @cache_in_self
+    def get_rust_runtime(self) -> RustRuntime:
+        """The per-homeserver state for the Rust side of Synapse: the tokio
+        thread pool, plus anything else Rust code keeps for the lifetime of the
+        homeserver.
+
+        The tokio runtime is started lazily on first use, and shut down when
+        this homeserver is shut down.
+        """
+        # TODO: make the number of worker threads configurable
+        return RustRuntime(hs=self, worker_threads=4)
+
+    @cache_in_self
     def get_event_sources(self) -> EventSources:
         return EventSources(self)
 
@@ -1056,6 +1070,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_federation_registry(self) -> FederationHandlerRegistry:
         return FederationHandlerRegistry(self)
+
+    @cache_in_self
+    def get_server_announcements_handler(self) -> ServerAnnouncementsHandler:
+        return ServerAnnouncementsHandler(self)
 
     @cache_in_self
     def get_server_notices_manager(self) -> ServerNoticesManager:
@@ -1196,7 +1214,11 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_msc4388_rendezvous_handler(self) -> MSC4388RendezvousHandler:
-        return MSC4388RendezvousHandler(self)
+        return MSC4388RendezvousHandler(
+            self,
+            max_unauthenticated_sessions=self.config.experimental.msc4388_max_unauthenticated_sessions,
+            ttl=self.config.experimental.msc4388_session_ttl_ms,
+        )
 
     @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":

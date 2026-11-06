@@ -1,9 +1,4 @@
 #! /usr/bin/env python
-import sys
-
-if sys.version_info < (3, 11):
-    raise RuntimeError("Requires at least Python 3.11, to import tomllib")
-
 import tomllib
 
 with open("poetry.lock", "rb") as f:

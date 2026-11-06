@@ -199,7 +199,7 @@ def main() -> None:
     parser.add_argument(
         "--exists-ok",
         action="store_true",
-        help="Do not fail if user already exists.",
+        help="Do not fail if the user already exists. The user account will not be updated.",
     )
     password_group = parser.add_mutually_exclusive_group()
     password_group.add_argument(

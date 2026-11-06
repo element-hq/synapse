@@ -29,7 +29,7 @@ use pyo3::{
     exceptions::PyValueError,
     pyclass, pymethods,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
-    Bound, IntoPyObject, Py, PyAny, PyResult, Python,
+    Bound, Py, PyAny, PyResult, Python,
 };
 use ulid::Ulid;
 
@@ -37,8 +37,9 @@ use self::session::Session;
 use crate::{
     duration::SynapseDuration,
     errors::{NotFoundError, SynapseError},
+    homeserver::HomeServer,
     http::{http_request_from_twisted, http_response_to_twisted, HeaderMapPyExt},
-    UnwrapInfallible,
+    runtime::RustRuntime,
 };
 
 mod session;
@@ -57,7 +58,7 @@ fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
 #[pyclass]
 struct RendezvousHandler {
     base: Uri,
-    clock: Py<PyAny>,
+    runtime: RustRuntime,
     sessions: BTreeMap<Ulid, Session>,
     capacity: usize,
     max_content_length: u64,
@@ -113,25 +114,18 @@ impl RendezvousHandler {
     #[pyo3(signature = (homeserver, /, capacity=100, max_content_length=4*1024, eviction_interval=60*1000, ttl=60*1000))]
     fn new(
         py: Python<'_>,
-        homeserver: &Bound<'_, PyAny>,
+        homeserver: HomeServer,
         capacity: usize,
         max_content_length: u64,
         eviction_interval: u64,
         ttl: u64,
     ) -> PyResult<Py<Self>> {
-        let base: String = homeserver
-            .getattr("config")?
-            .getattr("server")?
-            .getattr("public_baseurl")?
-            .extract()?;
+        let base = homeserver.config(py)?.server.public_baseurl;
         let base = Uri::try_from(format!("{base}_synapse/client/rendezvous"))
             .map_err(|_| PyValueError::new_err("Invalid base URI"))?;
 
-        let clock = homeserver
-            .call_method0("get_clock")?
-            .into_pyobject(py)
-            .unwrap_infallible()
-            .unbind();
+        let runtime = homeserver.get_rust_runtime(py)?;
+        let clock = homeserver.get_clock(py)?;
 
         let eviction_duration = SynapseDuration::from_milliseconds(eviction_interval);
 
@@ -141,7 +135,7 @@ impl RendezvousHandler {
             py,
             Self {
                 base,
-                clock,
+                runtime,
                 sessions: BTreeMap::new(),
                 capacity,
                 max_content_length,
@@ -150,32 +144,26 @@ impl RendezvousHandler {
         )?;
 
         let evict = self_.getattr(py, "_evict")?;
-        homeserver.call_method0("get_clock")?.call_method(
-            "looping_call",
-            (evict, &eviction_duration),
-            None,
-        )?;
+        clock
+            .bind(py)
+            .call_method("looping_call", (evict, &eviction_duration), None)?;
 
         Ok(self_)
     }
 
-    fn _evict(&mut self, py: Python<'_>) -> PyResult<()> {
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+    fn _evict(&mut self) -> PyResult<()> {
+        let now = self.runtime.clock().now();
         self.evict(now);
 
         Ok(())
     }
 
-    fn handle_post(&mut self, py: Python<'_>, twisted_request: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn handle_post(&mut self, twisted_request: &Bound<'_, PyAny>) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
         let content_type = self.check_input_headers(request.headers())?;
 
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        let now = self.runtime.clock().now();
 
         // We trigger an immediate eviction if we're at 2x the capacity
         if self.sessions.len() >= self.capacity * 2 {
@@ -209,18 +197,12 @@ impl RendezvousHandler {
         Ok(())
     }
 
-    fn handle_get(
-        &mut self,
-        py: Python<'_>,
-        twisted_request: &Bound<'_, PyAny>,
-        id: &str,
-    ) -> PyResult<()> {
+    fn handle_get(&mut self, twisted_request: &Bound<'_, PyAny>, id: &str) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
         let if_none_match: Option<IfNoneMatch> = request.headers().typed_get_optional()?;
 
-        let now: u64 = self.clock.call_method0(py, "time_msec")?.extract(py)?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        let now = self.runtime.clock().now();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self
@@ -250,12 +232,7 @@ impl RendezvousHandler {
         Ok(())
     }
 
-    fn handle_put(
-        &mut self,
-        py: Python<'_>,
-        twisted_request: &Bound<'_, PyAny>,
-        id: &str,
-    ) -> PyResult<()> {
+    fn handle_put(&mut self, twisted_request: &Bound<'_, PyAny>, id: &str) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
         let content_type = self.check_input_headers(request.headers())?;
@@ -264,8 +241,7 @@ impl RendezvousHandler {
 
         let data = request.into_body();
 
-        let now: u64 = self.clock.call_method0(py, "time_msec")?.extract(py)?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        let now = self.runtime.clock().now();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self

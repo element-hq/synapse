@@ -48,10 +48,12 @@ from synapse.config import (  # noqa: F401
     room_directory,
     saml2,
     server,
+    server_announcements,
     server_notices,
     spam_checker,
     sso,
     stats,
+    task_scheduler,
     third_party_event_rules,
     tls,
     tracer,
@@ -110,6 +112,7 @@ class RootConfig:
     userdirectory: user_directory.UserDirectoryConfig
     consent: consent.ConsentConfig
     stats: stats.StatsConfig
+    serverannouncements: server_announcements.ServerAnnouncementsConfig
     servernotices: server_notices.ServerNoticesConfig
     roomdirectory: room_directory.RoomDirectoryConfig
     thirdpartyrules: third_party_event_rules.ThirdPartyRulesConfig
@@ -122,6 +125,7 @@ class RootConfig:
     background_updates: background_updates.BackgroundUpdateConfig
     auto_accept_invites: auto_accept_invites.AutoAcceptInvitesConfig
     user_types: user_types.UserTypesConfig
+    task_scheduler: task_scheduler.TaskSchedulerConfig
     mas: mas.MasConfig
     matrix_rtc: matrixrtc.MatrixRtcConfig
 

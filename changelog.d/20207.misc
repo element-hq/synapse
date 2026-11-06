@@ -1,1 +1,0 @@
-Fix the `Schema Diff` CI check failing to post a comment on pull requests from forks.

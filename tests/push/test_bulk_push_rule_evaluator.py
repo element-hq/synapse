@@ -29,6 +29,8 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
 from synapse.api.room_versions import RoomVersions
+from synapse.events import EventBase
+from synapse.events.snapshot import EventContext
 from synapse.push.bulk_push_rule_evaluator import BulkPushRuleEvaluator
 from synapse.rest import admin
 from synapse.rest.client import login, push_rule, register, room
@@ -149,6 +151,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                     "content": {
                         "msgtype": "m.text",
                         "body": "helo @room",
+                        EventContentFields.MENTIONS: {"room": True},
                     },
                     "sender": self.alice,
                 },
@@ -207,6 +210,74 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
         bulk_evaluator._action_for_event_by_user.assert_not_called()
 
+    def _create_message_from_alice(self) -> tuple[EventBase, EventContext]:
+        """Create (but do not persist) a message event sent by Alice."""
+        event, unpersisted_context = self.get_success(
+            self.event_creation_handler.create_event(
+                self.requester,
+                {
+                    "type": "m.room.message",
+                    "room_id": self.room_id,
+                    "content": {"msgtype": "m.text", "body": "helo"},
+                    "sender": self.alice,
+                },
+            )
+        )
+        context = self.get_success(unpersisted_context.persist(event))
+        return event, context
+
+    def _get_users_with_staged_push_actions(self, event_id: str) -> list[str]:
+        return self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_onecol(
+                table="event_push_actions_staging",
+                keyvalues={"event_id": event_id},
+                retcol="user_id",
+                desc="get_users_with_staged_push_actions",
+            )
+        )
+
+    def test_action_for_event_by_user_skipped_when_sender_is_only_local_user(
+        self,
+    ) -> None:
+        """Ensure that we don't evaluate push rules when the only local user in the
+        room is the sender, as users are never notified about their own events."""
+        event, context = self._create_message_from_alice()
+
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+
+        # The sender should never be considered for notifications.
+        rules_by_user = self.get_success(bulk_evaluator._get_rules_for_event(event))
+        self.assertEqual(rules_by_user, {})
+
+        # Mock one of the methods called when evaluating push rules -- we do this
+        # instead of only checking the results in the database because we want to
+        # ensure that code isn't even running.
+        bulk_evaluator._get_power_levels_and_sender_level = AsyncMock()  # type: ignore[method-assign]
+
+        self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
+        bulk_evaluator._get_power_levels_and_sender_level.assert_not_called()
+        self.assertEqual(self._get_users_with_staged_push_actions(event.event_id), [])
+
+    def test_action_for_event_by_user_with_other_local_user(self) -> None:
+        """Ensure that push rules are still evaluated for local users other than the
+        sender."""
+        bob = self.register_user("bob", "pass")
+        bob_token = self.login(bob, "pass")
+        self.helper.join(self.room_id, bob, tok=bob_token)
+
+        event, context = self._create_message_from_alice()
+
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+
+        # Only Bob should be considered for notifications.
+        rules_by_user = self.get_success(bulk_evaluator._get_rules_for_event(event))
+        self.assertEqual(set(rules_by_user), {bob})
+
+        self.get_success(bulk_evaluator.action_for_events_by_user([(event, context)]))
+        self.assertEqual(
+            self._get_users_with_staged_push_actions(event.event_id), [bob]
+        )
+
     def _create_and_process(
         self,
         bulk_evaluator: BulkPushRuleEvaluator,
@@ -240,6 +311,44 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
             )
         )
         return len(result) > 0
+
+    def test_legacy_mention_rules_removed(self) -> None:
+        """
+        Matrix v1.17 (MSC4210) removed the legacy mention rules from the base rule
+        set: an event which merely contains the user's name in its body, without
+        an `m.mentions` property, must no longer notify.
+        """
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+
+        # Note that the events are not `m.room.message`s, so that the generic
+        # underride rules do not fire and only the mention rules can notify.
+        self.assertFalse(
+            self._create_and_process(bulk_evaluator, {"body": "hello alice"}),
+            "alice should not be notified (legacy mention rules are removed)",
+        )
+        self.assertTrue(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "body": "hello alice",
+                    EventContentFields.MENTIONS: {"user_ids": [self.alice]},
+                },
+            ),
+            "alice should be notified (intentional mention)",
+        )
+
+    @override_config({"experimental_features": {"msc4210_enabled": False}})
+    def test_legacy_mention_rules_opt_out(self) -> None:
+        """
+        The legacy mention rules can temporarily be restored, in which case an
+        event which contains the user's name in its body notifies again.
+        """
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+
+        self.assertTrue(
+            self._create_and_process(bulk_evaluator, {"body": "hello alice"}),
+            "alice should be notified (legacy mention)",
+        )
 
     def test_user_mentions(self) -> None:
         """Test the behavior of an event which includes invalid user mentions."""
@@ -593,6 +702,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                 {
                     "msgtype": "m.text",
                     "body": "this is a message that mentions alice",
+                    EventContentFields.MENTIONS: {"user_ids": [self.alice]},
                 },
                 type="m.room.message",
             ),
@@ -649,4 +759,32 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                 },
                 type="m.room.message",
             )
+        )
+
+    def _get_rule_ids(self) -> set[str]:
+        """Returns the IDs of all push rules that apply to Alice."""
+        filtered_push_rules = self.get_success(
+            self.hs.get_datastores().main.get_push_rules_for_user(self.alice)
+        )
+        return {rule.rule_id for rule, _ in filtered_push_rules.rules()}
+
+    def test_msc4075_rules_omitted_when_disabled(self) -> None:
+        """The MSC4075 base rules should be filtered out unless the feature is enabled."""
+        rule_ids = self._get_rule_ids()
+        self.assertNotIn(
+            "global/override/.org.matrix.msc4075.rule.rtc.invite_for_me", rule_ids
+        )
+        self.assertNotIn(
+            "global/override/.org.matrix.msc4075.rule.rtc.invite_for_room", rule_ids
+        )
+
+    @override_config({"experimental_features": {"msc4075_enabled": True}})
+    def test_msc4075_rules_present_when_enabled(self) -> None:
+        """The MSC4075 base rules should be included when the feature is enabled."""
+        rule_ids = self._get_rule_ids()
+        self.assertIn(
+            "global/override/.org.matrix.msc4075.rule.rtc.invite_for_me", rule_ids
+        )
+        self.assertIn(
+            "global/override/.org.matrix.msc4075.rule.rtc.invite_for_room", rule_ids
         )

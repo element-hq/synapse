@@ -311,7 +311,8 @@ presence:
 ---
 ### `require_auth_for_profile_requests`
 
-*(boolean)* Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless `allow_profile_lookup_over_federation` is set to false. Defaults to `false`.
+*(boolean)* Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless `allow_profile_lookup_over_federation` is set to false.
+This option must be enabled in order to use `limit_profile_requests_to_users_who_share_rooms`. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -320,7 +321,8 @@ require_auth_for_profile_requests: true
 ---
 ### `limit_profile_requests_to_users_who_share_rooms`
 
-*(boolean)* Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server. Defaults to `false`.
+*(boolean)* Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server.
+The check can only be applied to authenticated requests, so this option requires `require_auth_for_profile_requests` to be enabled as well. Synapse will refuse to start if this option is enabled without it. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -611,7 +613,7 @@ listeners:
 ---
 ### `manhole`
 
-*(integer|null)* Turn on the Twisted telnet manhole service on the given port.
+*(integer|null)* Turn on the Twisted manhole service on the given port.
 
 This can also be set by the `--manhole` argument when starting Synapse.
 
@@ -1109,7 +1111,7 @@ user_ips_max_age: 14d
 ---
 ### `request_token_inhibit_3pid_errors`
 
-*(boolean)* Inhibits the `/requestToken` endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (`sid`) to clients. Defaults to `false`.
+*(boolean)* Inhibits the `/requestToken` endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (`sid`) to clients. Defaults to `true`.
 
 Example configuration:
 ```yaml
@@ -2021,7 +2023,7 @@ rc_presence:
 
 *(object)* Ratelimiting settings for delayed event management.
 
-This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account, or its source IP when requests are unauthenticated.
+This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 
@@ -2698,17 +2700,24 @@ turn_allow_guests: false
 
 This setting has the following sub-options:
 
-* `transports` (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to `[]`.
+* `transports` (array): A list of MatrixRTC transports advertised to clients on `/_matrix/client/v1/rtc/transports` and, if it is enabled via `experimental_features.msc4143_enabled`, the unstable `/_matrix/client/unstable/org.matrix.msc4143/rtc/transports` endpoint. Defaults to `[]`.
 
   Options for each entry include:
 
-  * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
+  * `type` (string): The type of transport to advertise to clients.
 
-  * `url` (string): The WebSocket URL of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is required.
+    - Transports of type `m.livekit` advertise the stable transport based on LiveKit's selective
+      forwarding unit (SFU).
+
+    - Transports of type `livekit` advertise the unstable version of the LiveKit-based transport.
+      This type is deprecated and should only be used when backwards compatibility for clients
+      that don't yet support the stable transport is required.
+
+  * `url` (string): The WebSocket URL of the LiveKit SFU. If `type` is "m.livekit", this is required. If `type` is "livekit", either this or `livekit_service_url` is required.
 
     Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
 
-  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
+  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If `type` is "livekit", either this or `url` is required.
 
     Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
@@ -2716,6 +2725,8 @@ Example configuration:
 ```yaml
 matrix_rtc:
   transports:
+  - type: m.livekit
+    url: wss://livekit.example.com
   - type: livekit
     url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
@@ -4639,6 +4650,20 @@ outbound_federation_restricted_to:
 Example configuration:
 ```yaml
 run_background_tasks_on: worker1
+```
+---
+### `task_scheduler`
+
+*(object)* Configuration for the task scheduler.
+
+This setting has the following sub-options:
+
+* `max_concurrent_tasks` (integer): The maximum number of tasks that can run concurrently in the task scheduler. Setting this too high may swamp the database connection pool. Defaults to `5`.
+
+Example configuration:
+```yaml
+task_scheduler:
+  max_concurrent_tasks: 5
 ```
 ---
 ### `update_user_directory_from_worker`
