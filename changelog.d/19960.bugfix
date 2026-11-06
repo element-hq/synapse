@@ -1,0 +1,1 @@
+Fix a bug where `/sync` could return a 500 error ("Missing state for event that is not user's own membership") when an out-of-band membership event, since de-outliered into the room's current state, appeared in a room timeline.
