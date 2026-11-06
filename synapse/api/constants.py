@@ -504,7 +504,8 @@ class StickyEvent:
 
     MAX_EVENTS_IN_SYNC: Final = 100
     """
-    Maximum number of sticky events to include in /sync.
+    Maximum number of sticky events to include in /sync (in total), or in a
+    sliding sync response (per room, like `timeline_limit`).
 
     This is the default specified in the MSC. Chosen arbitrarily.
 

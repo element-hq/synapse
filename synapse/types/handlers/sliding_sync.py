@@ -111,7 +111,9 @@ class SlidingSyncResult:
     Attributes:
         next_pos: The next position token in the sliding window to request (next_batch).
         lists: Sliding window API. A map of list key to list results.
-        rooms: Room subscription API. A map of room ID to room results.
+        rooms: Room subscription API. A map of room ID to room results. This
+            includes rooms without any updates, which shouldn't be returned to the
+            client (see `RoomResult.__bool__`).
         extensions: Extensions API. A map of extension key to extension results.
     """
 
@@ -139,6 +141,9 @@ class SlidingSyncResult:
                 the timeline events above. This allows clients to show accurate reaction
                 counts (or edits, threads), even if some of the reaction events were skipped
                 over in a gappy sync.
+            sticky_events: The sticky events (MSC4354) to return in the sticky events
+                extension (MSC4480), in stream order, or `None` if the room is not in
+                scope for the extension. They don't count as an update to the room.
             stripped_state: Stripped state events (for rooms where the usre is
                 invited/knocked). Same as `rooms.invite.$room_id.invite_state` in sync v2,
                 absent on joined/left rooms
@@ -188,6 +193,7 @@ class SlidingSyncResult:
         # Should be empty for invite/knock rooms with `stripped_state`
         timeline_events: list[FilteredEvent]
         bundled_aggregations: dict[str, "BundledAggregations"] | None
+        sticky_events: list[FilteredEvent] | None
         # Optional because it's only relevant to invite/knock rooms
         stripped_state: list[JsonDict]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
@@ -496,7 +502,7 @@ class SlidingSyncResult:
         # there are no changes, and b) since we're sorting rooms by `stream_ordering` of
         # the latest activity, anything that would cause the order to change would end
         # up in `self.rooms` and cause us to send down the change.
-        return bool(self.rooms or self.extensions)
+        return any(self.rooms.values()) or bool(self.extensions)
 
     @staticmethod
     def empty(next_pos: SlidingSyncStreamToken) -> "SlidingSyncResult":
@@ -538,21 +544,30 @@ class RoomSyncConfig:
         required_state_map: Map from state event type to state_keys requested for the
             room. The values are close to `StateKey` but actually use a syntax where you
             can provide `*` wildcard and `$LAZY` for lazy-loading room members.
+
+        sticky_events: Whether the room is in scope for the sticky events extension
+            (MSC4480), as per its `lists`/`rooms`. Per-request, so neither persisted
+            in the per-connection state nor considered when comparing configs.
     """
 
     timeline_limit: int
     required_state_map: Mapping[str, AbstractSet[str]]
+    sticky_events: bool = attr.ib(default=False, eq=False)
 
     @classmethod
     def from_room_config(
         cls,
         room_params: SlidingSyncConfig.CommonRoomParameters,
+        *,
+        sticky_events: bool = False,
     ) -> "RoomSyncConfig":
         """
         Create a `RoomSyncConfig` from a `SlidingSyncList`/`RoomSubscription` config.
 
         Args:
             room_params: `SlidingSyncConfig.SlidingSyncList` or `SlidingSyncConfig.RoomSubscription`
+            sticky_events: Whether the list/room subscription is in scope for the
+                sticky events extension (MSC4480).
         """
         required_state_map: dict[str, set[str]] = {}
         for (
@@ -611,6 +626,7 @@ class RoomSyncConfig:
         return cls(
             timeline_limit=room_params.timeline_limit,
             required_state_map=required_state_map,
+            sticky_events=sticky_events,
         )
 
     def combine_room_sync_config(
@@ -695,7 +711,11 @@ class RoomSyncConfig:
                     else:
                         required_state_map[state_type].add(state_key)
 
-        return RoomSyncConfig(timeline_limit, required_state_map)
+        return RoomSyncConfig(
+            timeline_limit,
+            required_state_map,
+            sticky_events=self.sticky_events or other_room_sync_config.sticky_events,
+        )
 
     def must_await_full_state(
         self,

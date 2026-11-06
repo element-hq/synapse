@@ -970,6 +970,10 @@ class SlidingSyncRestServlet(RestServlet):
 
         serialized_rooms: dict[str, JsonDict] = {}
         for room_id, room_result in rooms.items():
+            # Skip rooms without any updates to return.
+            if not room_result:
+                continue
+
             serialized_rooms[room_id] = {
                 "notification_count": room_result.notification_count,
                 "highlight_count": room_result.highlight_count,
