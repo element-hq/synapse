@@ -1315,9 +1315,13 @@ The following parameters should be set in the URL:
 This API allows to override or disable ratelimiting for a specific user.
 There are specific APIs to set, get and delete a ratelimit override.
 
-An override only replaces the rate and burst count of the *message sending*
-ratelimiter (`rc_message` in the homeserver config); it does not override the
-limits of other ratelimiters (e.g. `rc_invites`, `rc_joins` or `rc_login`).
+An override replaces the rate and burst count of the `rc_message` ratelimiter,
+which applies to sending events and some related actions (e.g. creating rooms,
+updating the user's profile). It does not override the limits of other
+ratelimiters (e.g. `rc_invites` or `rc_joins`).
+
+The exception is disabling ratelimiting: an override with `messages_per_second`
+set to `0` disables all ratelimiting for the user's authenticated requests.
 The exception is disabling ratelimiting: an override with `messages_per_second`
 set to `0` disables **all** ratelimiting for the user.
 
