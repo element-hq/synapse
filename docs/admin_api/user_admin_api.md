@@ -1321,8 +1321,6 @@ updating the user's profile). It does not override the limits of other
 ratelimiters (e.g. `rc_invites` or `rc_joins`).
 
 The exception is disabling ratelimiting: an override with `messages_per_second`
-set to `0` disables all ratelimiting for the user's authenticated requests.
-The exception is disabling ratelimiting: an override with `messages_per_second`
 set to `0` disables **all** ratelimiting for the user.
 
 ### Get status of ratelimit override
