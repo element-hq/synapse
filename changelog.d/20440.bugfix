@@ -1,0 +1,1 @@
+Return the event with an empty context, rather than a 500, when `GET /_matrix/client/v3/rooms/{roomId}/context/{eventId}` is called on an out-of-band membership event such as a remote invite or a knock.

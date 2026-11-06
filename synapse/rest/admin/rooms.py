@@ -901,7 +901,7 @@ class RoomEventContextServlet(RestServlet):
             )
 
         time_now = self.clock.time_msec()
-        results = {
+        results: JsonDict = {
             "events_before": await self._event_serializer.serialize_events(
                 event_context.events_before,
                 time_now,
@@ -921,9 +921,14 @@ class RoomEventContextServlet(RestServlet):
                 [FilteredEvent.state(e) for e in event_context.state],
                 time_now,
             ),
-            "start": event_context.start,
-            "end": event_context.end,
         }
+
+        # Omitted when the handler has no token to give, as in
+        # RoomEventContextServlet.
+        if event_context.start is not None:
+            results["start"] = event_context.start
+        if event_context.end is not None:
+            results["end"] = event_context.end
 
         return HTTPStatus.OK, results
 

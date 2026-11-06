@@ -26,7 +26,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes
+from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -36,6 +36,7 @@ from synapse.api.errors import (
 )
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
+from synapse.events.snapshot import EventContext
 from synapse.federation.federation_client import SendJoinResult
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -398,6 +399,152 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
             ),
             exc=LimitExceededError,
         )
+
+    def test_context_on_out_of_band_invite(self) -> None:
+        """/context on the user's own out-of-band invite returns 200 with an empty
+        context instead of 500ing.
+
+        The invite is an outlier with no state group, so the state lookup in
+        get_event_context raises unless the handler returns early. It is an outlier in
+        a room this server created and is joined to, unlike a real out-of-band invite,
+        so the surrounding events exist here and only the visibility filter hides them.
+        """
+        other_server = "otherserver"
+        other_user = "@otheruser:" + other_server
+
+        user_id = self.register_user("kermit", "test")
+        tok = self.login("kermit", "test")
+        room_id = self.helper.create_room_as(room_creator=user_id, tok=tok)
+        room_version = self.get_success(self.store.get_room_version(room_id))
+
+        invited_user = self.register_user("invitee", "test")
+        invited_tok = self.login("invitee", "test")
+
+        invite = make_test_pdu_event(
+            {
+                "type": EventTypes.Member,
+                "content": {"membership": "invite"},
+                "room_id": room_id,
+                "sender": other_user,
+                "state_key": invited_user,
+                "depth": 32,
+                "prev_events": [],
+                "auth_events": [],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            room_version,
+        )
+        self.get_success(
+            self.handler.on_invite_request(
+                origin=other_server, event=invite, room_version=invite.room_version
+            )
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id}/context/{invite.event_id}",
+            access_token=invited_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(channel.json_body["event"]["event_id"], invite.event_id)
+        self.assertEqual(channel.json_body["events_before"], [])
+        self.assertEqual(channel.json_body["events_after"], [])
+        self.assertEqual(channel.json_body["state"], [])
+        self.assertNotIn("start", channel.json_body)
+        self.assertNotIn("end", channel.json_body)
+
+        # Only the invitee can see the invite.
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id}/context/{invite.event_id}",
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+
+    def test_context_on_own_knock(self) -> None:
+        """/context on the user's own knock in a room this server is not in returns
+        200 with an empty context."""
+        user_id = self.register_user("knocker", "test")
+        tok = self.login("knocker", "test")
+        room_id = "!knocked:otherserver"
+
+        knock = self._inject_out_of_band_membership(
+            room_id, sender=user_id, state_key=user_id, membership=Membership.KNOCK
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id}/context/{knock.event_id}",
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(channel.json_body["event"]["event_id"], knock.event_id)
+        self.assertEqual(channel.json_body["events_before"], [])
+        self.assertEqual(channel.json_body["events_after"], [])
+        self.assertEqual(channel.json_body["state"], [])
+        self.assertNotIn("start", channel.json_body)
+        self.assertNotIn("end", channel.json_body)
+
+    def test_context_on_out_of_band_leave(self) -> None:
+        """/context on a leave which denies the user's knock returns 200 with an empty
+        context."""
+        user_id = self.register_user("knocker", "test")
+        tok = self.login("knocker", "test")
+        room_id = "!knocked:otherserver"
+
+        denial = self._inject_out_of_band_membership(
+            room_id,
+            sender="@otheruser:otherserver",
+            state_key=user_id,
+            membership=Membership.LEAVE,
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id}/context/{denial.event_id}",
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(channel.json_body["event"]["event_id"], denial.event_id)
+        self.assertEqual(channel.json_body["events_before"], [])
+        self.assertEqual(channel.json_body["events_after"], [])
+        self.assertEqual(channel.json_body["state"], [])
+        self.assertNotIn("start", channel.json_body)
+        self.assertNotIn("end", channel.json_body)
+
+    def _inject_out_of_band_membership(
+        self, room_id: str, sender: str, state_key: str, membership: str
+    ) -> EventBase:
+        """Persist a membership event as an outlier in a room this server is not in,
+        as the knock and leave federation flows do."""
+        room_version = RoomVersions.V10
+        self.get_success(
+            self.store.maybe_store_room_on_outlier_membership(room_id, room_version)
+        )
+
+        builder = self.hs.get_event_builder_factory().for_room_version(
+            room_version,
+            {
+                "type": EventTypes.Member,
+                "sender": sender,
+                "state_key": state_key,
+                "room_id": room_id,
+                "content": {"membership": membership},
+            },
+        )
+        event = self.get_success(builder.build(prev_event_ids=[], auth_event_ids=[]))
+        event.internal_metadata.outlier = True
+        event.internal_metadata.out_of_band_membership = True
+
+        storage_controllers = self.hs.get_storage_controllers()
+        persistence = storage_controllers.persistence
+        assert persistence is not None
+        self.get_success(
+            persistence.persist_event(
+                event, EventContext.for_outlier(storage_controllers)
+            )
+        )
+        return event
 
     def _build_and_send_join_event(
         self, other_server: str, other_user: str, room_id: str
