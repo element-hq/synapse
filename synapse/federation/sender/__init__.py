@@ -677,17 +677,8 @@ class FederationSender(AbstractFederationSender):
 
                     if destinations is None:
                         try:
-                            # Get the state from before the event.
-                            # We need to make sure that this is the state from before
-                            # the event and not from after it.
-                            # Otherwise if the last member on a server in a room is
-                            # banned then it won't receive the event because it won't
-                            # be in the room after the ban.
-                            destinations = await self.state.get_hosts_in_room_at_events(
-                                event.room_id,
-                                event_ids=event.prev_state_events
-                                if supports_msc4242_state_dag(event)
-                                else event.prev_event_ids(),
+                            destinations = await self._get_hosts_in_room_before_event(
+                                event
                             )
                         except Exception:
                             logger.exception(
@@ -817,6 +808,54 @@ class FederationSender(AbstractFederationSender):
 
         finally:
             self._is_processing = False
+
+    async def _get_hosts_in_room_before_event(
+        self, event: EventBase
+    ) -> Collection[str]:
+        """Get the hosts that were in the room just before the given event.
+
+        We need to make sure that this is the state from before the event and not
+        from after it. Otherwise if the last member on a server in a room is banned
+        then it won't receive the event because it won't be in the room after the
+        ban.
+        """
+        prev_event_ids = (
+            event.prev_state_events
+            if supports_msc4242_state_dag(event)
+            else event.prev_event_ids()
+        )
+
+        # The prev events may include an out-of-band membership event that has not
+        # been de-outliered yet, and so has no state group. `EventBuilder.build`
+        # adds the local user's out-of-band invite to the prev events when they join
+        # a room we're already in, so that the join passes the auth rules.
+        #
+        # Resolving the state at a set of events that includes an outlier silently
+        # drops every event whose state group was not already cached, which can
+        # leave us with empty state and no destinations at all. In that case, fall
+        # back to the state after the event itself (which is always known, as the
+        # event has been persisted). The only way we expect to end up here is a local
+        # user's membership event that points at their own out-of-band membership,
+        # and the state before and after such an event only differs in that user's
+        # membership, which doesn't change which remote hosts are in the room.
+        prev_state_groups = (
+            await self._storage_controllers.state.get_state_group_for_events(
+                prev_event_ids
+            )
+        )
+        if any(prev_state_groups.get(e) is None for e in prev_event_ids):
+            logger.info(
+                "Missing state for some of the prev events of %s; using the state "
+                "after the event to calculate its destinations",
+                event.event_id,
+            )
+            return await self.state.get_hosts_in_room_at_events(
+                event.room_id, event_ids=[event.event_id]
+            )
+
+        return await self.state.get_hosts_in_room_at_events(
+            event.room_id, event_ids=prev_event_ids
+        )
 
     async def _send_pdu(self, pdu: EventBase, destinations: Iterable[str]) -> None:
         # We loop through all destinations to see whether we already have
