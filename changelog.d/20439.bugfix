@@ -1,0 +1,1 @@
+Fix a bug where `/sync` could fail with a 500 error (`Missing state for event that is not user's own membership`) shortly after an invite or invite rejection received over federation entered a room's state.
