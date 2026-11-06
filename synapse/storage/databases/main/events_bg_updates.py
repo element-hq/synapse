@@ -1440,10 +1440,11 @@ class EventsBackgroundUpdatesStore(
                 """,
                 (last_stream, batch_size),
             )
-            row_count = txn.rowcount
-            if row_count == 0:
+            # We need to read the rows before calling `rowcount`.
+            last_stream = max((row[0] for row in txn), default=None)
+            if last_stream is None:
                 return 0
-            last_stream = max(row[0] for row in txn)
+            row_count = txn.rowcount
             logger.info("populated stream_ordering2 up to %i", last_stream)
 
             self.db_pool.updates._background_update_progress_txn(

@@ -11,6 +11,7 @@ use pyo3::types::PyModule;
 // `pub` so the items in these submodules count as public API even though
 // nothing consumes them yet, which keeps clippy's `dead_code` lint quiet.
 // Tighten to private once the connection/cursor code uses them.
+pub mod cursor_state;
 pub mod helpers;
 pub mod value;
 
