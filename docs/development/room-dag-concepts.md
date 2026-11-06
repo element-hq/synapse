@@ -1,5 +1,7 @@
 # Room DAG concepts
 
+The events in a room form a directed acyclic graph (DAG).
+
 ## Edges
 
 The word "edge" comes from graph theory lingo. An edge is just a connection
@@ -113,3 +115,48 @@ mappings of `event_id -> state_group` and `state_group -> state`.
 
 TODO: `state_group_edges` is a further optimization...
       notes from @Azrenbeth, https://pastebin.com/seUGVGeT
+
+
+
+## Soft-failed events
+
+TODO
+
+## Rejected events
+
+TODO
+
+
+## State rollbacks
+
+There are two classes of state rollbacks:
+
+ 1. Intentional rollbacks (revocations due to concurrent state updates)
+ 1. Unintentional rollbacks also known as a state reset (due to logical holes in the
+    state resolution algorithm)
+
+Random notes to incorporate:
+
+Learning about new state later in time
+
+When there is a fork in the graph, the events are considered to have happened
+concurrently. The state resolution algorithm is used to reconcile this.
+
+Access control and permission revocation is a non-monotonic problem (CALM theorem). This
+means that state resolution is non-monotonic.
+
+This can result in a membership change without corresponding membership event
+
+How does the client become aware of these changes? (for state?, for non-state?)
+
+An attacker backdating events is indistinguishable from high network latency
+
+
+References:
+
+ - [*Eventually Consistent Access Control: Practical Insights on Matrix from
+   Decentralized Systems Theory*](https://www.youtube.com/watch?v=lfQ2SRXd8PY&t=2583)
+   (Florian Jacob, Hannes Hartenstein),
+ - [*Improving the security of the federation
+   protocol*](https://www.youtube.com/watch?v=m_2ZBs_4RbE) (Kegan Dougal)
+
