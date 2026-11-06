@@ -224,6 +224,7 @@ class SlidingSyncRoomLists:
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
         self._clock = hs.get_clock()
+        self._enable_sticky_events = hs.config.experimental.msc4354_enabled
 
     async def compute_interested_rooms(
         self,
@@ -276,6 +277,7 @@ class SlidingSyncRoomLists:
         lists: dict[str, SlidingSyncResult.SlidingWindowList] = {}
         # Keep track of the rooms that we can display and need to fetch more info about
         relevant_room_map: dict[str, RoomSyncConfig] = {}
+        sticky_events_request = self._get_sticky_events_request(sync_config)
         # The set of room IDs of all rooms that could appear in any list. These
         # include rooms that are outside the list ranges.
         all_rooms: set[str] = set()
@@ -501,11 +503,18 @@ class SlidingSyncRoomLists:
 
                     # Since creating the `RoomSyncConfig` takes some work, let's just do it
                     # once.
-                    room_sync_config = RoomSyncConfig.from_room_config(list_config)
+                    list_room_sync_config = RoomSyncConfig.from_room_config(
+                        list_config,
+                        sticky_events=sticky_events_request is not None
+                        and (
+                            "*" in sticky_events_request.lists
+                            or list_key in sticky_events_request.lists
+                        ),
+                    )
 
                     # Exclude partially-stated rooms if we must wait for the room to be
                     # fully-stated
-                    if room_sync_config.must_await_full_state(self.is_mine_id):
+                    if list_room_sync_config.must_await_full_state(self.is_mine_id):
                         filtered_sync_room_map = {
                             room_id: room
                             for room_id, room in filtered_sync_room_map.items()
@@ -566,6 +575,7 @@ class SlidingSyncRoomLists:
                                 #
                                 # Update our `relevant_room_map` with the room we're going
                                 # to display and need to fetch more info about.
+                                room_sync_config = list_room_sync_config
                                 existing_room_sync_config = relevant_room_map.get(
                                     room_id
                                 )
@@ -623,7 +633,12 @@ class SlidingSyncRoomLists:
 
                     # Take the superset of the `RoomSyncConfig` for each room.
                     room_sync_config = RoomSyncConfig.from_room_config(
-                        room_subscription
+                        room_subscription,
+                        sticky_events=sticky_events_request is not None
+                        and (
+                            "*" in sticky_events_request.rooms
+                            or room_id in sticky_events_request.rooms
+                        ),
                     )
 
                     # Exclude partially-stated rooms if we must wait for the room to be
@@ -647,7 +662,10 @@ class SlidingSyncRoomLists:
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
         relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
-            previous_connection_state, from_token, relevant_room_map
+            previous_connection_state,
+            from_token,
+            to_token,
+            relevant_room_map,
         )
 
         return SlidingSyncInterestedRooms(
@@ -684,6 +702,7 @@ class SlidingSyncRoomLists:
         lists: dict[str, SlidingSyncResult.SlidingWindowList] = {}
         # Keep track of the rooms that we can display and need to fetch more info about
         relevant_room_map: dict[str, RoomSyncConfig] = {}
+        sticky_events_request = self._get_sticky_events_request(sync_config)
         # The set of room IDs of all rooms that could appear in any list. These
         # include rooms that are outside the list ranges.
         all_rooms: set[str] = set()
@@ -715,11 +734,18 @@ class SlidingSyncRoomLists:
 
                     # Since creating the `RoomSyncConfig` takes some work, let's just do it
                     # once.
-                    room_sync_config = RoomSyncConfig.from_room_config(list_config)
+                    list_room_sync_config = RoomSyncConfig.from_room_config(
+                        list_config,
+                        sticky_events=sticky_events_request is not None
+                        and (
+                            "*" in sticky_events_request.lists
+                            or list_key in sticky_events_request.lists
+                        ),
+                    )
 
                     # Exclude partially-stated rooms if we must wait for the room to be
                     # fully-stated
-                    if room_sync_config.must_await_full_state(self.is_mine_id):
+                    if list_room_sync_config.must_await_full_state(self.is_mine_id):
                         filtered_sync_room_map = {
                             room_id: room
                             for room_id, room in filtered_sync_room_map.items()
@@ -754,6 +780,7 @@ class SlidingSyncRoomLists:
                                 #
                                 # Update our `relevant_room_map` with the room we're going
                                 # to display and need to fetch more info about.
+                                room_sync_config = list_room_sync_config
                                 existing_room_sync_config = relevant_room_map.get(
                                     room_id
                                 )
@@ -809,7 +836,12 @@ class SlidingSyncRoomLists:
 
                     # Take the superset of the `RoomSyncConfig` for each room.
                     room_sync_config = RoomSyncConfig.from_room_config(
-                        room_subscription
+                        room_subscription,
+                        sticky_events=sticky_events_request is not None
+                        and (
+                            "*" in sticky_events_request.rooms
+                            or room_id in sticky_events_request.rooms
+                        ),
                     )
 
                     # Exclude partially-stated rooms if we must wait for the room to be
@@ -835,7 +867,10 @@ class SlidingSyncRoomLists:
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
         relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
-            previous_connection_state, from_token, relevant_room_map
+            previous_connection_state,
+            from_token,
+            to_token,
+            relevant_room_map,
         )
 
         return SlidingSyncInterestedRooms(
@@ -849,15 +884,40 @@ class SlidingSyncRoomLists:
             dm_room_ids=dm_room_ids,
         )
 
+    def _get_sticky_events_request(
+        self, sync_config: SlidingSyncConfig
+    ) -> SlidingSyncConfig.Extensions.StickyEventsExtension | None:
+        """Get the sticky events extension (MSC4480) from the request, or `None` if
+        it isn't enabled.
+
+        Its `lists`/`rooms` determine which lists/room subscriptions are in scope
+        for the extension (see `RoomSyncConfig.sticky_events`), as per the common
+        per-room extension semantics of MSC4508.
+        """
+        if not self._enable_sticky_events or sync_config.extensions is None:
+            return None
+
+        sticky_events_request = sync_config.extensions.sticky_events
+        if sticky_events_request is Absent or not sticky_events_request.enabled:
+            return None
+
+        return sticky_events_request
+
     async def _filter_relevant_rooms_to_send(
         self,
         previous_connection_state: PerConnectionState,
         from_token: StreamToken | None,
+        to_token: StreamToken,
         relevant_room_map: dict[str, RoomSyncConfig],
     ) -> dict[str, RoomSyncConfig]:
         """Filters the `relevant_room_map` down to those rooms that may have
-        updates we need to fetch and return."""
+        updates we need to fetch and return.
 
+        Sticky events (MSC4354) count as updates for the rooms with
+        `RoomSyncConfig.sticky_events` set, as we fetch them alongside the rest of
+        the room data (so that their senders can be included in the lazy-loaded
+        members of the room).
+        """
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
         relevant_rooms_to_send_map: dict[str, RoomSyncConfig] = relevant_room_map
@@ -945,6 +1005,44 @@ class SlidingSyncRoomLists:
                             raise SlidingSyncUnknownPosition()
 
                     rooms_should_send.update(rooms_that_have_updates)
+
+                    # Rooms in scope for the sticky events extension can have
+                    # sticky events to send even when nothing new has happened
+                    # in the room, e.g. because the room has just come into
+                    # scope, or because we hit the `limit` last time.
+                    live_sticky_events_room_ids = []
+                    for room_id, room_config in relevant_room_map.items():
+                        if (
+                            not room_config.sticky_events
+                            or room_id in rooms_should_send
+                        ):
+                            continue
+
+                        sticky_events_status = (
+                            previous_connection_state.sticky_events.have_sent_room(
+                                room_id
+                            )
+                        )
+                        if sticky_events_status.status == HaveSentRoomFlag.LIVE:
+                            live_sticky_events_room_ids.append(room_id)
+                        elif (
+                            sticky_events_status.status == HaveSentRoomFlag.NEVER
+                            or sticky_events_status.status
+                            == HaveSentRoomFlag.PREVIOUSLY
+                        ):
+                            rooms_should_send.add(room_id)
+                        else:
+                            assert_never(sticky_events_status.status)
+
+                    # For `LIVE` rooms, we only need to check for new sticky events.
+                    rooms_should_send.update(
+                        await self.store.get_rooms_with_sticky_events_between(
+                            live_sticky_events_room_ids,
+                            from_token=from_token.sticky_events_key,
+                            to_token=to_token.sticky_events_key,
+                        )
+                    )
+
                     relevant_rooms_to_send_map = {
                         room_id: room_sync_config
                         for room_id, room_sync_config in relevant_room_map.items()
