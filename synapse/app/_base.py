@@ -53,7 +53,7 @@ from twisted.internet.interfaces import (
     IReactorUNIX,
 )
 from twisted.internet.protocol import ServerFactory
-from twisted.internet.tcp import Port
+from twisted.internet.tcp import Connection, Port
 from twisted.logger import LoggingFile, LogLevel
 from twisted.protocols.tls import TLSMemoryBIOFactory
 from twisted.python.threadpool import ThreadPool
@@ -684,6 +684,14 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
     reactor.installNameResolver(
         GAIResolver(reactor, getThreadPool=lambda: resolver_threadpool)
     )
+
+    # Twisted sends at most `SEND_LIMIT` (128KiB) per write to a TCP socket on
+    # each reactor tick, to work around Windows mishandling large sends. On a
+    # busy reactor that throttles large responses to 128KiB per tick, even when
+    # the kernel send buffer has plenty of room. Raise it to 4MiB (the default
+    # maximum TCP send buffer on Linux) so each tick can fill the send buffer.
+    if sys.platform != "win32":
+        Connection.SEND_LIMIT = 4 * 1024 * 1024
 
     # Register the threadpools with our metrics.
     register_threadpool(
