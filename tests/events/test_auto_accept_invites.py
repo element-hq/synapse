@@ -36,7 +36,7 @@ from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.handlers.sync import JoinedSyncResult, SyncRequestKey
 from synapse.module_api import ModuleApi
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.types import StreamToken, UserID, UserInfo, create_requester
 from synapse.util.clock import Clock
@@ -58,6 +58,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
 
     servlets = [
         admin.register_servlets,
+        knock.register_servlets,
         login.register_servlets,
         room.register_servlets,
     ]
@@ -118,6 +119,46 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
 
         join_update: JoinedSyncResult = join_updates[0]
         self.assertEqual(join_update.room_id, room_id)
+
+    @override_config(
+        {
+            "auto_accept_invites": {
+                "enabled": True,
+            },
+        }
+    )
+    def test_auto_accept_invite_accepting_a_knock(self) -> None:
+        """Test that an invite which accepts a knock is auto-accepted like any
+        other invite.
+
+        MSC4509 joins such invites through a separate, opt-in path; this module
+        must keep accepting them for deployments which have `enabled` set.
+        """
+        creator_id = self.register_user("creator", "pass")
+        creator_tok = self.login("creator", "pass")
+
+        knocker_id = self.register_user("knocker", "pass")
+        knocker_tok = self.login("knocker", "pass")
+
+        room_id = self.helper.create_room_as(
+            creator_id,
+            is_public=False,
+            tok=creator_tok,
+        )
+        self.helper.send_state(
+            room_id,
+            EventTypes.JoinRules,
+            {"join_rule": "knock"},
+            tok=creator_tok,
+        )
+        self.helper.knock(room=room_id, user=knocker_id, tok=knocker_tok)
+
+        # The creator accepts the knock by inviting the knocker.
+        self.helper.invite(room_id, creator_id, knocker_id, tok=creator_tok)
+
+        join_updates, _ = sync_join(self, knocker_id)
+        self.assertEqual(len(join_updates), 1)
+        self.assertEqual(join_updates[0].room_id, room_id)
 
     @override_config(
         {

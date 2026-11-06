@@ -1643,6 +1643,8 @@ class FederationHandler:
             await self.store.remove_push_actions_from_staging(event.event_id)
             raise
 
+        await member_handler.maybe_auto_join_accepted_knock(event)
+
         return event
 
     async def do_remotely_reject_invite(

@@ -130,6 +130,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             hs.get_module_api_callbacks().third_party_event_rules
         )
         self._server_notices_mxid = self.config.servernotices.server_notices_mxid
+        self._msc4509_enabled = hs.config.experimental.msc4509_enabled
         self._enable_lookup = hs.config.registration.enable_3pid_lookup
         self.allow_per_room_profiles = self.config.server.allow_per_room_profiles
 
@@ -534,9 +535,74 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 if i == max_retries - 1:
                     raise e
 
+        if membership == Membership.INVITE:
+            await self.maybe_auto_join_accepted_knock(result_event)
+
         # we know it was persisted, so should have a stream ordering
         assert result_event.internal_metadata.stream_ordering
         return result_event.event_id, result_event.internal_metadata.stream_ordering
+
+    async def maybe_auto_join_accepted_knock(self, invite_event: EventBase) -> None:
+        """Join a local user to a room if the given invite accepts a knock of theirs.
+
+        An invite accepts a knock when the invitee's own knock event is among the
+        invite's auth events, which is how MSC4509 specifies the check: the auth
+        events show the invite was authorised against the knock, so an invite sent
+        independently of it does not qualify. They are also the only evidence
+        available for an invite received over federation, where this server holds no
+        state for the room.
+
+        The join runs in a background process: it takes the same per-room membership
+        lock as the caller, and for a remote invite it runs a `send_join` handshake
+        which must not hold up the inviting server's `/invite` request.
+        """
+        if not self._msc4509_enabled:
+            return
+
+        assert invite_event.state_key is not None
+        invitee = invite_event.state_key
+        if not self.hs.is_mine_id(invitee):
+            return
+
+        auth_events = await self.store.get_events(invite_event.auth_event_ids())
+        accepts_knock = any(
+            auth_event.type == EventTypes.Member
+            and auth_event.state_key == invitee
+            and auth_event.membership == Membership.KNOCK
+            for auth_event in auth_events.values()
+        )
+        if not accepts_knock:
+            return
+
+        self.hs.run_as_background_process(
+            "msc4509_auto_join_on_accepted_knock",
+            self._auto_join_accepted_knock,
+            invitee,
+            invite_event.room_id,
+        )
+
+    async def _auto_join_accepted_knock(self, invitee: str, room_id: str) -> None:
+        """Join `invitee` to `room_id` on their behalf, after their knock was accepted.
+
+        If this fails the invite is still there, so the user can accept it by hand.
+        """
+        try:
+            await self.update_membership(
+                requester=create_requester(invitee),
+                target=UserID.from_string(invitee),
+                room_id=room_id,
+                action=Membership.JOIN,
+                # The user did not ask for this join, and the invite which triggered
+                # it was rate limited on the inviter.
+                ratelimit=False,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to join %s to %s after their knock was accepted",
+                invitee,
+                room_id,
+                exc_info=True,
+            )
 
     async def copy_room_tags_and_direct_to_room(
         self, old_room_id: str, new_room_id: str, user_id: str
