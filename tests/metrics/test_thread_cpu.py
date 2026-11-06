@@ -83,8 +83,8 @@ class ThreadCPUMetricsTestCase(unittest.TestCase):
             burnt.set()
             release.wait(timeout=Duration(seconds=10).as_secs())
 
-        # Since `/proc/<tid>/stat` puts the thread name in brackets and uses
-        # spaces as field separators, choose a thread name with those characters
+        # Since `/proc/<tid>/stat` puts the thread name in parenthesis and uses
+        # spaces as field separators, choose a thread name with those same characters
         # to ensure we parse it correctly.
         #
         # Note that the thread name only gets passed to the kernel from Python
