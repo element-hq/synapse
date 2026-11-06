@@ -27,7 +27,6 @@ from typing import (
     Collection,
     Generator,
     Iterable,
-    Sequence,
     cast,
 )
 
@@ -56,7 +55,6 @@ from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.types import JsonDict, StrCollection
 from synapse.util.caches.descriptors import cached
 from synapse.util.caches.lrucache import LruCache
-from synapse.util.cancellation import cancellable
 from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.json import json_encoder
@@ -1775,84 +1773,6 @@ class EventFederationWorkerStore(
             "have_room_forward_extremities_changed_since",
             have_room_forward_extremities_changed_since_txn,
         )
-
-    @cancellable
-    async def get_forward_extremities_for_room_at_stream_ordering(
-        self, room_id: str, stream_ordering: int
-    ) -> Sequence[str]:
-        """For a given room_id and stream_ordering, return the forward
-        extremeties of the room at that point in "time".
-
-        Throws a StoreError if we have since purged the index for
-        stream_orderings from that point.
-
-        Args:
-            room_id:
-            stream_ordering:
-
-        Returns:
-            A list of event_ids
-        """
-        # We want to make the cache more effective, so we clamp to the last
-        # change before the given ordering.
-        last_change = self._events_stream_cache.get_max_pos_of_last_change(room_id)  # type: ignore[attr-defined]
-        if last_change is None:
-            # If the room isn't in the cache we know that the last change was
-            # somewhere before the earliest known position of the cache, so we
-            # can clamp to that.
-            last_change = self._events_stream_cache.get_earliest_known_position()  # type: ignore[attr-defined]
-
-        # We don't always have a full stream_to_exterm_id table, e.g. after
-        # the upgrade that introduced it, so we make sure we never ask for a
-        # stream_ordering from before a restart
-        last_change = max(self._stream_order_on_start, last_change)  # type: ignore[attr-defined]
-
-        # provided the last_change is recent enough, we now clamp the requested
-        # stream_ordering to it.
-        assert self.stream_ordering_month_ago is not None
-        if last_change > self.stream_ordering_month_ago:
-            stream_ordering = min(last_change, stream_ordering)
-
-        return await self._get_forward_extremeties_for_room(room_id, stream_ordering)
-
-    @cached(max_entries=5000, num_args=2)
-    async def _get_forward_extremeties_for_room(
-        self, room_id: str, stream_ordering: int
-    ) -> Sequence[str]:
-        """For a given room_id and stream_ordering, return the forward
-        extremeties of the room at that point in "time".
-
-        Throws a StoreError if we have since purged the index for
-        stream_orderings from that point.
-        """
-        assert self.stream_ordering_month_ago is not None
-        if stream_ordering <= self.stream_ordering_month_ago:
-            raise StoreError(400, "stream_ordering too old %s" % (stream_ordering,))
-
-        sql = """
-                SELECT event_id FROM stream_ordering_to_exterm
-                INNER JOIN (
-                    SELECT room_id, MAX(stream_ordering) AS stream_ordering
-                    FROM stream_ordering_to_exterm
-                    WHERE stream_ordering <= ? GROUP BY room_id
-                ) AS rms USING (room_id, stream_ordering)
-                WHERE room_id = ?
-        """
-
-        def get_forward_extremeties_for_room_txn(txn: LoggingTransaction) -> list[str]:
-            txn.execute(sql, (stream_ordering, room_id))
-            return [event_id for (event_id,) in txn]
-
-        event_ids = await self.db_pool.runInteraction(
-            "get_forward_extremeties_for_room", get_forward_extremeties_for_room_txn
-        )
-
-        # If we didn't find any IDs, then we must have cleared out the
-        # associated `stream_ordering_to_exterm`.
-        if not event_ids:
-            raise StoreError(400, "stream_ordering too old %s" % (stream_ordering,))
-
-        return event_ids
 
     def _get_connected_prev_event_backfill_results_txn(
         self, txn: LoggingTransaction, event_id: str, limit: int

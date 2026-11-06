@@ -137,6 +137,11 @@ last_pdu_ts_metric = Gauge(
 # federation.
 _INBOUND_EVENT_HANDLING_LOCK_NAME = "federation_inbound_pdu"
 
+# How long to wait for event creations which were in flight when a remote join was
+# persisted, before repairing the room's forward extremities anyway.
+# See `FederationServer._repair_forward_extremities_after_join`.
+_JOIN_EXTREMITY_REPAIR_TIMEOUT = Duration(seconds=20)
+
 
 class FederationServer(FederationBase):
     def __init__(self, hs: "HomeServer"):
@@ -200,6 +205,11 @@ class FederationServer(FederationBase):
 
         # Whether we have started handling old events in the staging area.
         self._started_handling_of_staged_events = False
+
+        # Rooms with an in-flight `_repair_forward_extremities_after_join`, and
+        # rooms which need another pass once the in-flight one has finished.
+        self._rooms_being_repaired_after_join: set[str] = set()
+        self._rooms_to_repair_again_after_join: set[str] = set()
 
     @wrap_as_background_process("_handle_old_staged_events")
     async def _handle_old_staged_events(self) -> None:
@@ -979,33 +989,14 @@ class FederationServer(FederationBase):
             resp["state"] = serialize_and_filter_pdus(state_events, time_now)
             resp["auth_chain"] = serialize_and_filter_pdus(auth_chain_events, time_now)
 
-        # Snapshot event creations which were already in progress when the join was
-        # persisted, then wait for that snapshot to finish. These creations may have
-        # selected prev_events which do not include the join. Event creations which
-        # start later are not waited for: they select prev_events after the join and
-        # will be sent to the newly joined server through normal federation.
-        await self._worker_lock_handler.wait_for_current_read_write_lock_holders(
-            NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
-        )
-
-        # Check the current forward extremities for the room here. If there is more
-        # than one, an event was created in the room during the make_join/send_join
-        # handshake. The joining server is likely to miss this event until a second
-        # event references it - which could be some time. In that case, we proactively
-        # send a dummy extensible event that ties these forward extremities together.
-        # The remote server will then attempt to backfill the missing event on its own.
+        # An event may have been created in the room while we were handling the
+        # make_join/send_join handshake, and have ended up as a sibling of the join
+        # rather than an ancestor of it. Tie the room's forward extremities back
+        # together so the joining server learns about it.
         #
-        # By not sending the 'missing event' directly, but instead having the joining
-        # homeserver backfill it, the stream ordering for the missing event will be
-        # "before" the join (which is what we expect).
-
-        forward_extremities = await self.store.get_latest_event_ids_in_room(room_id)
-
-        if len(forward_extremities) > 1:
-            # The likelihood of this being used is extremely low, thus only build the handler
-            # when necessary.
-            _creation_handler = self.hs.get_event_creation_handler()
-            await _creation_handler._send_dummy_event_after_room_join(room_id)
+        # This runs in the background: nothing in the response depends on it, and
+        # waiting for in-flight events could hold the response up for a long time.
+        self._start_repair_forward_extremities_after_join(room_id)
 
         if servers_in_room is not None:
             resp["servers_in_room"] = list(servers_in_room)
@@ -1017,6 +1008,88 @@ class FederationServer(FederationBase):
         )
 
         return resp
+
+    def _start_repair_forward_extremities_after_join(self, room_id: str) -> None:
+        """Kick off `_repair_forward_extremities_after_join` in the background.
+
+        Only one repair runs per room at a time: several servers joining a busy
+        room at once would otherwise each wait on (and poll for) the same set of
+        in-flight events. If a join comes in while a repair is running we re-run
+        it afterwards, since the new join may race with events that the running
+        repair did not snapshot.
+        """
+        if room_id in self._rooms_being_repaired_after_join:
+            self._rooms_to_repair_again_after_join.add(room_id)
+            return
+
+        self._rooms_being_repaired_after_join.add(room_id)
+        self.hs.run_as_background_process(
+            "repair_forward_extremities_after_join",
+            self._repair_forward_extremities_after_join,
+            room_id,
+        )
+
+    async def _repair_forward_extremities_after_join(self, room_id: str) -> None:
+        """Tie together forward extremities created during a remote join.
+
+        A local event can select its `prev_events` before an inbound join is
+        persisted but itself be persisted after it. It is then a sibling of the
+        join rather than an ancestor, and it is not sent to the joining server
+        (that server was not in the state used to pick the event's federation
+        destinations). The joining server would not learn about it until some
+        later event references it, which could be some time.
+        """
+        try:
+            while True:
+                self._rooms_to_repair_again_after_join.discard(room_id)
+                await self._repair_forward_extremities_after_join_once(room_id)
+                if room_id not in self._rooms_to_repair_again_after_join:
+                    return
+        finally:
+            self._rooms_being_repaired_after_join.discard(room_id)
+            self._rooms_to_repair_again_after_join.discard(room_id)
+
+    async def _repair_forward_extremities_after_join_once(self, room_id: str) -> None:
+        # Snapshot the event creations which were already in progress when the join
+        # was persisted, then wait for that snapshot to finish. These creations may
+        # have selected `prev_events` which do not include the join. Event creations
+        # which start later are not waited for: they select `prev_events` after the
+        # join and so will be sent to the newly joined server through normal
+        # federation.
+        drained = (
+            await self._worker_lock_handler.wait_for_current_read_write_lock_holders(
+                NEW_EVENT_DURING_PURGE_LOCK_NAME,
+                room_id,
+                write=False,
+                timeout=_JOIN_EXTREMITY_REPAIR_TIMEOUT,
+            )
+        )
+        if not drained:
+            # Handling an inbound PDU holds the lock while it fetches missing
+            # events over federation, which can take a while. Carry on and check
+            # the extremities anyway: at worst we don't spot the fork, and the
+            # joining server learns about the event when the next one is sent --
+            # which is the behaviour we had before this repair existed.
+            logger.warning(
+                "Timed out waiting for in-flight events in room %s after a remote "
+                "join; checking forward extremities anyway",
+                room_id,
+            )
+
+        # If there is more than one forward extremity, an event was created in the
+        # room during the make_join/send_join handshake. We proactively send a dummy
+        # extensible event that ties these forward extremities together. The remote
+        # server will then attempt to backfill the missing event on its own.
+        #
+        # By not sending the 'missing event' directly, but instead having the joining
+        # homeserver backfill it, the stream ordering for the missing event will be
+        # "before" the join (which is what we expect).
+        forward_extremities = await self.store.get_latest_event_ids_in_room(room_id)
+        if len(forward_extremities) > 1:
+            # The likelihood of this being used is extremely low, thus only build the
+            # handler when necessary.
+            creation_handler = self.hs.get_event_creation_handler()
+            await creation_handler._send_dummy_event_after_room_join(room_id)
 
     async def on_make_leave_request(
         self, origin: str, room_id: str, user_id: str
