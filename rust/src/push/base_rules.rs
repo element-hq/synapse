@@ -117,6 +117,30 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
         default: true,
         default_enabled: true,
     },
+    // MSC4506: notify the members of a room who are able to act on a knock
+    // (i.e. those with a power level sufficient to invite the knocker). Must
+    // come before `.m.rule.member_event`, which suppresses all other member
+    // events.
+    PushRule {
+        rule_id: Cow::Borrowed("global/override/.org.matrix.msc4506.rule.knock"),
+        priority_class: 5,
+        conditions: Cow::Borrowed(&[
+            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("m.room.member"),
+            })),
+            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
+                key: Cow::Borrowed("content.membership"),
+                pattern: Cow::Borrowed("knock"),
+            })),
+            Condition::Known(KnownCondition::RecipientPermission {
+                key: Cow::Borrowed("invite"),
+            }),
+        ]),
+        actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_FALSE_ACTION, SOUND_ACTION]),
+        default: true,
+        default_enabled: true,
+    },
     PushRule {
         rule_id: Cow::Borrowed("global/override/.m.rule.member_event"),
         priority_class: 5,
@@ -811,6 +835,7 @@ mod tests {
             msc4075_enabled,
             false, // msc4210_enabled
             false, // msc4306_enabled
+            false, // msc4506_enabled
         )
     }
 
@@ -851,6 +876,7 @@ mod tests {
             Some(sender_power_level),
             BTreeMap::new(),
             BTreeMap::new(),
+            BTreeMap::new(),
             false,
             vec![],
             false,
@@ -864,7 +890,7 @@ mod tests {
     fn test_rtc_invite_for_me_notifies_mentioned_user() {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[ALICE], false, 0);
 
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![Action::Notify, RING_ACTION]);
     }
 
@@ -872,7 +898,7 @@ mod tests {
     fn test_rtc_invite_for_me_ignores_other_users() {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[BOB], false, 0);
 
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![]);
     }
 
@@ -881,7 +907,7 @@ mod tests {
         // The default `notifications.room` power level is 50.
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[], true, 50);
 
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![Action::Notify, RING_ACTION]);
     }
 
@@ -889,7 +915,7 @@ mod tests {
     fn test_rtc_invite_for_room_requires_permission() {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[], true, 0);
 
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![]);
     }
 
@@ -897,7 +923,7 @@ mod tests {
     fn test_rtc_rules_ignore_other_event_types() {
         let evaluator = build_evaluator("org.example.other", &[ALICE], true, 50);
 
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![]);
     }
 
@@ -905,7 +931,7 @@ mod tests {
     fn test_rtc_rules_are_omitted_when_msc4075_is_disabled() {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[ALICE], true, 50);
 
-        let actions = evaluator.run(&push_rules(false), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(false), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![]);
     }
 }
