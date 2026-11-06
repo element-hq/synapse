@@ -32,7 +32,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
-from synapse.api.room_versions import RoomVersion
+from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.federation.transport.client import SendJoinResponse
@@ -41,7 +41,7 @@ from synapse.http.matrixfederationclient import (
 )
 from synapse.http.types import QueryParams
 from synapse.rest import admin
-from synapse.rest.client import login, room, sync
+from synapse.rest.client import knock, login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, MutableStateMap, StateMap
 from synapse.types.handlers.sliding_sync import (
@@ -657,3 +657,409 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             exact=True,
             message="Expected to find the event ID of the user2 membership to be sent from hs1 over federation to hs2",
         )
+
+
+class OutOfBandMembershipStateAfterTests(unittest.FederatingHomeserverTestCase):
+    """
+    Out-of-band leaves (rejecting a remote invite, rescinding a knock on a remote
+    room) are outliers, so they never enter the current state delta stream. Check
+    that MSC4222 `state_after` reports them anyway.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.federation_http_client = Mock()
+        return self.setup_test_homeserver(
+            federation_http_client=self.federation_http_client
+        )
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
+        self.store = self.hs.get_datastores().main
+
+        self.local_user1_id = self.register_user("user1", "pass")
+        self.local_user1_tok = self.login(self.local_user1_id, "pass")
+
+        self.remote_user_id = f"@remote-user:{self.OTHER_SERVER_NAME}"
+        self.remote_room_id = f"!remote-room:{self.OTHER_SERVER_NAME}"
+        self.room_version = RoomVersions.V11
+
+        self.room_create_event = make_test_event(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.remote_room_id,
+                    "sender": self.remote_user_id,
+                    "depth": 1,
+                    "origin_server_ts": 1,
+                    "type": EventTypes.Create,
+                    "state_key": "",
+                    "content": {
+                        EventContentFields.ROOM_VERSION: self.room_version.identifier,
+                    },
+                    "auth_events": [],
+                    "prev_events": [],
+                }
+            ),
+            room_version=self.room_version,
+        )
+
+        self.creator_membership_event = make_test_event(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.remote_room_id,
+                    "sender": self.remote_user_id,
+                    "depth": 2,
+                    "origin_server_ts": 2,
+                    "type": EventTypes.Member,
+                    "state_key": self.remote_user_id,
+                    "content": {"membership": Membership.JOIN},
+                    "auth_events": [self.room_create_event.event_id],
+                    "prev_events": [self.room_create_event.event_id],
+                }
+            ),
+            room_version=self.room_version,
+        )
+
+    def sync(self, since: str | None = None) -> JsonDict:
+        """Do a `/sync` with MSC4222 `state_after` enabled.
+
+        Asserts the request was successful.
+
+        Args:
+            since: Optional since token
+
+        Returns:
+            The response body.
+        """
+        sync_path = "/_matrix/client/v3/sync?timeout=0&use_state_after=true"
+        if since:
+            sync_path += f"&since={since}"
+
+        channel = self.make_request("GET", sync_path, access_token=self.local_user1_tok)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        return channel.json_body
+
+    def assert_leave_in_state_after(self, since: str) -> None:
+        """Assert that user1's leave is the whole of `state_after` for the remote
+        room in an incremental sync from `since`."""
+        response_body = self.sync(since=since)
+
+        leave_room = response_body["rooms"]["leave"][self.remote_room_id]
+        state_after_events = leave_room["state_after"]["events"]
+        self.assertIncludes(
+            {
+                (event["type"], event["state_key"], event["content"]["membership"])
+                for event in state_after_events
+            },
+            {(EventTypes.Member, self.local_user1_id, Membership.LEAVE)},
+            exact=True,
+            message=str(leave_room),
+        )
+
+    def _invite_local_user_to_remote_room(self) -> EventBase:
+        """Have the remote server invite user1, giving them an out-of-band invite
+        membership in a room our server is not in.
+
+        Returns:
+            The invite event.
+        """
+        invite_event = make_test_event(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.remote_room_id,
+                    "sender": self.remote_user_id,
+                    "depth": 3,
+                    "origin_server_ts": 3,
+                    "type": EventTypes.Member,
+                    "state_key": self.local_user1_id,
+                    "content": {"membership": Membership.INVITE},
+                    "auth_events": [
+                        self.room_create_event.event_id,
+                        self.creator_membership_event.event_id,
+                    ],
+                    "prev_events": [self.creator_membership_event.event_id],
+                }
+            ),
+            room_version=self.room_version,
+        )
+
+        channel = self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v2/invite/{self.remote_room_id}/{invite_event.event_id}",
+            content={
+                "event": invite_event.get_dict(),
+                "invite_room_state": [strip_event(self.room_create_event)],
+                "room_version": self.room_version.identifier,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        return invite_event
+
+    def _knock_local_user_on_remote_room(self) -> None:
+        """Have user1 knock on the remote room through the remote server, giving
+        them an out-of-band knock membership."""
+        knock_event_template = {
+            "room_id": self.remote_room_id,
+            "sender": self.local_user1_id,
+            "depth": 3,
+            "origin_server_ts": 3,
+            "type": EventTypes.Member,
+            "state_key": self.local_user1_id,
+            "content": {"membership": Membership.KNOCK},
+            "auth_events": [self.room_create_event.event_id],
+            "prev_events": [self.creator_membership_event.event_id],
+        }
+
+        T = TypeVar("T")
+
+        async def get_json(
+            destination: str,
+            path: str,
+            args: QueryParams | None = None,
+            retry_on_dns_fail: bool = True,
+            timeout: int | None = None,
+            ignore_backoff: bool = False,
+            try_trailing_slash_on_400: bool = False,
+            parser: ByteParser[T] | None = None,
+        ) -> JsonDict | T:
+            if path.startswith(
+                f"/_matrix/federation/v1/make_knock/{urllib.parse.quote_plus(self.remote_room_id)}/{urllib.parse.quote_plus(self.local_user1_id)}"
+            ):
+                return {
+                    "event": knock_event_template,
+                    "room_version": self.room_version.identifier,
+                }
+
+            raise NotImplementedError(
+                "We have not mocked a response for `get_json(...)` for the following endpoint yet: "
+                + f"{destination}{path}"
+            )
+
+        self.federation_http_client.get_json.side_effect = get_json
+
+        async def put_json(
+            destination: str,
+            path: str,
+            args: QueryParams | None = None,
+            data: JsonDict | None = None,
+            json_data_callback: Callable[[], JsonDict] | None = None,
+            long_retries: bool = False,
+            timeout: int | None = None,
+            ignore_backoff: bool = False,
+            backoff_on_404: bool = False,
+            try_trailing_slash_on_400: bool = False,
+            parser: ByteParser[T] | None = None,
+            backoff_on_all_error_codes: bool = False,
+        ) -> JsonDict | T:
+            if path.startswith(
+                f"/_matrix/federation/v1/send_knock/{urllib.parse.quote_plus(self.remote_room_id)}/"
+            ):
+                return {"knock_room_state": [strip_event(self.room_create_event)]}
+
+            raise NotImplementedError(
+                "We have not mocked a response for `put_json(...)` for the following endpoint yet: "
+                + f"{destination}{path} with the following body data: {data}"
+            )
+
+        self.federation_http_client.put_json.side_effect = put_json
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/knock/{urllib.parse.quote_plus(self.remote_room_id)}?server_name={self.OTHER_SERVER_NAME}",
+            {},
+            access_token=self.local_user1_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        # Reset the mocks now that the knock has completed
+        self.federation_http_client.get_json.side_effect = None
+        self.federation_http_client.put_json.side_effect = None
+
+        membership, _ = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(
+                self.local_user1_id, self.remote_room_id
+            )
+        )
+        self.assertEqual(membership, Membership.KNOCK)
+
+    def test_rejected_invite_in_state_after(self) -> None:
+        """Rejecting a remote invite through the inviting server is reflected in
+        `state_after` (MSC4222) on sync."""
+        invite_event = self._invite_local_user_to_remote_room()
+        since_token = self.sync()["next_batch"]
+
+        leave_event_template = make_test_event(
+            {
+                "room_id": self.remote_room_id,
+                "sender": self.local_user1_id,
+                "depth": 4,
+                "origin_server_ts": 4,
+                "type": EventTypes.Member,
+                "state_key": self.local_user1_id,
+                "content": {"membership": Membership.LEAVE},
+                "auth_events": [
+                    self.room_create_event.event_id,
+                    invite_event.event_id,
+                ],
+                "prev_events": [invite_event.event_id],
+            },
+            room_version=self.room_version,
+        )
+
+        T = TypeVar("T")
+
+        async def get_json(
+            destination: str,
+            path: str,
+            args: QueryParams | None = None,
+            retry_on_dns_fail: bool = True,
+            timeout: int | None = None,
+            ignore_backoff: bool = False,
+            try_trailing_slash_on_400: bool = False,
+            parser: ByteParser[T] | None = None,
+        ) -> JsonDict | T:
+            if (
+                path
+                == f"/_matrix/federation/v1/make_leave/{urllib.parse.quote_plus(self.remote_room_id)}/{urllib.parse.quote_plus(self.local_user1_id)}"
+            ):
+                return {
+                    "event": leave_event_template.get_pdu_json(),
+                    "room_version": self.room_version.identifier,
+                }
+
+            raise NotImplementedError(
+                "We have not mocked a response for `get_json(...)` for the following endpoint yet: "
+                + f"{destination}{path}"
+            )
+
+        self.federation_http_client.get_json.side_effect = get_json
+
+        # Leave events that hs1 sent to hs2 via /send_leave
+        collected_send_leave_event_ids: set[str] = set()
+
+        async def put_json(
+            destination: str,
+            path: str,
+            args: QueryParams | None = None,
+            data: JsonDict | None = None,
+            json_data_callback: Callable[[], JsonDict] | None = None,
+            long_retries: bool = False,
+            timeout: int | None = None,
+            ignore_backoff: bool = False,
+            backoff_on_404: bool = False,
+            try_trailing_slash_on_400: bool = False,
+            parser: ByteParser[T] | None = None,
+            backoff_on_all_error_codes: bool = False,
+        ) -> JsonDict | T:
+            if (
+                path.startswith(
+                    f"/_matrix/federation/v2/send_leave/{urllib.parse.quote_plus(self.remote_room_id)}/"
+                )
+                and data is not None
+            ):
+                collected_send_leave_event_ids.add(
+                    make_test_pdu_event(data, self.room_version).event_id
+                )
+                return {}
+
+            raise NotImplementedError(
+                "We have not mocked a response for `put_json(...)` for the following endpoint yet: "
+                + f"{destination}{path} with the following body data: {data}"
+            )
+
+        self.federation_http_client.put_json.side_effect = put_json
+
+        leave_event = self.helper.leave(
+            self.remote_room_id, self.local_user1_id, tok=self.local_user1_tok
+        )
+
+        # If the rejection had not reached the inviting server, `remote_reject_invite`
+        # would have fallen back to generating the leave locally, which is the path
+        # `test_rescinded_knock_in_state_after` covers.
+        self.assertIncludes(
+            collected_send_leave_event_ids,
+            {leave_event["event_id"]},
+            exact=True,
+            message="Expected user1's leave to be sent to the inviting server",
+        )
+
+        self.assert_leave_in_state_after(since_token)
+
+    def test_retracted_invite_in_state_after(self) -> None:
+        """An invite retracted by the remote server is reflected in `state_after`
+        (MSC4222) on sync."""
+        invite_event = self._invite_local_user_to_remote_room()
+        since_token = self.sync()["next_batch"]
+
+        retraction_event = make_test_event(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.remote_room_id,
+                    "sender": self.remote_user_id,
+                    "depth": 4,
+                    "origin_server_ts": 4,
+                    "type": EventTypes.Member,
+                    "state_key": self.local_user1_id,
+                    "content": {"membership": Membership.LEAVE},
+                    "auth_events": [
+                        self.room_create_event.event_id,
+                        self.creator_membership_event.event_id,
+                        invite_event.event_id,
+                    ],
+                    "prev_events": [invite_event.event_id],
+                }
+            ),
+            room_version=self.room_version,
+        )
+
+        channel = self.make_signed_federation_request(
+            "PUT",
+            "/_matrix/federation/v1/send/1000",
+            content={
+                "origin": self.OTHER_SERVER_NAME,
+                "origin_server_ts": 4,
+                "pdus": [retraction_event.get_pdu_json()],
+                "edus": [],
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        membership, _ = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(
+                self.local_user1_id, self.remote_room_id
+            )
+        )
+        self.assertEqual(membership, Membership.LEAVE)
+
+        self.assert_leave_in_state_after(since_token)
+
+    def test_rescinded_knock_in_state_after(self) -> None:
+        """The out-of-band leave rescinding a knock is reflected in `state_after`
+        (MSC4222) on sync."""
+        self._knock_local_user_on_remote_room()
+        since_token = self.sync()["next_batch"]
+
+        # The room is remote, so rescinding the knock generates a local
+        # out-of-band leave event.
+        self.helper.leave(
+            self.remote_room_id, self.local_user1_id, tok=self.local_user1_tok
+        )
+
+        membership, _ = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(
+                self.local_user1_id, self.remote_room_id
+            )
+        )
+        self.assertEqual(membership, Membership.LEAVE)
+
+        self.assert_leave_in_state_after(since_token)
