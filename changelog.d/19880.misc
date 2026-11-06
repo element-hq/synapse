@@ -1,0 +1,1 @@
+Disable Postgres crash-safety features in CI for speed.
