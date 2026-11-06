@@ -346,10 +346,12 @@ def listen_metrics(
         )
         servers.append((server, thread))
 
-        # Note that we do not register these threads with `ThreadCPUMetrics` as
-        # they simply spawn a thread per-request. We could track them with
-        # `ThreadCPUMetrics` if needed, but we assume they won't use much CPU
-        # and so are OK with them being tracked in the "other" bucket.
+        # Note that we do not register these threads with `ThreadCPUMetrics` as they
+        # don't actually do much work themselves and simply spawn another new thread
+        # per-request (where the real metrics scrape work happens). It's not worth it to
+        # track these with `ThreadCPUMetrics` as we assume they won't use much CPU and
+        # so are OK with them being tracked in the `other` bucket. And we can't easily
+        # register those sub-threads where the metric scrapes actually happen.
     return servers
 
 
