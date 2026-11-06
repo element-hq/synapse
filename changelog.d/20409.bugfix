@@ -1,0 +1,1 @@
+Fix the task scheduler leaking its slots — which could eventually prevent new tasks from being launched — and logging errors when cancelling a running task. Contributed by @luochen1990.
