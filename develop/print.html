@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-e961b006.js";
+            window.path_to_searchindex_js = "searchindex-93632ab7.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8fc16911.js"></script>
@@ -17119,8 +17119,14 @@ be local.</li>
 </ul>
 <h2 id="override-ratelimiting-for-users"><a class="header" href="#override-ratelimiting-for-users">Override ratelimiting for users</a></h2>
 <p>This API allows to override or disable ratelimiting for a specific user.
-There are specific APIs to set, get and delete a ratelimit.</p>
-<h3 id="get-status-of-ratelimit"><a class="header" href="#get-status-of-ratelimit">Get status of ratelimit</a></h3>
+There are specific APIs to set, get and delete a ratelimit override.</p>
+<p>An override replaces the rate and burst count of the <code>rc_message</code> ratelimiter,
+which applies to sending events and some related actions (e.g. creating rooms,
+updating the user’s profile). It does not override the limits of other
+ratelimiters (e.g. <code>rc_invites</code> or <code>rc_joins</code>).</p>
+<p>The exception is disabling ratelimiting: an override with <code>messages_per_second</code>
+set to <code>0</code> disables <strong>all</strong> ratelimiting for the user.</p>
+<h3 id="get-status-of-ratelimit-override"><a class="header" href="#get-status-of-ratelimit-override">Get status of ratelimit override</a></h3>
 <p>The API is:</p>
 <pre><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/override_ratelimit
 </code></pre>
@@ -17139,15 +17145,16 @@ be local.</li>
 <p><strong>Response</strong></p>
 <p>The following fields are returned in the JSON response body:</p>
 <ul>
-<li><code>messages_per_second</code> - integer - The number of actions that can
-be performed in a second. <code>0</code> mean that ratelimiting is disabled for this user.</li>
-<li><code>burst_count</code> - integer - How many actions that can be performed before
+<li><code>messages_per_second</code> - integer - The number of messages that can
+be sent in a second. <code>0</code> means that ratelimiting is disabled for this user.</li>
+<li><code>burst_count</code> - integer - How many messages that can be sent before
 being limited.</li>
 </ul>
-<p>If <strong>no</strong> custom ratelimit is set, an empty JSON dict is returned.</p>
+<p>If <strong>no</strong> ratelimit override is set, an empty JSON dict is returned and the
+global ratelimits from the homeserver config apply to the user.</p>
 <pre><code class="language-json">{}
 </code></pre>
-<h3 id="set-ratelimit"><a class="header" href="#set-ratelimit">Set ratelimit</a></h3>
+<h3 id="set-ratelimit-override"><a class="header" href="#set-ratelimit-override">Set ratelimit override</a></h3>
 <p>The API is:</p>
 <pre><code>POST /_synapse/admin/v1/users/&lt;user_id&gt;/override_ratelimit
 </code></pre>
@@ -17165,21 +17172,24 @@ be local.</li>
 </ul>
 <p>Body parameters:</p>
 <ul>
-<li><code>messages_per_second</code> - positive integer, optional. The number of actions that can
-be performed in a second. Defaults to <code>0</code>.</li>
-<li><code>burst_count</code> - positive integer, optional. How many actions that can be performed
+<li><code>messages_per_second</code> - positive integer, optional. The number of messages that can
+be sent in a second. Defaults to <code>0</code>.</li>
+<li><code>burst_count</code> - positive integer, optional. How many messages that can be sent
 before being limited. Defaults to <code>0</code>.</li>
 </ul>
-<p>To disable users’ ratelimit set both values to <code>0</code>.</p>
+<p>To disable ratelimiting for the user entirely set both values to <code>0</code>.</p>
 <p><strong>Response</strong></p>
 <p>The following fields are returned in the JSON response body:</p>
 <ul>
-<li><code>messages_per_second</code> - integer - The number of actions that can
-be performed in a second.</li>
-<li><code>burst_count</code> - integer - How many actions that can be performed before
+<li><code>messages_per_second</code> - integer - The number of messages that can
+be sent in a second.</li>
+<li><code>burst_count</code> - integer - How many messages that can be sent before
 being limited.</li>
 </ul>
-<h3 id="delete-ratelimit"><a class="header" href="#delete-ratelimit">Delete ratelimit</a></h3>
+<h3 id="delete-ratelimit-override"><a class="header" href="#delete-ratelimit-override">Delete ratelimit override</a></h3>
+<p>Removes the ratelimit override for the user, so that the global ratelimits from
+the homeserver config apply to the user again. This does <strong>not</strong> disable
+ratelimiting for the user; to do that, set an override with both values <code>0</code>.</p>
 <p>The API is:</p>
 <pre><code>DELETE /_synapse/admin/v1/users/&lt;user_id&gt;/override_ratelimit
 </code></pre>
