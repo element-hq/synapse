@@ -337,11 +337,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             )
 
         # This goes and fills out the above state from the database.
-        # This may read on the PostgreSQL sequence, and
-        # SequenceGenerator.check_consistency might have fixed up the sequence, which
-        # means the SequenceGenerator needs to be setup before we read the value from
-        # the sequence.
-        self._load_current_ids(db_conn, tables, sequence_name)
+        self._load_current_ids(db_conn, tables)
 
         self._max_seen_allocated_stream_id = max(
             self._current_positions.values(), default=1
@@ -381,7 +377,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         self,
         db_conn: LoggingDatabaseConnection,
         tables: list[tuple[str, str, str]],
-        sequence_name: str,
     ) -> None:
         cur = db_conn.cursor(txn_name="_load_current_ids")
 
@@ -418,45 +413,22 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # If we're a writer, we can assume we're at the end of the stream
         # Usually, we would get that from the stream_positions, but in some cases,
         # like if we rolled back Synapse, the stream_positions table might not be up to
-        # date. If we're using Postgres for the sequences, we can just use the current
-        # sequence value as our own position.
+        # date, so we also take the highest stream ID in the tables.
         if self._instance_name in self._writers:
             if isinstance(self._db.engine, PostgresEngine):
-                cur.execute(f"SELECT last_value FROM {sequence_name}")
-                row = cur.fetchone()
-                assert row is not None
-                self._current_positions[self._instance_name] = row[0]
+                self._current_positions[self._instance_name] = max(
+                    self._current_positions.get(self._instance_name, 1),
+                    self._get_max_stream_id_in_tables_txn(cur, tables),
+                )
 
         # We set the `_persisted_upto_position` to be the minimum of all current
         # positions. If empty we use the max stream ID from the DB table.
         min_stream_id = min(self._current_positions.values(), default=None)
 
         if min_stream_id is None:
-            # We add a GREATEST here to ensure that the result is always
-            # positive. (This can be a problem for e.g. backfill streams where
-            # the server has never backfilled).
-            greatest_func = (
-                "GREATEST" if isinstance(self._db.engine, PostgresEngine) else "MAX"
+            self._persisted_upto_position = self._get_max_stream_id_in_tables_txn(
+                cur, tables
             )
-            max_stream_id = 1
-            for table, _, id_column in tables:
-                sql = """
-                    SELECT %(greatest_func)s(COALESCE(%(agg)s(%(id)s), 1), 1)
-                    FROM %(table)s
-                """ % {
-                    "greatest_func": greatest_func,
-                    "id": id_column,
-                    "table": table,
-                    "agg": "MAX" if self._positive else "-MIN",
-                }
-                cur.execute(sql)
-                result = cur.fetchone()
-                assert result is not None
-                (stream_id,) = result
-
-                max_stream_id = max(max_stream_id, stream_id)
-
-            self._persisted_upto_position = max_stream_id
         else:
             # If we have a min_stream_id then we pull out everything greater
             # than it from the DB so that we can prefill
@@ -519,6 +491,37 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 )
 
         cur.close()
+
+    def _get_max_stream_id_in_tables_txn(
+        self, cur: LoggingTransaction, tables: list[tuple[str, str, str]]
+    ) -> int:
+        """Returns the highest stream ID in the given tables, or 1 if they're empty."""
+
+        # We add a GREATEST here to ensure that the result is always
+        # positive. (This can be a problem for e.g. backfill streams where
+        # the server has never backfilled).
+        greatest_func = (
+            "GREATEST" if isinstance(self._db.engine, PostgresEngine) else "MAX"
+        )
+        max_stream_id = 1
+        for table, _, id_column in tables:
+            sql = """
+                SELECT %(greatest_func)s(COALESCE(%(agg)s(%(id)s), 1), 1)
+                FROM %(table)s
+            """ % {
+                "greatest_func": greatest_func,
+                "id": id_column,
+                "table": table,
+                "agg": "MAX" if self._positive else "-MIN",
+            }
+            cur.execute(sql)
+            result = cur.fetchone()
+            assert result is not None
+            (stream_id,) = result
+
+            max_stream_id = max(max_stream_id, stream_id)
+
+        return max_stream_id
 
     def _load_next_id_txn(self, txn: Cursor) -> int:
         stream_ids = self._load_next_mult_id_txn(txn, 1)
