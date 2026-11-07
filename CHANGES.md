@@ -1,3 +1,57 @@
+# Synapse 1.165.0rc1 (2026-11-04)
+
+Please check the [relevant section in the upgrade
+notes](https://github.com/element-hq/synapse/blob/release-v1.165/docs/upgrade.md#upgrading-to-v11650): support for Python 3.10 has been removed (Python 3.11+ is now required) and the `livekit` MatrixRTC transport type is deprecated in favour of `m.livekit`.
+
+## Features
+
+- Update experimental [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388) (sign-in with QR code) implementation to incorporate the latest changes from the MSC. ([\#19906](https://github.com/element-hq/synapse/issues/19906))
+- Update the [MSC4480](https://github.com/matrix-org/matrix-spec-proposals/pull/4480) sticky events sliding sync extension to use the global `pos` and [MSC4508](https://github.com/matrix-org/matrix-spec-proposals/pull/4508) scoping. ([\#20363](https://github.com/element-hq/synapse/issues/20363))
+- Avoid reading media from disk when answering a `HEAD` request to the media download endpoints. ([\#20368](https://github.com/element-hq/synapse/issues/20368))
+- Update support for scheduling [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140) delayed events with a [MSC4354](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) sticky duration. ([\#20378](https://github.com/element-hq/synapse/issues/20378))
+- Add stable support for `/rtc/transports` and copy `m.rtc.slot` state events during room upgrades as per [MSC4143](https://github.com/matrix-org/matrix-spec-proposals/pull/4143) and [MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195). ([\#20425](https://github.com/element-hq/synapse/issues/20425))
+
+## Bugfixes
+
+- Fix [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) that expired during sync processing being returned as expired events in the sticky section of the sync response. ([\#20349](https://github.com/element-hq/synapse/issues/20349))
+- Fix TLS listeners only offering the P-256 group for key exchange, which prevented the use of the X25519 and post-quantum X25519MLKEM768 groups. ([\#20374](https://github.com/element-hq/synapse/issues/20374))
+- Fix a bug where an error from the identity server during a third-party invite caused Synapse to return a 500 error instead of passing the error to the client. Contributed by @RaphaelFakhri. ([\#20401](https://github.com/element-hq/synapse/issues/20401))
+- Fix event signature verification failing when a notary that answered last returned a server key that expires sooner than one already stored. ([\#20406](https://github.com/element-hq/synapse/issues/20406))
+- Fix race where an initial sync did not return some memberships in rooms when another sync for the device was in-flight. Introduced in v1.163.0. ([\#20433](https://github.com/element-hq/synapse/issues/20433))
+
+## Improved Documentation
+
+- Remove `$server_port` from the `Host` header in the nginx reverse proxy example, as it can cause an SSO redirect loop. ([\#20391](https://github.com/element-hq/synapse/issues/20391))
+- Clarify config docs that manhole uses SSH (not Telnet). ([\#20417](https://github.com/element-hq/synapse/issues/20417))
+
+## Deprecations and Removals
+
+- Remove support for Python 3.10. ([\#20359](https://github.com/element-hq/synapse/issues/20359))
+
+## Internal Changes
+
+- Switch the MatrixRTC notification push rules to `event_property_is`. ([\#20366](https://github.com/element-hq/synapse/issues/20366))
+- Add an index on `lower(name)` to the `users` table, to speed up checking whether a username is available. ([\#20369](https://github.com/element-hq/synapse/issues/20369))
+- Add initial, experimental support for server-wide announcement rooms. ([\#20372](https://github.com/element-hq/synapse/issues/20372), [\#20407](https://github.com/element-hq/synapse/issues/20407), [\#20465](https://github.com/element-hq/synapse/issues/20465), [\#20467](https://github.com/element-hq/synapse/issues/20467), [\#20469](https://github.com/element-hq/synapse/issues/20469), [\#20412](https://github.com/element-hq/synapse/issues/20412), [\#20423](https://github.com/element-hq/synapse/issues/20423), [\#20427](https://github.com/element-hq/synapse/issues/20427), [\#20448](https://github.com/element-hq/synapse/issues/20448), [\#20468](https://github.com/element-hq/synapse/issues/20468))
+- Unbreak CI by bumping locked dependencies to support Python 3.15 wheels. ([\#20386](https://github.com/element-hq/synapse/issues/20386))
+- Slightly speed up the 'release artifacts' CI release steps. ([\#20397](https://github.com/element-hq/synapse/issues/20397))
+- Remove unused `tox.ini`. ([\#20410](https://github.com/element-hq/synapse/issues/20410))
+- Run lint script over codebase to fix spurious dirty Rust change leftover from [#19996](https://github.com/element-hq/synapse/pull/19996). ([\#20418](https://github.com/element-hq/synapse/issues/20418))
+- Add package build targets for Ubuntu 26.10 'Stonking Stingray'. ([\#20428](https://github.com/element-hq/synapse/issues/20428))
+- Remove duplicative early exit in sliding sync processing. ([\#20431](https://github.com/element-hq/synapse/issues/20431))
+
+
+
+
+# Synapse 1.164.2 (2026-11-02)
+
+## Bugfixes
+
+- Restore the unstable [MSC2965](https://github.com/matrix-org/matrix-spec-proposals/pull/2965) `/auth_metadata` endpoint, which Element X clients still request after upgrading from Synapse 1.162 or earlier, causing them to fail to refresh their access token. ([\#20460](https://github.com/element-hq/synapse/issues/20460))
+
+
+
+
 # Synapse 1.164.1 (2026-10-28)
 
 ## Bugfixes
@@ -495,7 +549,7 @@ Please check [the relevant section in the upgrade notes](https://github.com/elem
 - [MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Limit how many delayed events a user may have scheduled at once. ([\#19539](https://github.com/element-hq/synapse/issues/19539))
 - Support [MSC4446](https://github.com/matrix-org/matrix-spec-proposals/pull/4446) for moving fully read markers backwards. Contributed by @SpiritCroc @ Beeper. ([\#19663](https://github.com/element-hq/synapse/issues/19663))
 - Add before and after time filters to the ['Redact events of a user'](https://element-hq.github.io/synapse/v1.157/admin_api/user_admin_api.html#redact-events-of-a-user) Admin API. ([\#19802](https://github.com/element-hq/synapse/issues/19802))
-- Updated experimental support for [MSC4388: Secure out-of-band channel for sign in with QR](https://github.com/matrix-org/matrix-spec-proposals/pull/4388). ([\#19808](https://github.com/element-hq/synapse/issues/19808))
+- Update experimental [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388) (sign-in with QR code) implementation to make `PUT` requests idempotent. ([\#19808](https://github.com/element-hq/synapse/issues/19808))
 - Add an `exclude_rooms_from_presence` configuration option to stop presence being routed between users solely because they share one of the listed rooms. ([\#19935](https://github.com/element-hq/synapse/issues/19935))
 
 ## Bugfixes
