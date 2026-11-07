@@ -20,15 +20,17 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.rest.client.account_data
-from synapse.api.constants import EventTypes, EventUnsignedContentFields
+from synapse.api.constants import EventTypes, EventUnsignedContentFields, Membership
 from synapse.rest.client import account_data, login, register, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, StreamKeyType
+from synapse.types import JsonDict, StreamKeyType, UserID, create_requester
+from synapse.types.handlers.sliding_sync import StateValues
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.server import TimedOutException
+from tests.unittest import override_config
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 logger = logging.getLogger(__name__)
@@ -86,6 +88,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
         super().prepare(reactor, clock, hs)
 
     def _assert_sticky_events_response(
@@ -1357,3 +1360,627 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         )
         rows = get_persisted_sticky_events_state(from_token)
         self.assertEqual(rows, [(room_id, "live", None)])
+
+    def test_lazy_loaded_memberships_of_sticky_event_senders(self) -> None:
+        """
+        Test that, when lazy-loading room members, the memberships of the senders
+        of the sticky events returned in the extension are included in the room's
+        `required_state`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        self.helper.join(room_id, user3_id, tok=user3_tok)
+
+        sync_body = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 10]],
+                    "required_state": [[EventTypes.Member, StateValues.LAZY]],
+                    # No timeline, so that sticky events only come down the
+                    # `sticky_events` extension.
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+
+        # Initial sync: a sticky event sent beforehand comes down the extension,
+        # along with the membership of its sender.
+        sticky_event_id1 = self._send_sticky_event(room_id, user2_tok, body="one")
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id1]}
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id]["required_state"],
+            {state_map[(EventTypes.Member, user2_id)]},
+            exact=True,
+        )
+
+        # Incremental sync: another sticky event from the same sender, whose
+        # membership was already sent down, so the room has nothing to send.
+        sticky_event_id2 = self._send_sticky_event(room_id, user2_tok, body="two")
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id2]}
+        )
+        self.assertNotIn(room_id, response_body["rooms"])
+
+        # Incremental sync: a sticky event from a sender whose membership hasn't
+        # been sent down yet, so the room is sent down for the membership alone.
+        sticky_event_id3 = self._send_sticky_event(room_id, user3_tok, body="three")
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id3]}
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id]["required_state"],
+            {state_map[(EventTypes.Member, user3_id)]},
+            exact=True,
+        )
+
+    def test_sticky_events_without_lazy_loading_do_not_send_room(self) -> None:
+        """
+        Test that sticky events don't cause the room to be sent down when the
+        room's members aren't lazy-loaded.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        sticky_event_id = self._send_sticky_event(room_id, user2_tok, body="one")
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+        self.assertNotIn(room_id, response_body["rooms"])
+
+    def test_lazy_loaded_membership_of_sticky_event_sender_who_left(self) -> None:
+        """
+        Test that, when lazy-loading room members, the membership of the sender of
+        a sticky event is included in the room's `required_state` even if they have
+        since left the room (in which case it is their leave event).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        self.helper.join(room_id, user3_id, tok=user3_tok)
+
+        sync_body = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 10]],
+                    "required_state": [[EventTypes.Member, StateValues.LAZY]],
+                    # No timeline, so that neither the sticky event nor the leave
+                    # come down the timeline.
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # user3 sends a sticky event and then leaves the room
+        sticky_event_id = self._send_sticky_event(room_id, user3_tok, body="bye")
+        self.helper.leave(room_id, user3_id, tok=user3_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        user3_membership_event = state_map[(EventTypes.Member, user3_id)]
+        self.assertEqual(user3_membership_event.membership, Membership.LEAVE)
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id]["required_state"],
+            {user3_membership_event},
+            exact=True,
+        )
+
+    def test_lazy_loaded_membership_of_sticky_event_sender_also_in_timeline(
+        self,
+    ) -> None:
+        """
+        Test that, when lazy-loading room members, the membership of a user who
+        sent both a sticky event (returned in the extension) and a regular event
+        (returned in the timeline) is included in `required_state` exactly once.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        self.helper.join(room_id, user3_id, tok=user3_tok)
+        # So that user3's join isn't the latest event (and hence lazy-loaded) in
+        # the initial sync below.
+        self.helper.send(room_id, "hello", tok=user2_tok)
+
+        sync_body = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 10]],
+                    "required_state": [[EventTypes.Member, StateValues.LAZY]],
+                    # Only the latest event comes down the timeline
+                    "timeline_limit": 1,
+                }
+            },
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+
+        # user3 sends a sticky event followed by a regular event, so that only the
+        # regular event is in the timeline and the sticky event is in the extension.
+        sticky_event_id = self._send_sticky_event(room_id, user3_tok, body="sticky")
+        regular_event_id = self.helper.send(room_id, "regular", tok=user3_tok)[
+            "event_id"
+        ]
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+        self.assertEqual(
+            [e["event_id"] for e in response_body["rooms"][room_id]["timeline"]],
+            [regular_event_id],
+        )
+        required_state = response_body["rooms"][room_id]["required_state"]
+        self._assertRequiredStateIncludes(
+            required_state,
+            {state_map[(EventTypes.Member, user3_id)]},
+            exact=True,
+        )
+        # The membership should not be duplicated
+        self.assertEqual(len(required_state), 1)
+
+    def test_lazy_loaded_membership_of_sticky_event_sender_with_sticky_event_in_timeline(
+        self,
+    ) -> None:
+        """
+        Test that, when lazy-loading room members, the membership of the sender of
+        a sticky event that is returned in the timeline (and hence deduplicated out
+        of the extension) is included in `required_state` exactly once.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        self.helper.join(room_id, user3_id, tok=user3_tok)
+        # So that user3's join isn't the latest event (and hence lazy-loaded) in
+        # the initial sync below.
+        self.helper.send(room_id, "hello", tok=user2_tok)
+
+        sync_body = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 10]],
+                    "required_state": [[EventTypes.Member, StateValues.LAZY]],
+                    # Only the latest event comes down the timeline
+                    "timeline_limit": 1,
+                }
+            },
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+
+        sticky_event_id = self._send_sticky_event(room_id, user3_tok, body="sticky")
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        # The sticky event is in the timeline, so it is deduplicated out of the
+        # extension.
+        self.assertEqual(
+            [e["event_id"] for e in response_body["rooms"][room_id]["timeline"]],
+            [sticky_event_id],
+        )
+        self._assert_sticky_events_response(response_body, {room_id: []})
+        required_state = response_body["rooms"][room_id]["required_state"]
+        self._assertRequiredStateIncludes(
+            required_state,
+            {state_map[(EventTypes.Member, user3_id)]},
+            exact=True,
+        )
+        # The membership should not be duplicated
+        self.assertEqual(len(required_state), 1)
+
+    def test_lazy_loaded_memberships_of_sticky_event_senders_after_reenabling_extension(
+        self,
+    ) -> None:
+        """
+        Test that, when lazy-loading room members, the memberships of the senders
+        of sticky events replayed after re-enabling the extension are included in
+        `required_state`, and that the room's lazy-loading book-keeping is updated
+        accordingly.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        self.helper.join(room_id, user3_id, tok=user3_tok)
+
+        lists = {
+            "main": {
+                "ranges": [[0, 10]],
+                "required_state": [[EventTypes.Member, StateValues.LAZY]],
+                # No timeline, so that sticky events only come down the
+                # `sticky_events` extension.
+                "timeline_limit": 0,
+            }
+        }
+        enabled_sync_body = {
+            "lists": lists,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        disabled_sync_body = {
+            "lists": lists,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": False}},
+        }
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+
+        _, from_token = self.do_sync(enabled_sync_body, tok=user1_tok)
+
+        # Disable the extension and send a sticky event while it is disabled:
+        # neither the sticky event nor the membership of its sender are sent down.
+        _, from_token = self.do_sync(
+            disabled_sync_body, since=from_token, tok=user1_tok
+        )
+        sticky_event_id1 = self._send_sticky_event(
+            room_id, user3_tok, body="while disabled"
+        )
+        response_body, from_token = self.do_sync(
+            disabled_sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+        self.assertNotIn(room_id, response_body["rooms"])
+
+        # Re-enable the extension: the sticky event is replayed, along with the
+        # membership of its sender.
+        response_body, from_token = self.do_sync(
+            enabled_sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id1]}
+        )
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id]["required_state"],
+            {state_map[(EventTypes.Member, user3_id)]},
+            exact=True,
+        )
+
+        # Another sticky event from the same sender, whose membership has now
+        # been sent down, so the room has nothing to send.
+        sticky_event_id2 = self._send_sticky_event(room_id, user3_tok, body="again")
+        response_body, _ = self.do_sync(
+            enabled_sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id2]}
+        )
+        self.assertNotIn(room_id, response_body["rooms"])
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_lazy_loaded_sticky_event_senders_in_profiles_extension(self) -> None:
+        """
+        Test that, when lazy-loading room members, the profiles extension treats
+        the senders of the sticky events returned in the extension like the
+        senders of timeline events: their profile is sent down, even if their
+        membership has already been sent down.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Fill up the room heroes, so that user2 isn't one of them (the profiles
+        # extension always includes the heroes).
+        for i in range(5):
+            hero_id = self.register_user(f"hero{i}", "pass")
+            hero_tok = self.login(hero_id, "pass")
+            self.helper.join(room_id, hero_id, tok=hero_tok)
+        self.helper.join(room_id, user2_id, tok=user2_tok)
+        self.get_success(
+            self.hs.get_profile_handler().set_field(
+                target_user=UserID.from_string(user2_id),
+                requester=create_requester(user2_id),
+                field_name="field",
+                new_value="value",
+            )
+        )
+
+        sync_body = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 10]],
+                    "required_state": [[EventTypes.Member, StateValues.LAZY]],
+                    # No timeline, so that sticky events only come down the
+                    # `sticky_events` extension and user2 isn't a timeline sender.
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                STICKY_EVENTS_EXT: {"enabled": True},
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                    "fields": ["field"],
+                },
+            },
+        }
+
+        def profiles(response_body: JsonDict) -> JsonDict:
+            return (
+                response_body["extensions"]
+                .get("org.matrix.msc4262.profiles", {})
+                .get("users", {})
+            )
+
+        # Initial sync: user2 hasn't sent anything, so their profile isn't
+        # included.
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertNotIn(user2_id, profiles(response_body))
+
+        # user2 sends a sticky event: their membership is lazy-loaded into the
+        # room's `required_state` and their full profile is sent down.
+        sticky_event_id1 = self._send_sticky_event(room_id, user2_tok)
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id1]}
+        )
+        self.assertEqual(
+            profiles(response_body).get(user2_id), {"updated": {"field": "value"}}
+        )
+
+        # Another sticky event from user2, whose membership has already been sent
+        # down, so the room has nothing to send. Their full profile is still sent
+        # down, as it would be for a timeline event.
+        sticky_event_id2 = self._send_sticky_event(room_id, user2_tok)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id2]}
+        )
+        self.assertNotIn(room_id, response_body["rooms"])
+        self.assertEqual(
+            profiles(response_body).get(user2_id), {"updated": {"field": "value"}}
+        )
+
+    def test_limit_applies_per_room(self) -> None:
+        """
+        Test that the `limit` applies to each room separately (like
+        `timeline_limit`), with the remainder following on subsequent requests.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id_a = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_a, user1_id, tok=user1_tok)
+        room_id_b = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_b, user1_id, tok=user1_tok)
+
+        sticky_event_ids_a = [
+            self._send_sticky_event(room_id_a, user2_tok, body=f"A {i}")
+            for i in range(3)
+        ]
+        sticky_event_ids_b = [
+            self._send_sticky_event(room_id_b, user2_tok, body=f"B {i}")
+            for i in range(3)
+        ]
+
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 2}},
+        }
+
+        # Each room gets its oldest 2 sticky events
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(
+            response_body,
+            {room_id_a: sticky_event_ids_a[0:2], room_id_b: sticky_event_ids_b[0:2]},
+        )
+
+        # Then the remaining one in each room
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(
+            response_body,
+            {room_id_a: sticky_event_ids_a[2:3], room_id_b: sticky_event_ids_b[2:3]},
+        )
+
+        # And then nothing more
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+    def test_no_sticky_events_after_being_kicked(self) -> None:
+        """
+        Test that we don't send sticky events for a room the user was kicked from,
+        even though the room is still in the list (and so in scope).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+        sticky_event_id = self._send_sticky_event(room_id, user2_tok)
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+
+        # User1 is kicked, and then another sticky event is sent
+        self.helper.change_membership(
+            room_id, user2_id, user1_id, "leave", tok=user2_tok
+        )
+        self._send_sticky_event(room_id, user2_tok, body="after kick")
+
+        # The room is still in the list (kicks are shown), but user1 doesn't get the
+        # new sticky event
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self.assertEqual(
+            response_body["lists"]["main"]["ops"][0]["room_ids"], [room_id]
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # Nor on a fresh connection
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertEqual(
+            response_body["lists"]["main"]["ops"][0]["room_ids"], [room_id]
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+    def test_no_sticky_events_while_invited(self) -> None:
+        """
+        Test that we don't send sticky events for a room the user is only invited
+        to, even though the room is in the list (and so in scope), and that they
+        get all of them once they join.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.invite(room_id, src=user2_id, targ=user1_id, tok=user2_tok)
+        sticky_event_id_1 = self._send_sticky_event(room_id, user2_tok, body="1")
+
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
+        }
+
+        # The invite is in the list, but the sticky event isn't sent
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertEqual(
+            response_body["lists"]["main"]["ops"][0]["room_ids"], [room_id]
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # Another sticky event is sent while user1 is still only invited
+        sticky_event_id_2 = self._send_sticky_event(room_id, user2_tok, body="2")
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # Once user1 joins, they get all of the unexpired sticky events
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(
+            response_body, {room_id: [sticky_event_id_1, sticky_event_id_2]}
+        )
+
+    def test_scope_does_not_leak_between_lists(self) -> None:
+        """
+        Test that a room only in a list that is out of scope for the extension
+        doesn't get sticky events, even when it comes after a room that is in both
+        an in-scope list and that out-of-scope list.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Rooms from oldest to most recent activity. Room 3 just makes the lists
+        # bigger than their ranges, so that they get sorted (by recency).
+        room_id_3 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_3, user1_id, tok=user1_tok)
+
+        room_id_2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_2, user1_id, tok=user1_tok)
+        self._send_sticky_event(room_id_2, user2_tok, body="room 2")
+
+        room_id_1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id_1, user1_id, tok=user1_tok)
+        sticky_event_id_1 = self._send_sticky_event(room_id_1, user2_tok, body="room 1")
+
+        sync_body = {
+            "lists": {
+                # Just room 1, in scope
+                "in-scope": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                # Rooms 1 and 2, out of scope
+                "out-of-scope": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "extensions": {
+                STICKY_EVENTS_EXT: {"enabled": True, "lists": ["in-scope"], "rooms": []}
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertEqual(
+            response_body["lists"]["in-scope"]["ops"][0]["room_ids"], [room_id_1]
+        )
+        self.assertEqual(
+            response_body["lists"]["out-of-scope"]["ops"][0]["room_ids"],
+            [room_id_1, room_id_2],
+        )
+        self._assert_sticky_events_response(
+            response_body, {room_id_1: [sticky_event_id_1]}
+        )
