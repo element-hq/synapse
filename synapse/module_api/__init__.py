@@ -82,6 +82,7 @@ from synapse.logging.context import (
 from synapse.metrics.background_process_metrics import (
     run_as_background_process as _run_as_background_process,
 )
+from synapse.metrics.thread_cpu import thread_cpu_metrics
 from synapse.module_api.callbacks.account_validity_callbacks import (
     IS_USER_EXPIRED_CALLBACK,
     ON_LEGACY_ADMIN_REQUEST,
@@ -1764,6 +1765,12 @@ class ModuleApi:
         Returns:
             The return value of the function once ran in a thread.
         """
+        # Report the CPU time of the module's threads under the pool's name.
+        thread_pool_name = "module-other"
+        if threadpool.name:
+            thread_pool_name = "module-" + threadpool.name
+        thread_cpu_metrics.register_threadpool(thread_pool_name, threadpool)
+
         return await defer_to_threadpool(
             self._hs.get_reactor(), threadpool, f, *args, **kwargs
         )
