@@ -36,7 +36,7 @@ pyo3 = { version = "0.29.0", features = [
     "macros",
     "anyhow",
     "abi3",
-    "abi3-py310",
+    "abi3-py311",
     # So we can pass `bytes::Bytes` directly back to Python efficiently,
     # https://docs.rs/pyo3/latest/pyo3/bytes/index.html
     "bytes",

@@ -160,7 +160,7 @@ mod tests {
 
     use std::pin::pin;
 
-    use futures::stream::{self, StreamExt};
+    use futures::stream::{self};
     use tokio::runtime::Runtime;
 
     use super::*;

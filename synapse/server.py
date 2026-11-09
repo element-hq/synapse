@@ -129,6 +129,7 @@ from synapse.handlers.room_policy import RoomPolicyHandler
 from synapse.handlers.room_summary import RoomSummaryHandler
 from synapse.handlers.search import SearchHandler
 from synapse.handlers.send_email import SendEmailHandler
+from synapse.handlers.server_announcements import ServerAnnouncementsHandler
 from synapse.handlers.set_password import SetPasswordHandler
 from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sso import SsoHandler
@@ -1071,6 +1072,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return FederationHandlerRegistry(self)
 
     @cache_in_self
+    def get_server_announcements_handler(self) -> ServerAnnouncementsHandler:
+        return ServerAnnouncementsHandler(self)
+
+    @cache_in_self
     def get_server_notices_manager(self) -> ServerNoticesManager:
         if self.config.worker.worker_app:
             raise Exception("Workers cannot send server notices")
@@ -1209,7 +1214,11 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_msc4388_rendezvous_handler(self) -> MSC4388RendezvousHandler:
-        return MSC4388RendezvousHandler(self)
+        return MSC4388RendezvousHandler(
+            self,
+            max_unauthenticated_sessions=self.config.experimental.msc4388_max_unauthenticated_sessions,
+            ttl=self.config.experimental.msc4388_session_ttl_ms,
+        )
 
     @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":

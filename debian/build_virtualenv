@@ -81,8 +81,9 @@ case "$DEB_BUILD_OPTIONS" in
         # To avoid pulling in the unbuilt Synapse in the local directory
         pushd /
 
+        # --jobs 6 is intended to match .github/workflows/tests.yml
         PYTHONPATH="$tmpdir" \
-            "${TARGET_PYTHON}" -m twisted.trial --reporter=text -j2 tests
+            "${TARGET_PYTHON}" -m twisted.trial --reporter=text --jobs=6 tests
 
         popd
 
