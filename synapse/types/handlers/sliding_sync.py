@@ -515,6 +515,13 @@ class SlidingSyncResult:
         )
 
 
+# The reserved value in the `lists`/`rooms` of an extension request that means
+# "all lists" or "all room subscriptions" respectively (MSC3575).
+#
+# This is slated for removal as per MSC4508.
+EXTENSION_WILDCARD: Final = "*"
+
+
 class StateValues:
     """
     Understood values of the (type, state_key) tuple in `required_state`.
