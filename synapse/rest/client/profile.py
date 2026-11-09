@@ -403,7 +403,7 @@ class ProfileQueryRestServlet(RestServlet):
         """Profiles query endpoint (MSC4536)
 
         Allows querying multiple profiles in one go as an authenticated user. Hard
-        limited to an arbitrary number of profiles in one request.
+        limited to 100 profiles in one request as per MSC.
 
         Note, currently does not return information about remote profiles, ie this
         won't cause a remote lookup like when using the `/profile/<user>` or
