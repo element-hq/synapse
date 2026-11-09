@@ -53,8 +53,8 @@ use crate::database::postgres::{
 /// What the cursor state machine needs from the row stream beyond
 /// [`futures::Stream`] itself.
 ///
-/// Implemented for [`PgRowStream`] in production. The unit tests implement it
-/// for an in-memory stream.
+/// This is always [`PgRowStream`], except in unit tests which implement it for
+/// an in-memory stream.
 ///
 /// The stream must be fused, so that polling it after its end keeps returning
 /// [`None`]. It must be [`Unpin`], so that the cursor can poll it where it is
