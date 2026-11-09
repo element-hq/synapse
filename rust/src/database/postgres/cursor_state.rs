@@ -26,8 +26,8 @@
 //! "connection closed".
 //!
 //! The state machine is generic over the stream type `S` to allow using
-//! different stream implementations in tests. In production, this is always
-//! [`PgRowStream`].
+//! different stream implementations in tests. This is always [`PgRowStream`]
+//! outside of tests.
 
 use std::pin::Pin;
 
