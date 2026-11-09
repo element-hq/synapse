@@ -563,7 +563,7 @@ class RoomSyncConfig:
 
     timeline_limit: int
     required_state_map: Mapping[str, AbstractSet[str]]
-    sticky_events: bool = attr.ib(default=False, eq=False)
+    sticky_events: bool = False
 
     @classmethod
     def from_room_config(
@@ -726,6 +726,20 @@ class RoomSyncConfig:
             timeline_limit,
             required_state_map,
             sticky_events=self.sticky_events or other_room_sync_config.sticky_events,
+        )
+
+    def requests_more_than(self, other_room_sync_config: "RoomSyncConfig") -> bool:
+        """
+        Check whether this `RoomSyncConfig` requests more timeline or state than
+        `other_room_sync_config`, i.e. whether the other config would have to be
+        expanded to cover this one.
+
+        `sticky_events` is deliberately not considered.
+        """
+        combined = other_room_sync_config.combine_room_sync_config(self)
+        return (
+            combined.timeline_limit != other_room_sync_config.timeline_limit
+            or combined.required_state_map != other_room_sync_config.required_state_map
         )
 
     def must_await_full_state(

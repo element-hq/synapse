@@ -986,12 +986,7 @@ class SlidingSyncRoomLists:
                             # expanded. This covers timeline-limit increases and
                             # required-state additions introduced by room
                             # subscriptions overriding list-derived params.
-                            if (
-                                prev_room_sync_config.combine_room_sync_config(
-                                    room_config
-                                )
-                                != prev_room_sync_config
-                            ):
+                            if room_config.requests_more_than(prev_room_sync_config):
                                 rooms_should_send.add(room_id)
                                 continue
 
