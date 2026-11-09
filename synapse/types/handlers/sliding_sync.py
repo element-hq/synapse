@@ -111,9 +111,9 @@ class SlidingSyncResult:
     Attributes:
         next_pos: The next position token in the sliding window to request (next_batch).
         lists: Sliding window API. A map of list key to list results.
-        rooms: Room subscription API. A map of room ID to room results. This
-            includes rooms without any updates, which shouldn't be returned to the
-            client (filter them out with `RoomResult.__bool__`).
+        rooms: Room subscription API. A map of room ID to room results for the rooms
+            we fetched data for. Only rooms with updates are returned to the client,
+            the rest is filtered out when serialising with `bool(room_result)`.
         extensions: Extensions API. A map of extension key to extension results.
     """
 

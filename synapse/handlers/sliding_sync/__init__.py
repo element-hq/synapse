@@ -292,8 +292,16 @@ class SlidingSyncHandler:
         room_membership_for_user_map = interested_rooms.room_membership_for_user_map
         relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
 
-        # Fetch room data. Rooms without updates are included here and filtered
-        # out when serialising the response (see `RoomResult.__bool__`).
+        # Fetch room data
+        #
+        # This includes the results for all of the rooms we computed, i.e. the rooms
+        # that *probably* have updates (see `_filter_relevant_rooms_to_send(...)`),
+        # including those that turn out not to have any. Whether a room is actually
+        # returned in the response is up to `bool(room_result)`.
+        #
+        # Rooms in scope for the sticky events extension (MSC4480) are among them,
+        # as we fetch their sticky events alongside the rest of the room data. Those
+        # are surfaced via the extension even if the room itself has no updates.
         rooms: dict[str, SlidingSyncResult.RoomResult] = {}
 
         new_connection_state = previous_connection_state.get_mutable()

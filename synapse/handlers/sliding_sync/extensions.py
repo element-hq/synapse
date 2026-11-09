@@ -113,9 +113,10 @@ class SlidingSyncExtensionHandler:
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
-            actual_room_response_map: A map of room ID to room results in the the
-                Sliding Sync response. This includes rooms without updates, which
-                won't be returned to the client (see `RoomResult.__bool__`).
+            actual_room_response_map: A map of room ID to room results for the rooms
+                we fetched data for. Only rooms with updates are returned in the
+                Sliding Sync response, but the other results can still carry data
+                for the extensions, e.g. sticky events (MSC4480).
             sticky_events_room_ids: The rooms in scope for the sticky events
                 extension (MSC4480).
             to_token: The latest point in the stream to sync up to.
@@ -1041,8 +1042,9 @@ class SlidingSyncExtensionHandler:
                 state, used to record updates to the state.
             sticky_events_request: The sticky_events extension from the request,
                 or absent if the request didn't include it.
-            actual_room_response_map: A map of room ID to room results, including
-                rooms without other updates.
+            actual_room_response_map: A map of room ID to room results for the rooms
+                we fetched data for. The sticky events are taken from here regardless
+                of whether the room has any other updates.
             sticky_events_room_ids: The rooms in scope for the extension (empty
                 if the extension is disabled).
             to_token: The point in the stream to sync up to.
