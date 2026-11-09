@@ -320,21 +320,21 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
     ) -> None:
         user_id = user.to_string()
 
-        member = await self._storage_controllers.state.get_current_state_event(
-            room_id=room_id, event_type=EventTypes.Member, state_key=user_id
+        # Out-of-band invites and knocks are outliers, absent from the room state,
+        # so the membership is read from `local_current_membership`.
+        (
+            membership,
+            _,
+        ) = await self.store.get_local_current_membership_for_user_in_room(
+            user_id, room_id
         )
-        membership = member.membership if member else None
 
-        if membership is not None and membership not in [
+        if membership is not None and membership not in (
             Membership.LEAVE,
             Membership.BAN,
-        ]:
+        ):
             raise SynapseError(400, "User %s in room %s" % (user_id, room_id))
 
-        # In normal case this call is only required if `membership` is not `None`.
-        # But: After the last member had left the room, the background update
-        # `_background_remove_left_rooms` is deleting rows related to this room from
-        # the table `current_state_events` and `get_current_state_events` is `None`.
         await self.store.forget(user_id, room_id)
 
         # If everyone locally has left the room, then there is no reason for us to keep the
