@@ -1,0 +1,1 @@
+Fix `GET /_matrix/client/v3/rooms/{roomId}/state`, `/state/{eventType}/{stateKey}`, `/members` and `/rooms/{roomId}/initialSync` returning a 500 instead of a 403 for a room whose invite the user rejected, or whose knock they rescinded, while the server was not in the room.

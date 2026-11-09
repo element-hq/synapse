@@ -46,6 +46,7 @@ from synapse.api.constants import (
     RoomTypes,
 )
 from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.room_versions import RoomVersions
 from synapse.appservice import ApplicationService
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
@@ -53,6 +54,7 @@ from synapse.rest import admin
 from synapse.rest.client import (
     account,
     directory,
+    initial_sync,
     knock,
     login,
     profile,
@@ -71,6 +73,7 @@ from tests.http.server._base import make_request_with_cancellation_test
 from tests.server import FakeChannel
 from tests.storage.test_stream import PaginationTestCase
 from tests.test_utils import FakeResponse
+from tests.test_utils.event_builders import make_test_event
 from tests.test_utils.event_injection import (
     create_event,
     inject_event,
@@ -1231,6 +1234,76 @@ class RoomMemberStateTestCase(RoomBase):
         channel = self.make_request("GET", path, content=b"")
         self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
         self.assertEqual(json.loads(content), channel.json_body)
+
+
+class OutOfBandLeaveTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        initial_sync.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        room.register_deprecated_servlets,
+    ]
+
+    def test_room_read_endpoints_after_rejecting_remote_invite(self) -> None:
+        """A user who rejected an invite to a room this server is not in gets a
+        403 from the endpoints that serve a departed user the state at their
+        leave, as they did while the invite was pending."""
+        store = self.hs.get_datastores().main
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        user_id = self.register_user("user1", "pass")
+        tok = self.login("user1", "pass")
+
+        # An invite received over federation to a room this server is not in is
+        # stored as an out-of-band outlier.
+        room_id = "!remote-room:remote_server"
+        room_version = RoomVersions.V10
+        invite = make_test_event(
+            {
+                "room_id": room_id,
+                "sender": "@inviter:remote_server",
+                "depth": 1,
+                "origin_server_ts": 1,
+                "type": EventTypes.Member,
+                "state_key": user_id,
+                "content": {"membership": Membership.INVITE},
+                "auth_events": [],
+                "prev_events": [],
+            },
+            room_version=room_version,
+        )
+        invite.internal_metadata.outlier = True
+        invite.internal_metadata.out_of_band_membership = True
+        self.get_success(
+            store.maybe_store_room_on_outlier_membership(room_id, room_version)
+        )
+        self.get_success(
+            persistence.persist_event(
+                invite, EventContext.for_outlier(self.hs.get_storage_controllers())
+            )
+        )
+
+        # When the inviting server cannot be reached, the rejection is stored as a
+        # locally generated leave: an outlier with no state group.
+        with patch.object(
+            self.hs.get_federation_handler(),
+            "do_remotely_reject_invite",
+            side_effect=Exception(),
+        ):
+            self.helper.leave(room_id, user_id, tok=tok)
+
+        for path in (
+            f"/rooms/{room_id}/state",
+            f"/rooms/{room_id}/state/m.room.member/{user_id}",
+            f"/rooms/{room_id}/members",
+            f"/rooms/{room_id}/initialSync",
+        ):
+            channel = self.make_request("GET", path, access_token=tok)
+            self.assertEqual(
+                channel.code, HTTPStatus.FORBIDDEN, (path, channel.result["body"])
+            )
+            self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN, path)
 
 
 class RoomInviteRatelimitTestCase(RoomBase):
