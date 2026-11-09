@@ -3570,24 +3570,21 @@ class SyncHandler:
                 # An out of band room won't have any state changes.
                 state = {}
 
-                # MSC4222 clients do not apply timeline events to room state, so
-                # the out-of-band membership has to appear in `state_after` or they
-                # never learn that the user rejected the invite or rescinded the
-                # knock. Sliding sync does the same in `get_room_sync_data`.
-                #
-                # `events` is unfiltered, so a client filter that hides the
-                # membership event still gets it in `state_after`. A filter that
-                # empties the timeline batch gets no room at all, as the shortcut
-                # above returns first (see the FIXME in
-                # `tests/handlers/test_sync.py`).
-                if sync_config.use_state_after:
-                    for oob_event in events or ():
-                        if (
-                            oob_event.type == EventTypes.Member
-                            and oob_event.state_key == sync_config.user.to_string()
-                            and oob_event.internal_metadata.is_out_of_band_membership()
-                        ):
-                            state[(oob_event.type, oob_event.state_key)] = oob_event
+            # MSC4222 clients only read state from `state_after`, so an out-of-band
+            # membership that ends the timeline must be put there: as an outlier it
+            # is never in the computed state. Sliding sync does the same in
+            # `get_room_sync_data`. `events` is unfiltered, so this holds when a
+            # filter hides the membership. On an incremental sync a filter that
+            # empties the batch still drops the room, as the empty-batch shortcut
+            # above returns first.
+            if sync_config.use_state_after and events:
+                last_event = events[-1]
+                if (
+                    last_event.type == EventTypes.Member
+                    and last_event.state_key == sync_config.user.to_string()
+                    and last_event.internal_metadata.is_out_of_band_membership()
+                ):
+                    state[(last_event.type, last_event.state_key)] = last_event
 
             summary: JsonDict | None = {}
 
