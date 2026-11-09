@@ -205,6 +205,7 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         self.assertEqual(len(media_filepaths), 1)
         self.assertFalse(os.path.exists(media_filepaths[0]))
 
+
 @attr.s(auto_attribs=True, slots=True, frozen=True)
 class TestImage:
     """An image for testing thumbnailing with the expected results
