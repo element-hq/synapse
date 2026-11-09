@@ -21,7 +21,7 @@ import attr
 from prometheus_client import Histogram
 from typing_extensions import assert_never
 
-from synapse.api.constants import Direction, EventTypes, Membership
+from synapse.api.constants import Direction, EventTypes, Membership, StickyEvent
 from synapse.events import EventBase
 from synapse.events.utils import FilteredEvent, strip_event
 from synapse.handlers.relations import BundledAggregations
@@ -95,15 +95,6 @@ sync_processing_time = Histogram(
 # given ongoing conversation if we keep 100 around. Most rooms don't have 100 members
 # anyway and it takes a while to cycle through 100 members.
 MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER = 100
-
-# Maximum number of sticky events (MSC4354) to include per room in a sliding sync
-# response.
-#
-# This is the default specified in the MSC. Chosen arbitrarily.
-#
-# Does not apply when joining a new room, see
-# https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r3021907998
-MAX_STICKY_EVENTS_PER_ROOM = 100
 
 
 class SlidingSyncHandler:
@@ -1619,7 +1610,10 @@ class SlidingSyncHandler:
             else:
                 assert_never(room_status.status)
 
-        limit = min(sticky_events_request.limit, MAX_STICKY_EVENTS_PER_ROOM)
+        limit = min(
+            sticky_events_request.limit,
+            StickyEvent.MAX_EVENTS_PER_ROOM_IN_SLIDING_SYNC,
+        )
         read_to_token, room_to_event_ids = await self.store.get_sticky_events_in_rooms(
             [room_id],
             from_token=sticky_from_token,
