@@ -1576,7 +1576,8 @@ class SlidingSyncHandler:
                 state, used to record updates to the state.
             room_id: The room ID to fetch sticky events for. The user must be
                 joined to the room.
-            initial: Whether the room is being sent down from scratch.
+            initial: Whether this is the first time the server is sending down
+                this room on this connection.
             from_token: The point in the stream to sync from.
             to_token: The point in the stream to sync up to.
 
