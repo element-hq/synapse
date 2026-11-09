@@ -1201,6 +1201,23 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         knock.event_id, txn_id, requester, content
                     )
 
+                # We hold no events to build another leave on (a rejected invite or
+                # a rescinded knock leaves us with outliers only). An identical
+                # leave by the same sender returns the existing event, as
+                # `deduplicate_state_event` does in rooms we are in.
+                elif (
+                    current_membership_type == Membership.LEAVE and not latest_event_ids
+                ):
+                    leave = await self.store.get_event(current_membership_event_id)
+                    expected_content = {**content, "membership": Membership.LEAVE}
+                    if (
+                        leave.sender == requester.user.to_string()
+                        and leave.content == expected_content
+                    ):
+                        # we know it was persisted, so must have a stream ordering.
+                        assert leave.internal_metadata.stream_ordering
+                        return leave.event_id, leave.internal_metadata.stream_ordering
+
         elif effective_membership_state == Membership.KNOCK:
             if not is_host_in_room:
                 # we used to add the domain of the room ID to remote_room_hosts.

@@ -497,6 +497,41 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
             )
         return room_id, leave_event_id
 
+    def test_repeat_leave_after_out_of_band_leave(self) -> None:
+        """
+        Leaving a room again after an out-of-band leave returns the existing leave,
+        and a leave with a different reason is forbidden.
+        """
+        # Bob's leave is an outlier in a room our server is not in, so there is no
+        # event to build a second leave on.
+        room_id, leave_event_id = self._reject_invite_from_unreachable_server()
+
+        # Clients repeat the request when they did not see the first leave. The
+        # same leave again returns the event we already have.
+        event_id, _ = self.get_success(
+            self.handler.update_membership(
+                requester=create_requester(self.bob),
+                target=self.bob_ID,
+                room_id=room_id,
+                action=Membership.LEAVE,
+            )
+        )
+        self.assertEqual(event_id, leave_event_id)
+
+        # A different leave would be a new event. It is refused, as the auth rules
+        # refuse a leave from a user who has already left.
+        failure = self.get_failure(
+            self.handler.update_membership(
+                requester=create_requester(self.bob),
+                target=self.bob_ID,
+                room_id=room_id,
+                action=Membership.LEAVE,
+                content={"reason": "changed my mind"},
+            ),
+            AuthError,
+        )
+        self.assertEqual(failure.value.code, 403)
+
     @parameterized.expand([(Membership.INVITE,), (Membership.BAN,), ("kick",)])
     def test_membership_change_after_out_of_band_leave(self, action: str) -> None:
         """
