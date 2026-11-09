@@ -26,11 +26,11 @@ import inspect
 import itertools
 import logging
 from collections import OrderedDict
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import (
     Any,
     AsyncContextManager,
-    AsyncIterator,
     Awaitable,
     Callable,
     Collection,
@@ -672,7 +672,7 @@ class Linearizer:
 
     def queue(self, key: Hashable) -> AsyncContextManager[None]:
         @asynccontextmanager
-        async def _ctx_manager() -> AsyncIterator[None]:
+        async def _ctx_manager() -> AsyncGenerator[None]:
             entry = await self._acquire_lock(key)
             try:
                 yield
@@ -799,7 +799,7 @@ class ReadWriteLock:
 
     def read(self, key: str) -> AsyncContextManager:
         @asynccontextmanager
-        async def _ctx_manager() -> AsyncIterator[None]:
+        async def _ctx_manager() -> AsyncGenerator[None]:
             new_defer: "defer.Deferred[None]" = defer.Deferred()
 
             curr_readers = self.key_to_current_readers.setdefault(key, set())
@@ -825,7 +825,7 @@ class ReadWriteLock:
 
     def write(self, key: str) -> AsyncContextManager:
         @asynccontextmanager
-        async def _ctx_manager() -> AsyncIterator[None]:
+        async def _ctx_manager() -> AsyncGenerator[None]:
             new_defer: "defer.Deferred[None]" = defer.Deferred()
 
             curr_readers = self.key_to_current_readers.get(key, set())

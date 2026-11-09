@@ -20,11 +20,13 @@
 #
 import contextlib
 import hashlib
+import itertools
 import json
 import logging
 import os
 import shutil
 import tempfile
+from collections.abc import AsyncGenerator
 from contextlib import closing
 from io import BytesIO
 from types import TracebackType
@@ -32,7 +34,6 @@ from typing import (
     IO,
     TYPE_CHECKING,
     Any,
-    AsyncIterator,
     BinaryIO,
     Callable,
     Sequence,
@@ -109,47 +110,6 @@ class SHA256TransparentIOWriter:
         return getattr(self._source, attr_name)
 
 
-class SHA256TransparentIOReader:
-    """Will generate a SHA256 hash from a source stream transparently.
-
-    Args:
-        source: Source IO stream.
-    """
-
-    def __init__(self, source: IO):
-        self._hash = hashlib.sha256()
-        self._source = source
-
-    def read(self, n: int = -1) -> bytes:
-        """Wrapper for source.read()
-
-        Args:
-            n
-
-        Returns:
-            the value of source.read()
-        """
-        bytes = self._source.read(n)
-        self._hash.update(bytes)
-        return bytes
-
-    def hexdigest(self) -> str:
-        """The digest of the written or read value.
-
-        Returns:
-            The digest in hex formaat.
-        """
-        return self._hash.hexdigest()
-
-    def wrap(self) -> IO:
-        # This class implements a subset the IO interface and passes through everything else via __getattr__
-        return cast(IO, self)
-
-    # Passthrough any other calls
-    def __getattr__(self, attr_name: str) -> Any:
-        return getattr(self._source, attr_name)
-
-
 class MediaStorage:
     """Responsible for storing/fetching files from storage providers.
 
@@ -178,24 +138,6 @@ class MediaStorage:
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.clock = hs.get_clock()
 
-    @trace_with_opname("MediaStorage.store_file")
-    async def store_file(self, source: IO, file_info: FileInfo) -> str:
-        """Write `source` to the on disk media store, and also any other
-        configured storage providers
-
-        Args:
-            source: A file like object that should be written
-            file_info: Info about the file to store
-
-        Returns:
-            the file path written to in the primary media store
-        """
-        async with self.store_into_file(file_info) as (f, fname):
-            # Write to the main media repository
-            await self.write_to_file(source, f)
-
-        return fname
-
     @trace_with_opname("MediaStorage.write_to_file")
     async def write_to_file(self, source: IO, output: IO) -> None:
         """Asynchronously write the `source` to `output`."""
@@ -205,19 +147,18 @@ class MediaStorage:
     @contextlib.asynccontextmanager
     async def store_into_file(
         self, file_info: FileInfo
-    ) -> AsyncIterator[tuple[BinaryIO, str]]:
+    ) -> AsyncGenerator[tuple[BinaryIO, str], None]:
         """Async Context manager used to get a file like object to write into, as
         described by file_info.
 
-        Actually yields a 2-tuple (file, media_filepath,), where file is a file
-        like object that can be written to and media_filepath is the absolute path
-        of the file on disk.
-
-        media_filepath can be used to read the contents from after upload, e.g. to
-        generate thumbnails.
-
         Args:
             file_info: Info about the file to store
+
+        Returns:
+            A 2-tuple (file, media_filepath,), where `file` is a file like object
+            that can be written to and `media_filepath` is the absolute path of
+            the file on disk. `media_filepath` can be used to read the contents
+            from after upload, e.g. to generate thumbnails.
 
         Example:
 
@@ -279,7 +220,8 @@ class MediaStorage:
             raise e from None
 
     async def fetch_media(self, file_info: FileInfo) -> Responder | None:
-        """Attempts to fetch media described by file_info from the configured storage providers.
+        """Attempts to fetch media described by file_info from the configured
+        storage providers.
 
         Args:
             file_info: Metadata about the media file
@@ -314,29 +256,23 @@ class MediaStorage:
             )
 
         # Check local provider first, then other storage providers
+        providers: list[StorageProvider] = list(self.storage_providers)
         if self.local_provider:
-            for path in paths:
-                res: Any = await self.local_provider.fetch(path, file_info)
-                if res:
-                    logger.debug("Streaming %s from %s", path, self.local_provider)
-                    return res
-                logger.debug("%s not found on %s", path, self.local_provider)
+            providers.insert(0, self.local_provider)
 
-        for provider in self.storage_providers:
-            for path in paths:
-                res = await provider.fetch(path, file_info)
-                if res:
-                    logger.debug("Streaming %s from %s", path, provider)
-                    return res
-                logger.debug("%s not found on %s", path, provider)
-
+        for provider, path in itertools.product(providers, paths):
+            res: Any = await provider.fetch(path, file_info)
+            if res:
+                logger.debug("Streaming %s from %s", path, provider)
+                return res
+            logger.debug("%s not found on %s", path, provider)
         return None
 
     @trace
     @contextlib.asynccontextmanager
     async def ensure_media_is_in_local_cache(
         self, file_info: FileInfo
-    ) -> AsyncIterator[str]:
+    ) -> AsyncGenerator[str, None]:
         """Async context manager that ensures the given file is in the local cache.
         Attempts to download it from storage providers if it isn't.
 
@@ -380,46 +316,45 @@ class MediaStorage:
 
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
-            for provider in self.storage_providers:
-                remote_res: Any = await provider.fetch(path, file_info)
-                if remote_res:
-                    with remote_res:
-                        consumer = BackgroundFileConsumer(
-                            open(local_path, "wb"), self.reactor
-                        )
-                        await remote_res.write_to_consumer(consumer)
-                        await consumer.wait()
+        for provider in self.storage_providers:
+            res: Any = await provider.fetch(path, file_info)
+            if not res:
+                continue
+
+            if self.local_provider:
+                # Download to a unique side file and only move it into the cache
+                # once complete, so a failed download never leaves a truncated
+                # file at `local_path` that later calls would serve as cached.
+                download_path = f"{local_path}.{uuid4().hex}.partial"
+            else:
+                # No local provider, download to temp file and clean up after use
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=os.path.splitext(path)[1]
+                ) as tmp:
+                    download_path = tmp.name
+
+            try:
+                with res:
+                    consumer = BackgroundFileConsumer(
+                        open(download_path, "wb"), self.reactor
+                    )
+                    await res.write_to_consumer(consumer)
+                    await consumer.wait()
+
+                if self.local_provider:
+                    # Atomically move the completed download into the cache.
+                    os.replace(download_path, local_path)
                     yield local_path
-                    return
+                else:
+                    yield download_path
+            finally:
+                # Removes the temp file, or the partial file if the download
+                # failed. After a successful `os.replace` it no longer exists.
+                with contextlib.suppress(OSError):
+                    os.remove(download_path)
+            return
 
-            raise NotFoundError()
-        else:
-            # No local provider, download to temp file and clean up after use
-            for provider in self.storage_providers:
-                res: Any = await provider.fetch(path, file_info)
-                if res:
-                    temp_path = None
-                    try:
-                        with tempfile.NamedTemporaryFile(
-                            delete=False, suffix=os.path.splitext(path)[1]
-                        ) as tmp:
-                            temp_path = tmp.name
-                        with res:
-                            consumer = BackgroundFileConsumer(
-                                open(temp_path, "wb"), self.reactor
-                            )
-                            await res.write_to_consumer(consumer)
-                            await consumer.wait()
-                        yield temp_path
-                    finally:
-                        if temp_path:
-                            try:
-                                os.remove(temp_path)
-                            except Exception:
-                                pass
-                    return
-
-            raise NotFoundError()
+        raise NotFoundError()
 
     @trace
     def _file_info_to_path(self, file_info: FileInfo) -> str:

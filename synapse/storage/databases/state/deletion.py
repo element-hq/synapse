@@ -15,10 +15,10 @@
 
 import contextlib
 import logging
+from collections.abc import AsyncGenerator
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
-    AsyncIterator,
     Collection,
     Mapping,
 )
@@ -253,7 +253,7 @@ class StateDeletionDataStore:
     @contextlib.asynccontextmanager
     async def persisting_state_group_references(
         self, event_and_contexts: Collection[EventPersistencePair]
-    ) -> AsyncIterator[None]:
+    ) -> AsyncGenerator[None]:
         """Wraps the persistence of the given events and contexts, ensuring that
         any state groups referenced still exist and that they don't get deleted
         during this."""

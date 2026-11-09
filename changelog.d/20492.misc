@@ -1,0 +1,1 @@
+Refactor `MediaRepository` and `MediaStorage` to reduce duplication, and fix a bug where a failed download from a storage provider could leave a truncated file in the local media cache. @famedly @itsoyou.
