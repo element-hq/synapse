@@ -26,13 +26,20 @@ from signedjson.types import BaseKey, SigningKey
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EduTypes, RoomEncryptionAlgorithms
+from synapse.api.constants import (
+    EduTypes,
+    EventTypes,
+    Membership,
+    RoomEncryptionAlgorithms,
+)
 from synapse.api.presence import UserPresenceState
+from synapse.events import EventBase
+from synapse.events.snapshot import EventContext
 from synapse.federation.sender.per_destination_queue import MAX_PRESENCE_STATES_PER_EDU
 from synapse.federation.units import Transaction
 from synapse.handlers.device import DeviceListUpdater, DeviceWriterHandler
 from synapse.rest import admin
-from synapse.rest.client import login
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventMetadata
 from synapse.types import JsonDict, ReadReceipt
@@ -331,6 +338,95 @@ class FederationSenderReceiptsTestCases(HomeserverTestCase):
                 }
             ],
         )
+
+
+class FederationSenderMembershipTestCases(HomeserverTestCase):
+    """
+    Test which servers membership events are sent to, beyond those in the room.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.federation_transport_client = Mock(spec=["send_transaction"])
+        self.federation_transport_client.send_transaction = AsyncMock(return_value={})
+        hs = self.setup_test_homeserver(
+            federation_transport_client=self.federation_transport_client,
+        )
+
+        # The invitee's server would counter-sign the invite; return it unchanged.
+        async def send_invite(
+            target_host: str, event: EventBase, context: EventContext
+        ) -> EventBase:
+            return event
+
+        hs.get_federation_handler().send_invite = send_invite  # type: ignore[method-assign]
+
+        return hs
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["federation_sender_instances"] = None
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.moderator = self.register_user("moderator", "pass")
+        self.moderator_tok = self.login("moderator", "pass")
+        self.room_id = self.helper.create_room_as(
+            self.moderator, tok=self.moderator_tok
+        )
+
+    def _memberships_sent_to(self, destination: str) -> list[tuple[str, str]]:
+        """Return the (state_key, membership) of every membership event sent to
+        `destination`."""
+        sent = []
+        for call in self.federation_transport_client.send_transaction.call_args_list:
+            transaction, json_cb = call[0]
+            if transaction.destination != destination:
+                continue
+            for pdu in json_cb()["pdus"]:
+                if pdu["type"] == EventTypes.Member:
+                    sent.append((pdu["state_key"], pdu["content"]["membership"]))
+        return sent
+
+    def test_ban_of_invitee_sent_to_their_server(self) -> None:
+        """A ban of a remote user whose membership is invite is sent to their
+        server, which is not in the room."""
+        invitee = "@invitee:remote1"
+        self.helper.invite(
+            self.room_id, self.moderator, invitee, tok=self.moderator_tok
+        )
+        self.helper.ban(self.room_id, self.moderator, invitee, tok=self.moderator_tok)
+        self.pump()
+
+        self.assertEqual(
+            self._memberships_sent_to("remote1"), [(invitee, Membership.BAN)]
+        )
+
+    def test_ban_of_non_member_not_sent_to_their_server(self) -> None:
+        """A ban of a remote user with no membership in the room is not sent to
+        their server."""
+        self.helper.ban(
+            self.room_id, self.moderator, "@stranger:remote1", tok=self.moderator_tok
+        )
+
+        # Events are sent in order, so once a later event has reached its
+        # destination the ban has been handled.
+        invitee = "@invitee:remote2"
+        self.helper.invite(
+            self.room_id, self.moderator, invitee, tok=self.moderator_tok
+        )
+        self.helper.ban(self.room_id, self.moderator, invitee, tok=self.moderator_tok)
+        self.pump()
+
+        self.assertEqual(
+            self._memberships_sent_to("remote2"), [(invitee, Membership.BAN)]
+        )
+        self.assertEqual(self._memberships_sent_to("remote1"), [])
 
 
 class FederationSenderPresenceTestCases(HomeserverTestCase):

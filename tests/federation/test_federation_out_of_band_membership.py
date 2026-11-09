@@ -458,6 +458,374 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             ),
         )
 
+    def _receive_out_of_band_invite(self) -> tuple[str, str, EventBase, EventBase]:
+        """
+        Have a remote user invite a new local user to a room on the remote server,
+        which our server is not in.
+
+        Returns:
+            The local user ID, their access token, the room creator's membership
+            event and the invite event.
+        """
+        local_user1_id = self.register_user("user1", "pass")
+        local_user1_tok = self.login("user1", "pass")
+
+        room_creator_user_id = f"@remote-user:{self.OTHER_SERVER_NAME}"
+        room_version = self.hs.config.server.default_room_version
+
+        room_create_event = make_test_event(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "sender": room_creator_user_id,
+                    "depth": 1,
+                    "origin_server_ts": 1,
+                    "type": EventTypes.Create,
+                    "state_key": "",
+                    "content": {
+                        EventContentFields.ROOM_VERSION: room_version.identifier,
+                    },
+                    "auth_events": [],
+                    "prev_events": [],
+                }
+            ),
+            room_version=room_version,
+        )
+        remote_room_id = room_create_event.room_id
+
+        creator_membership_event = make_test_event(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": remote_room_id,
+                    "sender": room_creator_user_id,
+                    "depth": 2,
+                    "origin_server_ts": 2,
+                    "type": EventTypes.Member,
+                    "state_key": room_creator_user_id,
+                    "content": {"membership": Membership.JOIN},
+                    "auth_events": [],
+                    "prev_events": [room_create_event.event_id],
+                }
+            ),
+            room_version=room_version,
+        )
+
+        user1_invite_membership_event = make_test_event(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": remote_room_id,
+                    "sender": room_creator_user_id,
+                    "depth": 3,
+                    "origin_server_ts": 3,
+                    "type": EventTypes.Member,
+                    "state_key": local_user1_id,
+                    "content": {"membership": Membership.INVITE},
+                    "auth_events": [creator_membership_event.event_id],
+                    "prev_events": [creator_membership_event.event_id],
+                }
+            ),
+            room_version=room_version,
+        )
+        channel = self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v2/invite/{remote_room_id}/{user1_invite_membership_event.event_id}",
+            content={
+                "event": user1_invite_membership_event.get_dict(),
+                "invite_room_state": [strip_event(room_create_event)],
+                "room_version": room_version.identifier,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        return (
+            local_user1_id,
+            local_user1_tok,
+            creator_membership_event,
+            user1_invite_membership_event,
+        )
+
+    def _send_end_of_out_of_band_invite(
+        self,
+        sender: str,
+        creator_membership_event: EventBase,
+        invite_event: EventBase,
+        membership: str = Membership.BAN,
+        extra_content: JsonDict | None = None,
+        auth_event_ids: list[str] | None = None,
+    ) -> EventBase:
+        """
+        Send, over federation, a leave or ban of the target of `invite_event`.
+
+        Args:
+            auth_event_ids: The event's auth events, and its last entry its prev
+                event. Defaults to the creator's membership and the invite.
+
+        Returns:
+            The leave or ban event.
+        """
+        if auth_event_ids is None:
+            auth_event_ids = [creator_membership_event.event_id, invite_event.event_id]
+        end_event = make_test_event(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": invite_event.room_id,
+                    "sender": sender,
+                    "depth": 4,
+                    "origin_server_ts": 4,
+                    "type": EventTypes.Member,
+                    "state_key": invite_event.state_key,
+                    "content": {"membership": membership, **(extra_content or {})},
+                    "auth_events": auth_event_ids,
+                    "prev_events": auth_event_ids[-1:],
+                }
+            ),
+            room_version=self.hs.config.server.default_room_version,
+        )
+        channel = self.make_signed_federation_request(
+            "PUT",
+            "/_matrix/federation/v1/send/txn",
+            {"pdus": [end_event.get_pdu_json()]},
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        return end_event
+
+    @parameterized.expand(
+        [
+            ("inviter kick", "remote-user", Membership.LEAVE),
+            ("moderator kick", "moderator", Membership.LEAVE),
+            ("inviter ban", "remote-user", Membership.BAN),
+            ("moderator ban", "moderator", Membership.BAN),
+        ]
+    )
+    def test_end_of_out_of_band_invite_from_inviters_server(
+        self, _test_description: str, sender_localpart: str, end_membership: str
+    ) -> None:
+        """
+        Test to make sure that a kick or ban sent by a user on the inviter's server,
+        while our server is not in the room, replaces the local user's out-of-band
+        invite.
+        """
+        local_user1_id, _, creator_membership_event, invite_event = (
+            self._receive_out_of_band_invite()
+        )
+
+        end_event = self._send_end_of_out_of_band_invite(
+            f"@{sender_localpart}:{self.OTHER_SERVER_NAME}",
+            creator_membership_event,
+            invite_event,
+            membership=end_membership,
+        )
+
+        membership, membership_event_id = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(
+                local_user1_id, invite_event.room_id
+            )
+        )
+        self.assertEqual(membership, end_membership)
+        self.assertEqual(membership_event_id, end_event.event_id)
+
+    def test_ban_of_out_of_band_invite_from_other_server_ignored(self) -> None:
+        """
+        Test to make sure that a ban sent by a user on a server other than the
+        inviter's leaves the local user's out-of-band invite in place.
+        """
+        local_user1_id, _, creator_membership_event, invite_event = (
+            self._receive_out_of_band_invite()
+        )
+
+        # Only the other server's signing key is known, so accept any signature
+        # to let the ban reach the out-of-band membership check.
+        async def approve_all_signature_checking(
+            room_version: RoomVersion,
+            pdu: EventBase,
+            record_failure_callback: Any = None,
+        ) -> EventBase:
+            return pdu
+
+        self.hs.get_federation_server()._check_sigs_and_hash = (  # type: ignore[method-assign]
+            approve_all_signature_checking
+        )
+
+        self._send_end_of_out_of_band_invite(
+            "@moderator:third.example.com", creator_membership_event, invite_event
+        )
+
+        membership, membership_event_id = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(
+                local_user1_id, invite_event.room_id
+            )
+        )
+        self.assertEqual(membership, Membership.INVITE)
+        self.assertEqual(membership_event_id, invite_event.event_id)
+
+    def test_ban_without_invite_reference_ignored(self) -> None:
+        """
+        Test to make sure that a ban from the inviter that does not have the invite
+        in its auth events leaves the local user's out-of-band invite in place.
+        """
+        local_user1_id, _, creator_membership_event, invite_event = (
+            self._receive_out_of_band_invite()
+        )
+
+        self._send_end_of_out_of_band_invite(
+            invite_event.sender,
+            creator_membership_event,
+            invite_event,
+            auth_event_ids=[creator_membership_event.event_id],
+        )
+
+        membership, membership_event_id = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(
+                local_user1_id, invite_event.room_id
+            )
+        )
+        self.assertEqual(membership, Membership.INVITE)
+        self.assertEqual(membership_event_id, invite_event.event_id)
+
+    def test_ban_after_rejected_invite_ignored(self) -> None:
+        """
+        Test to make sure that a ban from the inviter that references the local
+        user's rejection of their out-of-band invite does not replace the rejection:
+        only an invite can be ended out of band.
+        """
+        local_user1_id, local_user1_tok, creator_membership_event, invite_event = (
+            self._receive_out_of_band_invite()
+        )
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{invite_event.room_id}/leave",
+            {},
+            access_token=local_user1_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        _, leave_event_id = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(
+                local_user1_id, invite_event.room_id
+            )
+        )
+        assert leave_event_id is not None
+
+        self._send_end_of_out_of_band_invite(
+            invite_event.sender,
+            creator_membership_event,
+            invite_event,
+            auth_event_ids=[creator_membership_event.event_id, leave_event_id],
+        )
+
+        membership, membership_event_id = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(
+                local_user1_id, invite_event.room_id
+            )
+        )
+        self.assertEqual(membership, Membership.LEAVE)
+        self.assertEqual(membership_event_id, leave_event_id)
+
+    def test_leave_after_ban_of_out_of_band_invite(self) -> None:
+        """
+        Test to make sure that a local user who was banned while invited, in a room
+        our server is not in, cannot leave the room.
+        """
+        # The local user is invited, then banned by the inviter. Our server holds
+        # both events as outliers and has no other event of the room.
+        local_user1_id, local_user1_tok, creator_membership_event, invite_event = (
+            self._receive_out_of_band_invite()
+        )
+        ban_event = self._send_end_of_out_of_band_invite(
+            creator_membership_event.sender, creator_membership_event, invite_event
+        )
+
+        # The client may still show the invite and try to reject it. There is no
+        # event to build a leave on, and a banned user cannot leave.
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{invite_event.room_id}/leave",
+            content={},
+            access_token=local_user1_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.FORBIDDEN, channel.json_body)
+
+        # The user is still banned.
+        membership, membership_event_id = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(
+                local_user1_id, invite_event.room_id
+            )
+        )
+        self.assertEqual(membership, Membership.BAN)
+        self.assertEqual(membership_event_id, ban_event.event_id)
+
+    def test_ban_of_out_of_band_invite_in_sliding_sync(self) -> None:
+        """
+        Test to make sure that an incremental sliding sync returns the ban that
+        replaced the local user's out-of-band invite.
+        """
+        local_user1_id, local_user1_tok, creator_membership_event, invite_event = (
+            self._receive_out_of_band_invite()
+        )
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [(EventTypes.Member, StateValues.ME)],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        _, from_token = self.do_sync(sync_body, tok=local_user1_tok)
+
+        ban_event = self._send_end_of_out_of_band_invite(
+            invite_event.sender, creator_membership_event, invite_event
+        )
+
+        response_body, _ = self.do_sync(
+            sync_body, since=from_token, tok=local_user1_tok
+        )
+        self.assertIncludes(
+            set(response_body["rooms"].keys()), {invite_event.room_id}, exact=True
+        )
+        required_state_map = required_state_json_to_state_map(
+            response_body["rooms"][invite_event.room_id]["required_state"]
+        )
+        self.assertEqual(
+            required_state_map[(EventTypes.Member, local_user1_id)].event_id,
+            ban_event.event_id,
+        )
+
+    @unittest.override_config({"experimental_features": {"msc4293_enabled": True}})
+    def test_ban_of_out_of_band_invite_with_msc4293_redact_events(self) -> None:
+        """
+        Test to make sure that a ban asking for the local user's events to be
+        redacted (MSC4293) is handled, although we have no room state to check the
+        sender's power level against.
+        """
+        local_user1_id, _, creator_membership_event, invite_event = (
+            self._receive_out_of_band_invite()
+        )
+
+        notifier = self.hs.get_notifier()
+        on_new_room_events = Mock(side_effect=notifier.on_new_room_events)
+        notifier.on_new_room_events = on_new_room_events  # type: ignore[method-assign]
+
+        ban_event = self._send_end_of_out_of_band_invite(
+            invite_event.sender,
+            creator_membership_event,
+            invite_event,
+            extra_content={"org.matrix.msc4293.redact_events": True},
+        )
+
+        membership, _ = self.get_success(
+            self.store.get_local_current_membership_for_user_in_room(
+                local_user1_id, invite_event.room_id
+            )
+        )
+        self.assertEqual(membership, Membership.BAN)
+        # The local user's clients are told about the ban.
+        notified_event_ids = {
+            event.event_id
+            for call in on_new_room_events.call_args_list
+            for event, _ in call.args[0]
+        }
+        self.assertIn(ban_event.event_id, notified_event_ids)
+
     def test_can_join_from_out_of_band_invite(self) -> None:
         """
         Test to make sure that we can join a room that we were invited to over
