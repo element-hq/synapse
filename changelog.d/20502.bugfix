@@ -1,0 +1,1 @@
+Fix a bug introduced in Synapse v1.111.0 where [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Simplified Sliding Sync could leave the user's own ban or leave out of the room timeline, for example a ban after they had already left the room or while they were invited.

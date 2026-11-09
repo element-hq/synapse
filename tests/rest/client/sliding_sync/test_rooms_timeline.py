@@ -18,7 +18,8 @@ from parameterized import parameterized_class
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EventTypes
+from synapse.api.constants import EventTypes, Membership
+from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.types import StrSequence
@@ -581,6 +582,152 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
 
         # Nothing to see for this banned user in the room in the token range
         self.assertIsNone(response_body["rooms"].get(room_id1))
+
+    def test_rooms_ban_after_leave_incremental_sync(self) -> None:
+        """
+        Test that a user who left a room and is then banned sees their ban at the
+        end of the timeline on the next incremental sync, matching the membership in
+        `required_state`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        user1_join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        user1_leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [[EventTypes.Member, StateValues.ME]],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        # The leave happened before the connection started
+        self.assertIsNone(response_body["rooms"].get(room_id1))
+
+        user1_ban_response = self.helper.ban(
+            room_id1, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+
+        # Make the incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[
+                event["event_id"]
+                for event in response_body["rooms"][room_id1]["timeline"]
+            ],
+            expected_event_ids=[
+                user1_join_response["event_id"],
+                user1_leave_response["event_id"],
+                user1_ban_response["event_id"],
+            ],
+            message=str(response_body["rooms"][room_id1]["timeline"]),
+        )
+        self.assertEqual(
+            [
+                (state["event_id"], state["content"]["membership"])
+                for state in response_body["rooms"][room_id1]["required_state"]
+            ],
+            [(user1_ban_response["event_id"], Membership.BAN)],
+        )
+
+    def test_rooms_leave_and_ban_incremental_sync(self) -> None:
+        """
+        Test that a user who leaves a room already sent on the connection and is
+        then banned, both within the token range, sees both events in the timeline.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        user1_leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        user1_ban_response = self.helper.ban(
+            room_id1, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+
+        # Make the incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[
+                event["event_id"]
+                for event in response_body["rooms"][room_id1]["timeline"]
+            ],
+            expected_event_ids=[
+                user1_leave_response["event_id"],
+                user1_ban_response["event_id"],
+            ],
+            message=str(response_body["rooms"][room_id1]["timeline"]),
+        )
+
+    def test_rooms_ban_after_invite_incremental_sync(self) -> None:
+        """
+        Test that a user who is banned while invited sees the ban in the timeline on
+        the next incremental sync. With no `required_state`, the timeline is the only
+        place the client learns that the invite is gone.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        # The invite is sent down first
+        self.assertIn(room_id1, response_body["rooms"])
+
+        user1_ban_response = self.helper.ban(
+            room_id1, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+
+        # Make the incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertIn(room_id1, response_body["rooms"])
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[
+                event["event_id"]
+                for event in response_body["rooms"][room_id1]["timeline"]
+            ],
+            expected_event_ids=[user1_ban_response["event_id"]],
+            message=str(response_body["rooms"][room_id1]["timeline"]),
+        )
 
     def test_increasing_timeline_range_sends_more_messages(self) -> None:
         """

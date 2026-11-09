@@ -790,6 +790,15 @@ class SlidingSyncHandler:
                 raw_timeline_events,
                 is_peeking=room_membership_for_user_at_to_token.membership
                 != Membership.JOIN,
+                # The user's membership at `to_token` ends the timeline of a room they
+                # left or were banned from, and must reach the client so the timeline
+                # agrees with `required_state`. History visibility can hide it, e.g. a
+                # ban after a leave.
+                always_include_ids=(
+                    frozenset({room_membership_for_user_at_to_token.event_id})
+                    if room_membership_for_user_at_to_token.event_id is not None
+                    else frozenset()
+                ),
                 filter_send_to_client=True,
             )
 
