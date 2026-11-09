@@ -2234,6 +2234,68 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         self.assertTrue(room_id1 not in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
 
+    def test_display_name_change_is_not_newly_joined_room(
+        self,
+    ) -> None:
+        """
+        Regression test that a displayname change is not considered a newly-joined room.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        after_room_join_token = self.event_sources.get_current_token()
+
+        # Our bug was only triggered if the displayname change's `prev_events` didn't
+        # include the member's actual previous memberships, so for that reason we
+        # add a dummy event here, even though it appears meaningless for the test.
+        self.helper.send(room_id1, "test", tok=user2_tok)
+
+        # Update the displayname during the token range
+        self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user1_id,
+            body={
+                "membership": Membership.JOIN,
+                "displayname": "displayname during token range",
+            },
+            tok=user1_tok,
+        )
+
+        after_change1_token = self.event_sources.get_current_token()
+
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
+                from_token=after_room_join_token,
+                to_token=after_change1_token,
+            )
+        )
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+
+        self.assertEqual(room_id_results, {room_id1})
+        # We must NOT be `newly_joined` (or `newly_left`, for that matter)
+        # because this was just a displayname change (and we were joined before the token range)
+        self.assertEqual(interested_rooms.newly_joined_rooms, set())
+        self.assertEqual(interested_rooms.newly_left_rooms, set())
+
     def test_display_name_changes_before_and_after_token_range(
         self,
     ) -> None:

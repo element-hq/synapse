@@ -77,6 +77,7 @@ from .relations import RelationsStore
 from .room import RoomStore
 from .roommember import RoomMemberStore
 from .search import SearchStore
+from .server_announcements import ServerAnnouncementsStore
 from .session import SessionStore
 from .signatures import SignatureStore
 from .state import StateStore
@@ -142,6 +143,7 @@ class DataStore(
     EndToEndKeyStore,
     EndToEndRoomKeyStore,
     SearchStore,
+    ServerAnnouncementsStore,
     TagsStore,
     AccountDataStore,
     ThreadSubscriptionsWorkerStore,

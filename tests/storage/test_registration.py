@@ -145,13 +145,14 @@ class RegistrationStoreTestCase(HomeserverTestCase):
         res = self.get_success(self.store.is_support_user(SUPPORT_USER))
         self.assertTrue(res)
 
+    @override_config({"request_token_inhibit_3pid_errors": False})
     def test_3pid_inhibit_invalid_validation_session_error(self) -> None:
         """Tests that enabling the configuration option to inhibit 3PID errors on
         /requestToken also inhibits validation errors caused by an unknown session ID.
         """
 
-        # Check that, with the config setting set to false (the default value), a
-        # validation error is caused by the unknown session ID.
+        # Check that, with the config setting explicitly set to false, a validation
+        # error is caused by the unknown session ID.
         e = self.get_failure(
             self.store.validate_threepid_session(
                 "fake_sid",
