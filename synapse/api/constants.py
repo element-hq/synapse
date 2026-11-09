@@ -502,16 +502,6 @@ class StickyEvent:
     Ensures that data in the /sync response can go down and not grow unbounded.
     """
 
-    MAX_EVENTS_IN_SYNC: Final = 100
-    """
-    Maximum number of sticky events to include in /sync (in total), or in a
-    sliding sync response (per room, like `timeline_limit`).
-
-    This is the default specified in the MSC. Chosen arbitrarily.
-
-    Does not apply when joining a new room, see https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r3021907998
-    """
-
 
 class StateDag:
     GET_MISSING_EVENTS_FIELD: Final = "org.matrix.msc4242.state_dag"

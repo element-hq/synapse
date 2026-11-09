@@ -43,7 +43,6 @@ from synapse.api.constants import (
     EventTypes,
     Membership,
     ProfileUpdateAction,
-    StickyEvent,
 )
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
@@ -131,6 +130,15 @@ LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE = 16
 # A random key generated on server startup, for the lazy loaded profile fields cache.
 # Since this is a per-process cache, we don't care if the key is different per process.
 LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY = os.urandom(32)
+
+# Maximum number of sticky events (MSC4354) to include in a /sync response (in
+# total, across all rooms).
+#
+# This is the default specified in the MSC. Chosen arbitrarily.
+#
+# Does not apply when joining a new room, see
+# https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r3021907998
+MAX_STICKY_EVENTS_IN_SYNC = 100
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -812,7 +820,7 @@ class SyncHandler:
                 from_token=from_token,
                 to_token=now_token.sticky_events_key,
                 now=now,
-                limit=StickyEvent.MAX_EVENTS_IN_SYNC,
+                limit=MAX_STICKY_EVENTS_IN_SYNC,
             )
             now_token = now_token.copy_and_replace(
                 StreamKeyType.STICKY_EVENTS, to_token
