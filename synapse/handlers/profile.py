@@ -1103,7 +1103,14 @@ class ProfileHandler:
         if not self.hs.config.server.limit_profile_requests_to_users_who_share_rooms:
             return target_users
 
-        return await self.store.do_users_share_a_room(
-            user_id=requester.to_string(),
-            other_user_ids=list(target_users),
+        requester_id = requester.to_string()
+        other_user_ids = target_users - {requester_id}
+
+        allowed = await self.store.do_users_share_a_room(
+            user_id=requester_id,
+            other_user_ids=list(other_user_ids),
         )
+        if requester_id in target_users:
+            # Always allow the user to query their own profile
+            allowed.add(requester_id)
+        return allowed

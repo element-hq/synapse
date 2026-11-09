@@ -1273,6 +1273,37 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             {},
         )
 
+    @unittest.override_config(
+        {
+            "experimental_features": {"msc4536_enabled": True},
+            "require_auth_for_profile_requests": True,
+            "limit_profile_requests_to_users_who_share_rooms": True,
+        }
+    )
+    def test_query_profiles_endpoint_when_msc4536_enabled_returns_own_profile_not_sharing_room_lookups_disallowed(
+        self,
+    ) -> None:
+        """With MSC4536 enabled and profile requests restricted to users who share
+        rooms, the profiles query endpoint should still return the requester's own
+        profile, even when the requester is not joined to any room.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [
+                    self.owner,
+                    self.other,
+                ],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body,
+            {self.owner: {"displayname": "owner"}},
+        )
+
 
 class ProfilesRestrictedTestCase(unittest.HomeserverTestCase):
     servlets = [
