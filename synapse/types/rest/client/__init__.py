@@ -409,9 +409,8 @@ class SlidingSyncBody(RequestBodyModel):
 
             Attributes:
                 enabled
-                limit: maximum number of sticky events to return per room (like
-                    `timeline_limit`, default 100). The server may cap this to a
-                    lower number.
+                limit: maximum number of sticky events to return per room
+                    (default 100). The server may cap this to a lower number.
                 lists: List of list keys (from the Sliding Window API) to apply this
                     extension to.
                 rooms: List of room IDs (from the Room Subscription API) to apply this
