@@ -25,14 +25,9 @@
 //! finished `RowStream` again would instead fail with a misleading
 //! "connection closed".
 //!
-//! ## Generic over the stream
-//!
-//! The state machine is generic over the stream type `S`. It defaults to
-//! [`PgRowStream`], the only stream used in production. The [`CursorRowStream`]
-//! trait covers what the logic needs from a stream beyond [`futures::Stream`]:
-//! the affected-row count, how to turn a row into a Python tuple, and how to
-//! turn a stream error into a [`PyErr`]. That lets the unit tests use an
-//! in-memory stream instead of a Postgres server.
+//! The state machine is generic over the stream type `S` to allow using
+//! different stream implementations in tests. In production, this is always
+//! [`PgRowStream`].
 
 use std::pin::Pin;
 
