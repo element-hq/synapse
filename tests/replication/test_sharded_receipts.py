@@ -23,6 +23,7 @@ import logging
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import ReceiptTypes
+from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.rest import admin
 from synapse.rest.client import login, receipts, room, sync
 from synapse.server import HomeServer
@@ -248,3 +249,72 @@ class ReceiptsShardTestCase(BaseMultiWorkerStreamTestCase):
         events = channel.json_body["rooms"]["join"][room_id]["ephemeral"]["events"]
         self.assertEqual(len(events), 1)
         self.assertIn(second_event, events[0]["content"])
+
+    def test_non_member_receipt_wakes_sync_worker(self) -> None:
+        """A non-member's read receipt in a server announcement room, persisted
+        on a receipts writer, wakes a long-polling incremental sync of their
+        other devices on a sync worker.
+        """
+        announcer = self.register_user("announcer", "pass")
+        announcer_tok = self.login("announcer", "pass")
+        bob = self.register_user("bob", "pass")
+        bob_tok = self.login("bob", "pass")
+        bob_other_tok = self.login("bob", "pass")
+
+        writer_hs = self.make_worker_hs(
+            "synapse.app.generic_worker", {"worker_name": "worker1"}
+        )
+        sync_hs = self.make_worker_hs(
+            "synapse.app.generic_worker", {"worker_name": "sync"}
+        )
+        announcement_rooms = [
+            ServerAnnouncementRoom(
+                config_id="news",
+                room_name="Server News",
+                room_topic=None,
+                room_avatar_url=None,
+                room_avatar_path=None,
+                allowed_user_ids=[announcer],
+            )
+        ]
+        for hs in (self.hs, writer_hs, sync_hs):
+            hs.config.serverannouncements.rooms = announcement_rooms
+        self.get_success(self.hs.get_server_announcements_handler().reconcile_rooms())
+        room_id = self.get_success(self.store.get_server_announcement_room("news"))
+        assert room_id is not None
+
+        event_id = self.helper.send(room_id, body="hello", tok=announcer_tok)[
+            "event_id"
+        ]
+
+        sync_site = self._hs_to_site[sync_hs]
+        channel = make_request(
+            self.reactor, sync_site, "GET", "/sync", access_token=bob_other_tok
+        )
+        self.assertEqual(200, channel.code, channel.json_body)
+        next_batch = channel.json_body["next_batch"]
+
+        sync_channel = make_request(
+            self.reactor,
+            sync_site,
+            "GET",
+            f"/sync?since={next_batch}&timeout=10000",
+            access_token=bob_other_tok,
+            await_result=False,
+        )
+
+        channel = make_request(
+            reactor=self.reactor,
+            site=self._hs_to_site[writer_hs],
+            method="POST",
+            path=f"/rooms/{room_id}/receipt/{ReceiptTypes.READ}/{event_id}",
+            access_token=bob_tok,
+            content={},
+        )
+        self.assertEqual(200, channel.code, channel.json_body)
+
+        sync_channel.await_result(timeout_ms=1000)
+        self.assertEqual(200, sync_channel.code, sync_channel.json_body)
+        events = sync_channel.json_body["rooms"]["join"][room_id]["ephemeral"]["events"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(set(events[0]["content"][event_id][ReceiptTypes.READ]), {bob})
