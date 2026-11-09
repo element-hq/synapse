@@ -1618,6 +1618,19 @@ class FederationHandler:
                     for stripped_state_event in stripped_room_state_for_client
                 ]
 
+        # MSC4509 joins the invitee only if they still have a pending knock on the
+        # room here: the inviting server may not have seen an out-of-band
+        # rescission of their knock, and lists it in the invite's auth events anyway.
+        knock_pending = False
+        if self.config.experimental.msc4509_enabled:
+            (
+                membership_before_invite,
+                _,
+            ) = await self.store.get_local_current_membership_for_user_in_room(
+                event.state_key, event.room_id
+            )
+            knock_pending = membership_before_invite == Membership.KNOCK
+
         event.internal_metadata.outlier = True
         event.internal_metadata.out_of_band_membership = True
 
@@ -1643,7 +1656,8 @@ class FederationHandler:
             await self.store.remove_push_actions_from_staging(event.event_id)
             raise
 
-        await member_handler.maybe_auto_join_accepted_knock(event)
+        if knock_pending:
+            await member_handler.maybe_auto_join_accepted_knock(event)
 
         return event
 
