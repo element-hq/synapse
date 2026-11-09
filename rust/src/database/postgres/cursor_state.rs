@@ -38,7 +38,7 @@
 //! turn a stream error into a [`PyErr`]. That lets the unit tests use an
 //! in-memory stream instead of a Postgres server.
 
-use std::{mem, pin::Pin};
+use std::pin::Pin;
 
 use futures::{
     stream::{Fuse, FusedStream},
@@ -175,20 +175,26 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     /// converting the row fails, the cursor is reset to [`Self::Idle`] and the
     /// error surfaced to Python.
     pub fn fetch_one<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyTuple>>> {
-        let Self::Active { stream, handle, .. } = self else {
-            return Err(self.fetch_after_end_err());
-        };
-
-        let row = match Pin::new(stream).block_on_next(py, handle) {
-            Some(row) => row
-                .map_err(S::stream_err)
-                .and_then(|row| S::row_to_py(py, &row)),
-            None => {
-                self.close_drained();
-                return Ok(None);
+        let row = self.with_active_query_state(|stream, handle| {
+            // Fetch the next row from the stream.
+            match Pin::new(stream).block_on_next(py, handle) {
+                Some(row) => {
+                    // Convert the postgres row to a Python tuple.
+                    let py_row = row
+                        .map_err(S::stream_err)
+                        .and_then(|row| S::row_to_py(py, &row))?;
+                    Ok(Some(py_row))
+                }
+                None => Ok(None),
             }
-        };
-        self.reset_on_err(row).map(Some)
+        })?;
+
+        // If no row was returned, the cursor is exhausted and we close it.
+        if row.is_none() {
+            self.close(py)?;
+        }
+
+        Ok(row)
     }
 
     /// Fetch the next batch of rows.
@@ -210,15 +216,17 @@ impl<S: CursorRowStream> CursorQueryState<S> {
         py: Python<'py>,
         capacity: usize,
     ) -> PyResult<Vec<Bound<'py, PyTuple>>> {
-        let Self::Active { stream, handle, .. } = self else {
-            return Err(self.fetch_after_end_err());
-        };
+        let rows = self.with_active_query_state(|stream, handle| {
+            pull_ready_batch(stream, py, capacity, handle)
+        })?;
 
-        let batch = pull_ready_batch(stream, py, capacity, handle);
-        if matches!(&batch, Ok(rows) if rows.is_empty()) {
-            self.close_drained();
+        // If no rows were returned, the cursor is exhausted and we
+        // close it.
+        if rows.is_empty() {
+            self.close(py)?;
         }
-        self.reset_on_err(batch)
+
+        Ok(rows)
     }
 
     /// Collect every remaining row into a [`Vec`], draining the stream.
@@ -227,19 +235,26 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     /// a subsequent fetch is an error. If reading or converting a row fails,
     /// the cursor is reset to [`Self::Idle`] and the error surfaced to Python.
     pub fn fetch_all<'py>(&mut self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyTuple>>> {
-        let Self::Active { stream, handle, .. } = self else {
-            return Err(self.fetch_after_end_err());
-        };
+        let rows = self.with_active_query_state(|stream, handle| {
+            // Collect all remaining postgres rows from the stream.
+            let pg_rows = stream
+                .try_collect::<Vec<_>>()
+                .block_on(py, handle)
+                .map_err(S::stream_err)?;
 
-        let rows = stream
-            .try_collect::<Vec<_>>()
-            .block_on(py, handle)
-            .map_err(S::stream_err)
-            .and_then(|rows| rows.iter().map(|row| S::row_to_py(py, row)).collect());
-        if rows.is_ok() {
-            self.close_drained();
-        }
-        self.reset_on_err(rows)
+            // Convert all the postgres rows to Python tuples.
+            let py_rows = pg_rows
+                .iter()
+                .map(|row| S::row_to_py(py, row))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(py_rows)
+        })?;
+
+        // We've exhausted the stream, so we close the cursor.
+        self.close(py)?;
+
+        Ok(rows)
     }
 
     /// Return the affected-row count, draining the stream first if needed.
@@ -247,69 +262,89 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     /// Unlike the `fetch_*` methods, this also works on a [`Self::Closed`]
     /// cursor. It returns the count captured when the stream ended.
     pub fn rowcount<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
-        // Postgres only sends the affected-row count after the last row, so
-        // the stream must be drained first. Draining discards any rows not yet
-        // fetched. psycopg2 keeps every row on the client, so there they stay
-        // fetchable after reading `rowcount`. Here a caller must fetch the rows
-        // it wants first.
-        if let Self::Active { stream, handle, .. } = self {
-            let drained = drain_stream(stream)
-                .block_on(py, handle)
-                .map_err(S::stream_err);
-            self.reset_on_err(drained)?;
-            self.close_drained();
-        }
-
         match self {
+            Self::Active { .. } => {
+                // Close the cursor and capture the affected-row count.
+                let rowcount = self.close(py)?;
+
+                if let Some(rowcount) = rowcount {
+                    Ok(PyInt::new(py, rowcount))
+                } else {
+                    // PEP-249 uses -1 for an unknown rowcount.
+                    Ok(PyInt::new(py, -1))
+                }
+            }
             Self::Closed {
                 rowcount: Some(rowcount),
                 ..
             } => Ok(PyInt::new(py, *rowcount)),
             // The cursor is `Idle`, or Postgres reported no count.
             // PEP-249 uses -1 for an unknown rowcount.
-            _ => Ok(PyInt::new(py, -1)),
+            Self::Idle | Self::Closed { rowcount: None, .. } => Ok(PyInt::new(py, -1)),
         }
     }
 
-    /// The error a `fetch_*` method raises when there is no [`Self::Active`]
-    /// result set. It tells "no query has run" apart from "the result set is
-    /// already exhausted". It leaves the state unchanged.
-    fn fetch_after_end_err(&self) -> PyErr {
-        match self {
-            Self::Closed { .. } => {
-                PyRuntimeError::new_err("cannot fetch: the result set is already exhausted")
+    /// Close the cursor, draining any remaining rows.
+    ///
+    /// Returns the number of rows affected if available. If the cursor is
+    /// already closed, returns the previously captured row count. If the cursor
+    /// is idle, an error is returned.
+    fn close(&mut self, py: Python<'_>) -> PyResult<Option<u64>> {
+        self.with_reset_on_err(|slf| match slf {
+            Self::Active {
+                stream,
+                handle,
+                description,
+            } => {
+                // To get the affected-row count, we need to read all the
+                // remaining rows.
+                let rows_affected = drain_stream(stream)
+                    .block_on(py, handle)
+                    .map_err(S::stream_err)?;
+
+                *slf = Self::Closed {
+                    rowcount: rows_affected,
+                    description: description.clone(),
+                };
+
+                Ok(rows_affected)
             }
-            _ => PyRuntimeError::new_err("no active query"),
-        }
+            Self::Closed { rowcount, .. } => Ok(*rowcount),
+            Self::Idle => Err(PyRuntimeError::new_err("cannot close: no active query")),
+        })
     }
 
-    /// Reset the cursor to [`Self::Idle`] if `result` is an error, so a failed
-    /// fetch never leaves a partly read result set behind.
-    fn reset_on_err<T>(&mut self, result: PyResult<T>) -> PyResult<T> {
+    /// Helper method to reset the cursor to the idle state if an error occurs
+    /// within the function.
+    fn with_reset_on_err<F, T>(&mut self, f: F) -> PyResult<T>
+    where
+        F: FnOnce(&mut Self) -> PyResult<T>,
+    {
+        let result = f(self);
         if result.is_err() {
             *self = Self::Idle;
         }
         result
     }
 
-    /// Move a [`Self::Active`] cursor to [`Self::Closed`], capturing the
-    /// affected-row count. The count only arrives after the last row, so
-    /// callers drain the stream, or observe its end, first.
+    /// Helper method to operate on the active query state.
     ///
-    /// A no-op in any other state.
-    fn close_drained(&mut self) {
-        if let Self::Active {
-            stream,
-            description,
-            ..
-        } = self
-        {
-            let rowcount = stream.rows_affected();
-            *self = Self::Closed {
-                description: mem::take(description),
-                rowcount,
-            };
-        }
+    /// If the cursor is active, the closure is called with the stream and
+    /// handle.
+    ///
+    /// If the cursor is closed or idle, an error is returned.
+    ///
+    /// Any error from the closure resets the cursor to the idle state, like
+    /// [`Self::with_reset_on_err`].
+    fn with_active_query_state<F, T>(&mut self, f: F) -> PyResult<T>
+    where
+        F: FnOnce(&mut S, &mut Handle) -> PyResult<T>,
+    {
+        self.with_reset_on_err(|slf| match slf {
+            Self::Active { stream, handle, .. } => f(stream, handle),
+            Self::Closed { .. } => Err(PyRuntimeError::new_err("query is closed")),
+            Self::Idle => Err(PyRuntimeError::new_err("no active query")),
+        })
     }
 }
 
@@ -322,11 +357,11 @@ impl<S: CursorRowStream> CursorQueryState<S> {
 /// yielding [`None`].
 ///
 /// A stream error part way through discards the rows collected so far.
-fn pull_ready_batch<'py, S: CursorRowStream>(
-    stream: &mut S,
+fn pull_ready_batch<'py, 'a, S: CursorRowStream>(
+    stream: &'a mut S,
     py: Python<'py>,
     capacity: usize,
-    handle: &Handle,
+    handle: &'a Handle,
 ) -> PyResult<Vec<Bound<'py, PyTuple>>> {
     let first = match Pin::new(&mut *stream).block_on_next(py, handle) {
         Some(row) => row.map_err(S::stream_err)?,
@@ -346,13 +381,13 @@ fn pull_ready_batch<'py, S: CursorRowStream>(
 }
 
 /// Consume and discard every row of a stream, and return the first stream
-/// error. Used to reach the affected-row count, which Postgres sends after the
+/// error. Used to get the affected-row count, which Postgres sends after the
 /// last row.
-async fn drain_stream<S: CursorRowStream>(stream: &mut S) -> Result<(), S::Error> {
+async fn drain_stream<S: CursorRowStream>(stream: &mut S) -> Result<Option<u64>, S::Error> {
     while let Some(row) = stream.next().await {
         row?;
     }
-    Ok(())
+    Ok(stream.rows_affected())
 }
 
 #[cfg(test)]
