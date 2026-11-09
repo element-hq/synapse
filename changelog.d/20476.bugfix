@@ -1,0 +1,1 @@
+Fix a bug introduced in Synapse 1.149.0 where an empty `m.invite_permission_config` account data event would take precedence over [MSC4155](https://github.com/matrix-org/matrix-spec-proposals/pull/4155) invite filtering rules.

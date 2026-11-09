@@ -1,0 +1,1 @@
+Clarify in the admin API docs that per-user ratelimit overrides only apply to message sending, and what deleting an override does. Contributed by @chiliec.

@@ -119,6 +119,15 @@ stacking them up. You can monitor the currently running background updates with
 
 # Upgrading to v1.165.0
 
+## Python 3.11+ is now required
+
+The minimum supported Python version has been increased from v3.10 to v3.11.
+You will need Python 3.11+ to run Synapse v1.165.0.
+
+If you use current versions of the
+[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
+Docker images, no action is required.
+
 ## Stable MatrixRTC transport discovery
 
 Synapse has added stable support for [MSC4143](https://github.com/matrix-org/matrix-spec-proposals/pull/4143)
@@ -130,18 +139,6 @@ expect transports of type `m.livekit`. The `livekit` transport type is deprecate
 `m.livekit` config entry should be added for each LiveKit SFU. As long as clients still
 depend on the unstable LiveKit transport from earlier versions of [MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195),
 matching `livekit` entries should still be listed in addition.
-
-# Upgrading to v1.164.0
-
-## Python 3.11+ is now required
-
-The minimum supported Python version has been increased from v3.10 to v3.11.
-You will need Python 3.11+ to run Synapse v1.164.0.
-
-If you use current versions of the
-[matrixorg/synapse](setup/installation.html#docker-images-and-ansible-playbooks)
-Docker images, no action is required.
-
 
 # Upgrading to v1.163.0
 
