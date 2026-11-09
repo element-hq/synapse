@@ -449,13 +449,12 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
 
         self.assertEqual(initial_count, new_count)
 
-    def _reject_invite_from_unreachable_server(self) -> tuple[str, str]:
+    def _receive_invite_from_remote_server(self) -> str:
         """
-        Has bob reject an invite to a room our server is not in, sent by a server
-        that cannot be reached.
+        Has a remote server invite bob to a room our server is not in.
 
         Returns:
-            The room ID and the event ID of bob's leave.
+            The room ID.
         """
         remote_server = "other.invalid"
         room_id = f"!room:{remote_server}"
@@ -479,6 +478,17 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
                 origin=remote_server, event=invite, room_version=invite.room_version
             )
         )
+        return room_id
+
+    def _reject_invite_from_unreachable_server(self) -> tuple[str, str]:
+        """
+        Has bob reject an invite to a room our server is not in, sent by a server
+        that cannot be reached.
+
+        Returns:
+            The room ID and the event ID of bob's leave.
+        """
+        room_id = self._receive_invite_from_remote_server()
 
         # Bob rejects the invite. The `make_leave` request to the remote server
         # fails, so our server builds the leave itself, as another outlier.
@@ -554,6 +564,24 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
             AuthError,
         )
         self.assertEqual(failure.value.code, 403)
+
+    def test_forget_pending_out_of_band_invite(self) -> None:
+        """A user cannot forget a room they hold a pending remote invite to."""
+        # Bob's invite is an outlier, absent from the room's current state.
+        room_id = self._receive_invite_from_remote_server()
+
+        failure = self.get_failure(
+            self.handler.forget(self.bob_ID, room_id), SynapseError
+        )
+        self.assertEqual(failure.value.code, 400)
+        self.assertFalse(self.get_success(self.store.did_forget(self.bob, room_id)))
+
+    def test_forget_after_rejecting_out_of_band_invite(self) -> None:
+        """A user can forget a room after rejecting its remote invite."""
+        room_id, _ = self._reject_invite_from_unreachable_server()
+
+        self.get_success(self.handler.forget(self.bob_ID, room_id))
+        self.assertTrue(self.get_success(self.store.did_forget(self.bob, room_id)))
 
 
 class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
