@@ -14,19 +14,137 @@
 #
 #
 import logging
+import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.types import (
+    EventID,
     Requester,
+    RoomAlias,
+    RoomID,
+    UserID,
+)
+from synapse.util.stringutils import (
+    is_namedspaced_grammar,
+    parse_and_validate_mxc_uri,
+    parse_and_validate_server_name,
 )
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+_HARM_PREFIX = "org.matrix.msc4456"
+
+# The "General/Other" harm categories defined by MSC4456. Complaints using one of
+# these harms must include a description.
+_GENERAL_HARMS = frozenset(
+    f"{_HARM_PREFIX}.{suffix}"
+    for suffix in (
+        "spam",
+        "adult",
+        "harassment",
+        "violence",
+        "child_safety",
+        "danger",
+        "tos",
+        "other",
+    )
+)
+
+# All harm identifiers defined by MSC4456: https://github.com/matrix-org/matrix-spec-proposals/pull/4456
+KNOWN_HARMS = _GENERAL_HARMS | frozenset(
+    f"{_HARM_PREFIX}.{suffix}"
+    for suffix in (
+        "spam.fraud",
+        "spam.impersonation",
+        "spam.election_interference",
+        "spam.flooding",
+        "adult.sexual_abuse",
+        "adult.ncii",
+        "adult.deepfake",
+        "adult.animal_sexual_abuse",
+        "adult.sexual_violence",
+        "harassment.trolling",
+        "harassment.targeted",
+        "harassment.hate",
+        "harassment.doxxing",
+        "violence.animal_welfare",
+        "violence.threats",
+        "violence.graphic",
+        "violence.glorification",
+        "violence.extremist",
+        "violence.human_trafficking",
+        "violence.domestic",
+        "child_safety.csam",
+        "child_safety.grooming",
+        "child_safety.privacy_violation",
+        "child_safety.harassment",
+        "danger.self_harm",
+        "danger.eating_disorder",
+        "danger.challenges",
+        "danger.substance_abuse",
+        "tos.hacking",
+        "tos.prohibited",
+        "tos.ban_evasion",
+    )
+)
+
+MAX_DESCRIPTION_BYTES = 1024
+
+# Event IDs in room versions 3 and above
+_HASH_EVENT_ID_PATTERN = re.compile(r"^\$([a-zA-Z0-9_-]{43}|[a-zA-Z0-9+/]{43})$")
+
+
+def is_valid_report_subject(regarding: str) -> bool:
+    """Checks whether `regarding` is an identifier a complaint can be filed against,
+    per MSC4457.
+
+    Accepted forms are user IDs, event IDs, room IDs, room aliases, server names
+    prefixed with "server:", MXC URIs, the string "m.system", and common
+    namespaced identifiers.
+    """
+    if regarding.startswith("@"):
+        return UserID.is_valid_strict(regarding)
+    if regarding.startswith("$"):
+        if len(regarding.encode("utf-8")) > 255:
+            return False
+        return bool(_HASH_EVENT_ID_PATTERN.match(regarding)) or EventID.is_valid(
+            regarding
+        )
+    if regarding.startswith("!"):
+        if len(regarding.encode("utf-8")) > 255:
+            return False
+        return RoomID.is_valid(regarding)
+    if regarding.startswith("#"):
+        if len(regarding.encode("utf-8")) > 255:
+            return False
+        return RoomAlias.is_valid(regarding)
+    if regarding.startswith("server:"):
+        server_name = regarding[len("server:") :]
+        if len(server_name) > 230:
+            return False
+        try:
+            parse_and_validate_server_name(server_name)
+        except ValueError:
+            return False
+        return True
+    if regarding.startswith("mxc://"):
+        try:
+            parse_and_validate_mxc_uri(regarding)
+        except ValueError:
+            return False
+        return True
+    if regarding == "m.system":
+        return True
+    # Other identifiers in the `m.` namespace are reserved by the spec.
+    if regarding.startswith("m."):
+        return False
+    return is_namedspaced_grammar(regarding)
 
 
 class ReportsHandler:
@@ -120,6 +238,75 @@ class ReportsHandler:
             room_id=room_id,
             user_id=requester.user.to_string(),
             reason=reason,
+            received_ts=self._clock.time_msec(),
+        )
+
+    async def report_safety_complaint(
+        self,
+        requester: Requester,
+        regarding: str,
+        harm: str,
+        description: str | None,
+    ) -> int:
+        """Files a complaint via the generic reporting API (MSC4457).
+
+        Args:
+            requester: The user filing the complaint.
+            regarding: The identifier the complaint is about.
+            harm: The MSC4456 harm identifier being reported.
+            description: Text the user supplied to support the complaint.
+
+        Returns:
+            The ID of the stored complaint.
+
+        Raises:
+            LimitExceededError if the user is filing reports too quickly.
+            SynapseError for BAD_JSON if the description is missing when required,
+                too long, or empty; or for INVALID_PARAM if `regarding` is not a
+                recognised identifier or `harm` is unknown.
+        """
+        await self._check_limits(requester)
+
+        if not is_valid_report_subject(regarding):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "'regarding' is not a recognised identifier",
+                Codes.INVALID_PARAM,
+            )
+
+        if harm not in KNOWN_HARMS:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Unknown harm identifier",
+                Codes.INVALID_PARAM,
+            )
+
+        if description is None:
+            if harm in _GENERAL_HARMS:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "'description' is required for this harm",
+                    Codes.BAD_JSON,
+                )
+        else:
+            if len(description.encode("utf-8")) > MAX_DESCRIPTION_BYTES:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    f"'description' must not exceed {MAX_DESCRIPTION_BYTES} bytes",
+                    Codes.BAD_JSON,
+                )
+            if not description.strip():
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "'description' must not be empty",
+                    Codes.BAD_JSON,
+                )
+
+        return await self._store.add_safety_report_complaint(
+            regarding=regarding,
+            harm=harm,
+            description=description,
+            user_id=requester.user.to_string(),
             received_ts=self._clock.time_msec(),
         )
 

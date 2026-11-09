@@ -33,7 +33,9 @@ from synapse.http.servlet import (
     parse_json_object_from_request,
 )
 from synapse.http.site import SynapseRequest
-from synapse.types import JsonDict
+from synapse.logging.opentracing import set_tag
+from synapse.rest.client.transactions import HttpTransactionCache
+from synapse.types import JsonDict, Requester
 from synapse.types.rest import RequestBodyModel
 
 from ._base import client_patterns
@@ -43,6 +45,83 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class SafetyReportRestServlet(RestServlet):
+    """This endpoint lets clients file a report via the generic reporting API.
+
+    Introduced by MSC4457: https://github.com/matrix-org/matrix-spec-proposals/pull/4457
+    """
+
+    PATTERNS = client_patterns(
+        "/org.matrix.msc4457/safety/report/(?P<txn_id>[^/]*)$",
+        releases=(),
+        unstable=True,
+    )
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.auth = hs.get_auth()
+        self.txns = HttpTransactionCache(hs)
+        self.reports_handler = hs.get_reports_handler()
+
+    async def on_POST(
+        self, request: SynapseRequest, txn_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        set_tag("txn_id", txn_id)
+        return await self.txns.fetch_or_execute_request(
+            request, requester, self._do_report, request, requester
+        )
+
+    async def _do_report(
+        self, request: SynapseRequest, requester: Requester
+    ) -> tuple[int, JsonDict]:
+        body = parse_json_object_from_request(request)
+
+        report_type = body.get("type")
+        if not isinstance(report_type, str):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Param 'type' is required and must be a string",
+                Codes.BAD_JSON,
+            )
+        if report_type != "complaint":
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Unknown report type",
+                Codes.INVALID_PARAM,
+            )
+
+        regarding = body.get("regarding")
+        if not isinstance(regarding, str):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Param 'regarding' is required and must be a string",
+                Codes.BAD_JSON,
+            )
+
+        harm = body.get("harm")
+        if not isinstance(harm, str):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Param 'harm' is required and must be a string",
+                Codes.BAD_JSON,
+            )
+
+        description = body.get("description")
+        if description is not None and not isinstance(description, str):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Param 'description' must be a string",
+                Codes.BAD_JSON,
+            )
+
+        report_id = await self.reports_handler.report_safety_complaint(
+            requester, regarding, harm, description
+        )
+
+        return 200, {"report_id": str(report_id)}
 
 
 class ReportEventRestServlet(RestServlet):
@@ -191,6 +270,8 @@ class ReportUserRestServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
+    if hs.config.experimental.msc4457_enabled:
+        SafetyReportRestServlet(hs).register(http_server)
     ReportEventRestServlet(hs).register(http_server)
     ReportRoomRestServlet(hs).register(http_server)
     ReportUserRestServlet(hs).register(http_server)
