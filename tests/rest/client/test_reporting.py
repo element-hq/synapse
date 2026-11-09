@@ -22,12 +22,13 @@
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.rest.client import login, reporting, room
+from synapse.rest.client import login, register, reporting, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.server import FakeChannel
 from tests.unittest import override_config
 
 
@@ -340,3 +341,291 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(response_status, channel.code, msg=channel.result["body"])
+
+
+class SafetyReportTestCase(unittest.HomeserverTestCase):
+    """Tests for the MSC4457 generic reporting endpoint."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        register.register_servlets,
+        reporting.register_servlets,
+    ]
+
+    PATH = "/_matrix/client/unstable/org.matrix.msc4457/safety/report"
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable the endpoint, unless a test has set the flag via `override_config`.
+        config.setdefault("experimental_features", {}).setdefault(
+            "msc4457_enabled", True
+        )
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.user_id = self.register_user("user", "pass")
+        self.user_tok = self.login("user", "pass")
+        self.txn_counter = 0
+
+        # Many tests here file several reports in a row, which would otherwise hit
+        # the reports rate limit.
+        self.get_success(self.store.set_ratelimit_for_user(self.user_id, 0, 0))
+
+    def test_complaint_is_stored(self) -> None:
+        """A valid complaint is stored and its ID returned as a string."""
+        channel = self._report(
+            {
+                "type": "complaint",
+                "regarding": "@bad:example.org",
+                "harm": "org.matrix.msc4456.spam.fraud",
+                "description": "they tried to sell me a bridge",
+            }
+        )
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+        report_id = channel.json_body["report_id"]
+        self.assertIsInstance(report_id, str)
+
+        row = self.get_success(
+            self.store.db_pool.simple_select_one(
+                table="safety_report_complaints",
+                keyvalues={"id": int(report_id)},
+                retcols=("regarding", "harm", "description", "user_id"),
+                desc="get_safety_report_complaint",
+            )
+        )
+        self.assertEqual(
+            row,
+            (
+                "@bad:example.org",
+                "org.matrix.msc4456.spam.fraud",
+                "they tried to sell me a bridge",
+                self.user_id,
+            ),
+        )
+
+    def test_description_optional_for_specific_harm(self) -> None:
+        """A specific (non-General/Other) harm doesn't need a description."""
+        self._assert_status(
+            200,
+            {
+                "type": "complaint",
+                "regarding": "@bad:example.org",
+                "harm": "org.matrix.msc4456.harassment.trolling",
+            },
+        )
+
+    def test_valid_regarding(self) -> None:
+        """Every identifier form listed in MSC4457 is accepted."""
+        for regarding in (
+            "@bad:example.org",
+            # Room v1/v2 event ID.
+            "$event:example.org",
+            # Room v3 event ID (standard base64).
+            "$" + "a+/" * 14 + "a",
+            # Room v4+ event ID (URL-safe base64), including room v12.
+            "$" + "a-_" * 14 + "a",
+            "!room:example.org",
+            # MSC4291 (room v12) room ID.
+            "!" + "a" * 43,
+            "#alias:example.org",
+            "server:example.org",
+            "server:example.org:8448",
+            "server:" + "a" * 230,
+            "mxc://example.org/abcdef",
+            "m.system",
+            "com.example.thing",
+        ):
+            with self.subTest(regarding=regarding):
+                self._assert_status(
+                    200,
+                    {
+                        "type": "complaint",
+                        "regarding": regarding,
+                        "harm": "org.matrix.msc4456.spam.fraud",
+                    },
+                )
+
+    def test_invalid_regarding(self) -> None:
+        """Identifiers outside the forms listed in MSC4457 are rejected."""
+        for regarding in (
+            "",
+            "@nodomain",
+            "@" + "a" * 250 + ":example.org",
+            "$",
+            # Mixes the standard and URL-safe base64 alphabets.
+            "$" + "a+_" * 14 + "a",
+            "$" + "a" * 250 + ":example.org",
+            "!nodomain",
+            "#nodomain",
+            "server:",
+            "server:not a server",
+            "server:" + "a" * 231,
+            "mxc://example.org",
+            "m.not_system",
+            "NotNamespaced",
+        ):
+            with self.subTest(regarding=regarding):
+                self._assert_error(
+                    400,
+                    "M_INVALID_PARAM",
+                    {
+                        "type": "complaint",
+                        "regarding": regarding,
+                        "harm": "org.matrix.msc4456.spam.fraud",
+                    },
+                )
+
+    def test_missing_or_non_string_fields(self) -> None:
+        """Missing required fields, or fields of the wrong type, are M_BAD_JSON."""
+        valid = {
+            "type": "complaint",
+            "regarding": "@bad:example.org",
+            "harm": "org.matrix.msc4456.spam.fraud",
+            "description": "spam",
+        }
+        for field in ("type", "regarding", "harm"):
+            with self.subTest(missing=field):
+                body = dict(valid)
+                del body[field]
+                self._assert_error(400, "M_BAD_JSON", body)
+        for field in ("type", "regarding", "harm", "description"):
+            with self.subTest(non_string=field):
+                self._assert_error(400, "M_BAD_JSON", {**valid, field: 42})
+
+    def test_unknown_type(self) -> None:
+        self._assert_error(
+            400,
+            "M_INVALID_PARAM",
+            {
+                "type": "appeal",
+                "regarding": "@bad:example.org",
+                "harm": "org.matrix.msc4456.spam.fraud",
+            },
+        )
+
+    def test_unknown_harm(self) -> None:
+        """Harms not defined by MSC4456, including the stable `m.` forms while the
+        MSC is unstable, are rejected."""
+        for harm in ("com.example.custom", "m.spam", "org.matrix.msc4456.nope"):
+            with self.subTest(harm=harm):
+                self._assert_error(
+                    400,
+                    "M_INVALID_PARAM",
+                    {
+                        "type": "complaint",
+                        "regarding": "@bad:example.org",
+                        "harm": harm,
+                        "description": "spam",
+                    },
+                )
+
+    def test_description_required_for_general_harms(self) -> None:
+        """General/Other harms require a description."""
+        for suffix in (
+            "spam",
+            "adult",
+            "harassment",
+            "violence",
+            "child_safety",
+            "danger",
+            "tos",
+            "other",
+        ):
+            harm = f"org.matrix.msc4456.{suffix}"
+            with self.subTest(harm=harm):
+                body = {
+                    "type": "complaint",
+                    "regarding": "@bad:example.org",
+                    "harm": harm,
+                }
+                self._assert_error(400, "M_BAD_JSON", body)
+                self._assert_status(200, {**body, "description": "details"})
+
+    def test_description_length(self) -> None:
+        """The description is limited to 1024 bytes, not characters."""
+        body = {
+            "type": "complaint",
+            "regarding": "@bad:example.org",
+            "harm": "org.matrix.msc4456.other",
+        }
+        self._assert_status(200, {**body, "description": "a" * 1024})
+        self._assert_error(400, "M_BAD_JSON", {**body, "description": "a" * 1025})
+        # three-byte character
+        self._assert_error(400, "M_BAD_JSON", {**body, "description": "€" * 1024})
+
+    def test_description_blank(self) -> None:
+        """A description that is empty after trimming whitespace is rejected."""
+        body = {
+            "type": "complaint",
+            "regarding": "@bad:example.org",
+            "harm": "org.matrix.msc4456.spam.fraud",
+        }
+        for description in ("", "   ", "\n\t"):
+            with self.subTest(description=description):
+                self._assert_error(
+                    400, "M_BAD_JSON", {**body, "description": description}
+                )
+
+    @override_config({"allow_guest_access": True})
+    def test_guest_can_report(self) -> None:
+        channel = self.make_request("POST", "/register?kind=guest", {})
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+        guest_tok = channel.json_body["access_token"]
+
+        channel = self._report(
+            {
+                "type": "complaint",
+                "regarding": "@bad:example.org",
+                "harm": "org.matrix.msc4456.spam.fraud",
+            },
+            tok=guest_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+    @override_config({"experimental_features": {"msc4457_enabled": False}})
+    def test_disabled(self) -> None:
+        """The endpoint isn't registered unless MSC4457 is enabled."""
+        channel = self._report(
+            {
+                "type": "complaint",
+                "regarding": "@bad:example.org",
+                "harm": "org.matrix.msc4456.spam.fraud",
+            }
+        )
+        self.assertEqual(404, channel.code, msg=channel.result["body"])
+        self.assertEqual("M_UNRECOGNIZED", channel.json_body["errcode"])
+
+    def test_requires_auth(self) -> None:
+        channel = self.make_request(
+            "POST",
+            f"{self.PATH}/txn",
+            {
+                "type": "complaint",
+                "regarding": "@bad:example.org",
+                "harm": "org.matrix.msc4456.spam.fraud",
+            },
+            shorthand=False,
+        )
+        self.assertEqual(401, channel.code, msg=channel.result["body"])
+
+    def _report(self, data: JsonDict, tok: str | None = None) -> FakeChannel:
+        # Use a fresh transaction ID for each request.
+        self.txn_counter += 1
+        return self.make_request(
+            "POST",
+            f"{self.PATH}/txn{self.txn_counter}",
+            data,
+            access_token=tok or self.user_tok,
+            shorthand=False,
+        )
+
+    def _assert_status(self, response_status: int, data: JsonDict) -> None:
+        channel = self._report(data)
+        self.assertEqual(response_status, channel.code, msg=channel.result["body"])
+
+    def _assert_error(self, response_status: int, errcode: str, data: JsonDict) -> None:
+        channel = self._report(data)
+        self.assertEqual(response_status, channel.code, msg=channel.result["body"])
+        self.assertEqual(errcode, channel.json_body["errcode"], msg=channel.json_body)

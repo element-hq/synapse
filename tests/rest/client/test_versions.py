@@ -145,6 +145,21 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
         self.assertTrue(channel.json_body["unstable_features"]["io.element.msc4502"])
 
+    def test_msc4457_false_by_default(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertFalse(
+            channel.json_body["unstable_features"]["org.matrix.msc4457_report_api"]
+        )
+
+    @unittest.override_config({"experimental_features": {"msc4457_enabled": True}})
+    def test_msc4457_true_if_enabled(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertTrue(
+            channel.json_body["unstable_features"]["org.matrix.msc4457_report_api"]
+        )
+
     def _sanity_check_versions_response(self, versions_response: JsonDict) -> None:
         """
         Make sure this looks like a `/_matrix/client/versions` response
