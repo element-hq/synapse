@@ -315,14 +315,16 @@ impl<S: CursorRowStream> CursorQueryState<S> {
         })
     }
 
-    /// Helper method to reset the cursor to the idle state if an error occurs
-    /// within the function.
+    /// Helper method to reset an active cursor to the idle state if an error
+    /// occurs within the function.
+    ///
+    /// A closed cursor remains closed even if an error occurs.
     fn with_reset_on_err<F, T>(&mut self, f: F) -> PyResult<T>
     where
         F: FnOnce(&mut Self) -> PyResult<T>,
     {
         let result = f(self);
-        if result.is_err() {
+        if result.is_err() && matches!(self, Self::Active { .. }) {
             *self = Self::Idle;
         }
         result
@@ -343,7 +345,9 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     {
         self.with_reset_on_err(|slf| match slf {
             Self::Active { stream, handle, .. } => f(stream, handle),
-            Self::Closed { .. } => Err(PyRuntimeError::new_err("query is closed")),
+            Self::Closed { .. } => Err(PyRuntimeError::new_err(
+                "the result stream is already exhausted",
+            )),
             Self::Idle => Err(PyRuntimeError::new_err("no active query")),
         })
     }
