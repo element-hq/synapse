@@ -546,8 +546,19 @@ class RoomSyncConfig:
             can provide `*` wildcard and `$LAZY` for lazy-loading room members.
 
         sticky_events: Whether the room is in scope for the sticky events extension
-            (MSC4480), as per its `lists`/`rooms`. Per-request, so neither persisted
-            in the per-connection state nor considered when comparing configs.
+            (MSC4480), as per its `lists`/`rooms` for this request. Should not be
+            persisted in the per-connection state or considered in comparisons to check
+            whether the config was expanded.
+
+            We shouldn't consider `sticky_events` in expanded comparison checks because
+            "expanded" means the client is asking for more timeline or state than it has
+            received. Whether this request asked for sticky events for a particular room
+            says nothing about what the client has already received. That is already
+            tracked separately via `PerConnectionState.sticky_events`.
+
+            For the same reason, we don't persist it. This only says what the request
+            asks for, and provides no information on what the client previously
+            received.
     """
 
     timeline_limit: int
