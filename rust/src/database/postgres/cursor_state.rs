@@ -151,6 +151,9 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     /// Reset to [`Self::Idle`], discarding any previous result set. Called at
     /// the start of every `execute`.
     pub fn reset(&mut self) {
+        // We discard any previous query state and start fresh with the new
+        // query. This is fine as `tokio_postgres` correctly handles dropping an
+        // active query stream.
         *self = Self::Idle;
     }
 
@@ -161,6 +164,9 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     /// the driver's column type, so the tests need no driver. `handle` is the
     /// runtime the blocking `fetch_*` calls drive the stream on.
     pub fn on_query_start(&mut self, stream: S, description: Vec<String>, handle: Handle) {
+        // We discard any previous query state and start fresh with the new
+        // query. This is fine as `tokio_postgres` correctly handles dropping an
+        // active query stream.
         *self = Self::Active {
             stream,
             handle,
