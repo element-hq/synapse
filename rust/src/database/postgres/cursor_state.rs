@@ -25,10 +25,6 @@
 //! finished `RowStream` again would instead fail with a misleading
 //! "connection closed".
 //!
-//! The stream must be a [`FusedStream`]. A fused stream keeps yielding [`None`]
-//! after its end instead of polling its finished inner stream. So a stream that
-//! has ended can stay [`CursorQueryState::Active`] until its end is reported.
-//!
 //! ## Generic over the stream
 //!
 //! The state machine is generic over the stream type `S`. It defaults to
