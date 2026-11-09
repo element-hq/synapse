@@ -25,6 +25,8 @@ import random
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Iterable
 
+from twisted.internet.defer import CancelledError
+
 from synapse import types
 from synapse.api.constants import (
     AccountDataTypes,
@@ -76,6 +78,18 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+# How many times to try an MSC4509 auto-join, and the first wait, doubled for
+# each later one. A remote inviter refuses our `make_join` with `M_FORBIDDEN`
+# until it has stored the invite, which it does only once our `/invite`
+# response reaches it, usually a few milliseconds after an immediate join
+# attempt. So for an invite received over federation the first attempt waits
+# too; a local invite is already stored and joins at once. 3 attempts (at 1, 3
+# and 7 seconds for a remote invite) cover a slow inviter; a refusal that
+# outlasts them is treated as real, and the invite stays for the user to accept
+# by hand.
+MSC4509_AUTO_JOIN_ATTEMPTS = 3
+MSC4509_AUTO_JOIN_FIRST_DELAY = Duration(seconds=1)
 
 
 class NoKnownServersError(SynapseError):
@@ -579,23 +593,73 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             self._auto_join_accepted_knock,
             invitee,
             invite_event.room_id,
+            not self.hs.is_mine_id(invite_event.sender),
         )
 
-    async def _auto_join_accepted_knock(self, invitee: str, room_id: str) -> None:
+    async def _auto_join_accepted_knock(
+        self, invitee: str, room_id: str, remote_invite: bool
+    ) -> None:
         """Join `invitee` to `room_id` on their behalf, after their knock was accepted.
 
         If this fails the invite is still there, so the user can accept it by hand.
+
+        A join refused with `M_FORBIDDEN` is retried, see `MSC4509_AUTO_JOIN_ATTEMPTS`.
+        Each wait is followed by a check that the invite is still the user's current
+        membership.
+
+        Args:
+            invitee: The local user to join.
+            room_id: The room to join.
+            remote_invite: Whether the invite came from another server, in which
+                case the first attempt waits as well.
         """
+        delay = MSC4509_AUTO_JOIN_FIRST_DELAY
         try:
-            await self.update_membership(
-                requester=create_requester(invitee),
-                target=UserID.from_string(invitee),
-                room_id=room_id,
-                action=Membership.JOIN,
-                # The user did not ask for this join, and the invite which triggered
-                # it was rate limited on the inviter.
-                ratelimit=False,
+            for attempt in range(1, MSC4509_AUTO_JOIN_ATTEMPTS + 1):
+                if attempt > 1 or remote_invite:
+                    await self.clock.sleep(delay)
+                    delay *= 2
+
+                    (
+                        membership,
+                        _,
+                    ) = await self.store.get_local_current_membership_for_user_in_room(
+                        invitee, room_id
+                    )
+                    if membership != Membership.INVITE:
+                        return
+
+                try:
+                    await self.update_membership(
+                        requester=create_requester(invitee),
+                        target=UserID.from_string(invitee),
+                        room_id=room_id,
+                        action=Membership.JOIN,
+                        # The user did not ask for this join, and the invite which
+                        # triggered it was rate limited on the inviter.
+                        ratelimit=False,
+                    )
+                    return
+                except SynapseError as e:
+                    if (
+                        e.errcode != Codes.FORBIDDEN
+                        or attempt == MSC4509_AUTO_JOIN_ATTEMPTS
+                    ):
+                        raise
+                    logger.info(
+                        "Join of %s to %s after their knock was accepted was refused, retrying in %ss: %s",
+                        invitee,
+                        room_id,
+                        delay.as_secs(),
+                        e,
+                    )
+        except CancelledError:
+            # The homeserver cancels background processes when it shuts down.
+            # Re-raising would make `run_as_background_process` log this as an error.
+            logger.debug(
+                "Auto-join of %s to %s cancelled during shutdown", invitee, room_id
             )
+            return
         except Exception:
             logger.warning(
                 "Failed to join %s to %s after their knock was accepted",

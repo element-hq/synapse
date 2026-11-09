@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+from typing import Iterator, Sequence
 from unittest.mock import AsyncMock, patch
 
 from twisted.internet.testing import MemoryReactor
@@ -9,8 +11,13 @@ import synapse.rest.client.room
 from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.crypto.event_signing import add_hashes_and_signatures
+from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.federation.federation_client import SendJoinResult
+from synapse.handlers.room_member import (
+    MSC4509_AUTO_JOIN_ATTEMPTS,
+    MSC4509_AUTO_JOIN_FIRST_DELAY,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
@@ -818,17 +825,18 @@ class AutoJoinOnAcceptedKnockTestCase(FederatingHomeserverTestCase):
         membership, _ = self._current_membership(room_id, self.knocker)
         self.assertEqual(membership, Membership.INVITE)
 
-    @override_config({"experimental_features": {"msc4509_enabled": True}})
-    def test_remote_invite_accepting_knock(self) -> None:
-        """An invite received over federation which accepts a knock we hold as
-        an outlier starts a remote join."""
-        room_version = self.hs.config.server.default_room_version
-        remote_user = f"@creator:{self.OTHER_SERVER_NAME}"
+    def _knock_on_remote_room(self) -> tuple[EventBase, EventBase]:
+        """Hold what we would for a remote room our knocker knocked on: its create
+        event and the knock as an out-of-band membership.
 
+        Returns:
+            The create event and the knock event.
+        """
+        room_version = self.hs.config.server.default_room_version
         create_event_source: JsonDict = {
             "type": EventTypes.Create,
             "content": {"room_version": room_version.identifier},
-            "sender": remote_user,
+            "sender": f"@creator:{self.OTHER_SERVER_NAME}",
             "state_key": "",
             "depth": 1,
             "origin_server_ts": 0,
@@ -839,59 +847,63 @@ class AutoJoinOnAcceptedKnockTestCase(FederatingHomeserverTestCase):
             create_event_source, room_version
         )
         create_event = make_test_pdu_event(create_event_source, room_version)
-        room_id = create_event.room_id
 
-        # Our user knocked on a room we are not in: all we hold is the knock.
-        knock_event = make_test_pdu_event(
+        self.get_success(
+            self.store.maybe_store_room_on_outlier_membership(
+                room_id=create_event.room_id, room_version=room_version
+            )
+        )
+        knock_event = self._persist_out_of_band_membership(
+            create_event.room_id, Membership.KNOCK, depth=10
+        )
+        return create_event, knock_event
+
+    def _persist_out_of_band_membership(
+        self, room_id: str, membership: str, depth: int
+    ) -> EventBase:
+        """Persist a membership event of our knocker's own, as an outlier."""
+        room_version = self.hs.config.server.default_room_version
+        event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
-                "content": {"membership": Membership.KNOCK},
+                "content": {"membership": membership},
                 "room_id": room_id,
                 "sender": self.knocker,
                 "state_key": self.knocker,
-                "depth": 10,
+                "depth": depth,
                 "origin_server_ts": self.clock.time_msec(),
             },
             room_version,
         )
-        knock_event.internal_metadata.outlier = True
-        knock_event.internal_metadata.out_of_band_membership = True
-        self.get_success(
-            self.store.maybe_store_room_on_outlier_membership(
-                room_id=room_id, room_version=room_version
-            )
-        )
+        event.internal_metadata.outlier = True
+        event.internal_metadata.out_of_band_membership = True
         self.get_success(
             self.hs.get_federation_event_handler().persist_events_and_notify(
                 room_id,
-                [
-                    (
-                        knock_event,
-                        EventContext.for_outlier(self.hs.get_storage_controllers()),
-                    )
-                ],
+                [(event, EventContext.for_outlier(self.hs.get_storage_controllers()))],
             )
         )
+        return event
 
-        invite_event = make_test_pdu_event(
-            {
-                "type": EventTypes.Member,
-                "content": {"membership": Membership.INVITE},
-                "room_id": room_id,
-                "sender": remote_user,
-                "state_key": self.knocker,
-                "depth": 11,
-                "auth_events": [knock_event.event_id],
-                "origin_server_ts": self.clock.time_msec(),
-            },
-            room_version,
-        )
+    @contextmanager
+    def _mock_remote_join(
+        self, create_event: EventBase, make_join_errors: Sequence[SynapseError] = ()
+    ) -> Iterator[AsyncMock]:
+        """Answer our `make_join`/`send_join` to the remote room as its server would.
 
-        # The remote's response to our `make_join`/`send_join`.
+        Args:
+            create_event: The create event of the remote room.
+            make_join_errors: Errors to raise from the first `make_join` requests,
+                one per request, before one is answered.
+
+        Yields:
+            The mocked `make_membership_event`.
+        """
+        room_version = self.hs.config.server.default_room_version
         join_event_source = {
             "type": EventTypes.Member,
             "content": {"membership": Membership.JOIN},
-            "room_id": room_id,
+            "room_id": create_event.room_id,
             "sender": self.knocker,
             "state_key": self.knocker,
             "depth": 12,
@@ -904,7 +916,10 @@ class AutoJoinOnAcceptedKnockTestCase(FederatingHomeserverTestCase):
         )
         join_event = make_test_pdu_event(join_event_source, room_version)
         mock_make_membership_event = AsyncMock(
-            return_value=(self.OTHER_SERVER_NAME, join_event, room_version)
+            side_effect=[
+                *make_join_errors,
+                (self.OTHER_SERVER_NAME, join_event, room_version),
+            ]
         )
         mock_send_join = AsyncMock(
             return_value=SendJoinResult(
@@ -935,13 +950,51 @@ class AutoJoinOnAcceptedKnockTestCase(FederatingHomeserverTestCase):
                 return_value=None,
             ),
         ):
-            self.get_success(
-                self.fed_handler.on_invite_request(
-                    origin=self.OTHER_SERVER_NAME,
-                    event=invite_event,
-                    room_version=room_version,
-                )
+            yield mock_make_membership_event
+
+    def _receive_remote_invite(
+        self, create_event: EventBase, knock_event: EventBase
+    ) -> None:
+        """Receive an invite over federation that lists `knock_event` among its auth
+        events."""
+        room_version = self.hs.config.server.default_room_version
+        invite_event = make_test_pdu_event(
+            {
+                "type": EventTypes.Member,
+                "content": {"membership": Membership.INVITE},
+                "room_id": create_event.room_id,
+                "sender": create_event.sender,
+                "state_key": self.knocker,
+                "depth": 11,
+                "auth_events": [knock_event.event_id],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            room_version,
+        )
+        self.get_success(
+            self.fed_handler.on_invite_request(
+                origin=self.OTHER_SERVER_NAME,
+                event=invite_event,
+                room_version=room_version,
             )
+        )
+
+    def _not_invited(self) -> SynapseError:
+        """The inviting server's refusal of a `make_join` before it stores the invite."""
+        return SynapseError(403, "You are not invited to this room", Codes.FORBIDDEN)
+
+    @override_config({"experimental_features": {"msc4509_enabled": True}})
+    def test_remote_invite_accepting_knock(self) -> None:
+        """An invite received over federation which accepts a knock we hold as
+        an outlier starts a remote join, after giving the inviting server time to
+        store the invite."""
+        create_event, knock_event = self._knock_on_remote_room()
+        room_id = create_event.room_id
+
+        with self._mock_remote_join(create_event) as mock_make_membership_event:
+            self._receive_remote_invite(create_event, knock_event)
+            self.reactor.advance(MSC4509_AUTO_JOIN_FIRST_DELAY.as_secs() / 2)
+            mock_make_membership_event.assert_not_called()
             self.pump(1)
 
         mock_make_membership_event.assert_called_once()
@@ -953,4 +1006,120 @@ class AutoJoinOnAcceptedKnockTestCase(FederatingHomeserverTestCase):
         self.assertEqual(made_user_id, self.knocker)
         self.assertEqual(made_membership, Membership.JOIN)
         membership, _ = self._current_membership(room_id, self.knocker)
+        self.assertEqual(membership, Membership.JOIN)
+
+    @override_config({"experimental_features": {"msc4509_enabled": True}})
+    def test_remote_invite_accepting_knock_retries_refused_join(self) -> None:
+        """The inviting server refuses our `make_join` until it has stored the
+        invite: the join is retried."""
+        create_event, knock_event = self._knock_on_remote_room()
+
+        with self._mock_remote_join(
+            create_event, make_join_errors=[self._not_invited()]
+        ) as mock_make_membership_event:
+            self._receive_remote_invite(create_event, knock_event)
+            self.pump(1)
+
+        self.assertEqual(mock_make_membership_event.call_count, 2)
+        membership, _ = self._current_membership(create_event.room_id, self.knocker)
+        self.assertEqual(membership, Membership.JOIN)
+
+    @override_config({"experimental_features": {"msc4509_enabled": True}})
+    def test_remote_invite_accepting_knock_gives_up_on_refused_join(self) -> None:
+        """A join the inviting server keeps refusing is tried a bounded number of
+        times, and the invite is left for the user."""
+        create_event, knock_event = self._knock_on_remote_room()
+
+        with (
+            self.assertLogs("synapse.handlers.room_member", "WARNING") as logs,
+            self._mock_remote_join(
+                create_event,
+                make_join_errors=[self._not_invited() for _ in range(10)],
+            ) as mock_make_membership_event,
+        ):
+            self._receive_remote_invite(create_event, knock_event)
+            self.pump(1)
+
+        self.assertEqual(
+            mock_make_membership_event.call_count, MSC4509_AUTO_JOIN_ATTEMPTS
+        )
+        self.assertIn("Failed to join", logs.output[0])
+        membership, _ = self._current_membership(create_event.room_id, self.knocker)
+        self.assertEqual(membership, Membership.INVITE)
+
+    @override_config({"experimental_features": {"msc4509_enabled": True}})
+    def test_remote_invite_accepting_knock_stops_once_invite_is_gone(self) -> None:
+        """The join is not retried once the invite is no longer the user's
+        membership, here because they rejected it after the first refusal."""
+        create_event, knock_event = self._knock_on_remote_room()
+
+        with self._mock_remote_join(
+            create_event, make_join_errors=[self._not_invited()]
+        ) as mock_make_membership_event:
+            self._receive_remote_invite(create_event, knock_event)
+            self.reactor.advance(MSC4509_AUTO_JOIN_FIRST_DELAY.as_secs())
+            self.assertEqual(mock_make_membership_event.call_count, 1)
+
+            self._persist_out_of_band_membership(
+                create_event.room_id, Membership.LEAVE, depth=12
+            )
+            # A second attempt would fail and log, as the invite is gone.
+            with self.assertNoLogs("synapse.handlers.room_member", "WARNING"):
+                self.pump(1)
+
+        self.assertEqual(mock_make_membership_event.call_count, 1)
+        membership, _ = self._current_membership(create_event.room_id, self.knocker)
+        self.assertEqual(membership, Membership.LEAVE)
+
+    @override_config({"experimental_features": {"msc4509_enabled": True}})
+    def test_remote_invite_accepting_knock_does_not_retry_other_errors(self) -> None:
+        """Only an `M_FORBIDDEN` refusal of the join is retried."""
+        create_event, knock_event = self._knock_on_remote_room()
+
+        with self._mock_remote_join(
+            create_event,
+            make_join_errors=[SynapseError(404, "Unknown room", Codes.NOT_FOUND)],
+        ) as mock_make_membership_event:
+            self._receive_remote_invite(create_event, knock_event)
+            self.pump(1)
+
+        self.assertEqual(mock_make_membership_event.call_count, 1)
+        membership, _ = self._current_membership(create_event.room_id, self.knocker)
+        self.assertEqual(membership, Membership.INVITE)
+
+    @override_config({"experimental_features": {"msc4509_enabled": True}})
+    def test_remote_invite_listing_rescinded_knock(self) -> None:
+        """An invite from a server that never saw our out-of-band rescission of the
+        knock still lists the knock in its auth events. It does not start a join."""
+        create_event, knock_event = self._knock_on_remote_room()
+        self._persist_out_of_band_membership(
+            create_event.room_id, Membership.LEAVE, depth=11
+        )
+
+        with self._mock_remote_join(create_event) as mock_make_membership_event:
+            self._receive_remote_invite(create_event, knock_event)
+            self.pump(1)
+
+        mock_make_membership_event.assert_not_called()
+        membership, _ = self._current_membership(create_event.room_id, self.knocker)
+        self.assertEqual(membership, Membership.INVITE)
+
+    @override_config({"experimental_features": {"msc4509_enabled": True}})
+    def test_remote_invite_accepting_knock_after_reknock(self) -> None:
+        """A user who rescinded a knock out of band and knocked again is joined by
+        an invite accepting the new knock."""
+        create_event, _ = self._knock_on_remote_room()
+        self._persist_out_of_band_membership(
+            create_event.room_id, Membership.LEAVE, depth=11
+        )
+        second_knock = self._persist_out_of_band_membership(
+            create_event.room_id, Membership.KNOCK, depth=12
+        )
+
+        with self._mock_remote_join(create_event) as mock_make_membership_event:
+            self._receive_remote_invite(create_event, second_knock)
+            self.pump(1)
+
+        mock_make_membership_event.assert_called_once()
+        membership, _ = self._current_membership(create_event.room_id, self.knocker)
         self.assertEqual(membership, Membership.JOIN)
