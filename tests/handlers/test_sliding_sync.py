@@ -19,7 +19,6 @@
 #
 import logging
 from typing import AbstractSet
-from unittest.mock import patch
 
 import attr
 from parameterized import parameterized, parameterized_class
@@ -2235,6 +2234,68 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         self.assertTrue(room_id1 not in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
 
+    def test_display_name_change_is_not_newly_joined_room(
+        self,
+    ) -> None:
+        """
+        Regression test that a displayname change is not considered a newly-joined room.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        after_room_join_token = self.event_sources.get_current_token()
+
+        # Our bug was only triggered if the displayname change's `prev_events` didn't
+        # include the member's actual previous memberships, so for that reason we
+        # add a dummy event here, even though it appears meaningless for the test.
+        self.helper.send(room_id1, "test", tok=user2_tok)
+
+        # Update the displayname during the token range
+        self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user1_id,
+            body={
+                "membership": Membership.JOIN,
+                "displayname": "displayname during token range",
+            },
+            tok=user1_tok,
+        )
+
+        after_change1_token = self.event_sources.get_current_token()
+
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
+                from_token=after_room_join_token,
+                to_token=after_change1_token,
+            )
+        )
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+
+        self.assertEqual(room_id_results, {room_id1})
+        # We must NOT be `newly_joined` (or `newly_left`, for that matter)
+        # because this was just a displayname change (and we were joined before the token range)
+        self.assertEqual(interested_rooms.newly_joined_rooms, set())
+        self.assertEqual(interested_rooms.newly_left_rooms, set())
+
     def test_display_name_changes_before_and_after_token_range(
         self,
     ) -> None:
@@ -3018,21 +3079,6 @@ class ComputeInterestedRoomsShardTestCase(
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
 
-    def _create_room(self, room_id: str, user_id: str, tok: str) -> None:
-        """
-        Create a room with a specific room_id. We use this so that that we have a
-        consistent room_id across test runs that hashes to the same value and will be
-        sharded to a known worker in the tests.
-        """
-
-        # We control the room ID generation by patching out the
-        # `_generate_room_id` method
-        with patch(
-            "synapse.handlers.room.RoomCreationHandler._generate_room_id"
-        ) as mock:
-            mock.side_effect = lambda: room_id
-            self.helper.create_room_as(user_id, tok=tok)
-
     def test_sharded_event_persisters(self) -> None:
         """
         This test should catch bugs that would come from flawed stream position
@@ -3070,19 +3116,15 @@ class ComputeInterestedRoomsShardTestCase(
             {"worker_name": "worker3"},
         )
 
-        # Specially crafted room IDs that get persisted on different workers.
-        #
-        # Sharded to worker1
-        room_id1 = "!fooo:test"
-        # Sharded to worker2
-        room_id2 = "!bar:test"
-        # Sharded to worker3
-        room_id3 = "!quux:test"
+        # 3 different rooms, each on a different worker. Match them up based on the
+        # trailing number.
+        room_results = self._generate_rooms_on_worker(
+            user2_id, user2_tok, ["worker1", "worker2", "worker3"]
+        )
+        room_id1 = room_results["worker1"]
+        room_id2 = room_results["worker2"]
+        room_id3 = room_results["worker3"]
 
-        # Create rooms on the different workers.
-        self._create_room(room_id1, user2_id, user2_tok)
-        self._create_room(room_id2, user2_id, user2_tok)
-        self._create_room(room_id3, user2_id, user2_tok)
         join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         join_response2 = self.helper.join(room_id2, user1_id, tok=user1_tok)
         # Leave room2

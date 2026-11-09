@@ -70,6 +70,7 @@ from synapse.types import (
     UserID,
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
+    is_compliant_user_id,
 )
 from synapse.util import stringutils
 from synapse.util.async_helpers import Linearizer
@@ -795,7 +796,20 @@ class DeviceHandler:
             if any(rid in joined_room_ids for rid in entries):
                 newly_left_users.discard(user_id)
 
-        return DeviceListUpdates(changed=users_that_have_changed, left=newly_left_users)
+        return DeviceListUpdates(
+            changed={
+                changed_user_id
+                for changed_user_id in users_that_have_changed
+                if self.hs.is_mine_id(changed_user_id)
+                or is_compliant_user_id(changed_user_id)
+            },
+            left={
+                left_user_id
+                for left_user_id in newly_left_users
+                if self.hs.is_mine_id(left_user_id)
+                or is_compliant_user_id(left_user_id)
+            },
+        )
 
     async def on_federation_query_user_devices(self, user_id: str) -> JsonDict:
         if not self.hs.is_mine(UserID.from_string(user_id)):
@@ -1532,6 +1546,28 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                 {
                     "message": "Got a device list update edu from a user and "
                     "device which does not match the origin of the request.",
+                    "user_id": user_id,
+                    "device_id": device_id,
+                }
+            )
+            return
+
+        if not is_compliant_user_id(user_id):
+            # We SHOULD NOT forward non-compliant (grandfathered historical)
+            # user IDs to clients outside the context of an event, and the spec
+            # gives dropping their device list updates as the example. See
+            # https://spec.matrix.org/v1.19/appendices/#historical-user-ids
+            logger.warning(
+                "Dropping device list update edu for non-compliant user ID %r from %r",
+                user_id,
+                origin,
+            )
+
+            set_tag("error", True)
+            log_kv(
+                {
+                    "message": "Got a device list update edu from a "
+                    "non-compliant user ID, dropping it.",
                     "user_id": user_id,
                     "device_id": device_id,
                 }

@@ -45,7 +45,7 @@ def get_test_https_policy() -> BrowserLikePolicyForHTTPS:
         IPolicyForHTTPS
     """
     ca_file = get_test_ca_cert_file()
-    with open(ca_file) as stream:
+    with open(ca_file, "rb") as stream:
         content = stream.read()
     cert = Certificate.loadPEM(content)
     trust_root = trustRootFromCertificates([cert])

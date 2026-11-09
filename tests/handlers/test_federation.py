@@ -383,18 +383,18 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
             event = create_invite()
             self.get_success(
                 self.handler.on_invite_request(
-                    other_server,
-                    event,
-                    event.room_version,
+                    origin=other_server,
+                    event=event,
+                    room_version=event.room_version,
                 )
             )
 
         event = create_invite()
         self.get_failure(
             self.handler.on_invite_request(
-                other_server,
-                event,
-                event.room_version,
+                origin=other_server,
+                event=event,
+                room_version=event.room_version,
             ),
             exc=LimitExceededError,
         )
@@ -574,6 +574,7 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
                 ],
                 partial_state=True,
                 servers_in_room={"example.com"},
+                state_dag=None,
             )
         )
 

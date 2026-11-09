@@ -234,11 +234,6 @@ class EventCreationTestCase(unittest.HomeserverTestCase):
         )
 
     def test_call_invite_event_creation_fails_in_public_room(self) -> None:
-        # get prev_events for room
-        prev_events = self.get_success(
-            self.store.get_prev_events_for_room(self.room_id)
-        )
-
         # the invite in a public room should fail
         self.get_failure(
             self.handler.create_event(
@@ -248,8 +243,6 @@ class EventCreationTestCase(unittest.HomeserverTestCase):
                     "room_id": self.room_id,
                     "sender": self.requester.user.to_string(),
                 },
-                prev_event_ids=prev_events,
-                auth_event_ids=prev_events,
             ),
             SynapseError,
         )
@@ -263,8 +256,6 @@ class EventCreationTestCase(unittest.HomeserverTestCase):
                     "room_id": self.private_room_id,
                     "sender": self.requester.user.to_string(),
                 },
-                prev_event_ids=prev_events,
-                auth_event_ids=prev_events,
             )
         )
 

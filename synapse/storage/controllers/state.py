@@ -533,7 +533,14 @@ class StateStorageController:
 
         Raises:
             RuntimeError if we don't have a state group for one or more of the events
-               (ie. they are outliers or unknown)
+               (ie. they are outliers or unknown) AND the lookup reached the database.
+
+               XXX: `_get_state_group_for_events` raises `RuntimeError` for unknown events, but
+               the `@cachedList` wrapper swallows it and the caller just gets partial results.
+               For the time-being, Callers MUST NOT rely on this to determine missing events,
+               as cached responses return None for the state group instead of raising.
+
+               TODO: audit every caller, as some of them may be relying on the current behaviour.
         """
         if await_full_state:
             await self._partial_state_events_tracker.await_full_state(event_ids)
@@ -580,8 +587,8 @@ class StateStorageController:
         """Get the current state event ids for a room based on the
         current_state_events table.
 
-        If a state filter is given (that is not `StateFilter.all()`) the query
-        result is *not* cached.
+        If a wildcard state filter is given (that is not `StateFilter.all()`)
+        the query result is *not* cached.
 
         Args:
             room_id: The room to get the state IDs of. state_filter: The state

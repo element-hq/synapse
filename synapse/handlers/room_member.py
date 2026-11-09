@@ -887,8 +887,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         if effective_membership_state == Membership.INVITE:
             target_id = target.to_string()
 
-            # block any attempts to invite the server notices mxid
-            if target_id == self._server_notices_mxid:
+            # block any attempts to invite server identities.
+            if target_id in (
+                self._server_notices_mxid,
+                self.config.serverannouncements.room_management_mxid,
+            ):
                 raise SynapseError(HTTPStatus.FORBIDDEN, "Cannot invite this user")
 
             block_invite_result: tuple[Codes, dict] | None = None
@@ -896,8 +899,12 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             if (
                 self._server_notices_mxid is not None
                 and requester.user.to_string() == self._server_notices_mxid
+            ) or (
+                requester.user.to_string()
+                == self.config.serverannouncements.room_management_mxid
+                and request_by_server
             ):
-                # allow the server notices mxid to send invites
+                # Allow internal server identities to manage their room invites.
                 is_requester_admin = True
 
             else:
@@ -1239,6 +1246,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
     ) -> None:
         """
         Check if the user has any membership in the room and raise error if not.
+        This includes the synthetic membership users have in the server
+        announcement rooms delivered to them.
 
         Args:
             user_id: The user to check.
@@ -1247,6 +1256,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         Raises:
             AuthError if the user doesn't have any membership in the room.
         """
+        if room_id in await self.store.get_server_announcement_room_ids_for_user(
+            user_id
+        ):
+            return
+
         result = await self.store.get_local_current_membership_for_user_in_room(
             user_id=user_id, room_id=room_id
         )
@@ -1379,9 +1393,15 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             return True, list(servers_that_can_issue_invite)
 
         # Ensure the member should be allowed access via membership in a room.
-        await self.event_auth_handler.check_restricted_join_rules(
-            state_before_join, room_version, user_id, previous_membership
-        )
+        try:
+            await self.event_auth_handler.check_restricted_join_rules(
+                state_before_join, room_version, user_id, previous_membership
+            )
+        except SynapseError as e:
+            if e.errcode == Codes.UNABLE_AUTHORISE_JOIN:
+                servers_that_can_issue_invite.discard(self.hs.hostname)
+                return True, list(servers_that_can_issue_invite)
+            raise
 
         # If this is going to be a local join, additional information must
         # be included in the event content in order to efficiently validate

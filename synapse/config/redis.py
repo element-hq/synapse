@@ -49,6 +49,7 @@ class RedisConfig(Config):
         self.redis_port = redis_config.get("port", 6379)
         self.redis_path = redis_config.get("path", None)
         self.redis_dbid = redis_config.get("dbid", None)
+        self.redis_username = redis_config.get("username", None)
         self.redis_password = redis_config.get("password")
         if self.redis_password and not allow_secrets_in_config:
             raise ConfigError(
@@ -66,6 +67,16 @@ class RedisConfig(Config):
                     "password_path",
                 ),
             ).strip()
+
+        # An empty password is not the same as an unset one: Redis has no wire form
+        # for a username without a password, but a `nopass` ACL user accepts any.
+        if self.redis_username and self.redis_password is None:
+            raise ConfigError(
+                "`redis.username` was set without `redis.password` (or "
+                "`redis.password_path`). Redis username authentication requires "
+                "a password to also be configured.",
+                ("redis", "username"),
+            )
 
         self.redis_use_tls = redis_config.get("use_tls", False)
         self.redis_certificate = redis_config.get("certificate_file", None)

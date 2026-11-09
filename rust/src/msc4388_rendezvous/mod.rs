@@ -20,58 +20,93 @@ use std::{
 use http::StatusCode;
 use pyo3::{
     pyclass, pymethods,
-    types::{PyAnyMethods, PyModule, PyModuleMethods},
-    Bound, IntoPyObject, Py, PyAny, PyResult, Python,
+    types::{PyAnyMethods, PyDict, PyModule, PyModuleMethods},
+    Bound, Py, PyAny, PyResult, Python,
 };
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
+use serde_json::error::Category;
 use ulid::Ulid;
 
 use self::session::Session;
 use crate::{
     duration::SynapseDuration,
     errors::{NotFoundError, SynapseError},
+    homeserver::HomeServer,
     http::http_request_from_twisted,
-    msc4388_rendezvous::session::{GetResponse, PostResponse, PutResponse},
-    UnwrapInfallible,
+    identifier::OpaqueIdentifier,
+    msc4388_rendezvous::session::{ConcurrentWrite, GetResponse, PostResponse, PutResponse},
+    runtime::RustRuntime,
 };
 
 mod session;
 
 #[pyclass]
 struct MSC4388RendezvousHandler {
-    clock: Py<PyAny>,
+    runtime: RustRuntime,
     sessions: BTreeMap<Ulid, Session>,
-    soft_limit: usize,
-    hard_limit: usize,
+    /// The number of unauthenticated sessions in `sessions`, used to enforce
+    /// the limit on how many can be live at once. It is recounted on each
+    /// eviction, so cannot drift from `sessions` for longer than that.
+    unauthenticated_sessions: usize,
+    max_unauthenticated_sessions: usize,
     max_content_length: u64,
     ttl: Duration,
 }
 
-impl MSC4388RendezvousHandler {
-    /// Check the length of the data parameter and throw error if invalid.
-    fn check_data_length(&self, data: &str) -> PyResult<()> {
-        let data_length = data.len() as u64;
-        if data_length > self.max_content_length {
-            return Err(SynapseError::new(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "Payload too large".to_owned(),
-                "M_TOO_LARGE",
-                None,
-                None,
-            ));
-        }
-        Ok(())
+/// Check the length of the data parameter and throw error if invalid.
+fn check_data_length(data: &str, max_content_length: u64) -> PyResult<()> {
+    let data_length = data.len() as u64;
+    if data_length > max_content_length {
+        return Err(SynapseError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Payload too large".to_owned(),
+            "M_TOO_LARGE",
+            None,
+            None,
+        ));
     }
+    Ok(())
+}
 
-    /// Evict expired sessions and remove the oldest sessions until we're under the capacity.
+/// Parse the JSON request body, distinguishing between a body which is not
+/// JSON (`M_NOT_JSON`) and one which is JSON but has a required field missing
+/// or of the wrong type (`M_BAD_JSON`), as MSC4388 requires.
+fn parse_json_body<T: DeserializeOwned>(body: &[u8]) -> PyResult<T> {
+    serde_json::from_slice(body).map_err(|e| match e.classify() {
+        Category::Data => SynapseError::new(
+            StatusCode::BAD_REQUEST,
+            format!("Invalid request body: {e}"),
+            "M_BAD_JSON",
+            None,
+            None,
+        ),
+        Category::Io | Category::Syntax | Category::Eof => SynapseError::new(
+            StatusCode::BAD_REQUEST,
+            "Content not JSON".to_owned(),
+            "M_NOT_JSON",
+            None,
+            None,
+        ),
+    })
+}
+
+impl MSC4388RendezvousHandler {
+    /// Evict expired sessions.
+    ///
+    /// Live sessions are never evicted to make room for new ones, as otherwise
+    /// anyone could disrupt sign ins that are in progress by creating lots of
+    /// sessions. Instead, new unauthenticated sessions are refused while at
+    /// capacity.
     fn evict(&mut self, now: SystemTime) {
-        // First remove all the entries which expired
-        self.sessions.retain(|_, session| !session.expired(now));
-
-        // Then we remove the oldest entries until we're under the soft limit
-        while self.sessions.len() > self.soft_limit {
-            self.sessions.pop_first();
-        }
+        let mut unauthenticated_sessions = 0;
+        self.sessions.retain(|_, session| {
+            let keep = !session.expired(now);
+            if keep && !session.authenticated() {
+                unauthenticated_sessions += 1;
+            }
+            keep
+        });
+        self.unauthenticated_sessions = unauthenticated_sessions;
     }
 }
 
@@ -89,31 +124,27 @@ pub struct PutRequest {
 #[pymethods]
 impl MSC4388RendezvousHandler {
     #[new]
-    #[pyo3(signature = (homeserver, /, soft_limit=100, hard_limit=200,max_content_length=4*1024, eviction_interval=60*1000, ttl=2*60*1000))]
+    #[pyo3(signature = (homeserver, /, max_unauthenticated_sessions=1000, max_content_length=4*1024, eviction_interval=60*1000, ttl=2*60*1000))]
     fn new(
         py: Python<'_>,
-        homeserver: &Bound<'_, PyAny>,
-        soft_limit: usize,
-        hard_limit: usize,
+        homeserver: HomeServer,
+        max_unauthenticated_sessions: usize,
         max_content_length: u64,
         eviction_interval: u64,
         ttl: u64,
     ) -> PyResult<Py<Self>> {
-        let clock = homeserver
-            .call_method0("get_clock")?
-            .into_pyobject(py)
-            .unwrap_infallible()
-            .unbind();
+        let runtime = homeserver.get_rust_runtime(py)?;
+        let clock = homeserver.get_clock(py)?;
 
         // Construct a Python object so that we can get a reference to the
         // evict method and schedule it to run.
         let self_ = Py::new(
             py,
             Self {
-                clock,
+                runtime,
                 sessions: BTreeMap::new(),
-                soft_limit,
-                hard_limit,
+                unauthenticated_sessions: 0,
+                max_unauthenticated_sessions,
                 max_content_length,
                 ttl: Duration::from_millis(ttl),
             },
@@ -122,19 +153,15 @@ impl MSC4388RendezvousHandler {
         let eviction_duration = SynapseDuration::from_milliseconds(eviction_interval);
 
         let evict = self_.getattr(py, "_evict")?;
-        homeserver.call_method0("get_clock")?.call_method(
-            "looping_call",
-            (evict, &eviction_duration),
-            None,
-        )?;
+        clock
+            .bind(py)
+            .call_method("looping_call", (evict, &eviction_duration), None)?;
 
         Ok(self_)
     }
 
-    fn _evict(&mut self, py: Python<'_>) -> PyResult<()> {
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+    fn _evict(&mut self) -> PyResult<()> {
+        let now = self.runtime.clock().now();
         self.evict(now);
 
         Ok(())
@@ -142,47 +169,50 @@ impl MSC4388RendezvousHandler {
 
     fn handle_post(
         &mut self,
-        py: Python<'_>,
         twisted_request: &Bound<'_, PyAny>,
+        authenticated: bool,
     ) -> PyResult<(u8, PostResponse)> {
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
-
-        // We trigger an immediate eviction if we're at the hard limit
-        if self.sessions.len() >= self.hard_limit {
-            self.evict(now);
-        }
+        let now = self.runtime.clock().now();
 
         // Generate a new ULID for the session from the current time.
         let id = Ulid::from_datetime(now);
 
         let request = http_request_from_twisted(twisted_request)?;
-        // parse JSON body
-        let post_request: PostRequest =
-            serde_json::from_slice(&request.into_body()).map_err(|_| {
-                SynapseError::new(
-                    StatusCode::BAD_REQUEST,
-                    "Invalid JSON in request body".to_owned(),
-                    "M_INVALID_PARAM",
-                    None,
-                    None,
-                )
-            })?;
+        let post_request: PostRequest = parse_json_body(&request.into_body())?;
 
         let data: String = post_request.data;
-        self.check_data_length(&data)?;
+        check_data_length(&data, self.max_content_length)?;
 
-        let session = Session::new(id, data, now, self.ttl);
+        if !authenticated {
+            // If we're at capacity, evict expired sessions now rather than waiting
+            // for the next eviction run, in case that frees up some room.
+            if self.unauthenticated_sessions >= self.max_unauthenticated_sessions {
+                self.evict(now);
+            }
+
+            if self.unauthenticated_sessions >= self.max_unauthenticated_sessions {
+                return Err(SynapseError::new(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "Too many rendezvous sessions in progress, try again later".to_owned(),
+                    "M_LIMIT_EXCEEDED",
+                    None,
+                    None,
+                ));
+            }
+        }
+
+        let session = Session::new(id, data, now, self.ttl, authenticated);
         let response = session.post_response(now);
         self.sessions.insert(id, session);
+        if !authenticated {
+            self.unauthenticated_sessions += 1;
+        }
 
         Ok((200, response))
     }
 
     fn handle_get(
         &mut self,
-        py: Python<'_>,
         id: &str,
         twisted_request: &Bound<'_, PyAny>,
     ) -> PyResult<(u8, GetResponse)> {
@@ -280,9 +310,7 @@ impl MSC4388RendezvousHandler {
             ));
         }
 
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        let now = self.runtime.clock().now();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self
@@ -296,32 +324,26 @@ impl MSC4388RendezvousHandler {
 
     fn handle_put(
         &mut self,
-        py: Python<'_>,
         id: &str,
+        txn_id: &str,
         twisted_request: &Bound<'_, PyAny>,
     ) -> PyResult<(u8, PutResponse)> {
+        // The transaction ID is recorded against the session, so we enforce the
+        // opaque identifier grammar (including its 255 byte limit) that MSC4388
+        // requires of it, to keep the memory used by a session bounded.
+        let txn_id = OpaqueIdentifier::try_from(txn_id).map_err(|_| {
+            SynapseError::new(
+                StatusCode::BAD_REQUEST,
+                "Invalid transaction ID".to_owned(),
+                "M_INVALID_PARAM",
+                None,
+                None,
+            )
+        })?;
+
         let request = http_request_from_twisted(twisted_request)?;
-        // parse JSON body
-        let put_request: PutRequest =
-            serde_json::from_slice(&request.into_body()).map_err(|_| {
-                SynapseError::new(
-                    StatusCode::BAD_REQUEST,
-                    "Invalid JSON in request body".to_owned(),
-                    "M_INVALID_PARAM",
-                    None,
-                    None,
-                )
-            })?;
 
-        let sequence_token: String = put_request.sequence_token;
-
-        let data: String = put_request.data;
-
-        self.check_data_length(&data)?;
-
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        let now = self.runtime.clock().now();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self
@@ -330,34 +352,57 @@ impl MSC4388RendezvousHandler {
             .filter(|s| !s.expired(now))
             .ok_or_else(NotFoundError::new)?;
 
-        if !session.sequence_token().eq(&sequence_token) {
-            // Allow clients to safely retry a PUT (e.g. after a network error)
-            // by accepting the previous sequence_token as long as the data
-            // being submitted matches what is currently stored. This makes
-            // PUTs idempotent without weakening the concurrent-write check.
-            if session.is_idempotent_retry(&sequence_token, &data) {
-                return Ok((200, session.put_response()));
-            }
+        // A retry of a successful PUT gets the earlier response without the new
+        // request being considered, so MSC4388 requires that we check for a
+        // recorded transaction ID before validating the request body.
+        if let Some(sequence_token) = session.transaction_outcome(&txn_id) {
+            return Ok((200, PutResponse::new(sequence_token.clone())));
+        }
 
-            return Err(SynapseError::new(
+        let PutRequest {
+            sequence_token,
+            data,
+        } = parse_json_body(&request.into_body())?;
+
+        check_data_length(&data, self.max_content_length)?;
+
+        // The session performs the compare-and-swap, and remembers a successful
+        // result against the transaction ID so that retries are idempotent.
+        match session.send(&txn_id, &sequence_token, data, now) {
+            Ok(sequence_token) => Ok((200, PutResponse::new(sequence_token))),
+            Err(ConcurrentWrite) => Err(SynapseError::new(
                 StatusCode::CONFLICT,
                 "sequence_token does not match".to_owned(),
                 "IO_ELEMENT_MSC4388_CONCURRENT_WRITE",
                 None,
                 None,
-            ));
+            )),
         }
-
-        session.update(data, now);
-
-        Ok((200, session.put_response()))
     }
 
-    fn handle_delete(&mut self, id: &str) -> PyResult<(u8, ())> {
-        let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
-        let _session = self.sessions.remove(&id).ok_or_else(NotFoundError::new)?;
+    fn handle_delete<'py>(
+        &mut self,
+        py: Python<'py>,
+        id: &str,
+    ) -> PyResult<(u8, Bound<'py, PyDict>)> {
+        let now = self.runtime.clock().now();
 
-        Ok((200, ()))
+        let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
+
+        let session = self.sessions.remove(&id).ok_or_else(NotFoundError::new)?;
+        if !session.authenticated() {
+            self.unauthenticated_sessions = self.unauthenticated_sessions.saturating_sub(1);
+        }
+
+        // An expired session may not have been evicted yet, but it should be
+        // treated as if it no longer exists.
+        if session.expired(now) {
+            return Err(NotFoundError::new());
+        }
+
+        // Respond with an empty JSON object, as is the convention for endpoints
+        // with no response body to return.
+        Ok((200, PyDict::new(py)))
     }
 }
 

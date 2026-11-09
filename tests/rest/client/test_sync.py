@@ -21,6 +21,7 @@
 import json
 import logging
 
+import attr
 from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
@@ -30,12 +31,26 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     JoinRules,
+    Membership,
     ReceiptTypes,
     RelationTypes,
 )
-from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
+from synapse.config.server_announcements import ServerAnnouncementRoom
+from synapse.events import EventBase
+from synapse.handlers.server_announcements import SYNTHETIC_JOIN_EVENT_ID_PREFIX
+from synapse.rest.client import (
+    account_data,
+    devices,
+    knock,
+    login,
+    read_marker,
+    receipts,
+    room,
+    sync,
+    tags,
+)
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -43,7 +58,12 @@ from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
 from tests.rest.client.test_rooms import make_request_with_cancellation_test
-from tests.server import TimedOutException
+from tests.server import FakeChannel, TimedOutException
+from tests.test_utils.event_injection import (
+    inject_event,
+    inject_member_event,
+    persist_message_and_state_event_in_one_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -393,6 +413,9 @@ class SyncKnockTestCase(KnockingStrippedStateEventHelperMixin):
         self.check_knock_room_state_against_room_state(
             room_state_events, self.expected_room_state
         )
+        # Ensure the events have been stripped
+        for event in room_state_events:
+            self.assertNotIn("signatures", event)
 
 
 class SyncCreateEventInPrejoinStateTestCase(unittest.HomeserverTestCase):
@@ -496,7 +519,7 @@ class UnreadMessagesTestCase(unittest.HomeserverTestCase):
             self.room_id,
             EventTypes.PowerLevels,
             {
-                "users": {self.user_id: 100, self.user2: 100},
+                "users": {self.user2: 100},
                 "users_default": 0,
                 "events": {
                     "m.room.name": 50,
@@ -766,6 +789,113 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
 
+# FIXME(unstable_state_after): Remove this whole test case after 2027-09-01
+# and we drop support for the unstable variant of `state_after`
+class SyncStateAfterTestCase(unittest.HomeserverTestCase):
+    """
+    Tests for the `use_state_after` opt-in on `/sync` (MSC4222, stable as of
+    Matrix v1.16): the variant of the `state_after` field in the response should
+    match the stable/unstable query parameter the client opted in with.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user_id = self.register_user("user", "password")
+        self.access_token = self.login(self.user_id, "password")
+        self.room_id = self.helper.create_room_as(self.user_id, tok=self.access_token)
+
+    def _sync_room_keys(self, query_string: str) -> set[str]:
+        """Perform a sync with the given query string and return the keys of
+        our room's response object."""
+        channel = self.make_request(
+            "GET",
+            f"/sync{query_string}",
+            access_token=self.access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        return set(channel.json_body["rooms"]["join"][self.room_id].keys())
+
+    def test_state_without_opt_in(self) -> None:
+        """By default, room state comes down under the `state` key."""
+        room_keys = self._sync_room_keys("")
+        self.assertIn("state", room_keys)
+        self.assertNotIn("state_after", room_keys)
+        self.assertNotIn("org.matrix.msc4222.state_after", room_keys)
+
+    def test_state_after_stable_name(self) -> None:
+        """Opting in with the stable query parameter gives the stable field name."""
+        room_keys = self._sync_room_keys("?use_state_after=true")
+        self.assertIn("state_after", room_keys)
+        self.assertNotIn("state", room_keys)
+        self.assertNotIn("org.matrix.msc4222.state_after", room_keys)
+
+    def test_state_after_unstable_name(self) -> None:
+        """Opting in with the unstable query parameter gives the unstable field
+        name, for the transition period."""
+        room_keys = self._sync_room_keys("?org.matrix.msc4222.use_state_after=true")
+        self.assertIn("org.matrix.msc4222.state_after", room_keys)
+        self.assertNotIn("state", room_keys)
+        self.assertNotIn("state_after", room_keys)
+
+    def test_state_after_both_names(self) -> None:
+        """If a client opts in with both query parameters, the stable field name wins."""
+        room_keys = self._sync_room_keys(
+            "?use_state_after=true&org.matrix.msc4222.use_state_after=true"
+        )
+        self.assertIn("state_after", room_keys)
+        self.assertNotIn("state", room_keys)
+        self.assertNotIn("org.matrix.msc4222.state_after", room_keys)
+
+
+class PresenceSyncTestCase(unittest.HomeserverTestCase):
+    """
+    Tests regarding the `presence` section of sync.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def test_non_compliant_remote_user_joining_not_in_presence(self) -> None:
+        """A compliant and a non-compliant (grandfathered historical) remote user
+        join a room alice is in. Alice's incremental sync only includes the
+        presence of the compliant one.
+        """
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(alice_user_id, "correcthorse")
+        room_id = self.helper.create_room_as(alice_user_id, tok=alice_access_token)
+
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        next_batch = channel.json_body["next_batch"]
+
+        compliant_user_id = "@john:remote"
+        non_compliant_user_id = "@héllo:remote"
+        for user_id in (compliant_user_id, non_compliant_user_id):
+            self.get_success(
+                inject_member_event(self.hs, room_id, user_id, Membership.JOIN)
+            )
+
+        channel = self.make_request(
+            "GET", f"/sync?since={next_batch}", access_token=alice_access_token
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        presence_senders = [
+            event["sender"] for event in channel.json_body["presence"]["events"]
+        ]
+        self.assertIn(compliant_user_id, presence_senders)
+        self.assertNotIn(non_compliant_user_id, presence_senders)
+
+
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
     """
     Tests regarding device list (`device_lists`) changes.
@@ -950,6 +1080,41 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         self.assertIn(
             alice_user_id, device_list_changes, incremental_sync_channel.json_body
         )
+
+    def test_non_compliant_remote_user_not_in_device_list_changes(self) -> None:
+        """A compliant and a non-compliant (grandfathered historical) remote user
+        join, then leave, a room alice is in. Alice's incremental syncs only list
+        the compliant one in `device_lists.changed` and `device_lists.left`.
+        """
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(alice_user_id, "correcthorse")
+        room_id = self.helper.create_room_as(alice_user_id, tok=alice_access_token)
+
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        next_batch = channel.json_body["next_batch"]
+
+        compliant_user_id = "@john:remote"
+        non_compliant_user_id = "@héllo:remote"
+
+        for membership, device_lists_field in (
+            (Membership.JOIN, "changed"),
+            (Membership.LEAVE, "left"),
+        ):
+            for user_id in (compliant_user_id, non_compliant_user_id):
+                self.get_success(
+                    inject_member_event(self.hs, room_id, user_id, membership)
+                )
+
+            channel = self.make_request(
+                "GET", f"/sync?since={next_batch}", access_token=alice_access_token
+            )
+            self.assertEqual(channel.code, 200, channel.json_body)
+            next_batch = channel.json_body["next_batch"]
+
+            device_lists = channel.json_body["device_lists"][device_lists_field]
+            self.assertIn(compliant_user_id, device_lists)
+            self.assertNotIn(non_compliant_user_id, device_lists)
 
 
 class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
@@ -1272,3 +1437,1483 @@ class SyncCancellationTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+
+class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
+    """Tests for the MSC4222 invariant that any state event served in a sync
+    response's *timeline* is reflected in `state_after` (unless it lost state
+    resolution): `state at since` + `state_after` must equal the state at the
+    end of the timeline. See
+    https://github.com/matrix-org/matrix-spec-proposals/pull/4222.
+
+    This breaks when the `since` token falls inside a persist batch: the
+    `current_state_delta_stream` row for a state event persisted in a batch is
+    stamped with the *minimum* stream ordering of the batch, so such a token
+    selects the event for the timeline but not its delta. A worker reading the
+    events stream from replication routinely observes such a token, which is
+    why this is seen on worker deployments and not on a single process.
+
+    `test_state_after_with_token_inside_persist_batch` reproduces this end to
+    end with a hand-built `since` token. Its preconditions -- the batch-minimum
+    stamp, and that the events replication stream really hands out a token
+    inside a batch -- are pinned in `tests/storage/test_state_deltas.py` and
+    `tests/replication/tcp/streams/test_events.py`.
+
+    The remaining tests guard that whatever repairs this reports the *resolved*
+    state at the end of the timeline rather than replaying the timeline.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+
+        self.alice = self.register_user("alice", "password")
+        self.alice_tok = self.login("alice", "password")
+        self.bob = self.register_user("bob", "password")
+        self.bob_tok = self.login("bob", "password")
+
+        # Named room, so that hero calculation doesn't inject current
+        # membership state into the response and confuse the assertions.
+        self.room_id = self.helper.create_room_as(
+            self.alice, tok=self.alice_tok, extra_content={"name": "test room"}
+        )
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+
+    def _sync_url(self, lazy_load_members: bool, timeline_limit: int = 10) -> str:
+        # The default `timeline_limit` of 10 is arbitrary: comfortably more
+        # events than any test here produces between syncs, so the timeline is
+        # never truncated unless a test passes a smaller limit on purpose.
+        sync_filter: JsonDict = {"room": {"timeline": {"limit": timeline_limit}}}
+        if lazy_load_members:
+            sync_filter["room"]["state"] = {"lazy_load_members": True}
+        return f"/sync?filter={json.dumps(sync_filter)}&use_state_after=true"
+
+    def _sync(self, sync_url: str, since: str | None = None) -> JsonDict:
+        url = sync_url if since is None else f"{sync_url}&since={since}"
+        channel = self.make_request("GET", url, access_token=self.alice_tok)
+        self.assertEqual(channel.code, 200, channel.result)
+        return channel.json_body
+
+    def _joined_room(self, response: JsonDict) -> JsonDict:
+        rooms = response["rooms"].get("join", {})
+        self.assertIn(self.room_id, rooms, f"room missing from sync: {response}")
+        return rooms[self.room_id]
+
+    def _timeline_ids(self, room: JsonDict) -> list[str]:
+        return [e["event_id"] for e in room["timeline"]["events"]]
+
+    def _state_after_ids(self, room: JsonDict) -> list[str]:
+        return [e["event_id"] for e in room["state_after"]["events"]]
+
+    def _persist_batch(self) -> tuple[EventBase, EventBase]:
+        return self.get_success(
+            persist_message_and_state_event_in_one_batch(
+                self.hs, self.room_id, self.alice
+            )
+        )
+
+    def _assert_state_after_is_current_state(self, room: JsonDict) -> None:
+        """For a joined room `end_token` is the global `now_token`, so every
+        entry in `state_after` must be the room's current state for that key.
+
+        This is the guard against "fix" shapes that seed `state_after` straight
+        from the timeline: a state event can be in the timeline and *not* be the
+        state at the end of it.
+        """
+        current_state = self.get_success(
+            self.store.get_partial_current_state_ids(self.room_id)
+        )
+        current_ids = set(current_state.values())
+        for event in room["state_after"]["events"]:
+            self.assertIn(
+                event["event_id"],
+                current_ids,
+                f"state_after reports {event['type']}/{event['state_key']} = "
+                f"{event['event_id']}, which is not the current state "
+                f"({current_state.get((event['type'], event['state_key']))})",
+            )
+
+    # ------------------------------------------------------------------
+    # The persist-batch window
+    # ------------------------------------------------------------------
+
+    def test_state_after_with_token_inside_persist_batch(self) -> None:
+        """The end-to-end symptom of the batch-minimum stamp: if a client's
+        `since` token lands strictly inside a persist batch (which a *reader*
+        worker can
+        observe, because it advances its events-stream position from replication
+        RDATA batches that may split a persist batch), the state event is in the
+        timeline of the next sync and must also be in `state_after`.
+        """
+        sync_url = self._sync_url(lazy_load_members=False)
+        base = self._sync(sync_url)["next_batch"]
+        base_token = self.get_success(StreamToken.from_string(self.store, base))
+
+        message, state_event = self._persist_batch()
+        message_pos = message.internal_metadata.stream_ordering
+        assert message_pos is not None
+
+        # A token positioned just after the message but before the state event
+        # -- i.e. in the middle of the persist batch.
+        split_token = base_token.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=message_pos)
+        )
+
+        deltas_up_to_split = self.get_success(
+            self.store.get_current_state_deltas_for_room(
+                self.room_id,
+                from_token=base_token.room_key,
+                to_token=RoomStreamToken(stream=message_pos),
+            )
+        )
+        self.assertIn(
+            state_event.event_id,
+            [d.event_id for d in deltas_up_to_split],
+            "expected the delta to be visible *before* its event",
+        )
+
+        split_since = self.get_success(split_token.to_string(self.store))
+        room = self._joined_room(self._sync(sync_url, split_since))
+        self.assertIn(state_event.event_id, self._timeline_ids(room))
+        self.assertIn(
+            state_event.event_id,
+            self._state_after_ids(room),
+            f"state event in timeline but missing from state_after when the "
+            f"since token splits a persist batch: {room}",
+        )
+
+    # ------------------------------------------------------------------
+    # Guards: `state_after` must be the *resolved* state, not a replay of
+    # the timeline
+    # ------------------------------------------------------------------
+
+    def test_state_res_loser_alone_in_timeline(self) -> None:
+        """A state event that appears in the timeline but *loses* state
+        resolution must not be reported in `state_after` -- `state_after` is
+        the resolved state at the end of the timeline, not a replay of the
+        timeline.
+
+        Here the client has already synced past the first of two conflicting
+        events, so the second one arrives alone in the timeline with no delta of
+        its own.
+        """
+        sync_url = self._sync_url(lazy_load_members=False)
+
+        fork_point = self.get_success(self.store.get_prev_events_for_room(self.room_id))
+
+        # Pin the state resolution outcome: conflicted events at the same
+        # mainline position are applied in `(origin_server_ts, event_id)`
+        # order with the last application winning, so giving the first event
+        # the later timestamp makes it deterministically beat the second one.
+        now = self.clock.time_msec()
+
+        first = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=self.room_id,
+                type="m.call.member",
+                state_key=self.alice,
+                sender=self.alice,
+                content={"memberships": [{"device_id": "FIRST"}]},
+                prev_event_ids=fork_point,
+                origin_server_ts=now + 1000,
+            )
+        )
+
+        # The client syncs past the first event.
+        since = self._sync(sync_url)["next_batch"]
+
+        # A conflicting event forked off the same point arrives afterwards.
+        second = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=self.room_id,
+                type="m.call.member",
+                state_key=self.alice,
+                sender=self.alice,
+                content={"memberships": [{"device_id": "SECOND"}]},
+                prev_event_ids=fork_point,
+                origin_server_ts=now,
+            )
+        )
+
+        current_state = self.get_success(
+            self.store.get_partial_current_state_ids(self.room_id)
+        )
+        self.assertEqual(
+            current_state[("m.call.member", self.alice)],
+            first.event_id,
+            "test setup: expected the first event to win state resolution",
+        )
+
+        room = self._joined_room(self._sync(sync_url, since))
+        self.assertIn(second.event_id, self._timeline_ids(room))
+        self._assert_state_after_is_current_state(room)
+        self.assertNotIn(
+            second.event_id,
+            self._state_after_ids(room),
+            "a state-res loser leaked into state_after",
+        )
+
+    def test_state_after_is_current_state_with_split_token(self) -> None:
+        """Whatever mechanism repairs the persist-batch window must not report
+        anything other than the state at the end of the timeline."""
+        sync_url = self._sync_url(lazy_load_members=False)
+        base = self._sync(sync_url)["next_batch"]
+        base_token = self.get_success(StreamToken.from_string(self.store, base))
+
+        message, state_event = self._persist_batch()
+        message_pos = message.internal_metadata.stream_ordering
+        assert message_pos is not None
+
+        split_token = base_token.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=message_pos)
+        )
+        since = self.get_success(split_token.to_string(self.store))
+
+        room = self._joined_room(self._sync(sync_url, since))
+        self._assert_state_after_is_current_state(room)
+        self.assertIn(state_event.event_id, self._state_after_ids(room))
+
+    def test_gappy_timeline_with_split_token(self) -> None:
+        """The gappy variant of the persist-batch window: the `since` token
+        splits a persist batch *and* the timeline is truncated so that the
+        state event falls outside the window. The state event is then in
+        neither the timeline nor the deltas, but it is a state change since
+        `since`, so `state_after` must still report it -- with `limited: true`
+        the client relies entirely on `state_after` to bridge the gap.
+        """
+        sync_url = self._sync_url(lazy_load_members=False, timeline_limit=3)
+        base = self._sync(sync_url)["next_batch"]
+        base_token = self.get_success(StreamToken.from_string(self.store, base))
+
+        message, state_event = self._persist_batch()
+        message_pos = message.internal_metadata.stream_ordering
+        assert message_pos is not None
+
+        # Push the state event out of the timeline window: more fillers than
+        # the timeline limit of 3, so the window holds fillers only.
+        for i in range(10):
+            self.helper.send(self.room_id, body=f"filler {i}", tok=self.bob_tok)
+
+        split_token = base_token.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=message_pos)
+        )
+        since = self.get_success(split_token.to_string(self.store))
+
+        room = self._joined_room(self._sync(sync_url, since))
+        self.assertTrue(room["timeline"].get("limited"), room)
+        self.assertNotIn(state_event.event_id, self._timeline_ids(room))
+        self.assertIn(
+            state_event.event_id,
+            self._state_after_ids(room),
+            f"state event outside a truncated timeline is missing from "
+            f"state_after when the since token splits a persist batch: {room}",
+        )
+
+
+class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
+    """Tests MSC4222 `state_after` behaviour for rooms the syncing user has
+    left (i.e. rooms in the `leave` section of the sync response)."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def test_archived_room_state_after_not_newer_than_leave(self) -> None:
+        """`state_after` for a left room must be the state at the end of that
+        room's timeline, i.e. at the user's leave point — never state from
+        after the leave.
+
+        Scenario: with lazy-loading of members and `use_state_after` enabled,
+        Alice does an incremental sync covering the window in which Bob sent a
+        message and Alice then left. Bob changed his per-room displayname
+        *after* Alice's leave; that post-leave membership event must NOT
+        appear in Alice's `state_after` for the left room.
+        """
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login("alice", "password")
+        bob = self.register_user("bob", "password")
+        bob_tok = self.login("bob", "password")
+
+        # Name the room to avoid heroes: those come from the *current*
+        # summary — a separate leak path from the one under test.
+        room_id = self.helper.create_room_as(
+            alice, tok=alice_tok, extra_content={"name": "Some room name"}
+        )
+        self.helper.join(room_id, bob, tok=bob_tok)
+
+        # Bob's membership as it will stand at Alice's leave point.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/rooms/{room_id}/state/m.room.member/{bob}?format=event",
+            access_token=alice_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        bob_member_event_id_at_leave = channel.json_body["event_id"]
+
+        # Lazy-load members; `include_redundant_members` bypasses the members
+        # cache so Bob's membership appears in the incremental sync below.
+        sync_filter = json.dumps(
+            {
+                "room": {
+                    "state": {
+                        "lazy_load_members": True,
+                        "include_redundant_members": True,
+                    },
+                }
+            }
+        )
+        sync_url = f"/sync?filter={sync_filter}&use_state_after=true"
+
+        # Initial sync.
+        channel = self.make_request("GET", sync_url, access_token=alice_tok)
+        self.assertEqual(channel.code, 200, channel.result)
+        since = channel.json_body["next_batch"]
+
+        # Bob becomes a timeline sender in the next sync window.
+        self.helper.send(room_id, body="hello", tok=bob_tok)
+
+        # Alice leaves the room.
+        self.helper.leave(room_id, alice, tok=alice_tok)
+
+        # Bob's membership changes AFTER Alice's leave.
+        post_leave_member_event = self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            {"membership": "join", "displayname": "bob-post-leave"},
+            tok=bob_tok,
+            state_key=bob,
+        )
+        post_leave_member_event_id = post_leave_member_event["event_id"]
+
+        # Incremental sync: the room is in the `leave` section.
+        channel = self.make_request(
+            "GET", f"{sync_url}&since={since}", access_token=alice_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        left_room = channel.json_body["rooms"]["leave"][room_id]
+        state_after_events = left_room["state_after"]["events"]
+
+        # Post-leave state must not appear in `state_after`.
+        self.assertNotIn(
+            post_leave_member_event_id,
+            [e["event_id"] for e in state_after_events],
+            f"state_after contains state from after the user's leave: "
+            f"{state_after_events}",
+        )
+
+        # Bob's membership must be the one at the leave point.
+        self.assertEqual(
+            [
+                e["event_id"]
+                for e in state_after_events
+                if e["type"] == EventTypes.Member and e["state_key"] == bob
+            ],
+            [bob_member_event_id_at_leave],
+        )
+
+
+class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
+    """Tests for the per-device cache of lazy-loaded members already sent.
+
+    A membership left out of a response as already sent is lost for good if
+    the client never processed the response that carried it. The cache must
+    only trust a response once the client has synced from its `next_batch`.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.alice = self.register_user("alice", "password")
+        self.alice_device = "alice_device"
+        self.alice_tok = self.login("alice", "password", device_id=self.alice_device)
+        self.bob = self.register_user("bob", "password")
+        self.bob_tok = self.login("bob", "password")
+
+        # Named room, so that hero calculation doesn't inject current
+        # membership state into the response and confuse the assertions.
+        self.room_id = self.helper.create_room_as(
+            self.alice, tok=self.alice_tok, extra_content={"name": "test room"}
+        )
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+
+        # Push bob's join out of the initial sync's timeline, so that his
+        # membership has not been sent to the client when a test starts.
+        for i in range(10):
+            self.helper.send(self.room_id, body=f"pad {i}", tok=self.alice_tok)
+
+    def _sync_request(
+        self,
+        use_state_after: bool,
+        since: str | None = None,
+        *,
+        timeline_limit: int = 10,
+        timeline_not_types: list[str] | None = None,
+        timeout_ms: int = 0,
+        await_result: bool = True,
+    ) -> FakeChannel:
+        """Make a lazy-loading `/sync` request as alice."""
+        timeline_filter: JsonDict = {"limit": timeline_limit}
+        if timeline_not_types is not None:
+            timeline_filter["not_types"] = timeline_not_types
+        sync_filter: JsonDict = {
+            "room": {
+                "timeline": timeline_filter,
+                "state": {"lazy_load_members": True},
+            }
+        }
+        url = f"/sync?filter={json.dumps(sync_filter)}&timeout={timeout_ms}"
+        if use_state_after:
+            url += "&use_state_after=true"
+        if since is not None:
+            url += f"&since={since}"
+        return self.make_request(
+            "GET", url, access_token=self.alice_tok, await_result=await_result
+        )
+
+    def _sync(
+        self,
+        use_state_after: bool,
+        since: str | None = None,
+        *,
+        timeline_limit: int = 10,
+        timeline_not_types: list[str] | None = None,
+    ) -> JsonDict:
+        """Sync as alice and return the response body."""
+        channel = self._sync_request(
+            use_state_after,
+            since,
+            timeline_limit=timeline_limit,
+            timeline_not_types=timeline_not_types,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        return channel.json_body
+
+    def _room(self, response: JsonDict) -> JsonDict:
+        """Extract the room dict for the test room from a sync response."""
+        rooms = response["rooms"].get("join", {})
+        self.assertIn(self.room_id, rooms, f"room missing from sync: {response}")
+        return rooms[self.room_id]
+
+    def _timeline_ids(self, response: JsonDict) -> list[str]:
+        return [e["event_id"] for e in self._room(response)["timeline"]["events"]]
+
+    def _state_events(
+        self, response: JsonDict, use_state_after: bool
+    ) -> list[JsonDict]:
+        """Extract the list of state events from the test room in a sync response."""
+        key = "state_after" if use_state_after else "state"
+        return self._room(response)[key]["events"]
+
+    def _state_ids(self, response: JsonDict, use_state_after: bool) -> list[str]:
+        """Extract the list of state event IDs from the test room in a sync
+        response."""
+        return [e["event_id"] for e in self._state_events(response, use_state_after)]
+
+    def _members_in_state(self, response: JsonDict, use_state_after: bool) -> list[str]:
+        """Extract the list of member state keys from the test room in a sync
+        response."""
+        return [
+            e["state_key"]
+            for e in self._state_events(response, use_state_after)
+            if e["type"] == EventTypes.Member
+        ]
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_member_sent_once_when_acknowledged(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A lazy-loaded member is sent the first time it is needed and left
+        out once the client has synced past the response that carried it."""
+        t0 = self._sync(use_state_after)["next_batch"]
+
+        self.helper.send(self.room_id, body="one", tok=self.bob_tok)
+        response = self._sync(use_state_after, t0)
+        self.assertEqual(self._members_in_state(response, use_state_after), [self.bob])
+        t1 = response["next_batch"]
+
+        self.helper.send(self.room_id, body="two", tok=self.bob_tok)
+        response = self._sync(use_state_after, t1)
+        self.assertEqual(self._members_in_state(response, use_state_after), [])
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_member_not_resent_on_resync_from_token_that_carried_it(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A client that resumes from an older token is only sent again the
+        members carried by the responses after that token.
+
+        A member sent in the response that ended at the resumed-from token was
+        processed by the client before it saved that token, so it must not be
+        sent again. matrix-js-sdk saves its sync store every few minutes and
+        resumes from the saved token on reload, so this is the common case.
+        """
+        t0 = self._sync(use_state_after)["next_batch"]
+
+        # bob's membership is carried by the response that ends at `t1`.
+        self.helper.send(self.room_id, body="one", tok=self.bob_tok)
+        response = self._sync(use_state_after, t0)
+        self.assertEqual(self._members_in_state(response, use_state_after), [self.bob])
+        t1 = response["next_batch"]
+
+        # The client processes further responses, then reloads from `t1`.
+        self.helper.send(self.room_id, body="two", tok=self.bob_tok)
+        self._sync(use_state_after, t1)
+        self.helper.send(self.room_id, body="three", tok=self.bob_tok)
+        response = self._sync(use_state_after, t1)
+        self.assertEqual(
+            self._members_in_state(response, use_state_after),
+            [],
+            f"bob's membership re-sent on resume from the token that carried "
+            f"it: {response}",
+        )
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_member_resent_on_retry_from_same_token(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A client that gives up on a slow request and retries it must get the
+        lazy-loaded members again. It never processed the first response."""
+        t0 = self._sync(use_state_after)["next_batch"]
+
+        self.helper.send(self.room_id, body="hello", tok=self.bob_tok)
+        for attempt in range(2):
+            response = self._sync(use_state_after, t0)
+            self.assertEqual(
+                self._members_in_state(response, use_state_after),
+                [self.bob],
+                f"bob's membership missing on attempt {attempt}: {response}",
+            )
+
+    def test_membership_change_resent_on_resync_from_older_token(self) -> None:
+        """A membership change must be in `state_after` every time the sync
+        window covers it, even if it has been sent before.
+
+        Clients do not persist every `since` token. matrix-js-sdk saves its
+        sync store every few minutes, so after a reload it resumes from a token
+        older than the one the change was first delivered on. A `state_after`
+        client never applies state from the timeline, so if the change is left
+        out of `state_after` it keeps the stale membership until it clears its
+        cache. A kicked user stays shown as joined.
+        """
+        t0 = self._sync(use_state_after=True)["next_batch"]
+
+        self.helper.send(self.room_id, body="hello", tok=self.bob_tok)
+        t1 = self._sync(use_state_after=True, since=t0)["next_batch"]
+
+        kick = self.helper.change_membership(
+            self.room_id, self.alice, self.bob, "leave", tok=self.alice_tok
+        )
+
+        # The live client sees the kick.
+        response = self._sync(use_state_after=True, since=t1)
+        self.assertIn(kick["event_id"], self._state_ids(response, use_state_after=True))
+
+        # The client reloads from the older persisted token.
+        response = self._sync(use_state_after=True, since=t0)
+        self.assertIn(kick["event_id"], self._timeline_ids(response))
+        self.assertIn(
+            kick["event_id"],
+            self._state_ids(response, use_state_after=True),
+            f"membership change missing from state_after on re-sync from an "
+            f"older token: {response}",
+        )
+
+    def test_gappy_membership_change_resent_on_resync_from_older_token(
+        self,
+    ) -> None:
+        """The same for `state`. A membership change that falls in the gap of
+        a limited timeline is only conveyed by `state`, so it must be there
+        every time the sync window covers it."""
+        t0 = self._sync(use_state_after=False, timeline_limit=1)["next_batch"]
+
+        self.helper.send(self.room_id, body="hello", tok=self.bob_tok)
+        t1 = self._sync(use_state_after=False, since=t0, timeline_limit=1)["next_batch"]
+
+        kick = self.helper.change_membership(
+            self.room_id, self.alice, self.bob, "leave", tok=self.alice_tok
+        )
+        # A later message, so that the kick falls into the gap of the
+        # one-event timeline.
+        self.helper.send(self.room_id, body="after", tok=self.alice_tok)
+
+        # The live client sees the kick in `state`.
+        response = self._sync(use_state_after=False, since=t1, timeline_limit=1)
+        self.assertTrue(self._room(response)["timeline"]["limited"])
+        self.assertNotIn(kick["event_id"], self._timeline_ids(response))
+        self.assertIn(
+            kick["event_id"], self._state_ids(response, use_state_after=False)
+        )
+
+        # The client reloads from the older persisted token.
+        response = self._sync(use_state_after=False, since=t0, timeline_limit=1)
+        self.assertNotIn(kick["event_id"], self._timeline_ids(response))
+        self.assertIn(
+            kick["event_id"],
+            self._state_ids(response, use_state_after=False),
+            f"membership change missing from state on re-sync from an older "
+            f"token: {response}",
+        )
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_member_not_resent_after_empty_long_poll_wakeup(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A long-poll that wakes up with nothing to send keeps waiting. The
+        response it eventually returns must still leave out the members the
+        client already has.
+
+        The notifier calls back into the sync handler on every wakeup within
+        one request. An empty result is not a response the client lost.
+        """
+        not_types = ["m.spurious"]
+        t0 = self._sync(use_state_after, timeline_not_types=not_types)["next_batch"]
+
+        self.helper.send(self.room_id, body="one", tok=self.bob_tok)
+        response = self._sync(use_state_after, t0, timeline_not_types=not_types)
+        self.assertEqual(self._members_in_state(response, use_state_after), [self.bob])
+        t1 = response["next_batch"]
+
+        channel = self._sync_request(
+            use_state_after,
+            t1,
+            timeline_not_types=not_types,
+            timeout_ms=30000,
+            await_result=False,
+        )
+
+        # Wakes the long-poll, but the filter drops the event, so the result is
+        # empty and the notifier waits again.
+        self.helper.send_event(
+            self.room_id, type="m.spurious", content={}, tok=self.bob_tok
+        )
+        self.assertFalse(channel.is_finished())
+
+        self.helper.send(self.room_id, body="two", tok=self.bob_tok)
+        channel.await_result()
+        self.assertEqual(channel.code, 200, channel.result)
+        response = channel.json_body
+        self.assertEqual(len(self._timeline_ids(response)), 1)
+        self.assertEqual(self._members_in_state(response, use_state_after), [])
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_membership_change_sent_when_cache_claims_it_was(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A membership change since `since` is sent even when the cache says
+        the client already has it.
+
+        The cache only decides whether to leave out the memberships fetched for
+        timeline senders. It can be wrong: a retry of a request can run while
+        the original is still being built, and the original then marks members
+        the retry has to send. A change must never depend on it.
+        """
+        t0 = self._sync(use_state_after, timeline_limit=1)["next_batch"]
+
+        kick = self.helper.change_membership(
+            self.room_id, self.alice, self.bob, "leave", tok=self.alice_tok
+        )
+        # A later message, so that the kick falls into the gap of the
+        # one-event timeline and only `state` can carry it.
+        self.helper.send(self.room_id, body="after the kick", tok=self.alice_tok)
+
+        # Claim the kick was already sent in the response that ended at `t0`.
+        # Syncing from `t0` does not forget this, as the client has acknowledged
+        # that response.
+        t0_token = self.get_success(
+            StreamToken.from_string(self.hs.get_datastores().main, t0)
+        )
+        cache = self.hs.get_sync_handler().get_lazy_loaded_members_cache(
+            (self.alice, self.alice_device)
+        )
+        cache.mark_sent(self.bob, kick["event_id"], t0_token)
+
+        response = self._sync(use_state_after, t0, timeline_limit=1)
+        self.assertNotIn(kick["event_id"], self._timeline_ids(response))
+        self.assertIn(kick["event_id"], self._state_ids(response, use_state_after))
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_full_state_is_not_filtered_through_cache(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """A newly joined room is sent its full (lazy-loaded) state, including
+        the user's own membership, even if the cache claims that membership was
+        already sent.
+
+        This test should only be needed while there are gaps in the lazy-loaded
+        membership cache logic. Specifically, around its handling of concurrent
+        sync requests.
+        """
+
+        # Do a sync before joining a new room.
+        t0 = self._sync(use_state_after)["next_batch"]
+
+        room2 = self.helper.create_room_as(
+            self.bob, tok=self.bob_tok, extra_content={"name": "room 2"}
+        )
+        self.helper.invite(room2, self.bob, self.alice, tok=self.bob_tok)
+        join = self.helper.join(room2, self.alice, tok=self.alice_tok)
+
+        # Push the join out of the 10 event timeline, so that only the state
+        # section can carry alice's membership.
+        for i in range(10):
+            self.helper.send(room2, body=f"welcome {i}", tok=self.bob_tok)
+
+        # Directly change the cache so that it thinks the join was already sent.
+        t0_token = self.get_success(
+            StreamToken.from_string(self.hs.get_datastores().main, t0)
+        )
+        cache = self.hs.get_sync_handler().get_lazy_loaded_members_cache(
+            (self.alice, self.alice_device)
+        )
+        cache.mark_sent(self.alice, join["event_id"], t0_token)
+
+        # Do a sync from t0, which will include the full state for the newly
+        # joined room. Despite what the cache says, the full state should still
+        # include the user's own membership.
+        response = self._sync(use_state_after, t0)
+
+        key = "state_after" if use_state_after else "state"
+        members = [
+            e["state_key"]
+            for e in response["rooms"]["join"][room2][key]["events"]
+            if e["type"] == EventTypes.Member
+        ]
+        self.assertIn(self.alice, members)
+
+
+class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
+    """Tests that server announcement rooms are delivered to users who are not
+    members of them, with a synthetic join for the syncing user.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        account_data.register_servlets,
+        tags.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.announcer = self.register_user("announcer", "pass")
+        self.announcer_tok = self.login("announcer", "pass")
+        self.former = self.register_user("former", "pass")
+        self.former_tok = self.login("former", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_tok = self.login("bob", "pass")
+
+        self.config = hs.config.serverannouncements
+        self.config.rooms = [
+            ServerAnnouncementRoom(
+                config_id="news",
+                room_name="Server News",
+                room_topic="News from the server",
+                room_avatar_url=None,
+                room_avatar_path=None,
+                allowed_user_ids=[self.announcer, self.former],
+            )
+        ]
+        self.handler = hs.get_server_announcements_handler()
+        self.store = hs.get_datastores().main
+        self.get_success(self.handler.reconcile_rooms())
+        room_id = self.get_success(self.store.get_server_announcement_room("news"))
+        assert room_id is not None
+        self.room_id = room_id
+
+    def _sync(
+        self,
+        tok: str,
+        since: str | None = None,
+        full_state: bool = False,
+        filter: JsonDict | None = None,
+        use_state_after: bool = False,
+    ) -> JsonDict:
+        params = []
+        if since is not None:
+            params.append(f"since={since}")
+        if full_state:
+            params.append("full_state=true")
+        if use_state_after:
+            params.append("use_state_after=true")
+        if filter is not None:
+            params.append(f"filter={json.dumps(filter)}")
+        channel = self.make_request(
+            "GET", "/sync?" + "&".join(params), access_token=tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        return channel.json_body
+
+    def _announce(self, body: str) -> str:
+        return self.helper.send(self.room_id, body, tok=self.announcer_tok)["event_id"]
+
+    def _assert_not_delivered(self, response: JsonDict) -> None:
+        for section in ("join", "invite", "leave", "knock"):
+            self.assertNotIn(
+                self.room_id, response.get("rooms", {}).get(section, {}), section
+            )
+
+    def _assert_delivered(self, response: JsonDict, user_id: str) -> JsonDict:
+        """Assert that the announcement room is in the `join` section with a
+        synthetic join for `user_id` and no unread counts, and return it.
+        """
+        room = response["rooms"]["join"][self.room_id]
+        state = room["state_after"] if "state_after" in room else room["state"]
+
+        own_memberships = [
+            event
+            for event in state["events"] + room["timeline"]["events"]
+            if event["type"] == EventTypes.Member and event["state_key"] == user_id
+        ]
+        self.assertEqual(len(own_memberships), 1, own_memberships)
+        membership = own_memberships[0]
+        self.assertTrue(
+            membership["event_id"].startswith(SYNTHETIC_JOIN_EVENT_ID_PREFIX),
+            membership,
+        )
+        self.assertEqual(membership["content"], {"membership": Membership.JOIN})
+        create_event = self.get_success(
+            self.store.get_create_event_for_room(self.room_id)
+        )
+        self.assertEqual(membership["origin_server_ts"], create_event.origin_server_ts)
+
+        self.assertEqual(
+            room["unread_notifications"],
+            {"highlight_count": 0, "notification_count": 0},
+        )
+        return room
+
+    def _timeline_ids(self, room: JsonDict) -> list[str]:
+        return [event["event_id"] for event in room["timeline"]["events"]]
+
+    def _timeline_types(self, room: JsonDict) -> list[str]:
+        return [event["type"] for event in room["timeline"]["events"]]
+
+    def _state_types(self, room: JsonDict) -> set[str]:
+        return {event["type"] for event in room["state"]["events"]}
+
+    def test_incremental_sync_delivers_new_announcement(self) -> None:
+        """A non-member syncing incrementally gets an announcement sent since
+        their token, with the room's full state.
+        """
+        since = self._sync(self.bob_tok)["next_batch"]
+        event_id = self._announce("hello")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+        self.assertTrue(
+            {EventTypes.Create, EventTypes.Name, EventTypes.Topic}
+            <= self._state_types(room)
+        )
+
+    def test_incremental_sync_without_new_announcement(self) -> None:
+        """An announcement room with nothing new since the token is left out of
+        an incremental sync.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        self._assert_not_delivered(self._sync(self.bob_tok, since))
+
+    def test_incremental_sync_after_first_announcement(self) -> None:
+        """A non-member who has synced past an announcement room's first
+        announcement gets a later announcement with only the synthetic join in
+        `state`, as nothing else changed since their token.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+        event_id = self._announce("again")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+        self.assertEqual(
+            [event["type"] for event in room["state"]["events"]], [EventTypes.Member]
+        )
+
+    def test_members_get_their_real_membership(self) -> None:
+        """Members of an announcement room sync it as a regular room."""
+        self._announce("hello")
+
+        room = self._sync(self.announcer_tok)["rooms"]["join"][self.room_id]
+        memberships = [
+            event
+            for event in room["state"]["events"] + room["timeline"]["events"]
+            if event["type"] == EventTypes.Member
+        ]
+        self.assertIn(self.announcer, {event["state_key"] for event in memberships})
+        for event in memberships:
+            self.assertFalse(
+                event["event_id"].startswith(SYNTHETIC_JOIN_EVENT_ID_PREFIX), event
+            )
+
+    def test_full_state_sync_delivers_earlier_announcement(self) -> None:
+        """An incremental sync with `full_state` delivers the state of an
+        announcement room even when there is no announcement since the token.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        room = self._assert_delivered(
+            self._sync(self.bob_tok, since, full_state=True), self.bob
+        )
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertTrue(
+            {EventTypes.Create, EventTypes.Name, EventTypes.Topic}
+            <= self._state_types(room)
+        )
+
+    def test_full_state_sync_without_announcement(self) -> None:
+        """An announcement room without any announcement is left out of an
+        incremental sync with `full_state`.
+        """
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        self._assert_not_delivered(self._sync(self.bob_tok, since, full_state=True))
+
+    def test_initial_sync_delivers_announcements(self) -> None:
+        """An initial sync delivers an announcement room with its most recent
+        announcements.
+        """
+        event_ids = [self._announce(f"message {i}") for i in range(3)]
+
+        room = self._assert_delivered(
+            self._sync(self.bob_tok, filter={"room": {"timeline": {"limit": 2}}}),
+            self.bob,
+        )
+        self.assertEqual(self._timeline_ids(room), event_ids[-2:])
+        self.assertTrue(room["timeline"]["limited"])
+
+    def test_state_changes_after_last_announcement(self) -> None:
+        """An announcement room is delivered on initial, incremental and
+        `full_state` syncs even when state changes push its last announcement
+        out of the timeline. The incremental sync has the state changes in its
+        timeline.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        self.config.rooms = [
+            attr.evolve(
+                self.config.rooms[0], room_name="New name", room_topic="New topic"
+            )
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+        filter = {"room": {"timeline": {"limit": 1}}}
+
+        for response in (
+            self._sync(self.bob_tok, filter=filter),
+            self._sync(self.bob_tok, since, filter=filter),
+            self._sync(self.bob_tok, since, full_state=True, filter=filter),
+        ):
+            room = self._assert_delivered(response, self.bob)
+            self.assertNotIn(EventTypes.Message, self._timeline_types(room))
+            topic = [
+                event
+                for event in room["state"]["events"] + room["timeline"]["events"]
+                if event["type"] == EventTypes.Topic
+            ][-1]
+            self.assertEqual(topic["content"]["topic"], "New topic")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertIn(EventTypes.Topic, self._timeline_types(room))
+
+    def test_state_change_after_announcement(self) -> None:
+        """Once an announcement room has had an announcement, a state change
+        such as a sender leaving delivers the room to non-members with the
+        change in the timeline, as it does for members.
+        """
+        self._announce("hello")
+        bob_since = self._sync(self.bob_tok)["next_batch"]
+        announcer_since = self._sync(self.announcer_tok)["next_batch"]
+
+        leave_id = self.helper.leave(self.room_id, self.former, tok=self.former_tok)[
+            "event_id"
+        ]
+
+        room = self._assert_delivered(self._sync(self.bob_tok, bob_since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [leave_id])
+        room = self._sync(self.announcer_tok, announcer_since)["rooms"]["join"][
+            self.room_id
+        ]
+        self.assertEqual(self._timeline_ids(room), [leave_id])
+
+    def test_state_change_before_first_announcement(self) -> None:
+        """Before an announcement room's first announcement, a state change such
+        as a sender leaving does not deliver the room on incremental sync.
+        """
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+
+        self._assert_not_delivered(self._sync(self.bob_tok, since))
+
+    def test_initial_sync_without_announcement(self) -> None:
+        """An announcement room without any announcement is left out of an
+        initial sync.
+        """
+        self._assert_not_delivered(self._sync(self.bob_tok))
+
+    def test_filtered_out_room(self) -> None:
+        """An announcement room excluded by the sync filter is not delivered."""
+        self._announce("hello")
+        filter = {"room": {"not_rooms": [self.room_id]}}
+
+        since = self._sync(self.bob_tok, filter=filter)["next_batch"]
+        self._announce("again")
+
+        self._assert_not_delivered(self._sync(self.bob_tok, filter=filter))
+        self._assert_not_delivered(self._sync(self.bob_tok, since, filter=filter))
+        self._assert_not_delivered(
+            self._sync(self.bob_tok, since, full_state=True, filter=filter)
+        )
+
+    def test_excluded_user(self) -> None:
+        """A user in `excluded_user_ids` is not delivered the room, while other
+        non-members still are.
+        """
+        carol = self.register_user("carol", "pass")
+        carol_tok = self.login("carol", "pass")
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], excluded_user_ids=[self.bob])
+        ]
+        self._announce("hello")
+
+        since = self._sync(self.bob_tok)["next_batch"]
+        self._announce("again")
+
+        self._assert_not_delivered(self._sync(self.bob_tok))
+        self._assert_not_delivered(self._sync(self.bob_tok, since))
+        self._assert_not_delivered(self._sync(self.bob_tok, since, full_state=True))
+        self._assert_delivered(self._sync(carol_tok), carol)
+
+    def test_excluded_former_member(self) -> None:
+        """A member removed from the room by the config and excluded from it
+        gets their real leave instead of the synthetic join.
+        """
+        since = self._sync(self.former_tok)["next_batch"]
+
+        self.config.rooms = [
+            attr.evolve(
+                self.config.rooms[0],
+                allowed_user_ids=[self.announcer],
+                excluded_user_ids=[self.former],
+            )
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+        self._announce("hello")
+
+        for response in (
+            self._sync(self.former_tok, since),
+            self._sync(self.former_tok),
+        ):
+            self.assertNotIn(self.room_id, response["rooms"].get("join", {}))
+            self.assertIn(self.room_id, response["rooms"]["leave"])
+
+    def test_removed_member(self) -> None:
+        """A member removed from the room by the config switches straight to the
+        synthetic join and the room's current power levels, then gets later
+        announcements as a non-member, on initial sync too.
+        """
+        since = self._sync(self.former_tok)["next_batch"]
+
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], allowed_user_ids=[self.announcer])
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+        response = self._sync(self.former_tok, since)
+        room = self._assert_delivered(response, self.former)
+        self.assertNotIn(EventTypes.Message, self._timeline_types(room))
+        power_levels = [
+            event
+            for event in room["state"]["events"] + room["timeline"]["events"]
+            if event["type"] == EventTypes.PowerLevels
+        ][-1]
+        self.assertNotIn(self.former, power_levels["content"]["users"])
+
+        event_id = self._announce("hello")
+        room = self._assert_delivered(
+            self._sync(self.former_tok, response["next_batch"]), self.former
+        )
+        self.assertEqual(self._timeline_ids(room), [event_id])
+
+        room = self._assert_delivered(self._sync(self.former_tok), self.former)
+        self.assertEqual(self._timeline_ids(room)[-1], event_id)
+
+    def test_removed_member_syncing_after_announcements(self) -> None:
+        """A member removed from the room by the config while offline gets the
+        announcements sent since their removal on their next incremental sync.
+        """
+        since = self._sync(self.former_tok)["next_batch"]
+
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], allowed_user_ids=[self.announcer])
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+        event_ids = [self._announce(f"message {i}") for i in range(2)]
+
+        response = self._sync(self.former_tok, since)
+        self.assertNotIn(self.room_id, response["rooms"].get("leave", {}))
+        room = self._assert_delivered(response, self.former)
+        self.assertEqual(self._timeline_ids(room)[-2:], event_ids)
+
+    def test_member_leaving(self) -> None:
+        """A member who leaves the room on their own switches straight to the
+        synthetic join, even when no announcement is sent.
+        """
+        since = self._sync(self.former_tok)["next_batch"]
+
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+
+        room = self._assert_delivered(self._sync(self.former_tok, since), self.former)
+        self.assertEqual(self._timeline_ids(room), [])
+
+    def test_initial_sync_after_leaving(self) -> None:
+        """A former member who left on their own gets a single, synthetic join
+        on initial sync, even when their real leave is among the recent events.
+        """
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+        self._announce("hello")
+
+        self._assert_delivered(self._sync(self.former_tok), self.former)
+
+    def test_no_device_list_changes(self) -> None:
+        """Delivering an announcement room does not report its members as users
+        whose device lists changed.
+        """
+        since = self._sync(self.bob_tok)["next_batch"]
+        self._announce("hello")
+
+        response = self._sync(self.bob_tok, since)
+        self._assert_delivered(response, self.bob)
+        self.assertEqual(response.get("device_lists", {}).get("changed", []), [])
+
+    def test_marked_unread_without_new_events(self) -> None:
+        """A non-member who marks an announcement room as unread gets
+        `m.marked_unread` on their next incremental sync, even when nothing
+        else happened in the room.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/account_data/m.marked_unread",
+            {"unread": True},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [
+                {"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}},
+                {"type": "m.marked_unread", "content": {"unread": True}},
+            ],
+        )
+
+    def test_marked_unread_with_new_announcement(self) -> None:
+        """A non-member who marks an announcement room as unread, followed by a
+        new announcement, gets both the announcement and `m.marked_unread` in
+        the room on their next incremental sync.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/account_data/m.marked_unread",
+            {"unread": True},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        event_id = self._announce("again")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [
+                {"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}},
+                {"type": "m.marked_unread", "content": {"unread": True}},
+            ],
+        )
+
+    def test_tag_without_new_events(self) -> None:
+        """A non-member who tags an announcement room gets `m.tag` on their next
+        incremental sync, even when nothing else happened in the room.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [
+                {
+                    "type": "m.tag",
+                    "content": {
+                        "tags": {"m.favourite": {"order": 0.5}, "m.server_notice": {}}
+                    },
+                }
+            ],
+        )
+
+    def test_tag_removed_without_new_events(self) -> None:
+        """A non-member who removes their last tag from an announcement room gets
+        `m.tag` with only `m.server_notice` on their next incremental sync, even
+        when nothing else happened in the room.
+        """
+        self._announce("hello")
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+
+    def test_server_notice_tag_on_initial_sync(self) -> None:
+        """A non-member gets the `m.server_notice` tag for an announcement room on
+        an initial sync, without it being stored for them.
+        """
+        self._announce("hello")
+
+        room = self._assert_delivered(self._sync(self.bob_tok), self.bob)
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+        self.assertEqual(
+            self.get_success(self.store.get_tags_for_room(self.bob, self.room_id)), {}
+        )
+
+    def test_server_notice_tag_with_new_announcement(self) -> None:
+        """A non-member gets the `m.server_notice` tag alongside a new announcement
+        on an incremental sync.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+        event_id = self._announce("again")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+
+    def test_server_notice_tag_respects_filter(self) -> None:
+        """A non-member whose filter hides `m.tag` doesn't get the `m.server_notice`
+        tag, but still gets the announcement.
+        """
+        event_id = self._announce("hello")
+
+        room = self._assert_delivered(
+            self._sync(
+                self.bob_tok,
+                filter={"room": {"account_data": {"not_types": ["m.tag"]}}},
+            ),
+            self.bob,
+        )
+        self.assertIn(event_id, self._timeline_ids(room))
+        self.assertEqual(room["account_data"]["events"], [])
+
+    def test_server_notice_tag_not_sent_to_room_members(self) -> None:
+        """A sender who is really joined to an announcement room doesn't get the
+        `m.server_notice` tag.
+        """
+        self._announce("hello")
+
+        response = self._sync(self.announcer_tok)
+        room = response["rooms"]["join"][self.room_id]
+        self.assertEqual(room["account_data"]["events"], [])
+
+    def test_server_notice_tag_cannot_be_removed(self) -> None:
+        """A user can't remove the `m.server_notice` tag from an announcement room,
+        and still gets it on their next sync.
+        """
+        self._announce("hello")
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.server_notice",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+        room = self._assert_delivered(self._sync(self.bob_tok), self.bob)
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+
+    def test_excluded_user_cannot_tag(self) -> None:
+        """A user in `excluded_user_ids` has no membership in the announcement
+        room to tag it with, and may remove `m.server_notice` from it.
+        """
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], excluded_user_ids=[self.bob])
+        ]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.server_notice",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+    def test_server_notice_tag_removable_from_other_rooms(self) -> None:
+        """A user can still remove the `m.server_notice` tag from a room that isn't
+        an announcement room.
+        """
+        other_room_id = self.helper.create_room_as(self.bob, tok=self.bob_tok)
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{other_room_id}/tags/m.server_notice",
+            {},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{other_room_id}/tags/m.server_notice",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+    def test_state_after(self) -> None:
+        """With `use_state_after`, a non-member gets the synthetic join in
+        `state_after`, including a former member whose real leave is in the
+        window.
+        """
+        bob_since = self._sync(self.bob_tok, use_state_after=True)["next_batch"]
+        former_since = self._sync(self.former_tok, use_state_after=True)["next_batch"]
+
+        self.helper.leave(self.room_id, self.former, tok=self.former_tok)
+        self._announce("hello")
+
+        for tok, user_id, since in (
+            (self.bob_tok, self.bob, bob_since),
+            (self.former_tok, self.former, former_since),
+        ):
+            room = self._assert_delivered(
+                self._sync(tok, since, use_state_after=True), user_id
+            )
+            self.assertNotIn("state", room)
+
+    def test_lazy_loaded_members(self) -> None:
+        """The synthetic join is sent when members are lazy-loaded."""
+        self._announce("hello")
+
+        self._assert_delivered(
+            self._sync(
+                self.bob_tok, filter={"room": {"state": {"lazy_load_members": True}}}
+            ),
+            self.bob,
+        )
+
+    def test_event_fields(self) -> None:
+        """With an `event_fields` filter, the synthetic join is trimmed to the
+        requested fields like every other event.
+        """
+        self._announce("hello")
+        event_fields = ["type", "content", "state_key"]
+
+        response = self._sync(self.bob_tok, filter={"event_fields": event_fields})
+        room = response["rooms"]["join"][self.room_id]
+
+        events = room["state"]["events"] + room["timeline"]["events"]
+        own_memberships = [
+            event
+            for event in events
+            if event["type"] == EventTypes.Member and event["state_key"] == self.bob
+        ]
+        self.assertEqual(
+            own_memberships,
+            [
+                {
+                    "type": EventTypes.Member,
+                    "content": {"membership": Membership.JOIN},
+                    "state_key": self.bob,
+                }
+            ],
+        )
+        for event in events:
+            self.assertLessEqual(set(event), set(event_fields), event)
+
+    def test_federation_event_format(self) -> None:
+        """With the `federation` event format, the synthetic join carries the
+        room ID like every other event.
+        """
+        self._announce("hello")
+
+        response = self._sync(self.bob_tok, filter={"event_format": "federation"})
+        room = response["rooms"]["join"][self.room_id]
+
+        events = room["state"]["events"] + room["timeline"]["events"]
+        own_memberships = [
+            event
+            for event in events
+            if event["type"] == EventTypes.Member and event["state_key"] == self.bob
+        ]
+        self.assertEqual(len(own_memberships), 1, own_memberships)
+        for event in events:
+            self.assertEqual(event.get("room_id"), self.room_id, event)

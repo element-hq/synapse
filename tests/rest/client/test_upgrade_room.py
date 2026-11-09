@@ -134,7 +134,9 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
             "m.room.power_levels",
             tok=self.creator_token,
         )
-        power_levels["users"][self.other] = 100
+        # In the Matrix Spec v1.16, m.room.tombstone events are MUST explicitly be
+        # higher than `state_default` per MSC4289.
+        power_levels["users"][self.other] = 150
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
@@ -160,7 +162,9 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
             "m.room.power_levels",
             tok=self.creator_token,
         )
-        power_levels["users_default"] = 100
+        # In the Matrix Spec v1.16, m.room.tombstone events are MUST explicitly be
+        # higher than `state_default` per MSC4289.
+        power_levels["users_default"] = 150
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
@@ -220,8 +224,8 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
             tok=self.creator_token,
         )
 
-        # Set creator's power level to the string "100" instead of the integer `100`.
-        power_levels["users"][self.creator] = "100"
+        # Set other's power level to the string "100" instead of the integer `100`.
+        power_levels["users"][self.other] = "100"
 
         # Synapse refuses to accept new stringy power level events. Bypass this by
         # neutering the validation.
@@ -252,7 +256,7 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
         )
 
         # We should now have an integer power level.
-        self.assertEqual(new_power_levels["users"][self.creator], 100, new_power_levels)
+        self.assertEqual(new_power_levels["users"][self.other], 100, new_power_levels)
 
     def test_events_field_missing(self) -> None:
         """Regression test for https://github.com/matrix-org/synapse/issues/16715."""
@@ -336,6 +340,36 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
         self.assertIn((EventTypes.SpaceChild, self.room_id), state_ids)
         # The child that was removed should not be copied over.
         self.assertNotIn((EventTypes.SpaceChild, old_room_id), state_ids)
+
+    def test_rtc_slots(self) -> None:
+        """Test that MatrixRTC slots are copied over during a room upgrade (MSC4143)."""
+
+        # Prepare the room with slot events.
+        slot_content = {"application": {"type": "m.call"}}
+        for state_key in ("m.call#room", "m.call#other"):
+            self.helper.send_state(
+                self.room_id,
+                event_type=EventTypes.RtcSlot,
+                body=slot_content,
+                tok=self.creator_token,
+                state_key=state_key,
+            )
+
+        # Upgrade the room.
+        channel = self._upgrade_room()
+        self.assertEqual(200, channel.code, channel.result)
+        new_room_id = channel.json_body["replacement_room"]
+        state_ids = self.get_success(
+            self.store.get_partial_current_state_ids(new_room_id)
+        )
+
+        # Both slots should have been copied over with their content intact.
+        for state_key in ("m.call#room", "m.call#other"):
+            self.assertIn((EventTypes.RtcSlot, state_key), state_ids)
+            event = self.get_success(
+                self.store.get_event(state_ids[(EventTypes.RtcSlot, state_key)])
+            )
+            self.assertEqual(event.content, slot_content)
 
     def test_custom_room_type(self) -> None:
         """Test upgrading a room that has a custom room type set."""

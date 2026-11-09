@@ -21,6 +21,14 @@ class EventInternalMetadata:
 
     stream_ordering: int | None
     """the stream ordering of this event. None, until it has been persisted."""
+    received_ts: int | None
+    """
+    The timestamp of receipt on this server (in milliseconds since the epoch) of this event.
+
+    None in two cases:
+    - before the event has been persisted
+    - events before Synapse v0.16.0 do not have this available.
+    """
     instance_name: str | None
     """the instance name of the server that persisted this event. None, until it has been persisted."""
     redacted_by: str | None
@@ -305,9 +313,26 @@ class Event:
         not affect the original."""
 
     def sticky_duration(self) -> Duration | None:
-        """If this event has the ``msc4354_sticky`` top-level field, returns a
-        ``SynapseDuration`` representing the sticky duration. Otherwise returns
-        ``None``."""
+        """
+        If this event has the `msc4354_sticky` top-level field and is eligible
+        to be sticky, returns a `SynapseDuration` representing the sticky duration.
+        Otherwise returns `None`.
+
+        The duration is capped at 1 hour according to MSC4354.
+        Spammy events (according to spam checkers and policy servers) are not eligible to be sticky
+        so we return `None` for those.
+
+        See `locally_sticky_until_ts` to get the effective stickiness expiry timestamp.
+        """
+
+    def locally_sticky_until_ts(self) -> int | None:
+        """
+        If this event has the `msc4354_sticky` top-level field and is eligible
+        to be sticky (isn't spammy), returns a timestamp (in milliseconds since the epoch) of
+        the expiry of the event's stickiness, as seen locally on this homeserver.
+
+        It is the caller's responsibility to check this time is not in the past.
+        """
 
 class ThreadAggregation:
     """The bundled thread summary for an event."""
@@ -411,6 +436,20 @@ class SerializeEventConfig:
         """Whether MSC4354 (sticky events) is enabled. When ``True``, the
         remaining stickiness TTL is computed and added to ``unsigned``."""
 
+class SerializeEventFilter:
+    """
+    Filters on events applied at serialisation time.
+    """
+
+    def __init__(self, *, sticky_only: bool = False) -> None: ...
+    @property
+    def sticky_only(self) -> bool:
+        """
+        Only serialise events that are sticky and haven't expired.
+        When set, all serialised events are guaranteed to have a `unsigned.sticky_duration_remaining_ms` field
+        (and the field will have a positive value).
+        """
+
 def serialize_events(
     events: list[tuple[Event, str | None]],
     time_now_ms: int,
@@ -419,7 +458,8 @@ def serialize_events(
     bundle_aggregations: Mapping[str, BundledAggregations] | None = None,
     redaction_map: Mapping[str, Event] | None = None,
     unsigned_additions: Mapping[str, JsonDict] | None = None,
-) -> list[JsonDict]:
+    filter: SerializeEventFilter | None = None,
+) -> list[JsonDict | None]:
     """Synchronously serialize a batch of events for clients using pre-fetched data.
 
     All DB/IO must already have been done by the caller; the keyword maps below
@@ -440,6 +480,24 @@ def serialize_events(
 
     Returns:
         The serialized events, in the same order as `events`.
+    """
+
+def serialize_synthetic_event(
+    event: JsonDict, config: SerializeEventConfig
+) -> JsonDict:
+    """Serialize an event that only exists as JSON, such as a synthetic event
+    that is never persisted.
+
+    Only the event format and the field allowlist from `config` apply: there is
+    no stored event to take the age, transaction ID, redaction or bundled
+    aggregations from.
+
+    Args:
+        event: The event's JSON, in federation format.
+        config: The serialization config.
+
+    Returns:
+        The serialized event.
     """
 
 # The standalone `format_event_*` transforms below are a backwards

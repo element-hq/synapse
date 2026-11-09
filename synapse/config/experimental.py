@@ -28,6 +28,7 @@ import attr
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
 from synapse.config._base import Config, read_file
+from synapse.config.ratelimiting import RatelimitSettings
 from synapse.types import JsonDict, StrSequence
 
 
@@ -63,6 +64,9 @@ class ExperimentalConfig(Config):
         self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
     ) -> None:
         experimental = config.get("experimental_features") or {}
+
+        # Server announcement rooms (incomplete; not part of the public config).
+        # Tracking issue: https://github.com/element-hq/synapse/issues/20240
 
         # MSC1763 (retention policy configuration endpoint)
         self.msc1763_enabled: bool = experimental.get("msc1763_enabled", False)
@@ -191,6 +195,9 @@ class ExperimentalConfig(Config):
             "msc4069_profile_inhibit_propagation", False
         )
 
+        # MSC4075: MatrixRTC invites and notifications
+        self.msc4075_enabled: bool = experimental.get("msc4075_enabled", False)
+
         # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version:
         # See: https://github.com/element-hq/synapse/issues/19434
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
@@ -241,23 +248,81 @@ class ExperimentalConfig(Config):
         ).get("enabled", False):
             raise ConfigError(
                 "MSC4388 requires matrix_authentication_service to be enabled",
-                ("experimental", "msc4388_enabled"),
+                ("experimental", "msc4388_mode"),
             )
+
+        # How long a rendezvous session lasts before it expires. MSC4388
+        # recommends at least 2 minutes for usability, to allow the user time to
+        # complete the sign in including any extra steps such as MFA, and at
+        # most 5 minutes for security.
+        self.msc4388_session_ttl_ms = self.parse_duration(
+            experimental.get("msc4388_session_ttl", "2m")
+        )
+        if not 2 * 60 * 1000 <= self.msc4388_session_ttl_ms <= 5 * 60 * 1000:
+            raise ConfigError(
+                "msc4388_session_ttl must be between 2 and 5 minutes",
+                ("experimental", "msc4388_session_ttl"),
+            )
+
+        # The maximum number of unauthenticated rendezvous sessions that can be
+        # live at once. New unauthenticated sessions are refused while at this
+        # limit, rather than evicting live ones, so that sign ins in progress
+        # cannot be disrupted. Each session uses up to around 32KiB, for its
+        # payload and the transaction IDs recorded against it.
+        self.msc4388_max_unauthenticated_sessions: int = experimental.get(
+            "msc4388_max_unauthenticated_sessions", 1000
+        )
+        if (
+            not isinstance(self.msc4388_max_unauthenticated_sessions, int)
+            or self.msc4388_max_unauthenticated_sessions < 1
+        ):
+            raise ConfigError(
+                "msc4388_max_unauthenticated_sessions must be a positive integer",
+                ("experimental", "msc4388_max_unauthenticated_sessions"),
+            )
+
+        # Most MSC4388 requests are ratelimited by client IP address, as they
+        # are unauthenticated. Creating a session is ratelimited by requester if
+        # authenticated, and by client IP address if not.
+        #
+        # Creating a session is limited more strictly than other requests, so
+        # that a single unauthenticated client cannot use up the capacity for
+        # live unauthenticated sessions. This is the only limit on how many
+        # sessions an authenticated user can hold. With these defaults, a client
+        # or user can hold at most around 20 live sessions at once with the
+        # default session TTL of 2 minutes, or 40 with the maximum of 5 minutes.
+        self.msc4388_rc_create = RatelimitSettings.parse(
+            experimental,
+            "msc4388_rc_create",
+            defaults={"per_second": 0.1, "burst_count": 10},
+        )
+        # Every other rendezvous request: discovery, and receiving, sending or
+        # cancelling on a session. This needs to allow for both devices polling
+        # for new payloads, possibly from behind the same IP address.
+        self.msc4388_rc_requests = RatelimitSettings.parse(
+            experimental,
+            "msc4388_rc_requests",
+            defaults={"per_second": 5, "burst_count": 20},
+        )
 
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
-        # MSC4143: Matrix RTC Transport using Livekit Backend
+        # MSC4143: MatrixRTC – Real-time communication over Matrix
+        #
+        # Note that MSC4143 covers only the core of MatrixRTC. For servers, this
+        # includes the /rtc/transports endpoint and retaining m.rtc.slot events
+        # on room upgrades.
+        #
+        # Tracked in: https://github.com/element-hq/synapse/issues/20447
         self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
 
         # MSC4169: Backwards-compatible redaction sending using `/send`
         self.msc4169_enabled: bool = experimental.get("msc4169_enabled", False)
 
         # MSC4210: Remove legacy mentions
-        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
-
-        # MSC4222: Adding `state_after` to sync v2
-        self.msc4222_enabled: bool = experimental.get("msc4222_enabled", False)
+        # TODO: Remove the flag and the legacy rules after 2026-12-01.
+        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", True)
 
         # MSC4076: Add `disable_badge_count`` to pusher configuration
         self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)
@@ -312,3 +377,6 @@ class ExperimentalConfig(Config):
 
         # MSC4491: Invite reasons in room creation
         self.msc4491_enabled: bool = experimental.get("msc4491_enabled", False)
+
+        # MSC4512: Delegating parts of the C-S and S-S API to application services
+        self.msc4512_enabled: bool = experimental.get("msc4512_enabled", False)

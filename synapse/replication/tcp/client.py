@@ -50,6 +50,8 @@ from synapse.replication.tcp.streams._base import (
 )
 from synapse.replication.tcp.streams.events import (
     EventsStream,
+    EventsStreamAllStateRow,
+    EventsStreamCurrentStateRow,
     EventsStreamEventRow,
     EventsStreamRow,
 )
@@ -160,8 +162,19 @@ class ReplicationDataHandler:
             )
         elif stream_name == ReceiptsStream.NAME:
             new_token = self.store.get_max_receipt_stream_id()
+            # See `ReceiptsHandler._handle_new_receipts`.
+            announcement_room_ids = await self.store.get_server_announcement_room_ids()
             self.notifier.on_new_event(
-                StreamKeyType.RECEIPT, new_token, rooms=[row.room_id for row in rows]
+                StreamKeyType.RECEIPT,
+                new_token,
+                users={
+                    row.user_id for row in rows if row.room_id in announcement_room_ids
+                },
+                rooms={
+                    row.room_id
+                    for row in rows
+                    if row.room_id not in announcement_room_ids
+                },
             )
             await self._pusher_pool.on_new_receipts({row.user_id for row in rows})
         elif stream_name == ToDeviceStream.NAME:
@@ -191,6 +204,20 @@ class ReplicationDataHandler:
             # We shouldn't get multiple rows per token for events stream, so
             # we don't need to optimise this for multiple rows.
             for row in rows:
+                # If this is a server ACL event, clear the cache in the storage controller.
+                if row.type in (
+                    EventsStreamEventRow.TypeId,
+                    EventsStreamCurrentStateRow.TypeId,
+                ):
+                    if row.data.type == EventTypes.ServerACL:
+                        self._state_storage_controller.get_server_acl_for_room.invalidate(
+                            (row.data.room_id,)
+                        )
+                elif row.type == EventsStreamAllStateRow.TypeId:
+                    self._state_storage_controller.get_server_acl_for_room.invalidate(
+                        (row.data.room_id,)
+                    )
+
                 if row.type != EventsStreamEventRow.TypeId:
                     # The row's data is an `EventsStreamCurrentStateRow`.
                     # When we recompute the current state of a room based on forward
@@ -238,11 +265,6 @@ class ReplicationDataHandler:
                         row.data.event_id, row.data.room_id
                     )
 
-                # If this is a server ACL event, clear the cache in the storage controller.
-                if row.data.type == EventTypes.ServerACL:
-                    self._state_storage_controller.get_server_acl_for_room.invalidate(
-                        (row.data.room_id,)
-                    )
         elif stream_name == UnPartialStatedRoomStream.NAME:
             for row in rows:
                 assert isinstance(row, UnPartialStatedRoomStreamRow)
@@ -286,7 +308,7 @@ class ReplicationDataHandler:
         elif stream_name == StickyEventsStream.NAME:
             self.notifier.on_new_event(
                 StreamKeyType.STICKY_EVENTS,
-                token,
+                self.store.get_sticky_events_stream_token(),
                 rooms=[row.room_id for row in rows],
             )
 

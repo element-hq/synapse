@@ -211,6 +211,24 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
             msg=channel.result["body"],
         )
 
+    @override_config({"rc_reports": {"per_second": 0.5, "burst_count": 1}})
+    def test_ratelimit(self) -> None:
+        """
+        Tests that the room report endpoint is rate limited.
+        """
+        data = {"reason": "this makes me sad"}
+
+        self._assert_status(200, data)
+        self._assert_status(429, data)
+
+        # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
+        self.get_success(
+            self.hs.get_datastores().main.set_ratelimit_for_user(self.other_user, 0, 0)
+        )
+
+        # Test that the request isn't ratelimited anymore.
+        self._assert_status(200, data)
+
     @override_config({"experimental_features": {"msc4277_enabled": True}})
     def test_room_existence_hidden(self) -> None:
         """

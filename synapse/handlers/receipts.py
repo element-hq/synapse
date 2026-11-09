@@ -19,9 +19,9 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Iterable, Sequence
+from typing import TYPE_CHECKING, AbstractSet, Callable, Iterable, Sequence
 
-from synapse.api.constants import EduTypes, ReceiptTypes
+from synapse.api.constants import Direction, EduTypes, ReceiptTypes
 from synapse.appservice import ApplicationService
 from synapse.streams import EventSource
 from synapse.types import (
@@ -32,6 +32,7 @@ from synapse.types import (
     StreamKeyType,
     UserID,
     get_domain_from_id,
+    is_compliant_user_id,
 )
 
 if TYPE_CHECKING:
@@ -116,6 +117,14 @@ class ReceiptsHandler:
                         )
                         continue
 
+                    if not is_compliant_user_id(user_id):
+                        logger.info(
+                            "Received receipt for non-compliant user ID %r from server %s, ignoring",
+                            user_id,
+                            origin,
+                        )
+                        continue
+
                     # Check if these receipts apply to a thread.
                     data = user_values.get("data", {})
                     thread_id = data.get("thread_id")
@@ -162,10 +171,22 @@ class ReceiptsHandler:
 
         max_batch_id = self.store.get_max_receipt_stream_id()
 
-        affected_room_ids = list({r.room_id for r in receipts_persisted})
-
+        # Receipts in announcement rooms are only ever shown to their sender,
+        # so only the sender's syncs need waking, not every member's.
+        announcement_room_ids = await self.store.get_server_announcement_room_ids()
         self.notifier.on_new_event(
-            StreamKeyType.RECEIPT, max_batch_id, rooms=affected_room_ids
+            StreamKeyType.RECEIPT,
+            max_batch_id,
+            users={
+                r.user_id
+                for r in receipts_persisted
+                if r.room_id in announcement_room_ids
+            },
+            rooms={
+                r.room_id
+                for r in receipts_persisted
+                if r.room_id not in announcement_room_ids
+            },
         )
         # Note that the min here shouldn't be relied upon to be accurate.
         await self.hs.get_pusherpool().on_new_receipts(
@@ -214,12 +235,35 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
         self.config = hs.config
 
     @staticmethod
+    def read_receipt_should_be_shared(
+        receipt_type: str, room_id: str, announcement_room_ids: AbstractSet[str]
+    ) -> bool:
+        """Whether a receipt may be sent to users other than the one who sent
+        it.
+
+        Private read receipts are never shared, and neither are any receipts in
+        server announcement rooms, which most users see without being members
+        of them.
+
+        Args:
+            receipt_type: The type of the receipt.
+            room_id: The room the receipt is in.
+            announcement_room_ids: The server announcement rooms.
+        """
+        return (
+            receipt_type != ReceiptTypes.READ_PRIVATE
+            and room_id not in announcement_room_ids
+        )
+
+    @staticmethod
     def filter_out_private_receipts(
-        rooms: Sequence[JsonMapping], user_id: str
+        rooms: Sequence[JsonMapping],
+        user_id: str,
+        announcement_room_ids: AbstractSet[str],
     ) -> list[JsonMapping]:
         """
         Filters a list of serialized receipts (as returned by /sync and /initialSync)
-        and removes private read receipts of other users.
+        and removes the receipts of other users that should not be shared.
 
         This operates on the return value of get_linearized_receipts_for_rooms(),
         which is wrapped in a cache. Care must be taken to ensure that the input
@@ -228,6 +272,38 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
         Args:
             rooms: A list of mappings, each mapping has a `content` field, which
                 is a map of event ID -> receipt type -> user ID -> receipt information.
+            user_id: The user whose receipts should be kept.
+            announcement_room_ids: The server announcement rooms.
+
+        Returns:
+            The same as rooms, but filtered.
+        """
+        return ReceiptEventSource._filter_private_receipts(
+            rooms,
+            lambda receipt_user_id: receipt_user_id == user_id,
+            announcement_room_ids,
+        )
+
+    @staticmethod
+    def _filter_private_receipts(
+        rooms: Sequence[JsonMapping],
+        is_visible: Callable[[str], bool],
+        announcement_room_ids: AbstractSet[str],
+    ) -> list[JsonMapping]:
+        """
+        Filters a list of serialized receipts and removes the receipts that
+        should not be shared of users for which `is_visible` returns False.
+
+        This may operate on the return value of cached functions. Care must be
+        taken to ensure that the input values are not modified.
+
+        Args:
+            rooms: A list of mappings, each mapping has a `room_id` and a
+                `content` field, which is a map of event ID -> receipt type ->
+                user ID -> receipt information.
+            is_visible: Called with the user ID of each receipt that should not
+                be shared; returns whether that user's receipt may be included.
+            announcement_room_ids: The server announcement rooms.
 
         Returns:
             The same as rooms, but filtered.
@@ -237,39 +313,43 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
 
         # Iterate through each room's receipt content.
         for room in rooms:
-            # The receipt content with other user's private read receipts removed.
+            room_id = room["room_id"]
+
+            # The receipt content with hidden users' unshared receipts removed.
             content = {}
 
             # Iterate over each event ID / receipts for that event.
             for event_id, orig_event_content in room.get("content", {}).items():
                 event_content = orig_event_content
-                # If there are private read receipts, additional logic is necessary.
-                if ReceiptTypes.READ_PRIVATE in event_content:
-                    # Make a copy without private read receipts to avoid leaking
-                    # other user's private read receipts..
-                    event_content = {
-                        receipt_type: receipt_value
-                        for receipt_type, receipt_value in event_content.items()
-                        if receipt_type != ReceiptTypes.READ_PRIVATE
-                    }
+                # If there are unshared receipts, additional logic is necessary.
+                if not all(
+                    ReceiptEventSource.read_receipt_should_be_shared(
+                        receipt_type, room_id, announcement_room_ids
+                    )
+                    for receipt_type in orig_event_content
+                ):
+                    # Make a copy that only keeps the visible users' unshared
+                    # receipts, to avoid leaking hidden users' unshared receipts.
+                    event_content = {}
+                    for receipt_type, receipt_value in orig_event_content.items():
+                        if not ReceiptEventSource.read_receipt_should_be_shared(
+                            receipt_type, room_id, announcement_room_ids
+                        ):
+                            receipt_value = {
+                                receipt_user_id: receipt_user_value
+                                for receipt_user_id, receipt_user_value in receipt_value.items()
+                                if is_visible(receipt_user_id)
+                            }
+                        if receipt_value:
+                            event_content[receipt_type] = receipt_value
 
-                    # Copy the current user's private read receipt from the
-                    # original content, if it exists.
-                    user_private_read_receipt = orig_event_content[
-                        ReceiptTypes.READ_PRIVATE
-                    ].get(user_id, None)
-                    if user_private_read_receipt:
-                        event_content[ReceiptTypes.READ_PRIVATE] = {
-                            user_id: user_private_read_receipt
-                        }
-
-                # Include the event if there is at least one non-private read
-                # receipt or the current user has a private read receipt.
+                # Include the event if there is at least one shared receipt or a
+                # visible user has an unshared receipt.
                 if event_content:
                     content[event_id] = event_content
 
-            # Include the event if there is at least one non-private read receipt
-            # or the current user has a private read receipt.
+            # Include the event if there is at least one shared receipt or a
+            # visible user has an unshared receipt.
             if content:
                 # Build a new event to avoid mutating the cache.
                 new_room = {k: v for k, v in room.items() if k != "content"}
@@ -303,7 +383,9 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
         )
 
         events = ReceiptEventSource.filter_out_private_receipts(
-            events, user.to_string()
+            events,
+            user.to_string(),
+            await self.store.get_server_announcement_room_ids(),
         )
 
         return events, to_key
@@ -326,15 +408,35 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
             A two-tuple containing the following:
                 * A list of json dictionaries derived from read receipts that the
                   appservice may be interested in.
-                * The current read receipt stream token.
+                * The read receipt stream token up to which receipts were actually
+                  fetched. This is earlier than `to_key` if the fetch was
+                  truncated; callers must call this method again from the returned
+                  token to fetch the remaining receipts.
         """
         if from_key == to_key:
             return [], to_key
 
-        # Fetch all read receipts for all rooms, up to a limit of 100. This is ordered
-        # by most recent.
-        rooms_to_events = await self.store.get_linearized_receipts_for_all_rooms(
-            from_key=from_key, to_key=to_key
+        # A stored stream position of 1 means no read receipts have ever been
+        # delivered to this application service:
+        # `get_type_stream_id_for_appservice` returns 1 when there is no stored
+        # position, and actual receipts occupy stream IDs 2 and upwards.
+        is_first_receipt_delivery = from_key.stream <= 1
+
+        # Fetch read receipts for all rooms, in ascending stream order. The number
+        # of receipts fetched is capped, in which case `reached_token` tells us how
+        # far we actually got.
+        #
+        # On the first delivery, don't backfill the entire receipt history: just
+        # send the most recent receipts and fast-forward past everything older.
+        (
+            rooms_to_events,
+            reached_token,
+        ) = await self.store.get_linearized_receipts_for_all_rooms(
+            from_key=from_key,
+            to_key=to_key,
+            order=Direction.BACKWARDS
+            if is_first_receipt_delivery
+            else Direction.FORWARDS,
         )
 
         # Then filter down to rooms that the AS can read
@@ -345,7 +447,16 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
 
             events.append(event)
 
-        return events, to_key
+        # Private read receipts must only be sent for users matching one of the
+        # appservice's namespaces (or its sender user). See
+        # https://spec.matrix.org/v1.19/application-service-api/#pushing-ephemeral-data
+        events = self._filter_private_receipts(
+            events,
+            service.is_interested_in_user,
+            await self.store.get_server_announcement_room_ids(),
+        )
+
+        return events, reached_token
 
     def get_current_key(self) -> MultiWriterStreamToken:
         return self.store.get_max_receipt_stream_id()

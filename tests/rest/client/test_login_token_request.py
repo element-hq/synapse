@@ -19,12 +19,14 @@
 #
 #
 
+from http import HTTPStatus
+
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import login, login_token_request, versions
 from synapse.server import HomeServer
-from synapse.synapse_rust.http_client import HttpClient
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -47,19 +49,6 @@ class LoginTokenRequestServletTestCase(unittest.HomeserverTestCase):
         self.hs.config.registration.registrations_require_3pid = []
         self.hs.config.registration.auto_join_rooms = []
         self.hs.config.captcha.enable_registration_captcha = False
-
-        # XXX: We must create the Rust HTTP client before we call `reactor.run()` below.
-        # Twisted's `MemoryReactor` doesn't invoke `callWhenRunning` callbacks if it's
-        # already running and we rely on that to start the Tokio thread pool in Rust. In
-        # the future, this may not matter, see https://github.com/twisted/twisted/pull/12514
-        self._http_client = self.hs.get_proxied_http_client()
-        _ = HttpClient(
-            reactor=self.hs.get_reactor(),
-            user_agent=self._http_client.user_agent.decode("utf8"),
-        )
-
-        # This triggers the server startup hooks, which starts the Tokio thread pool
-        reactor.run()
 
         return self.hs
 
@@ -125,6 +114,31 @@ class LoginTokenRequestServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
         self.assertEqual(channel.json_body["user_id"], user_id)
+
+    @override_config({"login_via_existing_session": {"enabled": True}})
+    def test_uia_null_auth(self) -> None:
+        """A null `auth` value is treated as if it was omitted."""
+        self.register_user(self.user, self.password)
+        token = self.login(self.user, self.password)
+
+        channel = self.make_request(
+            "POST", GET_TOKEN_ENDPOINT, {"auth": None}, access_token=token
+        )
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, msg=channel.result)
+        self.assertIn("session", channel.json_body)
+        self.assertIn({"stages": ["m.login.password"]}, channel.json_body["flows"])
+
+    @override_config({"login_via_existing_session": {"enabled": True}})
+    def test_uia_non_object_auth(self) -> None:
+        """A non-object `auth` value is rejected with a 400."""
+        self.register_user(self.user, self.password)
+        token = self.login(self.user, self.password)
+
+        channel = self.make_request(
+            "POST", GET_TOKEN_ENDPOINT, {"auth": "m.login.password"}, access_token=token
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, msg=channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.BAD_JSON)
 
     @override_config(
         {"login_via_existing_session": {"enabled": True, "require_ui_auth": False}}

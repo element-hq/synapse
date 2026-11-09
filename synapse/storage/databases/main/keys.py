@@ -169,12 +169,13 @@ class KeyStore(CacheInvalidationWorkerStore):
 
             # `server_keys_json` can have multiple entries per server (one per
             # remote server we fetched from, if using perspectives). Order by
-            # `ts_added_ms` so the most recently fetched one always wins.
+            # `ts_valid_until_ms` so the entry valid for longest always wins,
+            # and by `ts_added_ms` so the most recently fetched one wins a tie.
             sql = f"""
                 SELECT server_name, key_id, key_json, ts_valid_until_ms
                 FROM server_keys_json WHERE 1=0
                 {where_clause}
-                ORDER BY ts_added_ms
+                ORDER BY ts_valid_until_ms, ts_added_ms
             """
 
             txn.execute(sql, tuple(itertools.chain.from_iterable(batch)))

@@ -23,7 +23,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
-from synapse.types.rest.client import EmailRequestTokenBody
+from synapse.types.rest.client import ClientSecretStr, EmailRequestTokenBody
 
 
 class ThreepidMediumEnumTestCase(stdlib_unittest.TestCase):
@@ -46,6 +46,44 @@ class ThreepidMediumEnumTestCase(stdlib_unittest.TestCase):
     def test_rejects_invalid_medium_type(self) -> None:
         with self.assertRaises(ValidationError):
             self.Model.model_validate({"medium": 123})
+
+
+class ClientSecretStrTestCase(stdlib_unittest.TestCase):
+    class Model(BaseModel):
+        client_secret: ClientSecretStr
+
+    def test_accepts_valid_client_secrets(self) -> None:
+        """Secrets consisting entirely of `[0-9a-zA-Z.=_-]` are accepted."""
+        for client_secret in (
+            "this.is-a_valid=secret",
+            "foobar",
+            "a",
+            "0123456789",
+            "a" * 255,
+        ):
+            with self.subTest(client_secret=client_secret):
+                model = self.Model.model_validate({"client_secret": client_secret})
+                self.assertEqual(model.client_secret, client_secret)
+
+    def test_rejects_client_secrets_with_invalid_characters(self) -> None:
+        for client_secret in (
+            "foo bar",
+            "secret!",
+            "café",
+            # Little bobby tables
+            "Robert'; DROP TABLE students;--",
+        ):
+            with self.subTest(client_secret=client_secret):
+                with self.assertRaises(ValidationError):
+                    self.Model.model_validate({"client_secret": client_secret})
+
+    def test_rejects_empty_client_secret(self) -> None:
+        with self.assertRaises(ValidationError):
+            self.Model.model_validate({"client_secret": ""})
+
+    def test_rejects_overlong_client_secret(self) -> None:
+        with self.assertRaises(ValidationError):
+            self.Model.model_validate({"client_secret": "a" * 256})
 
 
 class EmailRequestTokenBodyTestCase(stdlib_unittest.TestCase):

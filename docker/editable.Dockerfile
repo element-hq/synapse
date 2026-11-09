@@ -3,7 +3,7 @@
 #
 # Used by `complement.sh`. Not suitable for production use.
 
-ARG PYTHON_VERSION=3.10
+ARG PYTHON_VERSION=3.11
 
 ###
 ### Stage 0: generate requirements.txt
