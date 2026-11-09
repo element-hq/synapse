@@ -254,7 +254,11 @@ impl<S: CursorRowStream> CursorQueryState<S> {
         Ok(rows)
     }
 
-    /// Return the affected-row count, draining the stream first if needed.
+    /// Return the affected-row count.
+    ///
+    /// This closes an active cursor, discarding any remaining rows. This means
+    /// that the caller cannot call the `fetch_*` methods afterwards, and must
+    /// only call `rowcount` after fetching any needed rows.
     ///
     /// Unlike the `fetch_*` methods, this also works on a [`Self::Closed`]
     /// cursor. It returns the count captured when the stream ended.
