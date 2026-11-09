@@ -1186,6 +1186,50 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_omits_users_without_requested_fields(
+        self,
+    ) -> None:
+        """With MSC4536 enabled, users with none of the requested fields set must
+        be omitted from the response, rather than returned as an empty object.
+        """
+        self.get_success(
+            self.hs.get_datastores().main.set_profile_field(
+                user_id=UserID.from_string(self.owner),
+                field_name="org.example.pronouns",
+                new_value="they/them",
+            )
+        )
+
+        # Only the owner has the requested field set.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [self.owner, self.other],
+                "fields": ["org.example.pronouns"],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body,
+            {self.owner: {"org.example.pronouns": "they/them"}},
+        )
+
+        # Neither user has the requested field set.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [self.owner, self.other],
+                "fields": ["org.example.unset"],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {})
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_filters_out_remote_users(
         self,
     ) -> None:

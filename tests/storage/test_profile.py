@@ -234,8 +234,8 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         return self.u_frank, u_bob, u_carol
 
     def test_get_profile_data_for_users_all_fields(self) -> None:
-        """Without `field_names`, every set field is returned, users with an
-        empty profile map to `{}`, and users without a profile row are omitted.
+        """Without `field_names`, every set field is returned. Users with an
+        empty profile, and users without a profile row, are omitted.
         """
         u_frank, u_bob, u_carol = self._set_up_profiles_for_field_filtering()
 
@@ -261,14 +261,14 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                     "org.example.verified": True,
                 },
                 "@bob:test": {ProfileFields.DISPLAYNAME: "Bob"},
-                "@carol:test": {},
             },
         )
 
     def test_get_profile_data_for_users_filters_fields(self) -> None:
         """`field_names` restricts the result to the named fields, covering the
         column-backed fields (`displayname`, `avatar_url`), custom fields, and
-        names that aren't set for some or all users.
+        names that aren't set for some or all users. Users with none of the
+        requested fields set are omitted.
         """
         u_frank, u_bob, u_carol = self._set_up_profiles_for_field_filtering()
         user_ids = [u_frank.to_string(), u_bob.to_string(), u_carol.to_string()]
@@ -281,7 +281,6 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                 {
                     "@frank:test": {ProfileFields.DISPLAYNAME: "Frank"},
                     "@bob:test": {ProfileFields.DISPLAYNAME: "Bob"},
-                    "@carol:test": {},
                 },
             ),
             # Only custom fields, including a nested object and a boolean.
@@ -292,8 +291,6 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                         "m.status": {"emoji": "💬", "text": "In a meeting"},
                         "org.example.verified": True,
                     },
-                    "@bob:test": {},
-                    "@carol:test": {},
                 },
             ),
             # A mix of column-backed, custom and unknown fields.
@@ -304,14 +301,17 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                         ProfileFields.AVATAR_URL: "mxc://test/frank",
                         "org.example.pronouns": "he/him",
                     },
-                    "@bob:test": {},
-                    "@carol:test": {},
                 },
             ),
-            # No fields at all: every user with a profile still appears, empty.
+            # Only fields that no user has set: every user is omitted.
+            (
+                {"org.example.unset"},
+                {},
+            ),
+            # No fields at all: every user is omitted.
             (
                 set(),
-                {"@frank:test": {}, "@bob:test": {}, "@carol:test": {}},
+                {},
             ),
         ]
 

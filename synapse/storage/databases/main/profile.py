@@ -652,9 +652,8 @@ class ProfileWorkerStore(SQLBaseStore):
             Dictionary from user_id -> field name -> field value
             for the requested users.
 
-            Every requested user that has a profile row gets an entry, even when
-            none of the requested fields are set (it then maps to `{}`). Users
-            without a profile row are omitted.
+            Users without a profile row, or with no profile information matching
+            the requested fields, are omitted.
 
             For `displayname` and `avatar_url`, when they are stored as NULL
             in the database column, the dictionary entry will be omitted.
@@ -752,7 +751,8 @@ class ProfileWorkerStore(SQLBaseStore):
             if avatar_url is not None:
                 user_fields[ProfileFields.AVATAR_URL] = avatar_url
 
-            results[full_user_id] = user_fields
+            if user_fields:
+                results[full_user_id] = user_fields
 
         return results
 
