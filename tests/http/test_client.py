@@ -19,7 +19,6 @@
 #
 #
 
-import importlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from io import BytesIO
@@ -40,6 +39,7 @@ from synapse.http.client import (
     BlocklistingAgentWrapper,
     BlocklistingReactorWrapper,
     BodyExceededMaxSize,
+    MultipartParser,
     MultipartResponse,
     _DiscardBodyWithMaxSizeProtocol,
     _MultipartParserProtocol,
@@ -170,11 +170,10 @@ class ReadMultipartResponseTests(TestCase):
     @contextmanager
     def _parser_without_on_header_begin(self) -> Iterator[None]:
         """Make the parser skip `on_header_begin`, as python-multipart 0.0.9 does."""
-        real_parser = importlib.import_module("synapse.http.client").MultipartParser
 
-        def parser(boundary: Any, callbacks: dict[str, Any]) -> Any:
+        def parser(boundary: Any, callbacks: Any) -> Any:
             callbacks = {k: v for k, v in callbacks.items() if k != "on_header_begin"}
-            return real_parser(boundary, callbacks)
+            return MultipartParser(boundary, callbacks)
 
         with patch("synapse.http.client.MultipartParser", parser):
             yield
@@ -329,6 +328,31 @@ class ReadMultipartResponseTests(TestCase):
         self.assertEqual(expected_file, b"")
 
         self._assert_all_splits_match(data)
+
+    def test_rejects_first_part_without_content_type_first(self) -> None:
+        """The first header of the metadata part must be Content-Type."""
+        data = (
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Content-Disposition: inline\r\n"
+            b"Content-Type: application/json\r\n\r\n"
+            b"{}\r\n"
+            b"--6067d4698f8d40a0a794ea7d7379d53a--\r\n"
+        )
+        parsed, _ = self._parse_chunks([data])
+        self.assertIsInstance(parsed, str)
+        self.assertIn("Expected content-type", str(parsed))
+
+    def test_rejects_first_part_that_is_not_json(self) -> None:
+        """The metadata part must be application/json."""
+        data = (
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Content-Type: text/plain\r\n\r\n"
+            b"{}\r\n"
+            b"--6067d4698f8d40a0a794ea7d7379d53a--\r\n"
+        )
+        parsed, _ = self._parse_chunks([data])
+        self.assertIsInstance(parsed, str)
+        self.assertIn("Expected application/json", str(parsed))
 
 
 class ReadBodyWithMaxSizeTests(TestCase):

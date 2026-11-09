@@ -1090,6 +1090,7 @@ class _MultipartParserProtocol(protocol.Protocol):
         self.total_length = 0
         # Callbacks can fire once per network chunk, so buffer each value until it ends.
         self.part_count = 0
+        self.part_header_count = 0
         self.header_field = bytearray()
         self.header_value = bytearray()
         self.json_buffer = bytearray()
@@ -1103,6 +1104,7 @@ class _MultipartParserProtocol(protocol.Protocol):
 
             def on_part_begin() -> None:
                 self.part_count += 1
+                self.part_header_count = 0
 
             def on_header_field(data: bytes, start: int, end: int) -> None:
                 self.header_field += data[start:end]
@@ -1116,10 +1118,13 @@ class _MultipartParserProtocol(protocol.Protocol):
                 # python-multipart 0.0.9 never calls on_header_begin, so reset here.
                 self.header_field.clear()
                 self.header_value.clear()
+                self.part_header_count += 1
                 # the first part should be the application/json metadata
                 if self.part_count == 1:
-                    if field == b"content-type":
-                        assert value == b"application/json"
+                    if self.part_header_count == 1 and field != b"content-type":
+                        raise ValueError(f"Expected content-type, got {field!r}")
+                    if field == b"content-type" and value != b"application/json":
+                        raise ValueError(f"Expected application/json, got {value!r}")
                 elif field == b"location":
                     self.has_redirect = True
                     self.multipart_response.url = value
