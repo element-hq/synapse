@@ -710,6 +710,81 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
             response_body, {room_id: sticky_event_ids[1:2]}
         )
 
+    def test_sticky_event_limit_zero_tracks_unsent_events(self) -> None:
+        """
+        Tests that a sticky event sent to a room that is up to date (`LIVE`) is not
+        lost when the client syncs with a limit of 0 in the meantime.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Initial sync, which brings the room up to date (`LIVE`) for the extension
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 10}},
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+        # A sticky event arrives while the client isn't accepting any
+        sticky_event_id = self._send_sticky_event(room_id, user2_tok)
+
+        # Incremental sync with limit=0 returns nothing
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 0}},
+        }
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self._assert_sticky_events_response(response_body, None)
+
+        # The sticky event is delivered once the limit allows it
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 10}},
+        }
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+
+    def test_sticky_event_limit_zero_on_initial_sync(self) -> None:
+        """
+        Tests that an initial sync with a limit of 0 returns no sticky events, and
+        that the room's unexpired sticky events are all delivered once the limit
+        allows it (as the room has never been sent down for the extension).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room with a sticky event in it
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        sticky_event_id = self._send_sticky_event(room_id, user2_tok)
+
+        # Initial sync with limit=0 returns nothing
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 0}},
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, None)
+
+        # The sticky event is delivered once the limit allows it
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 10}},
+        }
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
+
     def test_deduplication_with_timeline(self) -> None:
         """
         Test that sticky events are not included in the sticky event extension of sliding sync
