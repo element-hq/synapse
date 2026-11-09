@@ -113,7 +113,7 @@ class SlidingSyncResult:
         lists: Sliding window API. A map of list key to list results.
         rooms: Room subscription API. A map of room ID to room results. This
             includes rooms without any updates, which shouldn't be returned to the
-            client (see `RoomResult.__bool__`).
+            client (filter them out with `RoomResult.__bool__`).
         extensions: Extensions API. A map of extension key to extension results.
     """
 
