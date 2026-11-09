@@ -400,6 +400,11 @@ class SlidingSyncStore(SQLBaseStore):
         )
 
         # ... and upsert changes to the room configs.
+        #
+        # We deliberately don't persist `RoomSyncConfig.sticky_events`. It only says
+        # whether the current request asked for sticky events in the room (as per the
+        # `lists`/`rooms` of the extension), not what the client has received, which
+        # is tracked separately in `PerConnectionState.sticky_events`.
         keys = []
         values = []
         for room_id, room_config in per_connection_state.room_configs.items():
@@ -559,6 +564,7 @@ class SlidingSyncStore(SQLBaseStore):
             timeline_limit,
             required_state_id,
         ) in room_config_rows:
+            # `RoomSyncConfig.sticky_events` is per-request and not persisted.
             room_configs[room_id] = RoomSyncConfig(
                 timeline_limit=timeline_limit,
                 required_state_map=stored_required_state_id_maps[required_state_id],
