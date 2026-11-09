@@ -311,7 +311,6 @@ class SlidingSyncHandler:
                 from_token=from_token,
                 to_token=to_token,
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
-                newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
             )
 
@@ -584,7 +583,6 @@ class SlidingSyncHandler:
         from_token: SlidingSyncStreamToken | None,
         to_token: StreamToken,
         newly_joined: bool,
-        newly_left: bool,
         is_dm: bool,
     ) -> SlidingSyncResult.RoomResult:
         """
@@ -602,7 +600,6 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from.
             to_token: The point in the stream to sync up to.
             newly_joined: If the user has newly joined the room
-            newly_left: If the user has newly left the room
             is_dm: Whether the room is a DM room
         """
         user = sync_config.user
@@ -894,22 +891,30 @@ class SlidingSyncHandler:
             # the room, if its too many we should change this to an
             # `initial=True`?
 
-            # For the case of rejecting remote invites, the leave event won't be
-            # returned by `get_current_state_deltas_for_room`. This is due to the current
-            # state only being filled out for rooms the server is in, and so doesn't pick
-            # up out-of-band leaves (including locally rejected invites) as these events
-            # are outliers and not added to the `current_state_delta_stream`.
+            # For the case of rejecting remote invites, or of an invite rescinded by a
+            # kick or a ban, the leave or ban event won't be returned by
+            # `get_current_state_deltas_for_room`. This is due to the current state only
+            # being filled out for rooms the server is in, and so doesn't pick up
+            # out-of-band leaves and bans (including locally rejected invites) as these
+            # events are outliers and not added to the `current_state_delta_stream`.
             #
-            # We rely on being explicitly told that the room has been `newly_left` to
-            # ensure we extract the out-of-band leave.
-            if newly_left and room_membership_for_user_at_to_token.event_id is not None:
+            # We add the user's own leave or ban whenever it falls in the token range
+            # to ensure we extract the out-of-band membership.
+            if (
+                room_membership_for_user_at_to_token.event_id is not None
+                and room_membership_for_user_at_to_token.membership
+                in (Membership.LEAVE, Membership.BAN)
+                and room_membership_for_user_at_to_token.event_pos.persisted_after(
+                    from_bound
+                )
+            ):
                 membership_changed = True
-                leave_event = await self.store.get_event(
+                membership_event = await self.store.get_event(
                     room_membership_for_user_at_to_token.event_id
                 )
-                state_key = leave_event.get_state_key()
+                state_key = membership_event.get_state_key()
                 if state_key is not None:
-                    room_state_delta_id_map[(leave_event.type, state_key)] = (
+                    room_state_delta_id_map[(membership_event.type, state_key)] = (
                         room_membership_for_user_at_to_token.event_id
                     )
 

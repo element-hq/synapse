@@ -1570,6 +1570,50 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         )
         self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
 
+    def test_rooms_required_state_ban_not_repeated(self) -> None:
+        """
+        Test `rooms.required_state` returns the user's ban only on the incremental
+        sync that covers it, not on later ones.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [[EventTypes.Member, "*"]],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        ban_event_id = self.helper.ban(
+            room_id1, src=user2_id, targ=user1_id, tok=user2_tok
+        )["event_id"]
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self.assertEqual(
+            [
+                state_event["event_id"]
+                for state_event in response_body["rooms"][room_id1]["required_state"]
+            ],
+            [ban_event_id],
+        )
+
+        self.helper.send(room_id1, "after the ban", tok=user2_tok)
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self.assertNotIn(room_id1, response_body["rooms"])
+
     def test_rooms_required_state_combine_superset(self) -> None:
         """
         Test `rooms.required_state` is combined across lists and room subscriptions.
