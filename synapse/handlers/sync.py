@@ -222,11 +222,16 @@ class LazyLoadedMembersCache:
     # needs to check every entry's position against `since`.
     _sent: OrderedDict[str, tuple[str, RoomStreamToken]] = attr.Factory(OrderedDict)
 
-    # The furthest position any request or response for this device has
-    # reached: the `since` of any request, and the end of any response built
-    # here. A response records what it sent only if its end is after this.
-    # Every entry is at or before it, which lets `_forget_after` skip the scan
-    # when nothing was recorded after `since`, the steady state.
+    # The latest position any request or response for this device has reached.
+    # This includes both the `since` token of any request and the `next_batch`
+    # token of any response built here.
+    #
+    # A response records what it sent only if its `next_batch` is strictly after
+    # `_newest`.
+    #
+    # Every entry in `_sent` is at or before `_newest`, which lets
+    # `_forget_after` skip the scan when nothing was recorded after `since`, the
+    # steady state.
     #
     # Only ever raised. Discarding the entries after a `since` does not change
     # what has been reached.
@@ -241,9 +246,12 @@ class LazyLoadedMembersCache:
 
         Yields the cache handle the response reads and stages through.
 
-        Once the response has been built, discards the entries after
-        `since_token` and records what the response sent if its end is after
-        `_newest` (rules 2 and 3 of the class docstring).
+        Once the response has been built:
+          1. discards the entries after `since` token; and
+          2. records what the response sent if its `next_batch` is after
+             `_newest`.
+
+        These are rules 2 and 3 of the class docstring.
         """
 
         since = since_token.room_key if since_token is not None else None
