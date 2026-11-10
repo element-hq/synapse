@@ -929,7 +929,7 @@ class ServerConfig(Config):
         # which one isn't.
         self.request_token_inhibit_3pid_errors = config.get(
             "request_token_inhibit_3pid_errors",
-            False,
+            True,
         )
 
         # Whitelist of domain names that given next_link parameters must have
@@ -1088,7 +1088,7 @@ class ServerConfig(Config):
             metavar="PORT",
             dest="manhole",
             type=int,
-            help="Turn on the twisted telnet manhole service on the given port.",
+            help="Turn on the twisted manhole service on the given port.",
         )
 
     def read_gc_intervals(self, durations: Any) -> tuple[float, float, float] | None:

@@ -543,6 +543,48 @@ class SendToDeviceTestCase(HomeserverTestCase):
             ],
         )
 
+    def test_remote_non_compliant_sender(self) -> None:
+        """
+        Tests that a to-device message from a non-compliant (grandfathered
+        historical) sender is dropped, while one from a compliant sender on the
+        same server is delivered.
+        """
+        user2 = self.register_user("u2", "pass")
+        user2_tok = self.login("u2", "pass", "d2")
+
+        federation_registry = self.hs.get_federation_registry()
+
+        for sender, content in (
+            ("@héllo:example.org", {"foo": "bar"}),
+            ("@user:example.org", {"hiss": "meow"}),
+        ):
+            self.get_success(
+                federation_registry.on_edu(
+                    EduTypes.DIRECT_TO_DEVICE,
+                    "example.org",
+                    {
+                        "sender": sender,
+                        "type": "org.example.test",
+                        "messages": {user2: {"d2": content}},
+                        "message_id": "1",
+                    },
+                )
+            )
+
+        channel = self.make_request("GET", "/sync", access_token=user2_tok)
+        self.assertEqual(channel.code, 200, channel.result)
+        messages = channel.json_body.get("to_device", {}).get("events", [])
+        self.assertEqual(
+            messages,
+            [
+                {
+                    "content": {"hiss": "meow"},
+                    "sender": "@user:example.org",
+                    "type": "org.example.test",
+                }
+            ],
+        )
+
     def test_limited_sync(self) -> None:
         """If a limited sync for to-devices happens the next /sync should respond immediately."""
 

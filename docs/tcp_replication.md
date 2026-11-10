@@ -225,6 +225,10 @@ Asks the server for the current position of all streams.
 
    Inform other processes that a remote server may have come back online.
 
+### NEW_SERVER_JOINED (S, C)
+
+   Informs other processes that a remote server has just joined a room.
+
 See `synapse/replication/tcp/commands.py` for a detailed description and
 the format of each command.
 

@@ -1011,6 +1011,7 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
     def test_add_valid_email(self) -> None:
         self._add_email(self.email, self.email)
 
+    @unittest.override_config({"request_token_inhibit_3pid_errors": False})
     def test_add_valid_email_second_time(self) -> None:
         self._add_email(self.email, self.email)
         self._request_token_invalid_email(
@@ -1019,6 +1020,7 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
             expected_error="Email is already in use",
         )
 
+    @unittest.override_config({"request_token_inhibit_3pid_errors": False})
     def test_add_valid_email_second_time_canonicalise(self) -> None:
         self._add_email(self.email, self.email)
         self._request_token_invalid_email(

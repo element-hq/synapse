@@ -32,6 +32,7 @@ use anyhow::Context;
 use pyo3::{exceptions::PyRuntimeError, prelude::*};
 use tokio::runtime::{Handle, Runtime};
 
+use crate::clock::{set_virtual_time_msec, Clock};
 use crate::homeserver::HomeServer;
 use crate::reactor::Reactor;
 use crate::twisted_dispatch::{self, TwistedDispatchReader, TwistedDispatcher};
@@ -60,6 +61,7 @@ pub struct RustRuntimeInner {
     reactor: Reactor,
     tokio: Mutex<TokioState>,
     worker_threads: usize,
+    clock: Clock,
 
     /// Runs closures on the Twisted reactor thread without taking the GIL on
     /// the calling thread. See [`crate::twisted_dispatch`].
@@ -70,6 +72,11 @@ pub struct RustRuntimeInner {
 }
 
 impl RustRuntimeInner {
+    /// This homeserver's clock. See [`crate::clock`].
+    pub fn clock(&self) -> &Clock {
+        &self.clock
+    }
+
     /// Queue `f` to run on the Twisted reactor thread with the GIL held, and
     /// wake the reactor. Never takes the GIL itself, so a tokio task can call
     /// it to hand a result back to Twisted. See [`crate::twisted_dispatch`].
@@ -170,7 +177,7 @@ impl Drop for RustRuntimeInner {
 /// `HomeServer.get_rust_runtime()`. Rust classes that need it take it as a
 /// constructor argument and store their own clone, which is just an `Arc`
 /// refcount bump. Derefs to [`RustRuntimeInner`].
-#[pyclass(frozen, skip_from_py_object)]
+#[pyclass(frozen, weakref, skip_from_py_object)]
 #[derive(Clone)]
 pub struct RustRuntime {
     inner: Arc<RustRuntimeInner>,
@@ -202,6 +209,7 @@ impl RustRuntime {
             reactor,
             tokio: Mutex::new(TokioState::NotStarted),
             worker_threads,
+            clock: Clock::new(),
             dispatcher,
             dispatch_reader,
         });
@@ -219,6 +227,11 @@ impl RustRuntime {
         hs.register_sync_shutdown_handler(py, hook.bind(py).as_any())?;
 
         Ok(RustRuntime { inner })
+    }
+
+    /// The current time, in milliseconds since the Unix epoch.
+    fn time_msec(&self) -> u64 {
+        self.inner.clock.now_millis()
     }
 }
 
@@ -245,6 +258,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     let child_module = PyModule::new(py, "runtime")?;
 
     child_module.add_class::<RustRuntime>()?;
+    child_module.add_function(wrap_pyfunction!(set_virtual_time_msec, m)?)?;
 
     m.add_submodule(&child_module)?;
 

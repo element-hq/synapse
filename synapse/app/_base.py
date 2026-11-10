@@ -55,7 +55,6 @@ from twisted.internet.interfaces import (
 from twisted.internet.protocol import ServerFactory
 from twisted.internet.tcp import Port
 from twisted.logger import LoggingFile, LogLevel
-from twisted.protocols.tls import TLSMemoryBIOFactory
 from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
 
@@ -345,6 +344,13 @@ def listen_metrics(
             port, addr=host, registry=RegistryProxy
         )
         servers.append((server, thread))
+
+        # Note that we do not register these threads with `ThreadCPUMetrics` as they
+        # don't actually do much work themselves and simply spawn another new thread
+        # per-request (where the real metrics scrape work happens). It's not worth it to
+        # track these with `ThreadCPUMetrics` as we assume they won't use much CPU and
+        # so are OK with them being tracked in the `other` bucket. And we can't easily
+        # register those sub-threads where the metric scrapes actually happen.
     return servers
 
 
@@ -372,10 +378,12 @@ def listen_manhole(
     )
 
 
+# These listener helpers do not inspect the factory's protocol type. Erase that
+# invariant type parameter, quoting the annotation for older Twisted versions.
 def listen_tcp(
     bind_addresses: StrCollection,
     port: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     reactor: IReactorTCP = reactor,
     backlog: int = 50,
 ) -> list[Port]:
@@ -400,7 +408,7 @@ def listen_tcp(
 def listen_unix(
     path: str,
     mode: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     reactor: IReactorUNIX = reactor,
     backlog: int = 50,
 ) -> list[Port]:
@@ -487,7 +495,7 @@ def listen_http(
     try:
         if isinstance(listener_config, TCPListenerConfig):
             if listener_config.is_tls():
-                # refresh_certificate should have been called before this.
+                # `start()` builds the TLS context before starting the listeners.
                 assert context_factory is not None
                 ports = listen_ssl(
                     listener_config.bind_addresses,
@@ -541,7 +549,7 @@ def listen_http(
 def listen_ssl(
     bind_addresses: StrCollection,
     port: int,
-    factory: ServerFactory,
+    factory: "ServerFactory[Any]",
     context_factory: IOpenSSLContextFactory,
     reactor: IReactorSSL = reactor,
     backlog: int = 50,
@@ -569,34 +577,16 @@ def listen_ssl(
 
 def refresh_certificate(hs: "HomeServer") -> None:
     """
-    Refresh the TLS certificates that Synapse is using by re-reading them from
-    disk and updating the TLS context factories to use them.
+    SIGHUP handler: re-read the TLS certificate from disk and rebuild the server
+    TLS context.
     """
-    if not hs.config.server.has_tls_listener():
+    if hs.tls_server_context_factory is None:
+        # No TLS listener, so there is no certificate to reload.
         return
 
     hs.config.tls.read_certificate_from_disk()
-    hs.tls_server_context_factory = context_factory.ServerContextFactory(hs.config)
-
-    if hs._listening_services:
-        logger.info("Updating context factories...")
-        for i in hs._listening_services:
-            # When you listenSSL, it doesn't make an SSL port but a TCP one with
-            # a TLS wrapping factory around the factory you actually want to get
-            # requests. This factory attribute is public but missing from
-            # Twisted's documentation.
-            if isinstance(i.factory, TLSMemoryBIOFactory):
-                addr = i.getHost()
-                logger.info(
-                    "Replacing TLS context factory on [%s]:%i", addr.host, addr.port
-                )
-                # We want to replace TLS factories with a new one, with the new
-                # TLS configuration. We do this by reaching in and pulling out
-                # the wrappedFactory, and then re-wrapping it.
-                i.factory = TLSMemoryBIOFactory(
-                    hs.tls_server_context_factory, False, i.factory.wrappedFactory
-                )
-        logger.info("Context factories updated.")
+    hs.tls_server_context_factory.reload(hs.config)
+    logger.info("Reloaded TLS certificate")
 
 
 _already_setup_sighup_handling = False
@@ -706,8 +696,9 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
         # Loading the provider metadata also ensures the provider config is valid.
         oidc.preload_metadata()
 
-    # Load the certificate from disk.
-    refresh_certificate(hs)
+    if hs.config.server.has_tls_listener():
+        hs.config.tls.read_certificate_from_disk()
+        hs.tls_server_context_factory = context_factory.ServerContextFactory(hs.config)
 
     # Instantiate the modules so they can register their web resources to the module API
     # before we start the listeners.
@@ -728,6 +719,11 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
 
     # If we've configured an expiry time for caches, start the background job now.
     setup_expire_lru_cache_entries(hs)
+
+    # Only reconcile server announcement rooms on the main process.
+    if not hs.config.worker.worker_app and hs.config.serverannouncements.rooms:
+        await hs.get_server_announcements_handler().validate_configuration()
+        await hs.get_server_announcements_handler().reconcile_rooms()
 
     # It is now safe to start your Synapse.
     hs.start_listening()

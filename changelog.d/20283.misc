@@ -1,1 +1,0 @@
-Ignore suspended users failing to join new room when using the `new_room_user_id` option with the admin API to delete a room.
