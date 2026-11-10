@@ -752,7 +752,11 @@ class RoomSyncConfig:
         For example, we check for a higher `timeline_limit`, or `required_state`
         additions which would return `True`.
 
-        `sticky_events` is deliberately not considered.
+        `sticky_events` is deliberately not considered because this check is about
+        whether the client is asking for more timeline or state than it has already
+        received. Whether this request asked for sticky events for a particular room
+        says nothing about what the client has already received. That is tracked
+        separately via `PerConnectionState.sticky_events`.
         """
         combined = other_room_sync_config.combine_room_sync_config(self)
         return (
