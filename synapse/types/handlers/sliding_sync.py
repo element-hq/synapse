@@ -144,7 +144,7 @@ class SlidingSyncResult:
                 over in a gappy sync.
             sticky_events: The sticky events (MSC4354) to return in the sticky events
                 extension (MSC4480), in stream order, or `None` if the room is not in
-                scope for the extension. They don't count as an update to the room.
+                scope for the extension.
             stripped_state: Stripped state events (for rooms where the usre is
                 invited/knocked). Same as `rooms.invite.$room_id.invite_state` in sync v2,
                 absent on joined/left rooms
@@ -212,6 +212,13 @@ class SlidingSyncResult:
         def __bool__(self) -> bool:
             """Are there any updates that should be returned immediately to
             the client?
+
+            `sticky_events` is deliberately not considered. Sticky events are
+            returned in the sticky events extension (MSC4480) rather than as part
+            of the room, so they alone shouldn't cause the room to be sent down.
+            The extension collects them from the room results regardless of
+            whether the room itself is returned (see
+            `SlidingSyncExtensionHandler.get_sticky_events_extension_response(...)`).
             """
             return (
                 # If this is the first time the client is seeing the room, we should not filter it out
