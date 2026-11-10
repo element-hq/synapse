@@ -502,10 +502,21 @@ class StickyEvent:
     Ensures that data in the /sync response can go down and not grow unbounded.
     """
 
+    MAX_STICKY_EVENTS_IN_SYNC = 100
+    """
+    Maximum number of sticky events (MSC4354) to include in a /sync response (in
+    total, across all rooms).
+
+    This is the default specified in the MSC. Chosen arbitrarily.
+
+    Does not apply when joining a new room, see
+    https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r3021907998
+    """
+
     MAX_EVENTS_PER_ROOM_IN_SLIDING_SYNC: Final = 100
     """
     Maximum number of sticky events (MSC4354) to include per room in a sliding sync
-    response.
+    response (MSC4480).
 
     This is the default specified in the MSC. Chosen arbitrarily.
 

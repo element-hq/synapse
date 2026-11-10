@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes, EventUnsignedContentFields
+from synapse.api.constants import EventTypes, EventUnsignedContentFields, StickyEvent
 from synapse.rest import admin
 from synapse.rest.client import account_data, login, register, room, sync
 from synapse.server import HomeServer
@@ -692,7 +692,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
             f"Expecting to not see regular event ({regular_event_id}) before user1 joined.",
         )
 
-    @patch("synapse.handlers.sync.MAX_STICKY_EVENTS_IN_SYNC", 3)
+    @patch.object(StickyEvent, "MAX_STICKY_EVENTS_IN_SYNC", 3)
     def test_pagination_with_many_sticky_events(self) -> None:
         """
         Test that pagination works correctly when there are more sticky events than
