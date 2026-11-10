@@ -241,12 +241,12 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
 
         result = self.get_success(
             self.store.get_profile_data_for_users(
-                [
+                {
                     u_frank.to_string(),
                     u_bob.to_string(),
                     u_carol.to_string(),
                     "@unknown-person:test",
-                ]
+                }
             )
         )
 
@@ -271,7 +271,7 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         requested fields set are omitted.
         """
         u_frank, u_bob, u_carol = self._set_up_profiles_for_field_filtering()
-        user_ids = [u_frank.to_string(), u_bob.to_string(), u_carol.to_string()]
+        user_ids = {u_frank.to_string(), u_bob.to_string(), u_carol.to_string()}
 
         # (field_names, expected result)
         cases: list[tuple[set[str], dict]] = [
