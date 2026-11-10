@@ -287,7 +287,8 @@ pub struct UnstableFeatureMap {
     /// MSC4502: Targeted and unrestricted room member queries
     #[serde(rename = "io.element.msc4502")]
     msc4502: bool,
-    /// MSC4536: Additional endpoints for fetching user profiles
+    /// MSC4536: Additional endpoints for fetching user profiles  
+    /// Tracked in: https://github.com/element-hq/synapse/issues/20471
     #[serde(rename = "org.matrix.msc4536")]
     msc4536: bool,
 

@@ -125,7 +125,7 @@ class ProfileHandler:
         self._profile_updates_writer_instance = self.hs.config.worker.writers.events[0]
 
     async def get_locally_known_profiles(
-        self, user_ids: set[str], field_names: set[str] | None = None
+        self, *, user_ids: set[str], field_names: set[str] | None = None
     ) -> dict[str, dict[str, JsonValue | dict[str, JsonValue]]]:
         """
         Get locally known profiles as a dictionary.

@@ -55,7 +55,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.mock_federation = AsyncMock()
+        self.mock_federation_client = AsyncMock()
 
         self.hs = self.setup_test_homeserver(
             federation_client=self.mock_federation,
@@ -998,7 +998,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
                 "users": [
-                    "@alice:test",
+                    "@non-existent:test",
                 ],
             },
             access_token=self.owner_tok,

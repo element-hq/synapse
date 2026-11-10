@@ -245,7 +245,7 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                     u_frank.to_string(),
                     u_bob.to_string(),
                     u_carol.to_string(),
-                    "@nobody:test",
+                    "@unknown-person:test",
                 ]
             )
         )

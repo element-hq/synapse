@@ -53,7 +53,7 @@ query endpoint. Defined in MSC4536.
 """
 
 PROFILE_QUERY_MAX_FIELD_NAMES = 30
-"""Maximum amount of field names to allow quering via the profile query endpoint.
+"""Maximum amount of field names to allow querying via the profile query endpoint.
 Defined in MSC4536."""
 
 
