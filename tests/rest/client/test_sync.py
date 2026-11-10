@@ -50,7 +50,14 @@ from synapse.rest.client import (
     tags,
 )
 from synapse.server import HomeServer
-from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
+from synapse.types import (
+    JsonDict,
+    RoomStreamToken,
+    StreamKeyType,
+    StreamToken,
+    UserID,
+    create_requester,
+)
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -2279,20 +2286,20 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         synthetic join for `user_id` and no unread counts, and return it.
         """
         room = response["rooms"]["join"][self.room_id]
-        state = room["state_after"] if "state_after" in room else room["state"]
-
-        own_memberships = [
-            event
-            for event in state["events"] + room["timeline"]["events"]
-            if event["type"] == EventTypes.Member and event["state_key"] == user_id
-        ]
-        self.assertEqual(len(own_memberships), 1, own_memberships)
-        membership = own_memberships[0]
+        membership = self._own_membership(room, user_id)
         self.assertTrue(
             membership["event_id"].startswith(SYNTHETIC_JOIN_EVENT_ID_PREFIX),
             membership,
         )
-        self.assertEqual(membership["content"], {"membership": Membership.JOIN})
+        profile = self.get_success(
+            self.store.get_profileinfo(UserID.from_string(user_id))
+        )
+        expected_content = {"membership": Membership.JOIN}
+        if profile.display_name is not None:
+            expected_content["displayname"] = profile.display_name
+        if profile.avatar_url is not None:
+            expected_content["avatar_url"] = profile.avatar_url
+        self.assertEqual(membership["content"], expected_content)
         create_event = self.get_success(
             self.store.get_create_event_for_room(self.room_id)
         )
@@ -2303,6 +2310,53 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
             {"highlight_count": 0, "notification_count": 0},
         )
         return room
+
+    def _own_membership(self, room: JsonDict, user_id: str) -> JsonDict:
+        """Assert that the room has exactly one membership event for `user_id` in
+        its state or timeline, and return it.
+        """
+        state = room["state_after"] if "state_after" in room else room["state"]
+        own_memberships = [
+            event
+            for event in state["events"] + room["timeline"]["events"]
+            if event["type"] == EventTypes.Member and event["state_key"] == user_id
+        ]
+        self.assertEqual(len(own_memberships), 1, own_memberships)
+        return own_memberships[0]
+
+    def _set_profile(self, user_id: str, displayname: str, avatar_url: str) -> None:
+        """Set the user's global profile, where an empty string unsets the field."""
+        profile_handler = self.hs.get_profile_handler()
+        requester = create_requester(user_id)
+        self.get_success(
+            profile_handler.set_displayname(
+                target_user=UserID.from_string(user_id),
+                requester=requester,
+                new_displayname=displayname,
+            )
+        )
+        self.get_success(
+            profile_handler.set_avatar_url(
+                target_user=UserID.from_string(user_id),
+                requester=requester,
+                new_avatar_url=avatar_url,
+            )
+        )
+
+    def _real_join_content(self, user_id: str, tok: str) -> JsonDict:
+        """Join a regular room as the user and return the content of the join."""
+        room_id = self.helper.create_room_as(self.announcer, tok=self.announcer_tok)
+        self.helper.join(room_id, user_id, tok=tok)
+        return self.helper.get_state(
+            room_id, EventTypes.Member, tok=tok, state_key=user_id
+        )
+
+    def _synthetic_join_content(self, user_id: str, tok: str) -> JsonDict:
+        """Run an initial sync as the user and return the content of their
+        synthetic join in the announcement room.
+        """
+        room = self._assert_delivered(self._sync(tok), user_id)
+        return self._own_membership(room, user_id)["content"]
 
     def _timeline_ids(self, room: JsonDict) -> list[str]:
         return [event["event_id"] for event in room["timeline"]["events"]]
@@ -2859,6 +2913,56 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
             )
             self.assertNotIn("state", room)
 
+    def test_synthetic_join_carries_profile(self) -> None:
+        """The synthetic join carries the user's display name and avatar URL,
+        like a real join.
+        """
+        self._set_profile(self.bob, "Bob Builder", "mxc://test/bob")
+        self._announce("hello")
+
+        content = self._synthetic_join_content(self.bob, self.bob_tok)
+        self.assertEqual(
+            content,
+            {
+                "membership": Membership.JOIN,
+                "displayname": "Bob Builder",
+                "avatar_url": "mxc://test/bob",
+            },
+        )
+        self.assertEqual(content, self._real_join_content(self.bob, self.bob_tok))
+
+    def test_synthetic_join_without_profile(self) -> None:
+        """Without a profile, the synthetic join has the same content as a real
+        join.
+        """
+        self._set_profile(self.bob, "", "")
+        self._announce("hello")
+
+        content = self._synthetic_join_content(self.bob, self.bob_tok)
+        self.assertEqual(content, {"membership": Membership.JOIN})
+        self.assertEqual(content, self._real_join_content(self.bob, self.bob_tok))
+
+    def test_synthetic_join_follows_profile_change(self) -> None:
+        """A profile change shows up in the synthetic join at the next delivery,
+        under the same event ID.
+        """
+        self._announce("hello")
+        response = self._sync(self.bob_tok)
+        first = self._assert_delivered(response, self.bob)
+
+        self._set_profile(self.bob, "Bob Builder", "mxc://test/bob")
+        self._announce("again")
+        second = self._assert_delivered(
+            self._sync(self.bob_tok, response["next_batch"]), self.bob
+        )
+
+        first_join = self._own_membership(first, self.bob)
+        second_join = self._own_membership(second, self.bob)
+        self.assertEqual(first_join["event_id"], second_join["event_id"])
+        self.assertEqual(first_join["content"]["displayname"], "bob")
+        self.assertEqual(second_join["content"]["displayname"], "Bob Builder")
+        self.assertEqual(second_join["content"]["avatar_url"], "mxc://test/bob")
+
     def test_lazy_loaded_members(self) -> None:
         """The synthetic join is sent when members are lazy-loaded."""
         self._announce("hello")
@@ -2891,7 +2995,7 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
             [
                 {
                     "type": EventTypes.Member,
-                    "content": {"membership": Membership.JOIN},
+                    "content": {"membership": Membership.JOIN, "displayname": "bob"},
                     "state_key": self.bob,
                 }
             ],

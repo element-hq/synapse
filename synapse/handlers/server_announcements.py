@@ -32,14 +32,25 @@ SYNTHETIC_JOIN_EVENT_ID_PREFIX = "$fake_announcement_join"
 
 
 def make_synthetic_join_event(
-    room_id: str, user_id: str, origin_server_ts: int
+    room_id: str,
+    user_id: str,
+    origin_server_ts: int,
+    *,
+    displayname: str | None,
+    avatar_url: str | None,
 ) -> JsonDict:
     """Build the join event shown to a user who is not actually in an announcement
     room, so that clients list the room as joined.
 
     The event is never persisted. Its event ID is derived from the room and user,
-    so the same user always receives the same event and clients drop repeats. The
-    prefix makes it obvious that the event ID is not a real one.
+    so the same user always receives the same event ID and clients drop repeats.
+    The prefix makes it obvious that the event ID is not a real one.
+
+    The content carries the user's global profile, like a real join. The profile
+    is not part of the event ID. Clients apply state by type and state key, so a
+    profile change shows up the next time the room is in one of the user's
+    `/sync` responses. Unlike a real join, a profile change does not by itself
+    put the room in a response.
 
     It is injected into the `/sync` responses of every user of the homeserver who
     is not one of the room's senders.
@@ -49,10 +60,20 @@ def make_synthetic_join_event(
         user_id: The user receiving the event.
         origin_server_ts: The timestamp to give the event. Pass the same value
             every time, e.g. that of the room's create event.
+        displayname: The user's global display name. Omitted from the content
+            if None.
+        avatar_url: The user's global avatar URL. Omitted from the content if
+            None.
 
     Returns:
         The event's JSON in federation format.
     """
+    content: JsonDict = {"membership": Membership.JOIN}
+    if displayname is not None:
+        content["displayname"] = displayname
+    if avatar_url is not None:
+        content["avatar_url"] = avatar_url
+
     return {
         "room_id": room_id,
         "type": EventTypes.Member,
@@ -69,7 +90,7 @@ def make_synthetic_join_event(
         "sender": user_id,
         "state_key": user_id,
         "origin_server_ts": origin_server_ts,
-        "content": {"membership": Membership.JOIN},
+        "content": content,
     }
 
 
@@ -87,6 +108,29 @@ class ServerAnnouncementsHandler:
         self._creator = self._config.room_management_mxid
         self._requester = create_requester(
             self._creator, authenticated_entity=hs.hostname
+        )
+
+    async def get_synthetic_join_event(self, room_id: str, user_id: str) -> JsonDict:
+        """Build the synthetic join of a user in an announcement room, with the
+        user's current global profile.
+
+        See `make_synthetic_join_event`.
+
+        Args:
+            room_id: The announcement room.
+            user_id: The user receiving the event.
+
+        Returns:
+            The event's JSON in federation format.
+        """
+        create_event = await self._store.get_create_event_for_room(room_id)
+        profile = await self._store.get_profileinfo(UserID.from_string(user_id))
+        return make_synthetic_join_event(
+            room_id,
+            user_id,
+            create_event.origin_server_ts,
+            displayname=profile.display_name,
+            avatar_url=profile.avatar_url,
         )
 
     async def validate_configuration(self) -> None:
