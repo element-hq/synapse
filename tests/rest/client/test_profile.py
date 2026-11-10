@@ -1244,7 +1244,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
                 "users": [
-                    "@owner:test",
+                    self.owner,
                 ],
             },
             access_token=self.owner_tok,
@@ -1252,7 +1252,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body,
             {
-                "@owner:test": {
+                self.owner: {
                     "displayname": "owner",
                 },
             },
@@ -1319,7 +1319,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
                 "users": [
-                    "@owner:test",
+                    self.owner,
                     "@user:remote",
                 ],
             },
@@ -1328,7 +1328,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body,
             {
-                "@owner:test": {
+                self.owner: {
                     "displayname": "owner",
                 },
             },
@@ -1347,7 +1347,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
                 "users": [
-                    "@other:test",
+                    self.other,
                 ],
             },
             access_token=self.owner_tok,
@@ -1355,7 +1355,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body,
             {
-                "@other:test": {
+                self.other: {
                     "displayname": "Bob",
                 },
             },
@@ -1380,7 +1380,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
                 "users": [
-                    "@other:test",
+                    self.other,
                 ],
             },
             access_token=self.owner_tok,
