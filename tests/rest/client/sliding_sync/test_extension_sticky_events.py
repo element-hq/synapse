@@ -724,7 +724,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id, user1_id, tok=user1_tok)
 
-        # Initial sync, which brings the room up to date (`LIVE`) for the extension
+        # Initial sync, which brings the room up to date (`HaveSentRoomFlag.LIVE`) for the extension
         sync_body = {
             "lists": DUMMY_LISTS,
             "extensions": {STICKY_EVENTS_EXT: {"enabled": True, "limit": 10}},
