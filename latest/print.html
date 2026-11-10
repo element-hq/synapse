@@ -38,10 +38,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-4218e036.js";
+            window.path_to_searchindex_js = "searchindex-fb2cc3aa.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-64310643.js"></script>
+        <script src="toc-8fc16911.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -411,7 +411,7 @@ and mounting it to <code>/var/synapse</code> should be taken into consideration.
 <p>System requirements:</p>
 <ul>
 <li>POSIX-compliant system (tested on Linux &amp; OS X)</li>
-<li>Python 3.10 or later, up to Python 3.13.</li>
+<li>Python 3.11 or later, up to Python 3.14.</li>
 <li>At least 1GB of free RAM if you want to join large public rooms like #matrix:matrix.org</li>
 </ul>
 <p>If building on an uncommon architecture for which pre-built wheels are
@@ -1060,7 +1060,9 @@ reverse proxy is using.</p>
         proxy_pass http://localhost:8008;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Host $host:$server_port;
+        # If clients reach Synapse on a non-default port, use `$http_host` instead
+        # so the port is kept, and include that port in `public_baseurl`.
+        proxy_set_header Host $host;
 
         # Nginx by default only allows file uploads up to 1M in size
         # Increase client_max_body_size to match max_upload_size defined in homeserver.yaml
@@ -2106,7 +2108,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.164.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.165.0</td><td>v1.100.0</td></tr>
 </tbody>
 </table>
 </div>
@@ -2126,6 +2128,22 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11650"><a class="header" href="#upgrading-to-v11650">Upgrading to v1.165.0</a></h1>
+<h2 id="python-311-is-now-required"><a class="header" href="#python-311-is-now-required">Python 3.11+ is now required</a></h2>
+<p>The minimum supported Python version has been increased from v3.10 to v3.11.
+You will need Python 3.11+ to run Synapse v1.165.0.</p>
+<p>If you use current versions of the
+<a href="#docker-images-and-ansible-playbooks">matrixorg/synapse</a>
+Docker images, no action is required.</p>
+<h2 id="stable-matrixrtc-transport-discovery"><a class="header" href="#stable-matrixrtc-transport-discovery">Stable MatrixRTC transport discovery</a></h2>
+<p>Synapse has added stable support for <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4143">MSC4143</a>
+and serves <code>GET /_matrix/client/v1/rtc/transports</code> with the transports configured in
+<a href="#matrix_rtc"><code>matrix_rtc.transports</code></a>.</p>
+<p>Clients that implement the stable LiveKit transport from <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4195">MSC4195</a>
+expect transports of type <code>m.livekit</code>. The <code>livekit</code> transport type is deprecated. An
+<code>m.livekit</code> config entry should be added for each LiveKit SFU. As long as clients still
+depend on the unstable LiveKit transport from earlier versions of <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4195">MSC4195</a>,
+matching <code>livekit</code> entries should still be listed in addition.</p>
 <h1 id="upgrading-to-v11630"><a class="header" href="#upgrading-to-v11630">Upgrading to v1.163.0</a></h1>
 <h2 id="limit_profile_requests_to_users_who_share_rooms-now-requires-require_auth_for_profile_requests"><a class="header" href="#limit_profile_requests_to_users_who_share_rooms-now-requires-require_auth_for_profile_requests"><code>limit_profile_requests_to_users_who_share_rooms</code> now requires <code>require_auth_for_profile_requests</code></a></h2>
 <p>The shared-room check enabled by
@@ -4847,7 +4865,7 @@ This feature is under development and should be used with caution on busy server
 </code></pre>
 <hr>
 <h3 id="manhole"><a class="header" href="#manhole"><code>manhole</code></a></h3>
-<p><em>(integer|null)</em> Turn on the Twisted telnet manhole service on the given port.</p>
+<p><em>(integer|null)</em> Turn on the Twisted manhole service on the given port.</p>
 <p>This can also be set by the <code>--manhole</code> argument when starting Synapse.</p>
 <p>Defaults to <code>null</code>.</p>
 <p>Example configuration:</p>
@@ -6648,18 +6666,29 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <p>This setting has the following sub-options:</p>
 <ul>
 <li>
-<p><code>transports</code> (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to <code>[]</code>.</p>
+<p><code>transports</code> (array): A list of MatrixRTC transports advertised to clients on <code>/_matrix/client/v1/rtc/transports</code> and, if it is enabled via <code>experimental_features.msc4143_enabled</code>, the unstable <code>/_matrix/client/unstable/org.matrix.msc4143/rtc/transports</code> endpoint. Defaults to <code>[]</code>.</p>
 <p>Options for each entry include:</p>
 <ul>
 <li>
-<p><code>type</code> (string): The type of transport to use to connect to the selective forwarding unit (SFU).</p>
+<p><code>type</code> (string): The type of transport to advertise to clients.</p>
+<ul>
+<li>
+<p>Transports of type <code>m.livekit</code> advertise the stable transport based on LiveKit’s selective
+forwarding unit (SFU).</p>
 </li>
 <li>
-<p><code>url</code> (string): The WebSocket URL of the LiveKit SFU. If type is “livekit”, either this or <code>livekit_service_url</code> is required.</p>
+<p>Transports of type <code>livekit</code> advertise the unstable version of the LiveKit-based transport.
+This type is deprecated and should only be used when backwards compatibility for clients
+that don’t yet support the stable transport is required.</p>
+</li>
+</ul>
+</li>
+<li>
+<p><code>url</code> (string): The WebSocket URL of the LiveKit SFU. If <code>type</code> is “m.livekit”, this is required. If <code>type</code> is “livekit”, either this or <code>livekit_service_url</code> is required.</p>
 <p>Clients that support <code>url</code> will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.</p>
 </li>
 <li>
-<p><code>livekit_service_url</code> (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is “livekit”, either this or <code>url</code> is required.</p>
+<p><code>livekit_service_url</code> (string): Deprecated. The HTTP URL of the LiveKit authorization service. If <code>type</code> is “livekit”, either this or <code>url</code> is required.</p>
 <p>Clients that don’t support <code>url</code> will use <code>livekit_service_url</code> to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.</p>
 </li>
 </ul>
@@ -6668,6 +6697,8 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <p>Example configuration:</p>
 <pre><code class="language-yaml">matrix_rtc:
   transports:
+  - type: m.livekit
+    url: wss://livekit.example.com
   - type: livekit
     url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
@@ -15724,6 +15755,109 @@ ignored in the same way as with <code>PUT /_matrix/client/r0/rooms/{roomId}/send
 </code></pre>
 <p>Note that server notices must be enabled in <code>homeserver.yaml</code> before this API
 can be used. See <a href="#server-notices">the server notices documentation</a> for more information.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="server-announcements"><a class="header" href="#server-announcements">Server Announcements</a></h1>
+<p>These APIs read and send to the server announcement rooms configured under
+<code>experimental_features.server_announcements.rooms</code> in <code>homeserver.yaml</code>. The
+feature is experimental; see the
+<a href="https://github.com/element-hq/synapse/blob/develop/synapse/config/server_announcements.py">configuration module</a>
+for how to configure the rooms.</p>
+<p>Each room is identified by the <code>id</code> of its configuration entry, not by its
+Matrix room ID.</p>
+<p>You will need to
+<a href="https://element-hq.github.io/synapse/latest/usage/administration/admin_api/#authenticate-as-a-server-admin">authenticate with an access token</a>
+for an admin user.</p>
+<h2 id="list-announcement-rooms"><a class="header" href="#list-announcement-rooms">List announcement rooms</a></h2>
+<pre><code>GET /_synapse/admin/v1/server_announcements
+</code></pre>
+<p>Returns the configured announcement rooms:</p>
+<pre><code class="language-json">{
+    "management_user_id": "@_server_announcements:example.com",
+    "rooms": [
+        {
+            "id": "general",
+            "room_id": "!abc:example.com",
+            "room_name": "Server announcements",
+            "room_topic": "Planned maintenance and incidents",
+            "room_avatar_url": "mxc://example.com/xyz",
+            "allowed_user_ids": ["@comms:example.com"],
+            "excluded_user_ids": []
+        }
+    ]
+}
+</code></pre>
+<ul>
+<li><code>management_user_id</code>: the user that creates and manages the rooms, and sends
+the announcements posted through this API.</li>
+<li><code>rooms</code>: one entry per configured room, in configuration order. Empty if no
+rooms are configured.
+<ul>
+<li><code>id</code>: the <code>id</code> of the configuration entry.</li>
+<li><code>room_id</code>: the Matrix room ID. <code>null</code> if the room has not been created,
+which happens after the room is purged while Synapse is running. Synapse
+creates it again on the next restart.</li>
+<li><code>room_name</code>, <code>room_topic</code>, <code>room_avatar_url</code>: the values from the
+configuration, which Synapse applies to the room at startup. Use the
+<a href="#room-details-api">room details API</a> for the room’s current state.</li>
+<li><code>allowed_user_ids</code>, <code>excluded_user_ids</code>: as configured.</li>
+</ul>
+</li>
+</ul>
+<p>Rooms whose configuration entry was removed are not listed.</p>
+<h2 id="get-an-announcement-room"><a class="header" href="#get-an-announcement-room">Get an announcement room</a></h2>
+<pre><code>GET /_synapse/admin/v1/server_announcements/{id}
+</code></pre>
+<p>Returns a single entry of <code>rooms</code> above, or a 404 with <code>M_NOT_FOUND</code> if <code>id</code> is
+not in the configuration.</p>
+<h2 id="send-an-announcement"><a class="header" href="#send-an-announcement">Send an announcement</a></h2>
+<pre><code>POST /_synapse/admin/v1/server_announcements/{id}/send
+</code></pre>
+<p>or:</p>
+<pre><code>PUT /_synapse/admin/v1/server_announcements/{id}/send/{txnId}
+</code></pre>
+<p>Sends an event into the announcement room with configuration <code>id</code>, as the
+management user. The event reaches every user that the room is delivered to.
+No rate limit applies.</p>
+<p>When using the <code>PUT</code> form, retransmissions with the same transaction ID will be
+ignored in the same way as with <code>PUT /_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}</code>. When Synapse
+delegates authentication to the Matrix Authentication Service, the <code>PUT</code> form
+needs an access token with a device.</p>
+<p>The request body should look something like the following:</p>
+<pre><code class="language-json">{
+    "content": {
+        "msgtype": "m.text",
+        "body": "Maintenance tonight at 22:00 UTC"
+    }
+}
+</code></pre>
+<p>You can optionally include the following additional parameter:</p>
+<ul>
+<li>
+<p><code>type</code>: the type of event. Defaults to <code>m.room.message</code>. Any non-state event
+type except <code>m.room.member</code> is accepted, so an announcement can be edited by
+sending an <code>m.room.message</code> with <code>m.new_content</code> and <code>m.relates_to</code>. To
+retract an announcement, send an <code>m.room.redaction</code> with the ID of the event
+to redact in <code>content.redacts</code>, whatever the room version. Synapse moves it
+to the top level of the event for rooms before version 11:</p>
+<pre><code class="language-json">{
+    "type": "m.room.redaction",
+    "content": {"redacts": "$event_id"}
+}
+</code></pre>
+</li>
+</ul>
+<p>State events cannot be sent: Synapse manages the room state from the
+configuration, and a request with a <code>state_key</code> is rejected with
+<code>M_INVALID_PARAM</code>.</p>
+<p>Once the event has been sent, the API will return the following response:</p>
+<pre><code class="language-json">{
+    "event_id": "&lt;event_id&gt;",
+    "room_id": "&lt;room_id&gt;"
+}
+</code></pre>
+<p>The API returns a 400 if no announcement rooms are configured, and a 404 if
+<code>id</code> is not in the configuration.</p>
+<p>Push notifications are not yet sent for announcements.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="users-media-usage-statistics"><a class="header" href="#users-media-usage-statistics">Users’ media usage statistics</a></h1>
 <p>Returns information about all local media usage of users. Gives the
