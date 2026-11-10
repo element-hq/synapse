@@ -99,7 +99,6 @@ class SlidingSyncExtensionHandler:
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
-        sticky_events_room_ids: AbstractSet[str],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions:
@@ -117,8 +116,6 @@ class SlidingSyncExtensionHandler:
                 we fetched data for. Only rooms with updates are returned in the
                 Sliding Sync response, but the other results can still carry data
                 for the extensions, e.g. sticky events (MSC4480).
-            sticky_events_room_ids: The rooms in scope for the sticky events
-                extension (MSC4480).
             to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
@@ -202,7 +199,6 @@ class SlidingSyncExtensionHandler:
                 new_connection_state=new_connection_state,
                 sticky_events_request=extensions.sticky_events,
                 actual_room_response_map=actual_room_response_map,
-                sticky_events_room_ids=sticky_events_room_ids,
                 to_token=to_token,
                 from_token=from_token,
             )
@@ -1026,7 +1022,6 @@ class SlidingSyncExtensionHandler:
             SlidingSyncConfig.Extensions.StickyEventsExtension | AbsentType
         ),
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
-        sticky_events_room_ids: AbstractSet[str],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions.StickyEventsExtension | None:
@@ -1045,15 +1040,17 @@ class SlidingSyncExtensionHandler:
             actual_room_response_map: A map of room ID to room results for the rooms
                 we fetched data for. The sticky events are taken from here regardless
                 of whether the room has any other updates.
-            sticky_events_room_ids: The rooms in scope for the extension (empty
-                if the extension is disabled).
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
         await self._record_sticky_events_in_out_of_scope_rooms(
             previous_connection_state=previous_connection_state,
             new_connection_state=new_connection_state,
-            relevant_room_ids=sticky_events_room_ids,
+            fetched_room_ids={
+                room_id
+                for room_id, room_result in actual_room_response_map.items()
+                if room_result.sticky_events is not None
+            },
             to_token=to_token,
             from_token=from_token,
         )
@@ -1073,7 +1070,7 @@ class SlidingSyncExtensionHandler:
         self,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        relevant_room_ids: AbstractSet[str],
+        fetched_room_ids: AbstractSet[str],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> None:
@@ -1085,16 +1082,17 @@ class SlidingSyncExtensionHandler:
         pointing at their previous position and `NEVER` rooms will get everything
         when they come into scope.
 
-        Rooms in scope are skipped. Their sticky events were either fetched (and the
-        state recorded) alongside the room data, or found to be up to date in
-        `_filter_relevant_rooms_to_send(...)`.
+        Rooms that we didn't fetch sticky events for are either out of scope, or
+        in scope without any new sticky events (otherwise we would have fetched
+        them, see `_filter_relevant_rooms_to_send(...)`), so checking all of them
+        only picks up the out-of-scope ones.
 
         Args:
             previous_connection_state: The current per-connection state
             new_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state.
-            relevant_room_ids: The rooms that are in scope for the extension
-                (empty if the extension is disabled).
+            fetched_room_ids: The rooms we fetched sticky events for in this
+                request (and so have already recorded the state for).
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
@@ -1106,7 +1104,7 @@ class SlidingSyncExtensionHandler:
             room_id
             for room_id, room_status in previous_connection_state.sticky_events._statuses.items()
             if room_status.status == HaveSentRoomFlag.LIVE
-            and room_id not in relevant_room_ids
+            and room_id not in fetched_room_ids
         ]
         changed_rooms = await self.store.get_rooms_with_sticky_events_between(
             rooms_out_of_scope,

@@ -343,7 +343,6 @@ class SlidingSyncHandler:
             # account data, read receipts, typing indicators, to-device messages, etc).
             actual_room_ids=set(relevant_room_map.keys()),
             actual_room_response_map=rooms,
-            sticky_events_room_ids=interested_rooms.sticky_events_room_ids,
             from_token=from_token,
             to_token=to_token,
         )
@@ -856,7 +855,7 @@ class SlidingSyncHandler:
         # Fetch the sticky events for the sticky events extension here, alongside the
         # timeline, as their senders count as timeline senders when lazy-loading room
         # members (MSC4480). Only for rooms the user is joined to (see
-        # `SlidingSyncRoomLists._get_sticky_events_room_ids`).
+        # `SlidingSyncRoomLists._filter_relevant_rooms_to_send(...)`).
         sticky_events: list[FilteredEvent] | None = None
         if (
             room_sync_config.sticky_events

@@ -153,13 +153,6 @@ class SlidingSyncInterestedRooms:
     extensions may have updates in these rooms).
     """
 
-    sticky_events_room_ids: AbstractSet[str]
-    """
-    Subset of `relevant_room_map` that is in scope for the sticky events
-    extension (MSC4480): the rooms the user is joined to whose
-    `RoomSyncConfig.sticky_events` is set.
-    """
-
     all_rooms: set[str]
     """
     The set of room IDs of all rooms that could appear in any list.
@@ -195,7 +188,6 @@ class SlidingSyncInterestedRooms:
             lists={},
             relevant_room_map={},
             relevant_rooms_to_send_map={},
-            sticky_events_room_ids=set(),
             all_rooms=set(),
             room_membership_for_user_map={},
             newly_joined_rooms=set(),
@@ -680,10 +672,6 @@ class SlidingSyncRoomLists:
 
                     relevant_room_map[room_id] = room_sync_config
 
-        sticky_events_room_ids = self._get_sticky_events_room_ids(
-            relevant_room_map, room_membership_for_user_map
-        )
-
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
         relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
@@ -691,14 +679,13 @@ class SlidingSyncRoomLists:
             from_token,
             to_token,
             relevant_room_map,
-            sticky_events_room_ids,
+            room_membership_for_user_map,
         )
 
         return SlidingSyncInterestedRooms(
             lists=lists,
             relevant_room_map=relevant_room_map,
             relevant_rooms_to_send_map=relevant_rooms_to_send_map,
-            sticky_events_room_ids=sticky_events_room_ids,
             all_rooms=all_rooms,
             room_membership_for_user_map=room_membership_for_user_map,
             newly_joined_rooms=newly_joined_room_ids,
@@ -883,10 +870,6 @@ class SlidingSyncRoomLists:
 
                     relevant_room_map[room_id] = room_sync_config
 
-        sticky_events_room_ids = self._get_sticky_events_room_ids(
-            relevant_room_map, room_membership_for_user_map
-        )
-
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
         relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
@@ -894,14 +877,13 @@ class SlidingSyncRoomLists:
             from_token,
             to_token,
             relevant_room_map,
-            sticky_events_room_ids,
+            room_membership_for_user_map,
         )
 
         return SlidingSyncInterestedRooms(
             lists=lists,
             relevant_room_map=relevant_room_map,
             relevant_rooms_to_send_map=relevant_rooms_to_send_map,
-            sticky_events_room_ids=sticky_events_room_ids,
             all_rooms=all_rooms,
             room_membership_for_user_map=room_membership_for_user_map,
             newly_joined_rooms=newly_joined_room_ids,
@@ -933,38 +915,21 @@ class SlidingSyncRoomLists:
             rooms=frozenset(sticky_events_request.rooms),
         )
 
-    @staticmethod
-    def _get_sticky_events_room_ids(
-        relevant_room_map: Mapping[str, RoomSyncConfig],
-        room_membership_for_user_map: Mapping[str, RoomsForUserType],
-    ) -> set[str]:
-        """Get the rooms in scope for the sticky events extension (MSC4480), i.e.
-        the rooms the user is joined to whose `RoomSyncConfig.sticky_events` is set.
-
-        As with sync v2, we only send sticky events for rooms the user is joined
-        to. If they (re)join, the room will be `initial` and we'll send all of the
-        unexpired sticky events then.
-        """
-        return {
-            room_id
-            for room_id, room_config in relevant_room_map.items()
-            if room_config.sticky_events
-            and room_membership_for_user_map[room_id].membership == Membership.JOIN
-        }
-
     async def _filter_relevant_rooms_to_send(
         self,
         previous_connection_state: PerConnectionState,
         from_token: StreamToken | None,
         to_token: StreamToken,
         relevant_room_map: dict[str, RoomSyncConfig],
-        sticky_events_room_ids: AbstractSet[str],
+        room_membership_for_user_map: Mapping[str, RoomsForUserType],
     ) -> dict[str, RoomSyncConfig]:
         """Filters the `relevant_room_map` down to those rooms that may have
         updates we need to fetch and return.
 
-        Sticky events count as updates for the rooms in `sticky_events_room_ids`,
-        as they are fetched alongside the rest of the room data.
+        Sticky events count as updates for the rooms in scope for the sticky events
+        extension (MSC4480), i.e. the rooms the user is joined to whose
+        `RoomSyncConfig.sticky_events` is set, as they are fetched alongside the
+        rest of the room data.
         """
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
@@ -1053,9 +1018,19 @@ class SlidingSyncRoomLists:
                     # sticky events to send even when nothing new has happened
                     # in the room, e.g. because the room has just come into
                     # scope, or because we hit the `limit` last time.
+                    #
+                    # As with sync v2, we only send sticky events for rooms the
+                    # user is joined to. If they (re)join, the room will be
+                    # `initial` and we'll send all of the unexpired sticky events
+                    # then.
                     live_sticky_events_room_ids = []
-                    for room_id in sticky_events_room_ids:
-                        if room_id in rooms_should_send:
+                    for room_id, room_config in relevant_room_map.items():
+                        if (
+                            not room_config.sticky_events
+                            or room_membership_for_user_map[room_id].membership
+                            != Membership.JOIN
+                            or room_id in rooms_should_send
+                        ):
                             continue
 
                         sticky_events_status = (
