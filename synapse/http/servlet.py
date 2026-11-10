@@ -923,6 +923,11 @@ def _format_pydantic_error(e: ValidationError, content: JsonMapping) -> str:
                     # We're indexing into a dictionary
                     path += f".{seg}"
                     current_value = current_value.get(seg)
+                case str(), list():
+                    # A string segment can't index into a list, so this is a
+                    # union branch tag (e.g. `list[int]`). Skip it and carry on,
+                    # so that a following list index is still included.
+                    continue
                 case _:
                     # Either there is a type mismatch or the current_value is
                     # `None`, indicating we can't traverse further.
@@ -968,9 +973,16 @@ def validate_json_object(content: JsonDict, model_type: type[Model]) -> Model:
         # more specific error if possible (which occasionally helps us to be spec-
         # compliant) This is a bit awkward because the spec's error codes aren't very
         # clear-cut: BAD_JSON arguably overlaps with MISSING_PARAM and INVALID_PARAM.
-        errcode = Codes.BAD_JSON
+        errcode: str = Codes.BAD_JSON
 
-        if e.error_count() == 1:
+        # Custom validators can choose the error code by raising a
+        # `PydanticCustomError` with an `errcode` in its context. It's used when
+        # every error agrees on it.
+        custom_errcodes = {err.get("ctx", {}).get("errcode") for err in e.errors()}
+        custom_errcode = custom_errcodes.pop() if len(custom_errcodes) == 1 else None
+        if isinstance(custom_errcode, str):
+            errcode = custom_errcode
+        elif e.error_count() == 1:
             if err_type == "missing":
                 errcode = Codes.MISSING_PARAM
             elif err_type == "value_error":

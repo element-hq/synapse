@@ -23,9 +23,10 @@
 
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import Field
+from pydantic import AfterValidator, Discriminator, Field, Tag
+from pydantic_core import PydanticCustomError
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, SynapseError
@@ -54,6 +55,48 @@ query endpoint. Defined in MSC4536.
 PROFILE_QUERY_MAX_FIELD_NAMES = 30
 """Maximum amount of field names to allow quering via the profile query endpoint.
 Defined in MSC4536."""
+
+
+# The validators below raise `PydanticCustomError` with a type other than
+# `value_error`, so that `validate_json_object` responds with `M_BAD_JSON` (a
+# plain `ValueError` would map to `M_INVALID_PARAM`), or with the `errcode` given
+# in the error context, while still using our own error messages.
+
+
+def _validate_user_id(value: str) -> str:
+    if not UserID.is_valid(value):
+        raise PydanticCustomError(
+            "invalid_user_id", "Invalid user id {user_id}", {"user_id": value}
+        )
+    return value
+
+
+def _validate_profile_field_name(value: str) -> str:
+    if not value:
+        raise PydanticCustomError("string_too_short", "Field name too short")
+    # Match the limit and error code used when setting custom profile fields,
+    # where the limit is measured in UTF-8 bytes rather than characters.
+    if len(value.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
+        raise PydanticCustomError(
+            "string_too_long",
+            "Field name too long (max {max_length} bytes)",
+            {"max_length": MAX_CUSTOM_FIELD_LEN, "errcode": Codes.KEY_TOO_LARGE},
+        )
+    return value
+
+
+UserIdStr = Annotated[str, AfterValidator(_validate_user_id)]
+"""A string that must be a valid Matrix user ID."""
+
+ProfileFieldName = Annotated[str, AfterValidator(_validate_profile_field_name)]
+"""A non-empty profile field name of at most `MAX_CUSTOM_FIELD_LEN` UTF-8 bytes."""
+
+
+def _absent_or_value(value: Any) -> str:
+    """Discriminator for `X | AbsentType` unions, so that Pydantic only validates
+    (and reports errors for) the branch that applies. Without it, invalid input
+    also produces a confusing "should be an instance of AbsentType" error."""
+    return "absent" if value is Absent else "value"
 
 
 def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
@@ -372,18 +415,22 @@ class ProfileQueryRestServlet(RestServlet):
 
     class PostBody(RequestBodyModel):
         users: Annotated[
-            list[str], Field(min_length=1, max_length=PROFILE_QUERY_MAX_TARGET_USERS)
+            list[UserIdStr],
+            Field(min_length=1, max_length=PROFILE_QUERY_MAX_TARGET_USERS),
         ]
         """
         List of user IDs to query profiles for.
         """
 
-        fields: (
+        fields: Annotated[
             Annotated[
-                list[str], Field(min_length=1, max_length=PROFILE_QUERY_MAX_FIELD_NAMES)
+                list[ProfileFieldName],
+                Field(min_length=1, max_length=PROFILE_QUERY_MAX_FIELD_NAMES),
+                Tag("value"),
             ]
-            | AbsentType
-        ) = Absent
+            | Annotated[AbsentType, Tag("absent")],
+            Discriminator(_absent_or_value),
+        ] = Absent
         """
         If specified, the profile fields to return.
 
@@ -422,33 +469,6 @@ class ProfileQueryRestServlet(RestServlet):
 
         target_users = set(content.users)
         field_names = set(content.fields) if content.fields is not Absent else None
-
-        for user_id in target_users:
-            if not UserID.is_valid(user_id):
-                raise SynapseError(
-                    HTTPStatus.BAD_REQUEST,
-                    f"Invalid user id {user_id}",
-                    Codes.BAD_JSON,
-                )
-
-        if field_names is not None:
-            for field_name in field_names:
-                if not field_name:
-                    raise SynapseError(
-                        HTTPStatus.BAD_REQUEST,
-                        "Field name too short",
-                        Codes.BAD_JSON,
-                    )
-                # Match the limit enforced for custom profile fields, measured
-                # in UTF-8 bytes.
-                # Note, the error is a `BAD_JSON` instead of a `KEY_TOO_LARGE`
-                # to match other errors from this endpoint.
-                if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
-                    raise SynapseError(
-                        HTTPStatus.BAD_REQUEST,
-                        f"Field name too long (max {MAX_CUSTOM_FIELD_LEN} bytes)",
-                        Codes.BAD_JSON,
-                    )
 
         filtered_profiles = (
             await self.profile_handler.check_profile_query_allowed_for_users(
