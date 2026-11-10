@@ -21,6 +21,8 @@
 
 from http import HTTPStatus
 
+from parameterized import parameterized
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import ProfileFields
@@ -264,19 +266,11 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
             },
         )
 
-    def test_get_profile_data_for_users_filters_fields(self) -> None:
-        """`field_names` restricts the result to the named fields, covering the
-        column-backed fields (`displayname`, `avatar_url`), custom fields, and
-        names that aren't set for some or all users. Users with none of the
-        requested fields set are omitted.
-        """
-        u_frank, u_bob, u_carol = self._set_up_profiles_for_field_filtering()
-        user_ids = {u_frank.to_string(), u_bob.to_string(), u_carol.to_string()}
-
-        # (field_names, expected result)
-        cases: list[tuple[set[str], dict]] = [
+    @parameterized.expand(
+        [
             # Only a column-backed field.
             (
+                "column_field",
                 {ProfileFields.DISPLAYNAME},
                 {
                     "@frank:test": {ProfileFields.DISPLAYNAME: "Frank"},
@@ -285,6 +279,7 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
             ),
             # Only custom fields, including a nested object and a boolean.
             (
+                "custom_fields",
                 {"m.status", "org.example.verified"},
                 {
                     "@frank:test": {
@@ -295,6 +290,7 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
             ),
             # A mix of column-backed, custom and unknown fields.
             (
+                "mixed_fields",
                 {ProfileFields.AVATAR_URL, "org.example.pronouns", "org.example.unset"},
                 {
                     "@frank:test": {
@@ -305,21 +301,30 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
             ),
             # Only fields that no user has set: every user is omitted.
             (
+                "unset_fields",
                 {"org.example.unset"},
                 {},
             ),
             # No fields at all: every user is omitted.
             (
+                "no_fields",
                 set(),
                 {},
             ),
         ]
+    )
+    def test_get_profile_data_for_users_filters_fields(
+        self, _label: str, field_names: set[str], expected: dict
+    ) -> None:
+        """`field_names` restricts the result to the named fields, covering the
+        column-backed fields (`displayname`, `avatar_url`), custom fields, and
+        names that aren't set for some or all users. Users with none of the
+        requested fields set are omitted.
+        """
+        u_frank, u_bob, u_carol = self._set_up_profiles_for_field_filtering()
+        user_ids = {u_frank.to_string(), u_bob.to_string(), u_carol.to_string()}
 
-        for field_names, expected in cases:
-            with self.subTest(field_names=field_names):
-                result = self.get_success(
-                    self.store.get_profile_data_for_users(
-                        user_ids, field_names=field_names
-                    )
-                )
-                self.assertEqual(result, expected)
+        result = self.get_success(
+            self.store.get_profile_data_for_users(user_ids, field_names=field_names)
+        )
+        self.assertEqual(result, expected)
