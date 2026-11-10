@@ -478,7 +478,7 @@ class ProfileQueryRestServlet(RestServlet):
         )
 
         ret = await self.profile_handler.get_locally_known_profiles(
-            filtered_profiles, field_names=field_names
+            user_ids=filtered_profiles, field_names=field_names
         )
 
         return 200, ret

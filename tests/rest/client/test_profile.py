@@ -58,7 +58,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.mock_federation_client = AsyncMock()
 
         self.hs = self.setup_test_homeserver(
-            federation_client=self.mock_federation,
+            federation_client=self.mock_federation_client,
         )
         return self.hs
 
@@ -1325,7 +1325,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 },
             },
         )
-        self.mock_federation.make_query.assert_not_called()
+        self.mock_federation_client.make_query.assert_not_called()
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_returns_profile_data_not_sharing_room_lookups_allowed(
