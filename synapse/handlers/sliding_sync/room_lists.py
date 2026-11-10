@@ -1074,7 +1074,7 @@ class SlidingSyncRoomLists:
                         else:
                             assert_never(sticky_events_status.status)
 
-                    # For `LIVE` rooms, we only need to check for new sticky events.
+                    # For `HaveSentRoomFlag.LIVE` rooms, we only need to check for new sticky events.
                     rooms_should_send.update(
                         await self.store.get_rooms_with_sticky_events_between(
                             live_sticky_events_room_ids,
