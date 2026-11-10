@@ -568,6 +568,12 @@ class SlidingSyncStore(SQLBaseStore):
             room_configs[room_id] = RoomSyncConfig(
                 timeline_limit=timeline_limit,
                 required_state_map=stored_required_state_id_maps[required_state_id],
+            room_configs[room_id] = RoomSyncConfig(
+                timeline_limit=timeline_limit,
+                required_state_map=stored_required_state_id_maps[required_state_id],
+                # `RoomSyncConfig.sticky_events` is not persisted and instead is
+                # determined by the request (use the default here)
+                # stick_events=False
             )
 
         # Clean up any `required_state_id`s that are no longer used by any
