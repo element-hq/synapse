@@ -275,9 +275,6 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         self.assertEqual(messages[0]["content"]["body"], "test msg one")
         self.assertEqual(messages[0]["sender"], "@notices:test")
 
-        # invalidate cache of server notices room_ids
-        self.server_notices_manager.get_or_create_notice_room_for_user.invalidate_all()
-
         # send second message
         channel = self.make_request(
             "POST",
@@ -347,11 +344,6 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
 
         # user is not member anymore
         self._check_invite_and_join_status(self.other_user, 0, 0)
-
-        # invalidate cache of server notices room_ids
-        # if server tries to send to a cached room_id the user gets the message
-        # in old room
-        self.server_notices_manager.get_or_create_notice_room_for_user.invalidate_all()
 
         # send second message
         channel = self.make_request(
@@ -449,10 +441,6 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         # The summary should be empty since the room doesn't exist.
         self.assertEqual(summary, {})
 
-        # invalidate cache of server notices room_ids
-        # if server tries to send to a cached room_id it gives an error
-        self.server_notices_manager.get_or_create_notice_room_for_user.invalidate_all()
-
         # send second message
         channel = self.make_request(
             "POST",
@@ -532,7 +520,6 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         # simulate a change in server config after a server restart.
         new_display_name = "new display name"
         self.server_notices_manager._config.servernotices.server_notices_mxid_display_name = new_display_name
-        self.server_notices_manager.get_or_create_notice_room_for_user.cache.invalidate_all()
 
         self.make_request(
             "POST",
@@ -576,7 +563,6 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         # simulate a change in server config after a server restart.
         new_avatar_url = "test/new-url"
         self.server_notices_manager._config.servernotices.server_notices_mxid_avatar_url = new_avatar_url
-        self.server_notices_manager.get_or_create_notice_room_for_user.cache.invalidate_all()
 
         self.make_request(
             "POST",
@@ -689,7 +675,6 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         # simulate a change in server config after a server restart.
         new_avatar_url = "test/new-url"
         self.server_notices_manager._config.servernotices.server_notices_room_avatar_url = new_avatar_url
-        self.server_notices_manager.get_or_create_notice_room_for_user.cache.invalidate_all()
 
         self.make_request(
             "POST",
