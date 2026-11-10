@@ -1,5 +1,8 @@
 # Synapse 1.165.0 (2026-11-10)
 
+Please check the [relevant section in the upgrade
+notes](https://github.com/element-hq/synapse/blob/release-v1.165/docs/upgrade.md#upgrading-to-v11650): support for Python 3.10 has been removed (Python 3.11+ is now required) and the `livekit` MatrixRTC transport type is deprecated in favour of `m.livekit`.
+
 No significant changes since 1.165.0rc1.
 
 
