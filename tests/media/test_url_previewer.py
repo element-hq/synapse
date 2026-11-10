@@ -29,14 +29,14 @@ from tests import unittest
 from tests.unittest import override_config
 
 try:
-    import lxml
+    import bs4
 except ImportError:
-    lxml = None  # type: ignore[assignment]
+    bs4 = None  # type: ignore[assignment]
 
 
 class URLPreviewTests(unittest.HomeserverTestCase):
-    if not lxml:
-        skip = "url preview feature requires lxml"
+    if not bs4:
+        skip = "url preview feature requires beautifulsoup4"
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()

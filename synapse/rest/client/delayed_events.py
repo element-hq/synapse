@@ -47,11 +47,13 @@ class UpdateDelayedEventServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
+        self.auth = hs.get_auth()
         self.delayed_events_handler = hs.get_delayed_events_handler()
 
     async def on_POST(
         self, request: SynapseRequest, delay_id: str
     ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
         body = parse_json_object_from_request(request)
         try:
             action = str(body["action"])
@@ -72,11 +74,11 @@ class UpdateDelayedEventServlet(RestServlet):
             )
 
         if enum_action == _UpdateDelayedEventAction.CANCEL:
-            await self.delayed_events_handler.cancel(request, delay_id)
+            await self.delayed_events_handler.cancel(requester, delay_id)
         elif enum_action == _UpdateDelayedEventAction.RESTART:
-            await self.delayed_events_handler.restart(request, delay_id)
+            await self.delayed_events_handler.restart(requester, delay_id)
         elif enum_action == _UpdateDelayedEventAction.SEND:
-            await self.delayed_events_handler.send(request, delay_id)
+            await self.delayed_events_handler.send(requester, delay_id)
         return 200, {}
 
 
@@ -89,12 +91,14 @@ class CancelDelayedEventServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
+        self.auth = hs.get_auth()
         self.delayed_events_handler = hs.get_delayed_events_handler()
 
     async def on_POST(
         self, request: SynapseRequest, delay_id: str
     ) -> tuple[int, JsonDict]:
-        await self.delayed_events_handler.cancel(request, delay_id)
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        await self.delayed_events_handler.cancel(requester, delay_id)
         return 200, {}
 
 
@@ -107,12 +111,14 @@ class RestartDelayedEventServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
+        self.auth = hs.get_auth()
         self.delayed_events_handler = hs.get_delayed_events_handler()
 
     async def on_POST(
         self, request: SynapseRequest, delay_id: str
     ) -> tuple[int, JsonDict]:
-        await self.delayed_events_handler.restart(request, delay_id)
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        await self.delayed_events_handler.restart(requester, delay_id)
         return 200, {}
 
 
@@ -125,12 +131,14 @@ class SendDelayedEventServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
+        self.auth = hs.get_auth()
         self.delayed_events_handler = hs.get_delayed_events_handler()
 
     async def on_POST(
         self, request: SynapseRequest, delay_id: str
     ) -> tuple[int, JsonDict]:
-        await self.delayed_events_handler.send(request, delay_id)
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        await self.delayed_events_handler.send(requester, delay_id)
         return 200, {}
 
 
@@ -149,7 +157,7 @@ class DelayedEventServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, delay_id: str
     ) -> tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request)
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
         delayed_event = await self.delayed_events_handler.get_for_user(
             requester, delay_id
         )
@@ -169,7 +177,7 @@ class DelayedEventsServlet(RestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request)
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
         # TODO: Support Pagination stream API ("from" query parameter)
         delayed_events = await self.delayed_events_handler.get_all_for_user(requester)
         return 200, {

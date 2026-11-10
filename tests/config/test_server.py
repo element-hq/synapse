@@ -33,6 +33,20 @@ from tests import unittest
 
 
 class ServerConfigTestCase(unittest.TestCase):
+    def test_request_token_inhibit_3pid_errors_defaults_to_true(self) -> None:
+        config = ServerConfig(RootConfig())
+        config.read_config(
+            yaml.safe_load(
+                HomeServerConfig().generate_config(
+                    config_dir_path="CONFDIR",
+                    data_dir_path="/data_dir_path",
+                    server_name="che.org",
+                )
+            )
+        )
+
+        self.assertTrue(config.request_token_inhibit_3pid_errors)
+
     def test_is_threepid_reserved(self) -> None:
         user1 = {"medium": "email", "address": "user1@example.com"}
         user2 = {"medium": "email", "address": "user2@example.com"}

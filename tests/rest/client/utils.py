@@ -44,7 +44,7 @@ import attr
 from twisted.internet.testing import MemoryReactorClock
 from twisted.web.server import Site
 
-from synapse.api.constants import EventTypes, Membership, ReceiptTypes
+from synapse.api.constants import EventTypes, Membership, ReceiptTypes, StickyEvent
 from synapse.api.errors import Codes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -635,6 +635,37 @@ class RestHelper:
         return self._read_write_state(
             room_id, event_type, body, tok, expect_code, state_key, method="PUT"
         )
+
+    @staticmethod
+    def build_delayed_event_request_path(
+        *,
+        room_id: str,
+        event_type: str,
+        txn_id: str | None = None,
+    ) -> str:
+        """Build the request path for scheduling a delayed event via the dedicated endpoint."""
+        if txn_id is None:
+            txn_id = "m%s" % (str(time.time()))
+        return f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}/{txn_id}"
+
+    @staticmethod
+    def build_delayed_event_request_body(
+        *,
+        delay: Duration,
+        content: JsonDict,
+        state_key: str | None = None,
+        sticky_duration: Duration | None = None,
+    ) -> JsonDict:
+        """Build the request body for scheduling a delayed event via the dedicated endpoint."""
+        body = {
+            "delay_ms": delay.as_millis(),
+            "content": content,
+        }
+        if state_key is not None:
+            body["state_key"] = state_key
+        if sticky_duration is not None:
+            body[StickyEvent.REQUEST_PARAM_NAME] = sticky_duration.as_millis()
+        return body
 
     def upload_media(
         self,

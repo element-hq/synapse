@@ -146,6 +146,11 @@ async def respond_with_file(
 
         add_file_headers(request, media_type, file_size, upload_name)
 
+        if request.get_method() == "HEAD":
+            # Twisted does not send a body for HEAD requests. Do not read the media.
+            finish_request(request)
+            return
+
         with open(file_path, "rb") as f:
             await ThreadedFileSender(hs).beginFileTransfer(f, request)
 
@@ -375,6 +380,11 @@ async def respond_with_multipart_responder(
             b"multipart/mixed; boundary=%s" % multipart_consumer.boundary,
         )
 
+        if request.get_method() == "HEAD":
+            # Twisted does not send a body for HEAD requests. Do not read the media.
+            finish_request(request)
+            return
+
         try:
             await responder.write_to_consumer(multipart_consumer)
         except ConsumerRequestedStopError as e:
@@ -422,6 +432,12 @@ async def respond_with_responder(
 
         logger.debug("Responding to media request with responder %s", responder)
         add_file_headers(request, media_type, file_size, upload_name)
+
+        if request.get_method() == "HEAD":
+            # Twisted does not send a body for HEAD requests. Do not read the media.
+            finish_request(request)
+            return
+
         try:
             await responder.write_to_consumer(request)
         except ConsumerRequestedStopError as e:

@@ -14,6 +14,7 @@
 #
 
 import sqlite3
+from http import HTTPStatus
 
 from twisted.internet.testing import MemoryReactor
 
@@ -122,6 +123,71 @@ class StickyEventsClientTestCase(unittest.HomeserverTestCase):
         # Advancing time any more, the event is no longer sticky
         self.reactor.advance(Duration(seconds=1).as_secs())
         self._assert_event_not_sticky(event_id)
+
+    def test_joined_history_visibility_messages_returns_sticky_events(
+        self,
+    ) -> None:
+        """
+        Tests that, in a joined history visibility room, `/messages` returns sticky events
+        from before your join.
+        """
+
+        room_id = self.helper.create_room_as("resident", tok=self.token)
+        self.helper.send_state(
+            room_id,
+            "m.room.history_visibility",
+            body={"history_visibility": "joined"},
+            tok=self.token,
+        )
+
+        # Now send 3 timeline events:
+        # regular, sticky, regular
+        # (We have this 'sandwich' to prove that history visibility filtering is working)
+
+        # A message sent before the joiner joins; must not be visible to them.
+        self.helper.send(room_id, body="regular 1", tok=self.token)
+        sticky_event_id = self.helper.send_sticky_event(
+            room_id,
+            type=EventTypes.Message,
+            content={"body": "", "msgtype": ""},
+            duration=Duration(hours=1),
+            tok=self.token,
+        )["event_id"]
+        self.helper.send(room_id, body="regular 2", tok=self.token)
+
+        # Now get another user to join
+        self.register_user("joiner", "p2")
+        joiner_token = self.login("joiner", "p2")
+        self.helper.join(room_id, "@joiner:test", tok=joiner_token)
+
+        # A message sent after the newly-joined joins; must be visible to them.
+        sent_after_join_event_id = self.helper.send(
+            room_id, body="after_join", tok=self.token
+        )["event_id"]
+
+        # The newly-joined user backpaginates the room via /messages.
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id}/messages?dir=b",
+            access_token=joiner_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        visible_message_event_ids = [
+            e["event_id"]
+            for e in channel.json_body["chunk"]
+            if e["type"] == EventTypes.Message
+        ]
+
+        # The newly-joined user only sees the message sent since they joined
+        # and the sticky event (which is exempt from history visibility)
+        self.assertEqual(
+            visible_message_event_ids,
+            [
+                sent_after_join_event_id,
+                sticky_event_id,
+            ],
+        )
 
 
 class StickyEventsDisabledClientTestCase(unittest.HomeserverTestCase):

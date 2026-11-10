@@ -341,6 +341,36 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
         # The child that was removed should not be copied over.
         self.assertNotIn((EventTypes.SpaceChild, old_room_id), state_ids)
 
+    def test_rtc_slots(self) -> None:
+        """Test that MatrixRTC slots are copied over during a room upgrade (MSC4143)."""
+
+        # Prepare the room with slot events.
+        slot_content = {"application": {"type": "m.call"}}
+        for state_key in ("m.call#room", "m.call#other"):
+            self.helper.send_state(
+                self.room_id,
+                event_type=EventTypes.RtcSlot,
+                body=slot_content,
+                tok=self.creator_token,
+                state_key=state_key,
+            )
+
+        # Upgrade the room.
+        channel = self._upgrade_room()
+        self.assertEqual(200, channel.code, channel.result)
+        new_room_id = channel.json_body["replacement_room"]
+        state_ids = self.get_success(
+            self.store.get_partial_current_state_ids(new_room_id)
+        )
+
+        # Both slots should have been copied over with their content intact.
+        for state_key in ("m.call#room", "m.call#other"):
+            self.assertIn((EventTypes.RtcSlot, state_key), state_ids)
+            event = self.get_success(
+                self.store.get_event(state_ids[(EventTypes.RtcSlot, state_key)])
+            )
+            self.assertEqual(event.content, slot_content)
+
     def test_custom_room_type(self) -> None:
         """Test upgrading a room that has a custom room type set."""
         test_room_type = "com.example.my_custom_room_type"

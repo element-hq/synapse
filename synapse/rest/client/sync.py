@@ -24,7 +24,13 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 import attr
 
-from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
+from synapse.api.constants import (
+    AccountDataTypes,
+    EduTypes,
+    EventTypes,
+    Membership,
+    PresenceState,
+)
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
@@ -33,9 +39,11 @@ from synapse.events.utils import (
     EventFormat,
     FilteredEvent,
     SerializeEventConfig,
+    SerializeEventFilter,
     strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
+from synapse.handlers.server_announcements import make_synthetic_join_event
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
 from synapse.handlers.sync import (
     ArchivedSyncResult,
@@ -175,11 +183,12 @@ class SyncRestServlet(RestServlet):
         filter_id = parse_string(request, "filter")
         full_state = parse_boolean(request, "full_state", default=False)
 
-        use_state_after = False
-        if await self.store.is_feature_enabled(
-            user.to_string(), ExperimentalFeature.MSC4222
-        ):
-            use_state_after = parse_boolean(
+        use_state_after = parse_boolean(request, "use_state_after", default=False)
+        use_unstable_state_after_name = False
+        # FIXME(unstable_state_after): Remove support for the unstable identifiers after 2027-09-01
+        # (to allow some time for the ecosystem to adapt to the stable identifiers)
+        if not use_state_after:
+            use_state_after = use_unstable_state_after_name = parse_boolean(
                 request, "org.matrix.msc4222.use_state_after", default=False
             )
 
@@ -216,6 +225,7 @@ class SyncRestServlet(RestServlet):
             device_id,
             last_ignore_accdata_streampos,
             use_state_after,
+            use_unstable_state_after_name,
         )
 
         if filter_id is None:
@@ -253,6 +263,7 @@ class SyncRestServlet(RestServlet):
             is_guest=requester.is_guest,
             device_id=device_id,
             use_state_after=use_state_after,
+            use_unstable_state_after_name=use_unstable_state_after_name,
         )
 
         since_token = None
@@ -594,6 +605,26 @@ class SyncRestServlet(RestServlet):
         state_dict = room.state
         timeline_events = room.timeline.events
 
+        user_id = sync_config.user.to_string()
+        is_announcement = isinstance(room, JoinedSyncResult) and room.is_announcement
+        # A former member gets the room with `is_announcement` set, as they are
+        # no longer a member, but their real leave or ban can still be in the
+        # state or the timeline. Remove it, as the synthetic join replaces it.
+        if is_announcement:
+            state_dict = {
+                key: event
+                for key, event in state_dict.items()
+                if key != (EventTypes.Member, user_id)
+            }
+            timeline_events = [
+                filtered_event
+                for filtered_event in timeline_events
+                if not (
+                    filtered_event.event.type == EventTypes.Member
+                    and filtered_event.event.state_key == user_id
+                )
+            ]
+
         state_events = state_dict.values()
 
         for event in state_events:
@@ -622,6 +653,16 @@ class SyncRestServlet(RestServlet):
             time_now,
             config=serialize_options,
         )
+        if is_announcement:
+            create_event = await self.store.get_create_event_for_room(room.room_id)
+            serialized_state.append(
+                self._event_serializer.serialize_synthetic_event(
+                    make_synthetic_join_event(
+                        room.room_id, user_id, create_event.origin_server_ts
+                    ),
+                    serialize_options,
+                )
+            )
         serialized_timeline = await self._event_serializer.serialize_events(
             timeline_events,
             time_now,
@@ -634,7 +675,12 @@ class SyncRestServlet(RestServlet):
         # We either include a `state` or `state_after` field depending on
         # whether the client has opted in to the newer `state_after` behavior.
         if sync_config.use_state_after:
-            state_key_name = "org.matrix.msc4222.state_after"
+            # Clients which opted in via the unstable MSC4222 query parameter
+            # get the unstable field name back, for the transition period.
+            if sync_config.use_unstable_state_after_name:
+                state_key_name = "org.matrix.msc4222.state_after"
+            else:
+                state_key_name = "state_after"
         else:
             state_key_name = "state"
 
@@ -658,7 +704,12 @@ class SyncRestServlet(RestServlet):
                 # appearing in the timeline won't appear again here
                 result["msc4354_sticky"] = {
                     "events": await self._event_serializer.serialize_events(
-                        room.sticky, time_now, config=serialize_options
+                        room.sticky,
+                        time_now,
+                        config=serialize_options,
+                        # Drop any sticky events which have expired since they
+                        # were selected (or since this `SyncResult` was cached).
+                        filter=SerializeEventFilter(sticky_only=True),
                     )
                 }
             if room.unread_thread_notifications:
@@ -1234,13 +1285,17 @@ class SlidingSyncRestServlet(RestServlet):
                 ]
             rooms_out[room_id] = {
                 "events": await self.event_serializer.serialize_events(
-                    sticky_events_to_write, time_now, config=serialize_options
+                    sticky_events_to_write,
+                    time_now,
+                    config=serialize_options,
+                    # Drop any sticky events which have expired since they
+                    # were selected.
+                    filter=SerializeEventFilter(sticky_only=True),
                 )
             }
 
         return {
             "rooms": rooms_out,
-            "next_batch": sticky_events.next_batch.serialise(),
         }
 
 
