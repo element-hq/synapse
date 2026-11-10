@@ -488,13 +488,6 @@ def _upload(gh_token: str | None) -> None:
     current_version = get_package_version()
     tag_name = f"v{current_version}"
 
-    # Check we have the right tag checked out.
-    repo = get_repo_and_check_clean_checkout()
-    tag = repo.tag(f"refs/tags/{tag_name}")
-    if repo.head.commit != tag.commit:
-        click.echo(f"Tag {tag_name} ({tag.commit}) is not currently checked out!")
-        click.get_current_context().abort()
-
     if gh_token:
         gh = Github(auth=github.Auth.Token(token=gh_token))
     else:
