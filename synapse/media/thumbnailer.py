@@ -73,12 +73,17 @@ class ThumbnailError(Exception):
 
 
 class Thumbnailer:
-    FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
+    FORMATS = {
+        "image/jpeg": "JPEG",
+        "image/png": "PNG",
+        "image/webp": "WEBP",
+        "image/avif": "AVIF",
+    }
 
     # Which image formats we allow Pillow to open.
     # This should intentionally be kept restrictive, because the decoder of any
     # format in this list becomes part of our trusted computing base.
-    PILLOW_FORMATS = ("jpeg", "png", "webp", "gif")
+    PILLOW_FORMATS = ("jpeg", "png", "webp", "gif", "avif")
 
     # Pillow reports MPO (a JPEG holding a stereo pair) as multi-frame, so
     # frame count alone doesn't tell us whether something is an animation.

@@ -67,7 +67,12 @@ from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeChannel
-from tests.test_utils import SMALL_CMYK_JPEG, SMALL_PNG, SMALL_PNG_SHA256
+from tests.test_utils import (
+    SMALL_AVIF,
+    SMALL_CMYK_JPEG,
+    SMALL_PNG,
+    SMALL_PNG_SHA256,
+)
 from tests.unittest import override_config
 from tests.utils import default_config
 
@@ -218,6 +223,23 @@ small_png = TestImage(
     ),
 )
 
+small_avif = TestImage(
+    SMALL_AVIF,
+    b"image/avif",
+    b".avif",
+    unhexlify(
+        b"89504e470d0a1a0a0000000d4948445200000020000000200806"
+        b"000000737a7af40000001a49444154789cedc101010000008220"
+        b"ffaf6e484001000000ef0610200001194334ee0000000049454e"
+        b"44ae426082"
+    ),
+    unhexlify(
+        b"89504e470d0a1a0a0000000d4948445200000001000000010806"
+        b"0000001f15c4890000000d49444154789c636060606000000005"
+        b"0001a5f645400000000049454e44ae426082"
+    ),
+)
+
 small_png_with_transparency = TestImage(
     unhexlify(
         b"89504e470d0a1a0a0000000d49484452000000010000000101000"
@@ -329,6 +351,7 @@ test_images = [
     small_lossless_webp,
     empty_file,
     SVG,
+    small_avif,
 ]
 input_values = [(x,) for x in test_images]
 
@@ -752,7 +775,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_UNKNOWN",
-                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/media/r0/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
+                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/media/r0/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png, image/avif) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
                 },
             )
         else:

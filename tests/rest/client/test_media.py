@@ -73,6 +73,7 @@ from tests.media.test_media_storage import (
     SVG,
     TestImage,
     empty_file,
+    small_avif,
     small_cmyk_jpeg,
     small_lossless_webp,
     small_png,
@@ -2045,6 +2046,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
 
 
 test_images = [
+    small_avif,
     small_png,
     small_png_with_transparency,
     small_cmyk_jpeg,
@@ -2544,7 +2546,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_UNKNOWN",
-                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/client/v1/media/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
+                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/client/v1/media/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png, image/avif) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
                 },
             )
         else:
