@@ -38,7 +38,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, profile, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.profile import MAX_PROFILE_SIZE
-from synapse.types import UserID
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -1257,6 +1257,71 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 },
             },
         )
+
+    @parameterized.expand(
+        [
+            # No `fields`: the whole profile, custom fields included.
+            (
+                "all_fields",
+                None,
+                {
+                    "displayname": "owner",
+                    "org.example.pronouns": "they/them",
+                    "m.status": {"text": "Swimming", "emoji": "🏊"},
+                },
+            ),
+            # Only a custom field.
+            (
+                "custom_field",
+                ["org.example.pronouns"],
+                {"org.example.pronouns": "they/them"},
+            ),
+            # A mix of a standard field and a custom field with an object value.
+            (
+                "standard_and_custom_fields",
+                ["displayname", "m.status"],
+                {
+                    "displayname": "owner",
+                    "m.status": {"text": "Swimming", "emoji": "🏊"},
+                },
+            ),
+        ]
+    )
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_returns_custom_fields(
+        self, _label: str, fields: list[str] | None, expected_profile: JsonDict
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should return custom
+        profile fields, both as part of the whole profile and when requested via
+        `fields`.
+        """
+        store = self.hs.get_datastores().main
+        self.get_success(
+            store.set_profile_field(
+                user_id=UserID.from_string(self.owner),
+                field_name="org.example.pronouns",
+                new_value="they/them",
+            )
+        )
+        self.get_success(
+            store.set_profile_field(
+                user_id=UserID.from_string(self.owner),
+                field_name="m.status",
+                new_value={"text": "Swimming", "emoji": "🏊"},
+            )
+        )
+
+        content: JsonDict = {"users": [self.owner]}
+        if fields is not None:
+            content["fields"] = fields
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content=content,
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {self.owner: expected_profile})
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_omits_users_without_requested_fields(
