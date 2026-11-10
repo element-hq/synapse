@@ -854,13 +854,9 @@ class SlidingSyncHandler:
 
         # Fetch the sticky events for the sticky events extension here, alongside the
         # timeline, as their senders count as timeline senders when lazy-loading room
-        # members (MSC4480). Only for rooms the user is joined to (see
-        # `SlidingSyncRoomLists._filter_relevant_rooms_to_send(...)`).
+        # members (MSC4480).
         sticky_events: list[FilteredEvent] | None = None
-        if (
-            room_sync_config.sticky_events
-            and room_membership_for_user_at_to_token.membership == Membership.JOIN
-        ):
+        if room_sync_config.sticky_events:
             sticky_events = await self._get_sticky_events_for_room(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,

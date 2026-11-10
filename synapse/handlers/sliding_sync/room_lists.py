@@ -593,6 +593,15 @@ class SlidingSyncRoomLists:
                                 # Update our `relevant_room_map` with the room we're going
                                 # to display and need to fetch more info about.
                                 room_sync_config = list_room_sync_config
+                                if (
+                                    room_sync_config.sticky_events
+                                    and room_membership.membership != Membership.JOIN
+                                ):
+                                    # Sticky events are only fetched for rooms the
+                                    # user is joined to (see `RoomSyncConfig.sticky_events`).
+                                    room_sync_config = attr.evolve(
+                                        room_sync_config, sticky_events=False
+                                    )
                                 existing_room_sync_config = relevant_room_map.get(
                                     room_id
                                 )
@@ -651,7 +660,10 @@ class SlidingSyncRoomLists:
                     # Take the superset of the `RoomSyncConfig` for each room.
                     room_sync_config = RoomSyncConfig.from_room_config(
                         room_subscription,
-                        sticky_events=sticky_events_scope.includes_room(room_id),
+                        # Sticky events are only fetched for rooms the user is
+                        # joined to (see `RoomSyncConfig.sticky_events`).
+                        sticky_events=sticky_events_scope.includes_room(room_id)
+                        and current_room_entry.membership == Membership.JOIN,
                     )
 
                     # Exclude partially-stated rooms if we must wait for the room to be
@@ -679,7 +691,6 @@ class SlidingSyncRoomLists:
             from_token,
             to_token,
             relevant_room_map,
-            room_membership_for_user_map,
         )
 
         return SlidingSyncInterestedRooms(
@@ -791,6 +802,15 @@ class SlidingSyncRoomLists:
                                 # Update our `relevant_room_map` with the room we're going
                                 # to display and need to fetch more info about.
                                 room_sync_config = list_room_sync_config
+                                if (
+                                    room_sync_config.sticky_events
+                                    and room_membership.membership != Membership.JOIN
+                                ):
+                                    # Sticky events are only fetched for rooms the
+                                    # user is joined to (see `RoomSyncConfig.sticky_events`).
+                                    room_sync_config = attr.evolve(
+                                        room_sync_config, sticky_events=False
+                                    )
                                 existing_room_sync_config = relevant_room_map.get(
                                     room_id
                                 )
@@ -847,7 +867,11 @@ class SlidingSyncRoomLists:
                     # Take the superset of the `RoomSyncConfig` for each room.
                     room_sync_config = RoomSyncConfig.from_room_config(
                         room_subscription,
-                        sticky_events=sticky_events_scope.includes_room(room_id),
+                        # Sticky events are only fetched for rooms the user is
+                        # joined to (see `RoomSyncConfig.sticky_events`).
+                        sticky_events=sticky_events_scope.includes_room(room_id)
+                        and room_membership_for_user_at_to_token.membership
+                        == Membership.JOIN,
                     )
 
                     # Exclude partially-stated rooms if we must wait for the room to be
@@ -877,7 +901,6 @@ class SlidingSyncRoomLists:
             from_token,
             to_token,
             relevant_room_map,
-            room_membership_for_user_map,
         )
 
         return SlidingSyncInterestedRooms(
@@ -921,15 +944,12 @@ class SlidingSyncRoomLists:
         from_token: StreamToken | None,
         to_token: StreamToken,
         relevant_room_map: dict[str, RoomSyncConfig],
-        room_membership_for_user_map: Mapping[str, RoomsForUserType],
     ) -> dict[str, RoomSyncConfig]:
         """Filters the `relevant_room_map` down to those rooms that may have
         updates we need to fetch and return.
 
-        Sticky events count as updates for the rooms in scope for the sticky events
-        extension (MSC4480), i.e. the rooms the user is joined to whose
-        `RoomSyncConfig.sticky_events` is set, as they are fetched alongside the
-        rest of the room data.
+        Sticky events count as updates for the rooms with `RoomSyncConfig.sticky_events`
+        set, as they are fetched alongside the rest of the room data.
         """
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
@@ -1018,17 +1038,10 @@ class SlidingSyncRoomLists:
                     # sticky events to send even when nothing new has happened
                     # in the room, e.g. because the room has just come into
                     # scope, or because we hit the `limit` last time.
-                    #
-                    # As with sync v2, we only send sticky events for rooms the
-                    # user is joined to. If they (re)join, the room will be
-                    # `initial` and we'll send all of the unexpired sticky events
-                    # then.
                     live_sticky_events_room_ids = []
                     for room_id, room_config in relevant_room_map.items():
                         if (
                             not room_config.sticky_events
-                            or room_membership_for_user_map[room_id].membership
-                            != Membership.JOIN
                             or room_id in rooms_should_send
                         ):
                             continue

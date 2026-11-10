@@ -555,10 +555,16 @@ class RoomSyncConfig:
             room. The values are close to `StateKey` but actually use a syntax where you
             can provide `*` wildcard and `$LAZY` for lazy-loading room members.
 
-        sticky_events: Whether the room is in scope for the sticky events extension
-            (MSC4480), as per its `lists`/`rooms` for this request. Should not be
-            persisted in the per-connection state or considered in comparisons to check
-            whether the config was expanded (see `RoomSyncConfig.requests_more_than(...)`).
+        sticky_events: Whether to fetch sticky events for the room, i.e. the room is
+            in scope for the sticky events extension (MSC4480), as per its
+            `lists`/`rooms` for this request, and the user is joined to it. As with
+            sync v2, we only send sticky events for rooms the user is joined to. If
+            they (re)join, the room will be `initial` and we'll send all of the
+            unexpired sticky events then.
+
+            Should not be persisted in the per-connection state or considered in
+            comparisons to check whether the config was expanded (see
+            `RoomSyncConfig.requests_more_than(...)`).
 
             We shouldn't consider `sticky_events` in expanded comparison checks because
             "expanded" means the client is asking for more timeline or state than it has
@@ -587,8 +593,8 @@ class RoomSyncConfig:
 
         Args:
             room_params: `SlidingSyncConfig.SlidingSyncList` or `SlidingSyncConfig.RoomSubscription`
-            sticky_events: Whether the list/room subscription is in scope for the
-                sticky events extension (MSC4480).
+            sticky_events: Whether to fetch sticky events for the room (see
+                `RoomSyncConfig.sticky_events`).
         """
         required_state_map: dict[str, set[str]] = {}
         for (
@@ -742,7 +748,7 @@ class RoomSyncConfig:
         """
         Check whether this config asks for anything more than `other_room_sync_config`
         already covered, i.e. whether this config is a "superset" of `other_room_sync_config`.
-        
+
         For example, we check for a higher `timeline_limit`, or `required_state`
         additions which would return `True`.
 
