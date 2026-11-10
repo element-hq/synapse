@@ -556,7 +556,7 @@ class RoomSyncConfig:
         sticky_events: Whether the room is in scope for the sticky events extension
             (MSC4480), as per its `lists`/`rooms` for this request. Should not be
             persisted in the per-connection state or considered in comparisons to check
-            whether the config was expanded.
+            whether the config was expanded (see `RoomSyncConfig.requests_more_than(...)`).
 
             We shouldn't consider `sticky_events` in expanded comparison checks because
             "expanded" means the client is asking for more timeline or state than it has
