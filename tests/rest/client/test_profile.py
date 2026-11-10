@@ -1068,11 +1068,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
-    def test_query_profiles_endpoint_when_msc4536_enabled_no_users_passed_in(
+    def test_query_profiles_endpoint_when_msc4536_enabled_empty_users(
         self,
     ) -> None:
-        """With MSC4536 enabled, the profiles query endpoint should
-        be enabled, and throw an error for invalid user ids.
+        """With MSC4536 enabled, the profiles query endpoint should reject an
+        empty `users` list.
         """
         channel = self.make_request(
             "POST",
@@ -1085,6 +1085,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
         self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
 
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_missing_users(
+        self,
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should reject a
+        request without a `users` list.
+        """
         channel = self.make_request(
             "POST",
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
