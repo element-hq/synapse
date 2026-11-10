@@ -45,7 +45,6 @@ from typing_extensions import TypeAlias
 
 from twisted.internet import defer
 from twisted.internet.base import _SystemEventID
-from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.tcp import Port
 from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
@@ -64,7 +63,10 @@ from synapse.appservice.api import ApplicationServiceApi
 from synapse.appservice.scheduler import ApplicationServiceScheduler
 from synapse.config.homeserver import HomeServerConfig
 from synapse.crypto import context_factory
-from synapse.crypto.context_factory import RegularPolicyForHTTPS
+from synapse.crypto.context_factory import (
+    RegularPolicyForHTTPS,
+    ServerContextFactory,
+)
 from synapse.crypto.keyring import Keyring
 from synapse.events.builder import EventBuilderFactory
 from synapse.events.presence_router import PresenceRouter
@@ -359,8 +361,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._module_web_resources: dict[str, Resource] = {}
         self._module_web_resources_consumed = False
 
-        # This attribute is set by the free function `refresh_certificate`.
-        self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
+        # Set by `synapse.app._base.start` when there is a TLS listener.
+        self.tls_server_context_factory: Optional[ServerContextFactory] = None
 
         self._is_shutdown = False
         self._async_shutdown_handlers: list[ShutdownInfo] = []
@@ -1214,7 +1216,11 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_msc4388_rendezvous_handler(self) -> MSC4388RendezvousHandler:
-        return MSC4388RendezvousHandler(self)
+        return MSC4388RendezvousHandler(
+            self,
+            max_unauthenticated_sessions=self.config.experimental.msc4388_max_unauthenticated_sessions,
+            ttl=self.config.experimental.msc4388_session_ttl_ms,
+        )
 
     @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":

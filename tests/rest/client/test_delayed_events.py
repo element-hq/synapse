@@ -30,7 +30,6 @@ from synapse.api.constants import (
     EventUnsignedContentFields,
     GuestAccess,
     Membership,
-    StickyEvent,
 )
 from synapse.api.errors import Codes, NotFoundError
 from synapse.appservice import ApplicationService
@@ -1514,16 +1513,7 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         config["experimental_features"] = {"msc4354_enabled": True}
         return config
 
-    @parameterized.expand(
-        (
-            (False, True),
-            (True, False),
-            (True, True),
-        )
-    )
-    def test_delayed_sticky_event_is_sent_with_sticky_duration(
-        self, param_in_body: bool, param_in_query: bool
-    ) -> None:
+    def test_delayed_sticky_event_is_sent_with_sticky_duration(self) -> None:
         """Test that the sticky duration given when scheduling a delayed event
         is applied to the event once it is sent."""
         path = self.helper.build_delayed_event_request_path(
@@ -1532,13 +1522,9 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         )
         body = self.helper.build_delayed_event_request_body(
             delay=Duration(milliseconds=900),
+            sticky_duration=Duration(minutes=1),
             content={"body": "sticky"},
         )
-        sticky_duration = Duration(minutes=1)
-        if param_in_body:
-            body[StickyEvent.REQUEST_PARAM_NAME] = sticky_duration.as_millis()
-        if param_in_query:
-            path += f"?{StickyEvent.REQUEST_PARAM_NAME}={sticky_duration.as_millis()}"
         channel = self.make_request("PUT", path, body, self.user1_access_token)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         delay_id = channel.json_body.get("delay_id")
@@ -1557,8 +1543,7 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
             event,
         )
 
-    @parameterized.expand((False, True))
-    def test_delayed_sticky_state_event(self, param_in_body: bool) -> None:
+    def test_delayed_sticky_state_event(self) -> None:
         """Test that delayed event requests forbid scheduling a sticky state event."""
         path = self.helper.build_delayed_event_request_path(
             room_id=self.room_id,
@@ -1566,24 +1551,15 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         )
         body = self.helper.build_delayed_event_request_body(
             delay=Duration(milliseconds=900),
+            sticky_duration=Duration(minutes=1),
             content={"topic": "This is a topic"},
             state_key="",
         )
-        sticky_duration = Duration(minutes=1)
-        if param_in_body:
-            body[StickyEvent.REQUEST_PARAM_NAME] = sticky_duration.as_millis()
-        else:
-            path += f"?{StickyEvent.REQUEST_PARAM_NAME}={sticky_duration.as_millis()}"
         channel = self.make_request("PUT", path, body, self.user1_access_token)
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
-    @parameterized.expand(
-        ((Duration(days=1), param_in_body) for param_in_body in (False, True))
-    )
-    def test_delayed_sticky_event_with_extreme_duration(
-        self, sticky_duration: Duration, param_in_body: bool
-    ) -> None:
+    def test_delayed_sticky_event_with_extreme_duration(self) -> None:
         """Test that delayed event requests permit a very long sticky duration.
         (The actual sticky duration is clamped at event send time.)"""
         path = self.helper.build_delayed_event_request_path(
@@ -1592,29 +1568,17 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         )
         body = self.helper.build_delayed_event_request_body(
             delay=Duration(milliseconds=900),
+            sticky_duration=Duration(days=1),
             content={"body": "sticky"},
         )
-        if param_in_body:
-            body[StickyEvent.REQUEST_PARAM_NAME] = sticky_duration.as_millis()
-        else:
-            path += f"?{StickyEvent.REQUEST_PARAM_NAME}={sticky_duration.as_millis()}"
         channel = self.make_request("PUT", path, body, self.user1_access_token)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         delay_id = channel.json_body.get("delay_id")
         assert delay_id is not None
 
-    @parameterized.expand(
-        (
-            (sticky_duration, param_in_body)
-            for sticky_duration in (
-                Duration(),
-                Duration(seconds=-2000),
-            )
-            for param_in_body in (False, True)
-        )
-    )
+    @parameterized.expand((Duration(), Duration(seconds=-2000)))
     def test_delayed_sticky_event_require_positive_duration(
-        self, sticky_duration: Duration, param_in_body: bool
+        self, sticky_duration: Duration
     ) -> None:
         """Test that delayed event requests forbid a zero or negative sticky duration."""
         path = self.helper.build_delayed_event_request_path(
@@ -1623,32 +1587,16 @@ class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
         )
         body = self.helper.build_delayed_event_request_body(
             delay=Duration(milliseconds=900),
+            sticky_duration=sticky_duration,
             content={"body": "sticky"},
         )
-        if param_in_body:
-            body[StickyEvent.REQUEST_PARAM_NAME] = sticky_duration.as_millis()
-        else:
-            path += f"?{StickyEvent.REQUEST_PARAM_NAME}={sticky_duration.as_millis()}"
         channel = self.make_request("PUT", path, body, self.user1_access_token)
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
-        self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
-
-    def test_delayed_sticky_event_with_conflicting_sticky_durations(self) -> None:
-        """Test that delayed event requests reject having a different sticky duration
-        in the query parameter & request body."""
-        path = self.helper.build_delayed_event_request_path(
-            room_id=self.room_id,
-            event_type=_EVENT_TYPE,
-        )
-        body = self.helper.build_delayed_event_request_body(
-            delay=Duration(milliseconds=900),
-            content={"body": "sticky"},
-        )
-        path += f"?{StickyEvent.REQUEST_PARAM_NAME}=10000"
-        body[StickyEvent.REQUEST_PARAM_NAME] = 20000
-        channel = self.make_request("PUT", path, body, self.user1_access_token)
-        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+        # Fails with BAD_JSON instead of INVALID_PARAM because the invalid value
+        # actually causes two ValidationErrors (as the value is neither of the
+        # two accepted types of PositiveInt or Absent), and the function for
+        # request body validation uses BAD_JSON when multiple errors are raised.
+        self.assertEqual(channel.json_body["errcode"], Codes.BAD_JSON)
 
 
 class DelayedEventsWorkerTestCase(
