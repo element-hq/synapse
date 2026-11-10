@@ -740,9 +740,11 @@ class RoomSyncConfig:
 
     def requests_more_than(self, other_room_sync_config: "RoomSyncConfig") -> bool:
         """
-        Check whether this `RoomSyncConfig` requests more timeline or state than
-        `other_room_sync_config`, i.e. whether the other config would have to be
-        expanded to cover this one.
+        Check whether this config asks for anything more than `other_room_sync_config`
+        already covered, i.e. whether this config is a "superset" of `other_room_sync_config`.
+        
+        For example, we check for a higher `timeline_limit`, or `required_state`
+        additions which would return `True`.
 
         `sticky_events` is deliberately not considered.
         """
