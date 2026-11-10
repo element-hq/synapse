@@ -81,10 +81,10 @@ class TestResourceLimitsServerNotices(unittest.HomeserverTestCase):
 
         self.user_id = "@user_id:test"
 
-        self._rlsn._server_notices_manager.get_or_create_notice_room_for_user = (
+        self._rlsn._server_notices_manager.get_or_create_notice_room_for_user = (  # type: ignore[method-assign]
             AsyncMock(return_value="!something:localhost")
         )
-        self._rlsn._server_notices_manager.maybe_get_notice_room_for_user = AsyncMock(
+        self._rlsn._server_notices_manager.maybe_get_notice_room_for_user = AsyncMock(  # type: ignore[method-assign]
             return_value="!something:localhost"
         )
         self._rlsn._store.add_tag_to_room = AsyncMock(return_value=None)  # type: ignore[method-assign]
@@ -326,7 +326,7 @@ class TestResourceLimitsServerNoticesWithRealRooms(unittest.HomeserverTestCase):
         shouldn't receive a server notice.
         """
         m = AsyncMock(return_value=None)
-        self._rlsn._server_notices_manager.maybe_get_notice_room_for_user = m
+        self._rlsn._server_notices_manager.maybe_get_notice_room_for_user = m  # type: ignore[method-assign]
 
         user_id = self.register_user("user", "password")
         tok = self.login("user", "password")
