@@ -1405,24 +1405,15 @@ class SlidingSyncExtensionHandler:
         profile_data_by_user = await self.store.get_profile_data_for_users(
             # Force our own user to be in the set, as we should
             # always watch our own profile updates
-            profile_user_ids | {user_id.to_string()}
+            user_ids=profile_user_ids | {user_id.to_string()},
+            field_names=fields,
         )
 
         # Serialise the profile updates into the sync response format.
         for profile_user_id, profile_data in profile_data_by_user.items():
-            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]]
-            # Include the fields the client asked for, or all, if not specified
-            if fields is not None:
-                per_user_updates = {
-                    k: v for k, v in profile_data.items() if k in fields
-                }
-            else:
-                per_user_updates = profile_data
-
-            if per_user_updates:
-                response[profile_user_id] = {
-                    "updated": per_user_updates,
-                }
+            response[profile_user_id] = {
+                "updated": profile_data,
+            }
 
         return response
 
@@ -1559,20 +1550,14 @@ class SlidingSyncExtensionHandler:
 
         profile_data_by_user = await self.store.get_profile_data_for_users(
             profile_user_ids,
+            field_names=fields,
         )
 
         # Serialise the profile updates into the sync response format.
         for profile_user_id in profile_user_ids:
             if profile_user_id in left_room_user_ids:
                 continue
-            profile_data = profile_data_by_user.get(profile_user_id)
-            if profile_data is None:
-                # We don't have profile data for this user
-                # (This is different from having an empty profile)
-                # Return a null in incremental sync, telling the client to
-                # remove all profile information for this user.
-                response[profile_user_id] = None
-                continue
+            profile_data = profile_data_by_user.get(profile_user_id, {})
 
             # Calculate which fields had updates
             updated_fields: set[str] = updated_user_fields.get(profile_user_id, set())
@@ -1594,10 +1579,6 @@ class SlidingSyncExtensionHandler:
                 or profile_user_id in lazy_profile_user_ids
                 else updated_fields
             )
-            # Filter down if the client only wants a subset
-            if fields:
-                user_fields = user_fields.intersection(fields)
-
             if not user_fields:
                 continue
 
@@ -1608,7 +1589,7 @@ class SlidingSyncExtensionHandler:
                     profile_data.get(field_name, Absent)
                 )
                 if (
-                    # If the field isn't found on the profile and it is present in
+                    # If the field isn't found on the profile, and it is present in
                     # `updated_fields`, that means an existing field has been removed.
                     field_value is Absent and field_name in updated_fields
                 ):

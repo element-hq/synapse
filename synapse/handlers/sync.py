@@ -2553,7 +2553,10 @@ class SyncHandler:
         if not user_ids:
             return
 
-        profile_data_by_user = await self.store.get_profile_data_for_users(user_ids)
+        profile_data_by_user = await self.store.get_profile_data_for_users(
+            user_ids=user_ids,
+            field_names=profile_fields,
+        )
 
         # Serialise the profile updates into the sync response format.
         profile_updates: dict[
@@ -2566,13 +2569,7 @@ class SyncHandler:
                 # in initial sync.
                 continue
 
-            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
-            for field_name in profile_fields:
-                if field_name in profile_data.keys():
-                    per_user_updates[field_name] = profile_data[field_name]
-
-            if per_user_updates:
-                profile_updates[other_user_id] = per_user_updates
+            profile_updates[other_user_id] = profile_data
 
         if profile_updates:
             sync_result_builder.profile_updates = profile_updates
@@ -2702,20 +2699,17 @@ class SyncHandler:
             # profile update will come down a second time.
             #
             # Hopefully clients can just filter these out.
-            profile_data_by_user = await self.store.get_profile_data_for_users(users)
+            profile_data_by_user = await self.store.get_profile_data_for_users(
+                user_ids=users,
+                field_names=profile_fields,
+            )
 
             # Note, we've already collected field updates above via `updates`,
             # outside of events in the timeline when lazy loading. When lazy loading,
             # we're already always sending the fields that have changed, regardless
             # of the lazy loading cache.
             for other_user_id in users:
-                profile_data = profile_data_by_user.get(other_user_id)
-                if profile_data is None:
-                    # No profile data for this user, just return a blank dictionary
-                    # in incremental sync, telling the clients to remove all profile
-                    # information for this user.
-                    profile_updates[other_user_id] = None
-                    continue
+                profile_data = profile_data_by_user.get(other_user_id, {})
 
                 per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
                 if include_users and other_user_id in include_users:
