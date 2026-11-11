@@ -111,7 +111,7 @@ class Thumbnailer:
         # FIXME: see FIXME on PILLOW_FORMATS
         # Remove conditional AVIF support when supported distros starts shipping
         # Pillow newer than 11.2.1
-        additional_formats = ("avif",) if PIL.features.check_module("avif") else ()
+        additional_formats = ("avif",) if PIL.features.check("avif") else ()
         try:
             self.image = Image.open(
                 input_path, formats=self.PILLOW_FORMATS + additional_formats

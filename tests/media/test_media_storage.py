@@ -356,7 +356,7 @@ test_images = [
     # Pillow 11.1.0, lower then the 11.2.1 required for AVIF support.
     # Remove conditional test when supported distros starts shipping
     # Pillow newer than 11.2.1
-    *([small_avif] if PIL.features.check_module("avif") else []),
+    *([small_avif] if PIL.features.check("avif") else []),
 ]
 input_values = [(x,) for x in test_images]
 
