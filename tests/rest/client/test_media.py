@@ -30,6 +30,7 @@ from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
+import PIL.features
 from matrix_common.types.mxc_uri import MXCUri
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
@@ -2046,13 +2047,17 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
 
 
 test_images = [
-    small_avif,
     small_png,
     small_png_with_transparency,
     small_cmyk_jpeg,
     small_lossless_webp,
     empty_file,
     SVG,
+    # FIXME: conditionally test AVIF because Debian trixie ships
+    # Pillow 11.1.0, lower then the 11.2.1 required for AVIF support.
+    # Remove conditional test when supported distros starts shipping
+    # Pillow newer than 11.2.1
+    *([small_avif] if PIL.features.check_module("avif") else []),
 ]
 input_values = [(x,) for x in test_images]
 
