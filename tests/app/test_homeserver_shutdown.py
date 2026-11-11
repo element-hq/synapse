@@ -29,7 +29,6 @@ from synapse.logging.context import LoggingContext
 from synapse.storage.background_updates import UpdaterStatus
 
 from tests.server import (
-    cleanup_test_reactor_system_event_triggers,
     get_clock,
     setup_test_homeserver,
 )
@@ -69,9 +68,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Run the reactor so any `callWhenRunning` functions can be cleared out.
         self.reactor.run()
-        # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
-        # we use in tests doesn't handle this properly (see doc comment)
-        cleanup_test_reactor_system_event_triggers(self.reactor)
 
         async def shutdown() -> None:
             # Use a logcontext just to double-check that we don't mangle the logcontext
@@ -127,7 +123,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # The same shutdown sequence as `test_clean_homeserver_shutdown`.
         self.reactor.run()
-        cleanup_test_reactor_system_event_triggers(self.reactor)
         self.get_success(self.hs.shutdown())
         self.reactor.advance(0)
         del self.hs
@@ -162,9 +157,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Run the reactor so any `callWhenRunning` functions can be cleared out.
         self.reactor.run()
-        # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
-        # we use in tests doesn't handle this properly (see doc comment)
-        cleanup_test_reactor_system_event_triggers(self.reactor)
 
         # Ensure the background updates are not complete.
         self.assertNotEqual(store.db_pool.updates.get_status(), UpdaterStatus.COMPLETE)
@@ -226,9 +218,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Run the reactor so any `callWhenRunning` functions can be cleared out.
         self.reactor.run()
-        # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
-        # we use in tests doesn't handle this properly (see doc comment)
-        cleanup_test_reactor_system_event_triggers(self.reactor)
 
         async def shutdown() -> None:
             # Use a logcontext just to double-check that we don't mangle the logcontext
