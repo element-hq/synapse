@@ -1045,7 +1045,7 @@ class SlidingSyncExtensionHandler:
         await self._record_sticky_events_in_out_of_scope_rooms(
             previous_connection_state=previous_connection_state,
             new_connection_state=new_connection_state,
-            fetched_room_ids={
+            relevant_room_ids={
                 room_id
                 for room_id, room_result in actual_room_response_map.items()
                 if room_result.sticky_events is not None
@@ -1069,7 +1069,7 @@ class SlidingSyncExtensionHandler:
         self,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        fetched_room_ids: AbstractSet[str],
+        relevant_room_ids: AbstractSet[str],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> None:
@@ -1090,8 +1090,10 @@ class SlidingSyncExtensionHandler:
             previous_connection_state: The current per-connection state
             new_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state.
-            fetched_room_ids: The rooms we fetched sticky events for in this
-                request (and so have already recorded the state for).
+            relevant_room_ids: The rooms that are in scope for the extension
+                (empty if the extension is disabled). These are the rooms we
+                fetched sticky events for in this request (and so have already
+                recorded the state for).
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
@@ -1103,7 +1105,7 @@ class SlidingSyncExtensionHandler:
             room_id
             for room_id, room_status in previous_connection_state.sticky_events._statuses.items()
             if room_status.status == HaveSentRoomFlag.LIVE
-            and room_id not in fetched_room_ids
+            and room_id not in relevant_room_ids
         ]
         changed_rooms = await self.store.get_rooms_with_sticky_events_between(
             rooms_out_of_scope,
