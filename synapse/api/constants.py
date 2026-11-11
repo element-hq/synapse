@@ -519,9 +519,6 @@ class StickyEvent:
     response (MSC4480).
 
     This is the default specified in the MSC. Chosen arbitrarily.
-
-    Does not apply when joining a new room, see
-    https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r3021907998
     """
 
 
