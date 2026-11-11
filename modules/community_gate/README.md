@@ -27,7 +27,14 @@ would make every Google user internal.
 - **Join** — internal: anywhere. Community: a space listed in
   `community_spaces`, any room reachable from it through `m.space.child`
   (nested subspaces included, up to 5 levels; children with empty content
-  are treated as removed), or a room whose active members (`join`/`invite`)
+  are treated as removed). A child only counts if it also has an
+  `m.space.parent` event pointing back at that space: the community owner
+  has power in the space and could publish `m.space.child` for any room,
+  including internal ones, but `m.space.parent` lives in the child room
+  itself, so only someone with power there can confirm the link. Rooms
+  created outside Element's "create room in space" flow (e.g. via
+  `room_service`) must get their `m.space.parent` set by an admin. Also
+  allowed: a room whose active members (`join`/`invite`)
   are all community — that is what lets community members DM each other.
   An empty room never counts as community-only.
 - **Invite** — free on the same side of the boundary (internal → internal,
@@ -48,6 +55,10 @@ On load the module stores its rule at `api._hs.community_gate`.
   community members;
 - `invite` (keyword) and `invite_space` answer `403` before attempting the
   admin join.
+
+`bundle_service.invite_bundle` skips rooms the gate denies, for the same
+reason: the admin join invites before the join is refused, which would leave
+a dangling invite carrying an internal room's name.
 
 Without this module loaded, `room_service` behaves as before.
 

@@ -43,12 +43,28 @@ class CommunityGate:
                 if space_id == room_id:
                     return True
                 children = await self.backend.space_child_events(space_id)
-                # m.space.child com content vazio (sem `via`) = filho removido
-                next_frontier += [c for c, content in children.items() if content.get("via")]
+                for child_id, content in children.items():
+                    # m.space.child com content vazio (sem `via`) = filho removido
+                    if not content.get("via"):
+                        continue
+                    if await self._child_confirms_parent(child_id, space_id):
+                        next_frontier.append(child_id)
             if not next_frontier:
                 return False
             frontier = next_frontier
         return False
+
+    async def _child_confirms_parent(self, child_id, space_id):
+        """O link space->filha so vale se a filha declara o space como pai.
+
+        Quem tem PL no space da comunidade (o dono dela) consegue publicar
+        m.space.child apontando para qualquer sala, inclusive interna. Ja o
+        m.space.parent fica na propria sala filha, e so quem tem PL nela
+        consegue grava-lo, entao exigir os dois lados impede que o dono da
+        comunidade "adote" uma sala interna.
+        """
+        parents = await self.backend.space_parent_events(child_id)
+        return bool((parents.get(space_id) or {}).get("via"))
 
     async def _is_community_only_room(self, room_id):
         """DM/sala cujos membros ativos sao todos da comunidade (e existem)."""

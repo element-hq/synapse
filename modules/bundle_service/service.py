@@ -311,9 +311,19 @@ class BundleService:
         )
 
         joined_rooms = []
+        gate = self.room_service._community_gate()
 
         for row in rows:
             room_id = row[0] if isinstance(row, (list, tuple)) else row
+            # Sala negada pelo community_gate nem chega ao admin join: ele
+            # convida antes do join ser barrado e deixaria um convite pendurado.
+            if gate is not None and not await gate.may_join(user_id, room_id):
+                logger.info(
+                    "community_gate: invite_bundle pulou room=%s user=%s",
+                    room_id,
+                    user_id,
+                )
+                continue
             try:
                 logger.debug(
                     "invite_bundle: joining user=%s room=%s",

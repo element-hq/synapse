@@ -41,6 +41,14 @@ class FakeBackend:
             },
             COMMUNITY_SUBSPACE: {COMMUNITY_DEEP_ROOM: {"via": ["hs"]}},
         }
+        # room_id -> {state_key: content} dos eventos m.space.parent.
+        # O link so vale com os dois lados: child no space E parent na filha.
+        self.space_parents = {
+            COMMUNITY_ROOM: {COMMUNITY_SPACE: {"via": ["hs"]}},
+            COMMUNITY_SUBSPACE: {COMMUNITY_SPACE: {"via": ["hs"]}},
+            COMMUNITY_DEEP_ROOM: {COMMUNITY_SUBSPACE: {"via": ["hs"]}},
+            REMOVED_CHILD: {COMMUNITY_SPACE: {"via": ["hs"]}},
+        }
         # room_id -> {user_id: membership}
         self.members = {
             INTERNAL_ROOM: {ADMIN: "join", STAFF: "join"},
@@ -55,6 +63,9 @@ class FakeBackend:
 
     async def space_child_events(self, room_id):
         return self.space_children.get(room_id, {})
+
+    async def space_parent_events(self, room_id):
+        return self.space_parents.get(room_id, {})
 
     async def memberships(self, room_id):
         return self.members.get(room_id, {})
@@ -127,9 +138,33 @@ async def test_filho_removido_do_space_nao_conta():
 
 
 @pytest.mark.asyncio
+async def test_filho_declarado_so_pelo_space_nao_conta():
+    # dono do space da comunidade (PL 100 la) adiciona uma sala interna como
+    # filha; sem m.space.parent na sala interna, o link nao vale
+    backend = FakeBackend()
+    backend.space_children[COMMUNITY_SPACE][INTERNAL_ROOM] = {"via": ["hs"]}
+    assert await _gate(backend).may_join(FAN, INTERNAL_ROOM) is False
+
+
+@pytest.mark.asyncio
+async def test_parent_removido_na_filha_nao_conta():
+    backend = FakeBackend()
+    backend.space_parents[COMMUNITY_ROOM] = {COMMUNITY_SPACE: {}}
+    assert await _gate(backend).may_join(FAN, COMMUNITY_ROOM) is False
+
+
+@pytest.mark.asyncio
+async def test_parent_apontando_para_outro_space_nao_conta():
+    backend = FakeBackend()
+    backend.space_parents[COMMUNITY_ROOM] = {"!outro-space:hs": {"via": ["hs"]}}
+    assert await _gate(backend).may_join(FAN, COMMUNITY_ROOM) is False
+
+
+@pytest.mark.asyncio
 async def test_ciclo_entre_spaces_nao_trava():
     backend = FakeBackend()
     backend.space_children[COMMUNITY_SUBSPACE][COMMUNITY_SPACE] = {"via": ["hs"]}
+    backend.space_parents[COMMUNITY_SPACE] = {COMMUNITY_SUBSPACE: {"via": ["hs"]}}
     assert await _gate(backend).may_join(FAN, INTERNAL_ROOM) is False
 
 

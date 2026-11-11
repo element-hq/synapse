@@ -119,6 +119,15 @@ async def test_backend_le_filhos_do_space_por_state_key():
 
 
 @pytest.mark.asyncio
+async def test_backend_le_pais_da_sala_por_state_key():
+    api = _api(
+        state={("!r:hs", "m.space.parent"): [_event("!s:hs", {"via": ["hs"]})]}
+    )
+    parents = await SynapseBackend(api).space_parent_events("!r:hs")
+    assert parents == {"!s:hs": {"via": ["hs"]}}
+
+
+@pytest.mark.asyncio
 async def test_backend_le_membership_por_usuario():
     api = _api(
         state={

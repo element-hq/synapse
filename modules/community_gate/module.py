@@ -41,6 +41,10 @@ class SynapseBackend:
         events = await self._state(room_id, "m.space.child")
         return {ev.state_key: ev.content for ev in events}
 
+    async def space_parent_events(self, room_id):
+        events = await self._state(room_id, "m.space.parent")
+        return {ev.state_key: ev.content for ev in events}
+
     async def memberships(self, room_id):
         events = await self._state(room_id, "m.room.member")
         return {ev.state_key: ev.content.get("membership") for ev in events}
