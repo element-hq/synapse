@@ -515,6 +515,94 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
             [user4_id],
         )
 
+    def test_device_lists_user_joins_after_invite(self) -> None:
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.invite(room_id, src=user1_id, targ=user2_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "e2ee": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        self.helper.join(room_id, user2_id, tok=user2_tok)
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertEqual(
+            response_body["extensions"]["e2ee"].get("device_lists", {}).get("changed"),
+            [user2_id],
+        )
+
+    def test_device_lists_user_invited_and_left_is_not_changed(self) -> None:
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "e2ee": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        self.helper.invite(room_id, src=user1_id, targ=user2_id, tok=user1_tok)
+        self.helper.join(room_id, user2_id, tok=user2_tok)
+        self.helper.leave(room_id, user2_id, tok=user2_tok)
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        device_lists = response_body["extensions"]["e2ee"].get("device_lists", {})
+        self.assertNotIn(user2_id, device_lists.get("changed", []))
+        self.assertEqual(device_lists.get("left"), [user2_id])
+
+    def test_device_lists_member_profile_change_is_not_changed(self) -> None:
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.join(room_id, user2_id, tok=user2_tok)
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "e2ee": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        self.helper.send_state(
+            room_id,
+            "m.room.member",
+            {"membership": "join", "displayname": "New Name"},
+            tok=user2_tok,
+            state_key=user2_id,
+        )
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        device_lists = response_body["extensions"]["e2ee"].get("device_lists", {})
+        self.assertNotIn(user2_id, device_lists.get("changed", []))
+
     def test_device_one_time_keys_count(self) -> None:
         """
         Test that `device_one_time_keys_count` are included in the response
