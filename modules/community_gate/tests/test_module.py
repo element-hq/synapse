@@ -109,6 +109,69 @@ async def test_evento_comum_vira_not_spam():
     assert await callbacks["check_event_for_spam"](event) == NOT_SPAM
 
 
+CONFIG_SPACE = {
+    **CONFIG,
+    "internal_space": "!buzzlabs:hs",
+    "admin_user_id": "@scribe:hs",
+}
+
+
+def _login_module(memberships):
+    api = _api(
+        state={
+            ("!buzzlabs:hs", "m.room.member"): [
+                _event(u, {"membership": m}) for u, m in memberships.items()
+            ]
+        }
+    )
+    api.update_room_membership = AsyncMock()
+    module = CommunityGateModule(CommunityGateModule.parse_config(CONFIG_SPACE), api)
+    return module, api
+
+
+def test_registra_callback_de_login():
+    _, api = _login_module({})
+    kwargs = api.register_account_validity_callbacks.call_args.kwargs
+    assert set(kwargs) == {"on_user_login"}
+
+
+@pytest.mark.asyncio
+async def test_login_google_convida_e_entra_no_space_interno():
+    module, api = _login_module({})
+    await module.on_user_login("@staff:hs", "m.login.sso", "oidc-google")
+    assert [c.args for c in api.update_room_membership.await_args_list] == [
+        ("@scribe:hs", "@staff:hs", "!buzzlabs:hs", "invite"),
+        ("@staff:hs", "@staff:hs", "!buzzlabs:hs", "join"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_login_google_com_convite_pendente_so_entra():
+    module, api = _login_module({"@staff:hs": "invite"})
+    await module.on_user_login("@staff:hs", "m.login.sso", "oidc-google")
+    assert [c.args for c in api.update_room_membership.await_args_list] == [
+        ("@staff:hs", "@staff:hs", "!buzzlabs:hs", "join"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_falha_ao_entrar_no_space_nao_quebra_o_login():
+    module, api = _login_module({})
+    api.update_room_membership = AsyncMock(side_effect=RuntimeError("boom"))
+    await module.on_user_login("@staff:hs", "m.login.sso", "oidc-google")  # nao levanta
+
+
+def test_config_internal_space_exige_admin_user_id():
+    with pytest.raises(Exception):
+        CommunityGateModule.parse_config({**CONFIG, "internal_space": "!buzzlabs:hs"})
+
+
+def test_sem_internal_space_nao_registra_callback_de_login():
+    api = _api()
+    CommunityGateModule(CommunityGateModule.parse_config(CONFIG), api)
+    api.register_account_validity_callbacks.assert_not_called()
+
+
 def test_publica_o_gate_para_outros_modulos():
     api = _api()
     module = CommunityGateModule(CommunityGateModule.parse_config(CONFIG), api)

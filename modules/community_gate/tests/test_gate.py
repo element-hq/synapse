@@ -311,3 +311,53 @@ async def test_outro_widget_em_sala_da_comunidade_e_permitido():
 async def test_mensagem_comum_em_sala_da_comunidade_e_permitida():
     content = {"msgtype": "m.text", "body": "oi"}
     assert await _gate().may_send_event("m.room.message", content, COMMUNITY_ROOM) is True
+
+
+# ---------------- auto-entrada no space interno ----------------
+# Funcionario (login oidc-google) entra sozinho no space interno no login;
+# as salas internas sao restricted -> membros desse space.
+
+INTERNAL_SPACE = "!buzzlabs:hs"
+
+
+def _gate_com_space(backend=None):
+    return CommunityGate(
+        backend=backend or FakeBackend(),
+        internal_auth_provider=PROVIDER,
+        community_spaces=[COMMUNITY_SPACE],
+        internal_space=INTERNAL_SPACE,
+    )
+
+
+@pytest.mark.asyncio
+async def test_login_google_fora_do_space_interno_deve_entrar():
+    assert await _gate_com_space().should_join_internal_space(STAFF, PROVIDER) is True
+
+
+@pytest.mark.asyncio
+async def test_login_google_ja_membro_nao_entra_de_novo():
+    backend = FakeBackend()
+    backend.members[INTERNAL_SPACE] = {STAFF: "join"}
+    assert await _gate_com_space(backend).should_join_internal_space(STAFF, PROVIDER) is False
+
+
+@pytest.mark.asyncio
+async def test_login_google_com_convite_pendente_deve_entrar():
+    backend = FakeBackend()
+    backend.members[INTERNAL_SPACE] = {STAFF: "invite"}
+    assert await _gate_com_space(backend).should_join_internal_space(STAFF, PROVIDER) is True
+
+
+@pytest.mark.asyncio
+async def test_login_por_senha_nao_entra_no_space_interno():
+    assert await _gate_com_space().should_join_internal_space(FAN, None) is False
+
+
+@pytest.mark.asyncio
+async def test_login_por_outro_provider_nao_entra_no_space_interno():
+    assert await _gate_com_space().should_join_internal_space(FAN, "oidc-github") is False
+
+
+@pytest.mark.asyncio
+async def test_sem_space_interno_configurado_nao_faz_nada():
+    assert await _gate().should_join_internal_space(STAFF, PROVIDER) is False

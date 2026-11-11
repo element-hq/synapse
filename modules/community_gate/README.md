@@ -53,6 +53,17 @@ would make every Google user internal.
 
 Denials return `M_FORBIDDEN` and are logged at `INFO`.
 
+## Internal space auto-join (optional)
+
+When `internal_space` is set, staff join it automatically on login
+(`on_user_login` account-validity callback): if the login came from
+`internal_auth_provider` and the user isn't a member yet, `admin_user_id`
+invites them (unless an invite is already pending) and they join. Internal
+rooms are `restricted` to members of that space, so this is what lets new
+hires see them. The SSO handler records the external ID before this callback
+runs, so first logins count as internal. Failures are logged and never block
+the login.
+
 ## Cross-module use
 
 On load the module stores its rule at `api._hs.community_gate`.
@@ -78,6 +89,9 @@ modules:
       internal_auth_provider: oidc-google   # optional, default oidc-google
       community_spaces:
         - "!communitySpace:matrix.example.com"
+      # optional — staff auto-join on login
+      internal_space: "!companySpace:matrix.example.com"
+      admin_user_id: "@admin:matrix.example.com"   # who sends the invite
 ```
 
 Recommended alongside it in `homeserver.yaml`:

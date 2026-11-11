@@ -21,10 +21,11 @@ JITSI_WIDGET_TYPES = ("m.jitsi", "jitsi")
 
 
 class CommunityGate:
-    def __init__(self, backend, internal_auth_provider, community_spaces):
+    def __init__(self, backend, internal_auth_provider, community_spaces, internal_space=None):
         self.backend = backend
         self.internal_auth_provider = internal_auth_provider
         self.community_spaces = list(community_spaces)
+        self.internal_space = internal_space
 
     async def is_internal(self, user_id):
         """Interno = admin do servidor ou login pelo provider interno."""
@@ -105,6 +106,19 @@ class CommunityGate:
             room_id,
         )
         return False
+
+    async def should_join_internal_space(self, user_id, auth_provider_id):
+        """Login pelo provider interno e ainda fora do space interno?
+
+        As salas internas sao restricted -> membros do space interno, entao
+        funcionario novo precisa entrar nele para enxerga-las. Decide pelo
+        provider do proprio login (nao por consulta), e convite pendente
+        ainda conta como "fora".
+        """
+        if not self.internal_space or auth_provider_id != self.internal_auth_provider:
+            return False
+        memberships = await self.backend.memberships(self.internal_space)
+        return memberships.get(user_id) != "join"
 
     async def may_send_event(self, event_type, content, room_id):
         """Sem widget Jitsi em sala da comunidade (nem em DM so de comunidade).
