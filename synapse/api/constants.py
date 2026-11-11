@@ -502,7 +502,7 @@ class StickyEvent:
     Ensures that data in the /sync response can go down and not grow unbounded.
     """
 
-    MAX_STICKY_EVENTS_IN_SYNC = 100
+    MAX_STICKY_EVENTS_IN_SYNC: Final = 100
     """
     Maximum number of sticky events (MSC4354) to include in a /sync response (in
     total, across all rooms).
