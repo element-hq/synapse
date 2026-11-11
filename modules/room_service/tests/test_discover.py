@@ -11,6 +11,9 @@ async def test_discover_success():
     Deve retornar 200 e lista de salas corretamente formatada.
     """
     api = MagicMock()
+    requester = MagicMock()
+    requester.user.to_string.return_value = "@alice:localhost"
+    api.get_user_by_req = AsyncMock(return_value=requester)
 
     service = MagicMock()
     service.discover = AsyncMock(return_value=[
@@ -39,4 +42,4 @@ async def test_discover_success():
     assert room["name"] == "Sala Teste"
     assert room["member_count"] == 3
 
-    service.discover.assert_called_once()
+    service.discover.assert_called_once_with(user_id="@alice:localhost")

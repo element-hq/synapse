@@ -20,6 +20,7 @@ async def test_invite_bundle_success():
     store.db_pool = db_pool
 
     room_service = MagicMock()
+    room_service._community_gate = MagicMock(return_value=None)  # gate nao carregado
     room_service._admin_join = AsyncMock()
 
     service = BundleService(api, room_service)
@@ -55,6 +56,7 @@ async def test_invite_bundle_no_rooms():
     store.db_pool = db_pool
 
     room_service = MagicMock()
+    room_service._community_gate = MagicMock(return_value=None)  # gate nao carregado
     room_service._admin_join = AsyncMock()
 
     service = BundleService(api, room_service)
@@ -85,6 +87,7 @@ async def test_invite_bundle_partial_failure():
     store.db_pool = db_pool
 
     room_service = MagicMock()
+    room_service._community_gate = MagicMock(return_value=None)  # gate nao carregado
 
     async def mock_join(room_id, user_id):
         if room_id == "!room2:localhost":
@@ -124,6 +127,7 @@ async def test_invite_bundle_string_rows():
     store.db_pool = db_pool
 
     room_service = MagicMock()
+    room_service._community_gate = MagicMock(return_value=None)  # gate nao carregado
     room_service._admin_join = AsyncMock()
 
     service = BundleService(api, room_service)

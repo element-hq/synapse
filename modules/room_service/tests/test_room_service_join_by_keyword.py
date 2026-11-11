@@ -11,6 +11,7 @@ async def test_join_by_keyword_room_not_found():
     """
     api = MagicMock()
     hs = MagicMock()
+    hs.community_gate = None  # community_gate nao carregado
     api._hs = hs
 
     store = MagicMock()
@@ -36,6 +37,7 @@ async def test_join_by_keyword_room_not_found():
 async def test_join_by_keyword_success():
     api = MagicMock()
     hs = MagicMock()
+    hs.community_gate = None  # community_gate nao carregado
     api._hs = hs
 
     store = MagicMock()
@@ -76,6 +78,7 @@ async def test_join_by_keyword_admin_join_fails():
     """
     api = MagicMock()
     hs = MagicMock()
+    hs.community_gate = None  # community_gate nao carregado
     api._hs = hs
 
     store = MagicMock()

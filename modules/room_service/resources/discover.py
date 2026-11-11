@@ -10,5 +10,6 @@ class DiscoverRoomResource(DirectServeJsonResource):
         self.service = service
 
     async def _async_render_GET(self, request):
-        rooms = await self.service.discover()
+        requester = await self.api.get_user_by_req(request)
+        rooms = await self.service.discover(user_id=requester.user.to_string())
         return 200, {"rooms": rooms}
