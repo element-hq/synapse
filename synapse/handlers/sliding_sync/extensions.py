@@ -113,9 +113,8 @@ class SlidingSyncExtensionHandler:
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
             actual_room_response_map: A map of room ID to room results for the rooms
-                we fetched data for. Only rooms with updates are returned in the
-                Sliding Sync response, but the other results can still carry data
-                for the extensions, e.g. sticky events (MSC4480).
+                we fetched data for. The sticky events (MSC4480) are taken from here
+                regardless of whether the room has any other updates.
             to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
@@ -696,8 +695,8 @@ class SlidingSyncExtensionHandler:
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
-            actual_room_response_map: A map of room ID to room results in the the
-                Sliding Sync response.
+            actual_room_response_map: A map of room ID to room results for the rooms
+                we fetched data for.
             account_data_request: The account_data extension from the request
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
@@ -898,8 +897,8 @@ class SlidingSyncExtensionHandler:
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
-            actual_room_response_map: A map of room ID to room results in the the
-                Sliding Sync response.
+            actual_room_response_map: A map of room ID to room results for the rooms
+                we fetched data for.
             account_data_request: The account_data extension from the request
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
@@ -1038,8 +1037,8 @@ class SlidingSyncExtensionHandler:
             sticky_events_request: The sticky_events extension from the request,
                 or absent if the request didn't include it.
             actual_room_response_map: A map of room ID to room results for the rooms
-                we fetched data for. The sticky events are taken from here regardless
-                of whether the room has any other updates.
+                we fetched data for. The sticky events (MSC4480) are taken from here
+                regardless of whether the room has any other updates.
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
@@ -1142,7 +1141,8 @@ class SlidingSyncExtensionHandler:
             user_id: The full user ID syncing.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
             sync_config: The Sliding Sync config object.
-            actual_room_response_map: A calculated map of responses per room.
+            actual_room_response_map: A map of room ID to room results for the rooms
+                we fetched data for.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
 
@@ -1297,7 +1297,8 @@ class SlidingSyncExtensionHandler:
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
             to_token: The stream token to generate a response until.
             from_token: The stream token to generate a response from.
-            actual_room_response_map: A calculated map of responses per room.
+            actual_room_response_map: A map of room ID to room results for the rooms
+                we fetched data for.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
 
