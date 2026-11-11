@@ -32,39 +32,61 @@
 //! Rust unit tests).
 
 use std::{
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, OnceLock,
-    },
+    sync::OnceLock,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use pyo3::{pyfunction, Python};
+use tokio::sync::watch;
 
 /// A time that only moves when a test sets it.
 ///
 /// Clones share the same time.
 #[derive(Debug, Clone)]
 pub struct VirtualTime {
-    /// The time in milliseconds since the Unix epoch.
-    millis: Arc<AtomicU64>,
+    /// The time in milliseconds since the Unix epoch. This is a channel so
+    /// that [`Clock::sleep`] can wait for the time to change.
+    millis: watch::Sender<u64>,
 }
 
 impl VirtualTime {
     /// A virtual time that starts at `millis` since the Unix epoch.
     pub fn new(millis: u64) -> Self {
         VirtualTime {
-            millis: Arc::new(AtomicU64::new(millis)),
+            millis: watch::Sender::new(millis),
         }
     }
 
-    /// Move the time to `millis` since the Unix epoch.
+    /// Move the time to `millis` since the Unix epoch, and wake up any
+    /// sleepers that are now due.
     pub fn set_millis(&self, millis: u64) {
-        self.millis.store(millis, Ordering::Relaxed);
+        // Only wake the sleepers if the time has changed. Python's unit
+        // tests advance the reactor by zero seconds a lot.
+        self.millis
+            .send_if_modified(|now| std::mem::replace(now, millis) != millis);
     }
 
     fn now(&self) -> SystemTime {
-        UNIX_EPOCH + Duration::from_millis(self.millis.load(Ordering::Relaxed))
+        UNIX_EPOCH + Duration::from_millis(*self.millis.borrow())
+    }
+
+    /// Wait until the time has moved on by `duration`.
+    async fn sleep(&self, duration: Duration) {
+        // The virtual time counts whole milliseconds. Round up so that we never
+        // wake early.
+        let duration_millis =
+            u64::try_from(duration.as_nanos().div_ceil(1_000_000)).expect("duration is too large");
+
+        let mut millis = self.millis.subscribe();
+        let wake_up_time = *millis.borrow() + duration_millis;
+
+        // Wait for the test to move the time far enough. `wait_for` checks
+        // the current time before it waits, so we cannot miss a change that
+        // happens on another thread meanwhile.
+        millis
+            .wait_for(|now| *now >= wake_up_time)
+            .await
+            .expect("we hold a sender, so the channel cannot close");
     }
 }
 
@@ -140,10 +162,49 @@ impl Clock {
             .expect("system clock was set before the Unix epoch, 1970")
             .as_millis() as u64
     }
+
+    /// Wait until `duration` has passed on this clock.
+    ///
+    /// Use this in place of [`tokio::time::sleep`], which always waits on the
+    /// real time. On a virtual time this finishes once the test has moved
+    /// the time to the wake-up time.
+    ///
+    /// Under Python's unit tests, `reactor.advance()` wakes the sleeper but
+    /// does not wait for it. The task carries on later, on a Tokio worker
+    /// thread. A test has to keep advancing the reactor until the result has
+    /// come back to it.
+    ///
+    /// # Panics
+    ///
+    /// On the real time this uses Tokio's timer, so it panics if polled
+    /// outside a Tokio runtime. On a virtual time it runs anywhere. A unit
+    /// test that polls the future by hand therefore cannot catch a caller
+    /// that is not on a runtime.
+    pub async fn sleep(&self, duration: Duration) {
+        match (self, PYTHON_VIRTUAL_TIME.get()) {
+            (Clock::Process, None) =>
+            {
+                #[allow(clippy::disallowed_methods)]
+                tokio::time::sleep(duration).await
+            }
+            (Clock::Process, Some(virtual_time)) => virtual_time.sleep(duration).await,
+            (Clock::Internal(virtual_time), None) => virtual_time.sleep(duration).await,
+            (Clock::Internal(_), Some(_)) => {
+                panic!("Internal clock should not be used with Python virtual time")
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        pin::pin,
+        task::{Context, Waker},
+    };
+
+    use futures::FutureExt;
+
     use super::*;
 
     #[test]
@@ -162,5 +223,61 @@ mod tests {
         // Zero is a legitimate virtual time. The memory reactor starts there.
         virtual_time.set_millis(0);
         assert_eq!(clock.now_millis(), 0);
+    }
+
+    #[test]
+    fn virtual_time_sleepers_are_woken_up_in_order() {
+        let virtual_time = VirtualTime::new(0);
+        let clock = Clock::Internal(virtual_time.clone());
+
+        // Schedule two sleepers with different durations. The one with the
+        // shorter duration should wake up first.
+        let mut sleep1 = pin!(clock.sleep(Duration::from_millis(10)));
+        let mut sleep2 = pin!(clock.sleep(Duration::from_millis(5)));
+
+        let mut cx = Context::from_waker(Waker::noop());
+
+        // Initially, both sleepers should be pending because virtual time has
+        // not advanced yet.
+        assert!(sleep1.poll_unpin(&mut cx).is_pending());
+        assert!(sleep2.poll_unpin(&mut cx).is_pending());
+
+        // Advance virtual time to wake up the sleepers.
+        virtual_time.set_millis(5);
+
+        // After advancing virtual time to 5 milliseconds, the second sleeper
+        // (with a 5ms duration) should be ready, while the first sleeper
+        // (with a 10ms duration) should still be pending.
+        assert!(sleep1.poll_unpin(&mut cx).is_pending());
+        assert!(sleep2.poll_unpin(&mut cx).is_ready());
+
+        virtual_time.set_millis(10);
+
+        // After advancing virtual time to 10 milliseconds, the first sleeper
+        // (with a 10ms duration) should now be ready.
+        assert!(sleep1.poll_unpin(&mut cx).is_ready());
+    }
+
+    #[test]
+    fn virtual_time_advance_notifies_the_sleeping_task() {
+        let virtual_time = VirtualTime::new(0);
+        let clock = Clock::Internal(virtual_time.clone());
+
+        let (waker, awoken_count) = futures_test::task::new_count_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        let mut sleep = pin!(clock.sleep(Duration::from_millis(5)));
+        assert!(sleep.poll_unpin(&mut cx).is_pending());
+        assert_eq!(awoken_count.get(), 0);
+
+        // Setting the time it already has wakes nobody.
+        virtual_time.set_millis(0);
+        assert_eq!(awoken_count.get(), 0);
+
+        // The other tests poll by hand. A real task is only polled again
+        // once its waker is called.
+        virtual_time.set_millis(5);
+        assert_eq!(awoken_count.get(), 1);
+        assert!(sleep.poll_unpin(&mut cx).is_ready());
     }
 }
