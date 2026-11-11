@@ -1063,6 +1063,11 @@ class SlidingSyncRoomLists:
                             assert_never(sticky_events_status.status)
 
                     # For `HaveSentRoomFlag.LIVE` rooms, we only need to check for new sticky events.
+                    #
+                    # The `sticky_events` and `room` stream positions in the token can differ, so a
+                    # sticky event may fall outside the `room` stream range we checked while still
+                    # being new in terms of the `sticky_events` stream. Checking the `sticky_events`
+                    # stream directly makes sure we don't miss it.
                     rooms_should_send.update(
                         await self.store.get_rooms_with_sticky_events_between(
                             live_sticky_events_room_ids,
