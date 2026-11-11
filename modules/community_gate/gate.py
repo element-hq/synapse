@@ -1,0 +1,97 @@
+"""Regra de isolamento entre internos e comunidades externas.
+
+Sem dependencia do Synapse: as consultas ao homeserver chegam por um
+`backend` (ver `module.SynapseBackend`), o que deixa a regra testavel
+contra um mundo em memoria.
+"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Profundidade maxima de spaces aninhados seguida a partir de um space de
+# comunidade. Protege contra arvores grandes; ciclos ja sao tratados pelo
+# conjunto de visitados.
+MAX_SPACE_DEPTH = 5
+
+ACTIVE_MEMBERSHIPS = ("join", "invite")
+
+
+class CommunityGate:
+    def __init__(self, backend, internal_auth_provider, community_spaces):
+        self.backend = backend
+        self.internal_auth_provider = internal_auth_provider
+        self.community_spaces = list(community_spaces)
+
+    async def is_internal(self, user_id):
+        """Interno = admin do servidor ou login pelo provider interno."""
+        if await self.backend.is_admin(user_id):
+            return True
+        providers = await self.backend.external_providers(user_id)
+        return self.internal_auth_provider in providers
+
+    async def is_community_room(self, room_id):
+        """Sala e um space de comunidade ou alcancavel por m.space.child dele."""
+        visited = set()
+        frontier = list(self.community_spaces)
+        for _ in range(MAX_SPACE_DEPTH + 1):
+            next_frontier = []
+            for space_id in frontier:
+                if space_id in visited:
+                    continue
+                visited.add(space_id)
+                if space_id == room_id:
+                    return True
+                children = await self.backend.space_child_events(space_id)
+                # m.space.child com content vazio (sem `via`) = filho removido
+                next_frontier += [c for c, content in children.items() if content.get("via")]
+            if not next_frontier:
+                return False
+            frontier = next_frontier
+        return False
+
+    async def _is_community_only_room(self, room_id):
+        """DM/sala cujos membros ativos sao todos da comunidade (e existem)."""
+        memberships = await self.backend.memberships(room_id)
+        active = [u for u, m in memberships.items() if m in ACTIVE_MEMBERSHIPS]
+        if not active:
+            return False
+        for user_id in active:
+            if await self.is_internal(user_id):
+                return False
+        return True
+
+    async def may_join(self, user_id, room_id):
+        if await self.is_internal(user_id):
+            return True
+        if await self.is_community_room(room_id):
+            return True
+        if await self._is_community_only_room(room_id):
+            return True
+        logger.info("community_gate: join negado user=%s room=%s", user_id, room_id)
+        return False
+
+    async def may_invite(self, inviter, invitee, room_id):
+        # Convite do mesmo lado da fronteira e livre (interno->interno,
+        # comunidade->comunidade = DM). Cruzando a fronteira, nos dois
+        # sentidos, so para sala de comunidade.
+        if await self.is_internal(inviter) == await self.is_internal(invitee):
+            return True
+        if await self.is_community_room(room_id):
+            return True
+        logger.info(
+            "community_gate: convite negado inviter=%s invitee=%s room=%s",
+            inviter,
+            invitee,
+            room_id,
+        )
+        return False
+
+    async def may_create_room(self, user_id, room_config):
+        if await self.is_internal(user_id):
+            return True
+        is_space = (room_config.get("creation_content") or {}).get("type") == "m.space"
+        if room_config.get("is_direct") is True and not is_space:
+            return True
+        logger.info("community_gate: criacao de sala negada user=%s", user_id)
+        return False

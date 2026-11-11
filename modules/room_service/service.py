@@ -53,7 +53,7 @@ class RoomService:
         self.agent = Agent(self.hs.get_reactor())
 
     # ---------------- DISCOVER ----------------
-    async def discover(self):
+    async def discover(self, user_id: str | None = None):
         logger.info("discover: start fetching visible rooms")
         rows = await self.store.db_pool.runInteraction(
             "get_visible_rooms",
@@ -61,6 +61,12 @@ class RoomService:
         )
 
         logger.info("discover: %d visible rooms found in DB", len(rows))
+
+        # Comunidade externa so enxerga as salas da propria comunidade
+        # (community_gate). Sem gate carregado, nada muda.
+        gate = self._community_gate()
+        if gate is not None and user_id and not await gate.is_internal(user_id):
+            rows = [row for row in rows if await gate.is_community_room(row[0])]
         rooms = []
 
         for room_id, room_kind, access_type, price, keyword in rows:
@@ -136,6 +142,8 @@ class RoomService:
             raise SynapseError(404, "Room not found")
 
         room_id = row[0]
+
+        await self._assert_gate_allows_join(target_user_id, room_id)
 
         logger.info(
             "join_by_keyword: room_id=%s target=%s",
@@ -755,6 +763,22 @@ class RoomService:
         }
 
     # ---------------- INTERNAL ----------------
+    def _community_gate(self):
+        """Regra do community_gate, se o modulo estiver carregado."""
+        return getattr(self.hs, "community_gate", None)
+
+    async def _assert_gate_allows_join(self, user_id: str, room_id: str):
+        """403 antes do admin join quando o community_gate nega o acesso.
+
+        O spam checker ja barra o join em si; checar antes evita que o
+        admin join falhe com um erro generico (500, ou 403 lido como
+        "already_joined" em _admin_join).
+        """
+        gate = self._community_gate()
+        if gate is not None and not await gate.may_join(user_id, room_id):
+            logger.info("community_gate: room_service negou user=%s room=%s", user_id, room_id)
+            raise SynapseError(403, "Not allowed to join this room")
+
     async def assert_is_admin(self, user_id: str):
         is_admin = await self.api.is_user_admin(user_id)
 
@@ -977,7 +1001,9 @@ class RoomService:
             user_id,
             space_id,
         )
- 
+
+        await self._assert_gate_allows_join(user_id, space_id)
+
         room_ids = await self._get_space_children(space_id)
  
         if not room_ids:
