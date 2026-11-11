@@ -7,4 +7,5 @@ disallowed-methods = [
     { path = "tokio::runtime::Runtime::spawn_blocking", reason = "leaks past RustRuntime shutdown; see rust/src/runtime.rs" },
     { path = "tokio::runtime::Handle::spawn_blocking", reason = "leaks past RustRuntime shutdown; see rust/src/runtime.rs" },
     { path = "tokio::task::block_in_place", reason = "blocks a tokio worker thread; see rust/src/runtime.rs" },
+    { path = "crate::clock::set_virtual_time_msec", reason = "should only be called from Python unit tests; see rust/src/clock.rs" },
 ]
