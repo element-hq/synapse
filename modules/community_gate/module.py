@@ -65,6 +65,7 @@ class CommunityGateModule:
         # no mesmo padrao cross-module do room_streams_service.
         api._hs.community_gate = self.gate
         api.register_spam_checker_callbacks(
+            check_event_for_spam=self.check_event_for_spam,
             user_may_join_room=self.user_may_join_room,
             user_may_invite=self.user_may_invite,
             user_may_create_room=self.user_may_create_room,
@@ -83,6 +84,10 @@ class CommunityGateModule:
             "internal_auth_provider": config.get("internal_auth_provider", "oidc-google"),
             "community_spaces": spaces,
         }
+
+    async def check_event_for_spam(self, event):
+        allowed = await self.gate.may_send_event(event.type, event.content, event.room_id)
+        return _verdict(allowed)
 
     async def user_may_join_room(self, user_id, room_id, is_invited):
         return _verdict(await self.gate.may_join(user_id, room_id))

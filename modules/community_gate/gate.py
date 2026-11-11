@@ -16,6 +16,9 @@ MAX_SPACE_DEPTH = 5
 
 ACTIVE_MEMBERSHIPS = ("join", "invite")
 
+WIDGET_EVENT_TYPES = ("im.vector.modular.widgets", "m.widget")
+JITSI_WIDGET_TYPES = ("m.jitsi", "jitsi")
+
 
 class CommunityGate:
     def __init__(self, backend, internal_auth_provider, community_spaces):
@@ -102,6 +105,23 @@ class CommunityGate:
             room_id,
         )
         return False
+
+    async def may_send_event(self, event_type, content, room_id):
+        """Sem widget Jitsi em sala da comunidade (nem em DM so de comunidade).
+
+        O meet transcreve toda conferencia e o call-scribe abre PR na
+        kb-operacional; sem o widget nao ha call saindo da comunidade, seja
+        qual for o cliente. Roda para todo evento do servidor: o que nao e
+        widget Jitsi sai antes de qualquer consulta.
+        """
+        if event_type not in WIDGET_EVENT_TYPES:
+            return True
+        if (content or {}).get("type") not in JITSI_WIDGET_TYPES:
+            return True  # outro widget, ou remocao (content vazio)
+        if await self.is_community_room(room_id) or await self._is_community_only_room(room_id):
+            logger.info("community_gate: widget Jitsi negado room=%s", room_id)
+            return False
+        return True
 
     async def may_create_room(self, user_id, room_config):
         if await self.is_internal(user_id):

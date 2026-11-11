@@ -258,3 +258,56 @@ async def test_comunidade_nao_cria_sala_comum():
 async def test_comunidade_nao_cria_space_marcado_como_dm():
     config = {"is_direct": True, "creation_content": {"type": "m.space"}}
     assert await _gate().may_create_room(FAN, config) is False
+
+
+# ---------------- widget Jitsi (calls) ----------------
+# O meet transcreve toda conferencia (call-scribe -> kb-operacional); sem
+# widget Jitsi nao ha call saindo de sala da comunidade, qualquer cliente.
+
+WIDGETS = "im.vector.modular.widgets"
+JITSI = {"type": "m.jitsi", "url": "https://chat/jitsi.html"}
+
+
+@pytest.mark.asyncio
+async def test_widget_jitsi_negado_em_sala_da_comunidade():
+    assert await _gate().may_send_event(WIDGETS, JITSI, COMMUNITY_ROOM) is False
+
+
+@pytest.mark.asyncio
+async def test_widget_jitsi_tipo_legado_negado_em_sala_da_comunidade():
+    content = {"type": "jitsi", "url": "x"}
+    assert await _gate().may_send_event(WIDGETS, content, COMMUNITY_ROOM) is False
+
+
+@pytest.mark.asyncio
+async def test_widget_jitsi_negado_com_tipo_de_evento_m_widget():
+    assert await _gate().may_send_event("m.widget", JITSI, COMMUNITY_ROOM) is False
+
+
+@pytest.mark.asyncio
+async def test_widget_jitsi_negado_em_dm_da_comunidade():
+    backend = FakeBackend()
+    backend.members["!dm:hs"] = {FAN: "join", FAN2: "join"}
+    assert await _gate(backend).may_send_event(WIDGETS, JITSI, "!dm:hs") is False
+
+
+@pytest.mark.asyncio
+async def test_widget_jitsi_permitido_em_sala_interna():
+    assert await _gate().may_send_event(WIDGETS, JITSI, INTERNAL_ROOM) is True
+
+
+@pytest.mark.asyncio
+async def test_remover_widget_em_sala_da_comunidade_e_permitido():
+    assert await _gate().may_send_event(WIDGETS, {}, COMMUNITY_ROOM) is True
+
+
+@pytest.mark.asyncio
+async def test_outro_widget_em_sala_da_comunidade_e_permitido():
+    content = {"type": "m.custom", "url": "x"}
+    assert await _gate().may_send_event(WIDGETS, content, COMMUNITY_ROOM) is True
+
+
+@pytest.mark.asyncio
+async def test_mensagem_comum_em_sala_da_comunidade_e_permitida():
+    content = {"msgtype": "m.text", "body": "oi"}
+    assert await _gate().may_send_event("m.room.message", content, COMMUNITY_ROOM) is True

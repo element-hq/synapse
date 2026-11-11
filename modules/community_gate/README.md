@@ -43,6 +43,13 @@ would make every Google user internal.
   an internal room's name to a community member.
 - **Create room** — internal: anything. Community: direct messages only
   (`is_direct: true`, not a space).
+- **Jitsi widget** — refused (`check_event_for_spam`) in community rooms and
+  in community-only DMs, whoever sends it. The company's Jitsi transcribes
+  every conference and the transcript ends up in the internal knowledge base,
+  so community rooms get no Jitsi calls at all; without the widget there is
+  no call, whatever the client. Other widgets and widget removals pass. This
+  callback runs for every event, so anything that isn't a Jitsi widget
+  returns before any lookup.
 
 Denials return `M_FORBIDDEN` and are logged at `INFO`.
 

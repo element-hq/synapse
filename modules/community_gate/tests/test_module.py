@@ -47,9 +47,10 @@ def _callbacks(api):
     return api.register_spam_checker_callbacks.call_args.kwargs
 
 
-def test_registra_callbacks_de_join_convite_e_criacao():
+def test_registra_callbacks_de_join_convite_criacao_e_evento():
     callbacks = _callbacks(_api())
     assert set(callbacks) == {
+        "check_event_for_spam",
         "user_may_join_room",
         "user_may_invite",
         "user_may_create_room",
@@ -86,6 +87,26 @@ async def test_criacao_de_dm_pela_comunidade_vira_not_spam():
     callbacks = _callbacks(_api())
     result = await callbacks["user_may_create_room"]("@fan:hs", {"is_direct": True})
     assert result == NOT_SPAM
+
+
+@pytest.mark.asyncio
+async def test_widget_jitsi_em_sala_da_comunidade_vira_forbidden():
+    api = _api(
+        state={
+            ("!victor-space:hs", "m.space.child"): [_event("!r:hs", {"via": ["hs"]})],
+            ("!r:hs", "m.space.parent"): [_event("!victor-space:hs", {"via": ["hs"]})],
+        }
+    )
+    callbacks = _callbacks(api)
+    event = MagicMock(type="im.vector.modular.widgets", content={"type": "m.jitsi"}, room_id="!r:hs")
+    assert await callbacks["check_event_for_spam"](event) == Codes.FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_evento_comum_vira_not_spam():
+    callbacks = _callbacks(_api())
+    event = MagicMock(type="m.room.message", content={"body": "oi"}, room_id="!geral:hs")
+    assert await callbacks["check_event_for_spam"](event) == NOT_SPAM
 
 
 def test_publica_o_gate_para_outros_modulos():
