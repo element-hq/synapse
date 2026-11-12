@@ -161,6 +161,15 @@ class ReportsHandler:
             cfg=hs.config.ratelimiting.rc_reports,
         )
 
+        # Ratelimiter for reports rejected because the thing being reported
+        # doesn't exist or isn't visible to the reporter, keyed by the requesting
+        # user ID.  
+        self._failed_reports_ratelimiter = Ratelimiter(
+            store=self._store,
+            clock=self._clock,
+            cfg=hs.config.ratelimiting.rc_reports_failed,
+        )
+
     async def report_user(
         self, requester: Requester, target_user_id: str, reason: str
     ) -> None:

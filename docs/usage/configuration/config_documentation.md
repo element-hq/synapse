@@ -2075,6 +2075,32 @@ rc_reports:
   burst_count: 20.0
 ```
 ---
+### `rc_reports_failed`
+
+*(object)* Ratelimiting settings for failed reports.
+This ratelimits how many reports a user can make via the generic reporting endpoint ([MSC4457](https://github.com/matrix-org/matrix-spec-proposals/pull/4457)) which are rejected because the event, room, room alias, user, media or server being reported does not exist, or (for events) is not visible to them. Only these rejected reports count towards this limit.
+This applies in addition to `rc_reports`.
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_reports_failed:
+  per_second: 0.1
+  burst_count: 10.0
+```
+
+Example configuration:
+```yaml
+rc_reports_failed:
+  per_second: 0.5
+  burst_count: 20.0
+```
+---
 ### `rc_room_creation`
 
 *(object)* Sets rate limits for how often users are able to create rooms.
