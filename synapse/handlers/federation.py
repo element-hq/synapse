@@ -1983,7 +1983,7 @@ class FederationHandler:
         limit = min(limit, StateDag.MAX_MISSING_EVENTS)
         earliest_event_set = set(earliest_events)
 
-        seed_events = await self.store.get_events(latest_events)
+        seed_events = await self.store.get_events(latest_events, check_room_id=room_id)
 
         seed_event_ids: list[str] = []
         first_hop_event_ids: set[str] = set()
@@ -2007,7 +2007,8 @@ class FederationHandler:
         first_hop_events: list[EventBase] = []
         if first_hop_event_ids:
             first_hop_events = await self.store.get_events_as_list(
-                sorted(first_hop_event_ids)
+                sorted(first_hop_event_ids),
+                check_room_id=room_id,
             )
             # the sort exists to make [:limit] truncation deterministic
             first_hop_events.sort(key=lambda ev: ev.event_id)
