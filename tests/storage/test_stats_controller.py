@@ -13,30 +13,34 @@
 #
 #
 
+from typing import Collection, Optional
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet import defer
 
 from synapse.storage.controllers.stats import StatsController
 from synapse.storage.engines import PostgresEngine
+
 from tests import unittest
+
+ColumnRow = tuple[Optional[list[str]], Optional[list[float]]]
 
 
 class FakeTxn:
     """Minimal txn that returns canned rows per query, keyed on the table arg."""
 
-    def __init__(self, column_rows):
+    def __init__(self, column_rows: dict[str, ColumnRow]) -> None:
         self._column_rows = column_rows
-        self._last = None
+        self._last: tuple[str, str] = ("", "")
 
-    def execute(self, sql, args):
+    def execute(self, sql: str, args: tuple[str]) -> None:
         (table,) = args
         if "pg_total_relation_size" in sql:
             self._last = ("size", table)
         else:
             self._last = ("column", table)
 
-    def fetchone(self):
+    def fetchone(self) -> object:
         kind, table = self._last
         if kind == "size":
             return (1000,)
@@ -44,13 +48,15 @@ class FakeTxn:
 
 
 class GetRoomDbSizeEstimateTestCase(unittest.TestCase):
-    def _controller(self, column_rows):
+    def _controller(self, column_rows: dict[str, ColumnRow]) -> StatsController:
         stores = Mock()
         stores.main.database_engine = Mock(spec=PostgresEngine)
         stores.state.database_engine = Mock(spec=PostgresEngine)
 
-        async def run_interaction(desc, func, tables, **kwargs):
-            return func(FakeTxn(column_rows), tables)
+        async def run_interaction(
+            desc: str, func: object, tables: Collection[str], **kwargs: object
+        ) -> object:
+            return func(FakeTxn(column_rows), tables)  # type: ignore[operator]
 
         stores.main.db_pool.runInteraction = AsyncMock(side_effect=run_interaction)
         stores.state.db_pool.runInteraction = AsyncMock(side_effect=run_interaction)
@@ -68,8 +74,7 @@ class GetRoomDbSizeEstimateTestCase(unittest.TestCase):
             "stream_ordering_to_exterm",
             "state_groups_state",
         )
-        column_rows = {t: (["!room:test"], [0.5]) for t in tables}
-        # event_edges.room_id is entirely NULL -> pg_stats returns NULL arrays.
+        column_rows: dict[str, ColumnRow] = {t: (["!room:test"], [0.5]) for t in tables}
         column_rows["event_edges"] = (None, None)
 
         controller = self._controller(column_rows)
