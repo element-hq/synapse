@@ -18,7 +18,7 @@ import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-from synapse.api.errors import Codes, NotFoundError, SynapseError
+from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.types import (
     EventID,
@@ -28,7 +28,6 @@ from synapse.types import (
     UserID,
 )
 from synapse.util.stringutils import (
-    is_namedspaced_grammar,
     parse_and_validate_mxc_uri,
     parse_and_validate_server_name,
 )
@@ -100,13 +99,15 @@ MAX_DESCRIPTION_BYTES = 1024
 _HASH_EVENT_ID_PATTERN = re.compile(r"^\$([a-zA-Z0-9_-]{43}|[a-zA-Z0-9+/]{43})$")
 
 
-def is_valid_report_subject(regarding: str) -> bool:
+def is_valid_report_identifier(regarding: str) -> bool:
     """Checks whether `regarding` is an identifier a complaint can be filed against,
     per MSC4457.
 
     Accepted forms are user IDs, event IDs, room IDs, room aliases, server names
-    prefixed with "server:", MXC URIs, the string "m.system", and common
-    namespaced identifiers.
+    prefixed with "server:", MXC URIs, and the string "m.system".
+
+    The MSC also allows common namespaced identifiers, but this implementation
+    does not support them.
     """
     if regarding.startswith("@"):
         return UserID.is_valid_strict(regarding)
@@ -141,10 +142,7 @@ def is_valid_report_subject(regarding: str) -> bool:
         return True
     if regarding == "m.system":
         return True
-    # Other identifiers in the `m.` namespace are reserved by the spec.
-    if regarding.startswith("m."):
-        return False
-    return is_namedspaced_grammar(regarding)
+    return False
 
 
 class ReportsHandler:
@@ -152,6 +150,8 @@ class ReportsHandler:
         self._hs = hs
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
+        self._event_handler = hs.get_event_handler()
+        self._directory_handler = hs.get_directory_handler()
 
         # Ratelimiter for management of existing delayed events,
         # keyed by the requesting user ID.
@@ -269,14 +269,22 @@ class ReportsHandler:
             The ID of the stored complaint.
 
         Raises:
-            LimitExceededError if the user is filing reports too quickly.
+            LimitExceededError if the user is filing reports too quickly, or has
+                recently filed too many reports about things which do not exist.
             SynapseError for BAD_JSON if the description is missing when required,
                 too long, or empty; or for INVALID_PARAM if `regarding` is not a
                 recognised identifier or `harm` is unknown.
+            NotFoundError if `regarding` refers to something which does not exist
+                or which the requester cannot see. See `validate_report`.
         """
         await self._check_limits(requester)
 
-        if not is_valid_report_subject(regarding):
+        # Reject the request if the user has had too many recent reports
+        # rejected as not found. This doesn't count the request: only 404s from
+        # `validate_report` below do.
+        await self._failed_reports_ratelimiter.ratelimit(requester, update=False)
+
+        if not is_valid_report_identifier(regarding):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "'regarding' is not a recognised identifier",
@@ -311,6 +319,15 @@ class ReportsHandler:
                     Codes.BAD_JSON,
                 )
 
+        # Room aliases are resolved to their room ID.
+        try:
+            regarding = await self.validate_report(requester, regarding)
+        except SynapseError as e:
+            if e.code == HTTPStatus.NOT_FOUND:
+                # Record the failure (`can_do_action` doesn't raise).
+                await self._failed_reports_ratelimiter.can_do_action(requester)
+            raise
+
         return await self._store.add_safety_report_complaint(
             regarding=regarding,
             harm=harm,
@@ -318,6 +335,81 @@ class ReportsHandler:
             user_id=requester.user.to_string(),
             received_ts=self._clock.time_msec(),
         )
+
+    async def validate_report(self, requester: Requester, regarding: str) -> str:
+        """Checks that `requester` is able to file a report against `regarding`.
+
+        Args:
+            requester: The user filing the report.
+            regarding: The identifier the report is about.
+
+        Returns:
+            The identifier to file the report against: the resolved room ID if
+            `regarding` is a room alias, otherwise `regarding` unchanged.
+
+        Raises:
+            NotFoundError if `regarding` is not found or is an event which is not visible
+                to the reporter.
+            SynapseError for NOT_FOUND if `regarding` is a room alias which does
+                not exist, or 502 if a remote alias could not be looked up over
+                federation.
+        """
+        if regarding.startswith("$"):
+            try:
+                event = await self._event_handler.get_event(
+                    requester.user, None, regarding, show_redacted=False
+                )
+            except AuthError:
+                # The event exists, but the requester is not allowed to see it.
+                event = None
+
+            if event is None:
+                raise NotFoundError(
+                    "Unable to report event: "
+                    "it does not exist or you aren't able to see it."
+                )
+
+        elif regarding.startswith("!"):
+            room = await self._store.get_room(regarding)
+            if room is None:
+                raise NotFoundError("Room does not exist")
+
+        elif regarding.startswith("#"):
+            room_alias = RoomAlias.from_string(regarding)
+
+            # Raises a 404 if the alias doesn't exist. Remote aliases are looked
+            # up over federation.
+            result = await self._directory_handler.get_association(room_alias)
+            room_id = result["room_id"]
+
+            if self._hs.is_mine(room_alias):
+                room = await self._store.get_room(room_id)
+                if room is None:
+                    raise NotFoundError("Room does not exist")
+
+            regarding = room_id
+
+        elif regarding.startswith("mxc://"):
+            server_name, media_id = regarding[len("mxc://") :].split("/", 1)
+
+            if self._hs.is_mine_server_name(server_name):
+                media = await self._store.get_local_media(media_id)
+                if media is None:
+                    raise NotFoundError("Media does not exist")
+
+        elif regarding.startswith("server:"):
+            server_name = regarding[len("server:") :]
+            if not await self._store.is_destination_known(server_name):
+                raise NotFoundError("Server is not known to this homeserver")
+
+        elif regarding.startswith("@"):
+            if self._hs.is_mine_id(regarding):
+                # Includes deactivated users
+                user = await self._store.get_user_by_id(regarding)
+                if user is None:
+                    raise NotFoundError("User does not exist")
+
+        return regarding
 
     async def _check_limits(self, requester: Requester) -> None:
         await self._reports_ratelimiter.ratelimit(
