@@ -613,11 +613,13 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # on newer Twisted versions to use the test reactor's clock.
         #
         # This is *super* dirty since it is never undone and relies on the next
-        # test to overwrite it.
+        # test to overwrite it. The patch only holds a weak reference to this
+        # reactor, so that it doesn't keep the reactor (and through its
+        # shutdown triggers, the whole homeserver) alive until the next test.
         if twisted.version > Version("Twisted", 23, 8, 0):
             from twisted.protocols import tls
 
-            tls._get_default_clock = lambda: self
+            tls._get_default_clock = weakref.ref(self)  # type: ignore[assignment]
 
         super().__init__()
 
