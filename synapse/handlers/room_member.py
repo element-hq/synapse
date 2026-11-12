@@ -40,6 +40,7 @@ from synapse.api.errors import (
     PartialStateConflictError,
     ShadowBanError,
     SynapseError,
+    UnstableSpecAuthError,
     UnsupportedRoomVersionError,
 )
 from synapse.api.ratelimiting import Ratelimiter
@@ -1222,6 +1223,15 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 return await self.remote_knock(
                     requester, remote_room_hosts, room_id, target, content
                 )
+
+        # A room we are not in may have no forward extremities to build an event on.
+        # Refuse as the auth rules refuse a sender who is not in the room.
+        if not is_host_in_room and not latest_event_ids:
+            raise UnstableSpecAuthError(
+                403,
+                "%s not in room %s." % (requester.user, room_id),
+                errcode=Codes.NOT_JOINED,
+            )
 
         return await self._local_membership_update(
             requester=requester,
