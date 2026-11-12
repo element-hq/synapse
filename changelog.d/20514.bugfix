@@ -1,0 +1,1 @@
+Fix a bug where the `GET /_synapse/admin/v1/statistics/database/rooms` admin API could return a 500 error when a queried table's `room_id` column had no most-common-values list in `pg_stats`.
