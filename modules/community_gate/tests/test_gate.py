@@ -260,6 +260,36 @@ async def test_comunidade_nao_cria_space_marcado_como_dm():
     assert await _gate().may_create_room(FAN, config) is False
 
 
+def _gate_com_dono():
+    return CommunityGate(
+        backend=FakeBackend(),
+        internal_auth_provider=PROVIDER,
+        community_spaces=[COMMUNITY_SPACE],
+        community_owners=[VICTOR],
+    )
+
+
+@pytest.mark.asyncio
+async def test_dono_da_comunidade_cria_sala():
+    assert await _gate_com_dono().may_create_room(VICTOR, {"name": "Lives"}) is True
+
+
+@pytest.mark.asyncio
+async def test_dono_da_comunidade_cria_subspace():
+    config = {"creation_content": {"type": "m.space"}}
+    assert await _gate_com_dono().may_create_room(VICTOR, config) is True
+
+
+@pytest.mark.asyncio
+async def test_dono_nao_estende_permissao_aos_membros():
+    assert await _gate_com_dono().may_create_room(FAN, {"name": "x"}) is False
+
+
+@pytest.mark.asyncio
+async def test_dono_continua_sendo_comunidade_para_entrar():
+    assert await _gate_com_dono().may_join(VICTOR, INTERNAL_ROOM) is False
+
+
 # ---------------- widget Jitsi (calls) ----------------
 # O meet transcreve toda conferencia (call-scribe -> kb-operacional); sem
 # widget Jitsi nao ha call saindo de sala da comunidade, qualquer cliente.

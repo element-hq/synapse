@@ -21,11 +21,22 @@ JITSI_WIDGET_TYPES = ("m.jitsi", "jitsi")
 
 
 class CommunityGate:
-    def __init__(self, backend, internal_auth_provider, community_spaces, internal_space=None):
+    def __init__(
+        self,
+        backend,
+        internal_auth_provider,
+        community_spaces,
+        internal_space=None,
+        community_owners=(),
+    ):
         self.backend = backend
         self.internal_auth_provider = internal_auth_provider
         self.community_spaces = list(community_spaces)
         self.internal_space = internal_space
+        # Donos de comunidade (ex.: o criador do conteudo) criam salas e
+        # subspaces. Continuam "comunidade" para todo o resto: so entram em
+        # sala de comunidade e so convidam interno para sala de comunidade.
+        self.community_owners = set(community_owners)
 
     async def is_internal(self, user_id):
         """Interno = admin do servidor ou login pelo provider interno."""
@@ -139,6 +150,8 @@ class CommunityGate:
 
     async def may_create_room(self, user_id, room_config):
         if await self.is_internal(user_id):
+            return True
+        if user_id in self.community_owners:
             return True
         is_space = (room_config.get("creation_content") or {}).get("type") == "m.space"
         if room_config.get("is_direct") is True and not is_space:

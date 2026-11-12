@@ -183,6 +183,28 @@ def test_config_exige_community_spaces():
         CommunityGateModule.parse_config({"internal_auth_provider": "oidc-google"})
 
 
+def test_config_community_owners_e_opcional():
+    config = CommunityGateModule.parse_config({"community_spaces": ["!a:hs"]})
+    assert config["community_owners"] == []
+
+
+def test_config_community_owners_exige_lista():
+    with pytest.raises(Exception):
+        CommunityGateModule.parse_config(
+            {"community_spaces": ["!a:hs"], "community_owners": "@victor:hs"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_dono_configurado_cria_sala():
+    api = _api()
+    CommunityGateModule(
+        CommunityGateModule.parse_config({**CONFIG, "community_owners": ["@victor:hs"]}), api
+    )
+    callbacks = api.register_spam_checker_callbacks.call_args.kwargs
+    assert await callbacks["user_may_create_room"]("@victor:hs", {"name": "x"}) == NOT_SPAM
+
+
 def test_config_usa_oidc_google_por_padrao():
     config = CommunityGateModule.parse_config({"community_spaces": ["!a:hs"]})
     assert config["internal_auth_provider"] == "oidc-google"

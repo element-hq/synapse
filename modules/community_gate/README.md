@@ -42,7 +42,11 @@ would make every Google user internal.
   into a community room. This also prevents dangling invites that would show
   an internal room's name to a community member.
 - **Create room** — internal: anything. Community: direct messages only
-  (`is_direct: true`, not a space).
+  (`is_direct: true`, not a space). Users listed in `community_owners`
+  (e.g. the creator who runs the community) may also create rooms and
+  subspaces; for everything else they are still community. Rooms they create
+  through Element's "add room to space" flow get both `m.space.child` and
+  `m.space.parent`, so they count as community rooms.
 - **Jitsi widget** — refused (`check_event_for_spam`) in community rooms and
   in community-only DMs, whoever sends it. The company's Jitsi transcribes
   every conference and the transcript ends up in the internal knowledge base,
@@ -92,6 +96,9 @@ modules:
       # optional — staff auto-join on login
       internal_space: "!companySpace:matrix.example.com"
       admin_user_id: "@admin:matrix.example.com"   # who sends the invite
+      # optional — community owners who may create rooms and subspaces
+      community_owners:
+        - "@creator:matrix.example.com"
 ```
 
 Recommended alongside it in `homeserver.yaml`:

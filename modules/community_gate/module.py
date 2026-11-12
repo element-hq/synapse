@@ -9,6 +9,8 @@ Config no homeserver.yaml:
         # opcional: funcionario entra sozinho nesse space no login
         internal_space: "!buzzlabs:matrix.buzzlabs.com.br"
         admin_user_id: "@scribe:matrix.buzzlabs.com.br"  # quem convida
+        # opcional: donos de comunidade que podem criar salas e subspaces
+        community_owners: ["@victor:matrix.buzzlabs.com.br"]
 """
 
 import logging
@@ -64,6 +66,7 @@ class CommunityGateModule:
             internal_auth_provider=config["internal_auth_provider"],
             community_spaces=config["community_spaces"],
             internal_space=config["internal_space"],
+            community_owners=config["community_owners"],
         )
         self.api = api
         self.admin_user_id = config["admin_user_id"]
@@ -92,7 +95,11 @@ class CommunityGateModule:
         admin_user_id = config.get("admin_user_id")
         if internal_space and not admin_user_id:
             raise ConfigError("community_gate: 'internal_space' exige 'admin_user_id' (quem convida)")
+        owners = config.get("community_owners", [])
+        if not isinstance(owners, list) or not all(isinstance(u, str) for u in owners):
+            raise ConfigError("community_gate: 'community_owners' deve ser uma lista de user IDs")
         return {
+            "community_owners": owners,
             "internal_auth_provider": config.get("internal_auth_provider", "oidc-google"),
             "community_spaces": spaces,
             "internal_space": internal_space,
