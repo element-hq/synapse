@@ -1,0 +1,1 @@
+Fix `/leave`, `/invite`, `/ban` and `/kick` returning a 500 error in some rooms the server is not in, such as when leaving a room again after rejecting an invite or rescinding a knock that could not be sent over federation.
