@@ -339,7 +339,7 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
     ) -> None:
         """Tests that the _filter_out_private returns the expected output"""
         filtered_events = self.event_source.filter_out_private_receipts(
-            events, "@me:server.org"
+            events, "@me:server.org", frozenset()
         )
         self.assertEqual(filtered_events, expected_output)
 
