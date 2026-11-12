@@ -1413,6 +1413,22 @@ def setup_test_homeserver(
             deferred = defer.ensureDeferred(cleanup_hs.shutdown())
         return deferred
 
+    # Tests always run on the fake reactor, which has the hooks cleared below.
+    assert isinstance(reactor, MemoryReactorClock)
+
+    def forget_reactor_hooks() -> None:
+        # The fake reactor never runs, so its `callWhenRunning` hooks and
+        # system event triggers never fire. Any still registered after the
+        # homeserver has shut down point at its handlers. The Rust runtime
+        # holds the reactor through a reference the garbage collector can't
+        # see, so with them in place the whole homeserver would leak. Drop
+        # them once the homeserver has shut down (cleanups run in reverse
+        # order).
+        reactor.whenRunningHooks.clear()
+        reactor.triggers.clear()
+
+    cleanup_func(forget_reactor_hooks)
+
     # Register the cleanup hook for the homeserver.
     # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
     # strange behaviours.
