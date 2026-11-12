@@ -500,8 +500,9 @@ class SafetyReportTestCase(unittest.HomeserverTestCase):
                 self._assert_error(404, "M_NOT_FOUND", self._complaint(regarding))
 
     def test_report_alias(self) -> None:
-        """An existing alias can be reported, and is stored as the room ID it
-        resolves to; an unknown alias can't be reported."""
+        """An existing alias can be reported, and is stored as the alias with the
+        room ID it resolved to recorded in the metadata; an unknown alias can't be
+        reported."""
         room_id = self.helper.create_room_as(self.user_id, tok=self.user_tok)
         alias = f"#alias:{self.hs.hostname}"
         channel = self.make_request(
@@ -516,14 +517,14 @@ class SafetyReportTestCase(unittest.HomeserverTestCase):
         channel = self._report(self._complaint(alias))
         self.assertEqual(200, channel.code, msg=channel.result["body"])
         stored = self.get_success(
-            self.store.db_pool.simple_select_one_onecol(
+            self.store.db_pool.simple_select_one(
                 table="safety_report_complaints",
                 keyvalues={"id": int(channel.json_body["report_id"])},
-                retcol="regarding",
+                retcols=("regarding", "metadata"),
                 desc="get_safety_report_complaint",
             )
         )
-        self.assertEqual(stored, room_id)
+        self.assertEqual(stored, (alias, f"resolved room id: {room_id}"))
 
         self._assert_error(
             404, "M_NOT_FOUND", self._complaint(f"#nope:{self.hs.hostname}")

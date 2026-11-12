@@ -18,6 +18,7 @@ CREATE TABLE safety_report_complaints (
     description TEXT,
     received_ts BIGINT NOT NULL,
     -- user id of the reporter
-    user_id TEXT NOT NULL
+    user_id TEXT NOT NULL,
+    metadata TEXT
 );
 

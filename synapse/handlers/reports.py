@@ -256,6 +256,7 @@ class ReportsHandler:
         regarding: str,
         harm: str,
         description: str | None,
+        metadata: str | None = None,
     ) -> int:
         """Files a complaint via the generic reporting API (MSC4457).
 
@@ -264,6 +265,7 @@ class ReportsHandler:
             regarding: The identifier the complaint is about.
             harm: The MSC4456 harm identifier being reported.
             description: Text the user supplied to support the complaint.
+            metadata: Optional additional data to store with the complaint.
 
         Returns:
             The ID of the stored complaint.
@@ -319,14 +321,16 @@ class ReportsHandler:
                     Codes.BAD_JSON,
                 )
 
-        # Room aliases are resolved to their room ID.
         try:
-            regarding = await self.validate_report(requester, regarding)
+            validation_metadata = await self.validate_report(requester, regarding)
         except SynapseError as e:
             if e.code == HTTPStatus.NOT_FOUND:
                 # Record the failure (`can_do_action` doesn't raise).
                 await self._failed_reports_ratelimiter.can_do_action(requester)
             raise
+
+        if validation_metadata is not None:
+            metadata = validation_metadata
 
         return await self._store.add_safety_report_complaint(
             regarding=regarding,
@@ -334,9 +338,10 @@ class ReportsHandler:
             description=description,
             user_id=requester.user.to_string(),
             received_ts=self._clock.time_msec(),
+            metadata=metadata,
         )
 
-    async def validate_report(self, requester: Requester, regarding: str) -> str:
+    async def validate_report(self, requester: Requester, regarding: str) -> str | None:
         """Checks that `requester` is able to file a report against `regarding`.
 
         Args:
@@ -344,8 +349,9 @@ class ReportsHandler:
             regarding: The identifier the report is about.
 
         Returns:
-            The identifier to file the report against: the resolved room ID if
-            `regarding` is a room alias, otherwise `regarding` unchanged.
+            Metadata to store with the report: if `regarding` is a room alias,
+            "resolved room id: <room_id>" for the room it resolved to; otherwise
+            None.
 
         Raises:
             NotFoundError if `regarding` is not found or is an event which is not visible
@@ -354,6 +360,8 @@ class ReportsHandler:
                 not exist, or 502 if a remote alias could not be looked up over
                 federation.
         """
+        metadata: str | None = None
+
         if regarding.startswith("$"):
             try:
                 event = await self._event_handler.get_event(
@@ -387,7 +395,7 @@ class ReportsHandler:
                 if room is None:
                     raise NotFoundError("Room does not exist")
 
-            regarding = room_id
+            metadata = f"resolved room id: {room_id}"
 
         elif regarding.startswith("mxc://"):
             server_name, media_id = regarding[len("mxc://") :].split("/", 1)
@@ -409,7 +417,7 @@ class ReportsHandler:
                 if user is None:
                     raise NotFoundError("User does not exist")
 
-        return regarding
+        return metadata
 
     async def _check_limits(self, requester: Requester) -> None:
         await self._reports_ratelimiter.ratelimit(

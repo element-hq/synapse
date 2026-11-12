@@ -3192,6 +3192,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         description: str | None,
         user_id: str,
         received_ts: int,
+        metadata: str | None = None,
     ) -> int:
         """Add a complaint submitted via the generic reporting API (MSC4457).
 
@@ -3204,6 +3205,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
             description: Text the user supplied to support the complaint.
             user_id: User who submitted the complaint.
             received_ts: Time when the user submitted the complaint (milliseconds).
+            metadata: Optional additional data to store with the complaint.
         Returns:
             ID of the complaint.
         """
@@ -3217,6 +3219,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
                 "description": description,
                 "received_ts": received_ts,
                 "user_id": user_id,
+                "metadata": metadata,
             },
             desc="add_safety_report_complaint",
         )
