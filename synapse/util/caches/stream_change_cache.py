@@ -112,7 +112,7 @@ class StreamChangeCache:
             cache_name=self.name,
             server_name=server_name,
             cache=self._cache,
-            resize_callback=self.set_cache_factor,
+            resizable_cache=self,
         )
 
         if prefilled_cache:
