@@ -163,7 +163,7 @@ class ReportsHandler:
 
         # Ratelimiter for reports rejected because the thing being reported
         # doesn't exist or isn't visible to the reporter, keyed by the requesting
-        # user ID.  
+        # user ID.
         self._failed_reports_ratelimiter = Ratelimiter(
             store=self._store,
             clock=self._clock,
