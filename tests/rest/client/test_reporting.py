@@ -22,9 +22,10 @@
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.rest.client import login, register, reporting, room
+from synapse.handlers.reports import is_valid_report_identifier
+from synapse.rest.client import directory, login, register, reporting, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -351,6 +352,8 @@ class SafetyReportTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         register.register_servlets,
         reporting.register_servlets,
+        room.register_servlets,
+        directory.register_servlets,
     ]
 
     PATH = "/_matrix/client/unstable/org.matrix.msc4457/safety/report"
@@ -417,7 +420,11 @@ class SafetyReportTestCase(unittest.HomeserverTestCase):
         )
 
     def test_valid_regarding(self) -> None:
-        """Every identifier form listed in MSC4457 is accepted."""
+        """Every identifier other than namespaced gramma in MSC4457 is syntactically accepted.
+
+        This checks the format only: whether the thing referred to exists is
+        covered by the `test_report_*` tests below.
+        """
         for regarding in (
             "@bad:example.org",
             # Room v1/v2 event ID.
@@ -435,17 +442,159 @@ class SafetyReportTestCase(unittest.HomeserverTestCase):
             "server:" + "a" * 230,
             "mxc://example.org/abcdef",
             "m.system",
-            "com.example.thing",
         ):
             with self.subTest(regarding=regarding):
-                self._assert_status(
-                    200,
-                    {
-                        "type": "complaint",
-                        "regarding": regarding,
-                        "harm": "org.matrix.msc4456.spam.fraud",
-                    },
-                )
+                self.assertTrue(is_valid_report_identifier(regarding))
+
+    def test_report_system(self) -> None:
+        self._assert_status(200, self._complaint("m.system"))
+
+    def test_report_user(self) -> None:
+        """Existing local users can be reported; unknown local users can't.
+        Remote users can't be checked, so are accepted."""
+        other_user_id = self.register_user("other", "pass")
+        self._assert_status(200, self._complaint(other_user_id))
+        self._assert_status(200, self._complaint("@someone:example.org"))
+        self._assert_error(
+            404, "M_NOT_FOUND", self._complaint(f"@nobody:{self.hs.hostname}")
+        )
+
+    def test_report_event(self) -> None:
+        """Events the reporter can see can be reported; unknown events, and events
+        the reporter can't see, can't."""
+        room_id = self.helper.create_room_as(self.user_id, tok=self.user_tok)
+        event_id = self.helper.send(room_id, "spam", tok=self.user_tok)["event_id"]
+        self._assert_status(200, self._complaint(event_id))
+
+        # An event in a private room the reporter isn't in.
+        other_user_id = self.register_user("other", "pass")
+        other_tok = self.login("other", "pass")
+        private_room_id = self.helper.create_room_as(
+            other_user_id, is_public=False, tok=other_tok
+        )
+        hidden_event_id = self.helper.send(private_room_id, "secret", tok=other_tok)[
+            "event_id"
+        ]
+
+        for regarding in (
+            hidden_event_id,
+            # Room v4+ event ID (URL-safe base64).
+            "$" + "a-_" * 14 + "a",
+            # Room v1/v2 event ID.
+            "$event:example.org",
+        ):
+            with self.subTest(regarding=regarding):
+                self._assert_error(404, "M_NOT_FOUND", self._complaint(regarding))
+
+    def test_report_room(self) -> None:
+        """Rooms known to the server can be reported; unknown rooms can't."""
+        room_id = self.helper.create_room_as(self.user_id, tok=self.user_tok)
+        self._assert_status(200, self._complaint(room_id))
+
+        for regarding in (
+            "!room:example.org",
+            # MSC4291 (room v12) room ID.
+            "!" + "a" * 43,
+        ):
+            with self.subTest(regarding=regarding):
+                self._assert_error(404, "M_NOT_FOUND", self._complaint(regarding))
+
+    def test_report_alias(self) -> None:
+        """An existing alias can be reported, and is stored as the room ID it
+        resolves to; an unknown alias can't be reported."""
+        room_id = self.helper.create_room_as(self.user_id, tok=self.user_tok)
+        alias = f"#alias:{self.hs.hostname}"
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/directory/room/{alias}",
+            {"room_id": room_id},
+            access_token=self.user_tok,
+            shorthand=False,
+        )
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+        channel = self._report(self._complaint(alias))
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+        stored = self.get_success(
+            self.store.db_pool.simple_select_one_onecol(
+                table="safety_report_complaints",
+                keyvalues={"id": int(channel.json_body["report_id"])},
+                retcol="regarding",
+                desc="get_safety_report_complaint",
+            )
+        )
+        self.assertEqual(stored, room_id)
+
+        self._assert_error(
+            404, "M_NOT_FOUND", self._complaint(f"#nope:{self.hs.hostname}")
+        )
+
+    def test_report_server(self) -> None:
+        """Servers known to this homeserver can be reported; unknown servers
+        can't."""
+        self.get_success(
+            self.store.set_destination_retry_timings("known.example.org", None, 0, 0)
+        )
+        self._assert_status(200, self._complaint("server:known.example.org"))
+        self._assert_error(
+            404, "M_NOT_FOUND", self._complaint("server:unknown.example.org")
+        )
+
+    def test_report_media(self) -> None:
+        """Existing local media can be reported; unknown local media can't.
+        Remote media can't be checked, so is accepted."""
+        self.get_success(
+            self.store.store_local_media(
+                media_id="abcdef",
+                media_type="text/plain",
+                time_now_ms=self.clock.time_msec(),
+                upload_name=None,
+                media_length=1,
+                user_id=UserID.from_string(self.user_id),
+            )
+        )
+        self._assert_status(200, self._complaint(f"mxc://{self.hs.hostname}/abcdef"))
+        self._assert_status(200, self._complaint("mxc://example.org/abcdef"))
+        self._assert_error(
+            404, "M_NOT_FOUND", self._complaint(f"mxc://{self.hs.hostname}/nope")
+        )
+
+    @override_config(
+        {
+            "rc_reports": {"per_second": 1000, "burst_count": 1000},
+            "rc_reports_failed": {"per_second": 0.1, "burst_count": 2},
+        }
+    )
+    def test_failed_reports_ratelimited(self) -> None:
+        """Only reports rejected as not found count towards `rc_reports_failed`.
+        Once it is exceeded, all reports are rejected until it recovers."""
+        # `prepare` disables ratelimiting for `self.user_id`, so use a fresh user.
+        reporter_id = self.register_user("reporter", "pass")
+        reporter_tok = self.login("reporter", "pass")
+        existing = self._complaint(reporter_id)
+        missing = self._complaint(f"@nobody:{self.hs.hostname}")
+
+        # Successful and malformed reports don't count towards the limit.
+        for _ in range(5):
+            channel = self._report(existing, tok=reporter_tok)
+            self.assertEqual(200, channel.code, msg=channel.result["body"])
+            channel = self._report(self._complaint("NotNamespaced"), tok=reporter_tok)
+            self.assertEqual(400, channel.code, msg=channel.result["body"])
+
+        # Use up the burst of not-found reports.
+        for _ in range(2):
+            channel = self._report(missing, tok=reporter_tok)
+            self.assertEqual(404, channel.code, msg=channel.result["body"])
+
+        # Now even a report about something which exists is rejected.
+        channel = self._report(existing, tok=reporter_tok)
+        self.assertEqual(429, channel.code, msg=channel.result["body"])
+        self.assertEqual("M_LIMIT_EXCEEDED", channel.json_body["errcode"])
+
+        # After waiting for the limit to recover, reports are accepted again.
+        self.reactor.advance(10)
+        channel = self._report(existing, tok=reporter_tok)
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
 
     def test_invalid_regarding(self) -> None:
         """Identifiers outside the forms listed in MSC4457 are rejected."""
@@ -465,6 +614,8 @@ class SafetyReportTestCase(unittest.HomeserverTestCase):
             "mxc://example.org",
             "m.not_system",
             "NotNamespaced",
+            # Namespaced identifiers are allowed by MSC4457 but not supported.
+            "com.example.thing",
         ):
             with self.subTest(regarding=regarding):
                 self._assert_error(
@@ -609,6 +760,13 @@ class SafetyReportTestCase(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(401, channel.code, msg=channel.result["body"])
+
+    def _complaint(self, regarding: str) -> JsonDict:
+        return {
+            "type": "complaint",
+            "regarding": regarding,
+            "harm": "org.matrix.msc4456.spam.fraud",
+        }
 
     def _report(self, data: JsonDict, tok: str | None = None) -> FakeChannel:
         # Use a fresh transaction ID for each request.
