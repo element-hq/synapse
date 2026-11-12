@@ -1,0 +1,1 @@
+Fix race where a sync from an older token, built while another sync for the device was still running, did not return some memberships in rooms. Introduced in v1.163.0.

@@ -1,0 +1,1 @@
+Document that the [MSC4143](https://github.com/matrix-org/matrix-spec-proposals/pull/4143) transports endpoint can be run on a worker process.
