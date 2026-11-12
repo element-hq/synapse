@@ -3339,7 +3339,8 @@ class SyncHandler:
         )
         invite_config = await self.store.get_invite_config_for_user(user_id)
 
-        # Only leaves can be out of band, so load the ones sent down below.
+        # Of the leaves and bans sent down below, only leaves can be out of band, so
+        # load those.
         leave_events = await self.store.get_events(
             [
                 event.event_id
