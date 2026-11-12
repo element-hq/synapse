@@ -3339,24 +3339,10 @@ class SyncHandler:
         )
         invite_config = await self.store.get_invite_config_for_user(user_id)
 
-        # Of the leaves and bans sent down below, only leaves can be out of band, so
-        # load those.
-        leave_events = await self.store.get_events(
-            [
-                event.event_id
-                for event in room_list
-                if event.room_version_id in KNOWN_ROOM_VERSIONS
-                and event.membership == Membership.LEAVE
-                and (
-                    sync_config.filter_collection.include_leave
-                    or user_id != event.sender
-                )
-            ]
-        )
-
         room_entries = []
         invited = []
         knocked = []
+        left_or_banned = []
 
         for event in room_list:
             if event.room_version_id not in KNOWN_ROOM_VERSIONS:
@@ -3392,30 +3378,42 @@ class SyncHandler:
                         if user_id == event.sender:
                             continue
 
-                leave_token = now_token.copy_and_replace(
-                    StreamKeyType.ROOM, RoomStreamToken(stream=event.event_pos.stream)
+                left_or_banned.append(event)
+
+        # Of these leaves and bans, only leaves can be out of band.
+        leave_events = await self.store.get_events(
+            [
+                event.event_id
+                for event in left_or_banned
+                if event.membership == Membership.LEAVE
+            ]
+        )
+
+        for event in left_or_banned:
+            leave_token = now_token.copy_and_replace(
+                StreamKeyType.ROOM, RoomStreamToken(stream=event.event_pos.stream)
+            )
+            # An out of band leave, like a rescinded remote invite, is not in
+            # the room's timeline, so we send it after the room's history. The
+            # user may have been in the room before, and the client has nothing
+            # yet, so unlike incremental sync we don't set `out_of_band`, which
+            # would skip the room's state.
+            leave_event = leave_events.get(event.event_id)
+            room_entries.append(
+                RoomSyncResultBuilder(
+                    room_id=event.room_id,
+                    rtype="archived",
+                    events=[leave_event]
+                    if leave_event is not None
+                    and leave_event.internal_metadata.is_out_of_band_membership()
+                    else None,
+                    newly_joined=False,
+                    full_state=True,
+                    since_token=since_token,
+                    upto_token=leave_token,
+                    end_token=leave_token,
                 )
-                # An out of band leave, like a rescinded remote invite, is not in
-                # the room's timeline, so we send it after the room's history. The
-                # user may have been in the room before, and the client has nothing
-                # yet, so unlike incremental sync we don't set `out_of_band`, which
-                # would skip the room's state.
-                leave_event = leave_events.get(event.event_id)
-                room_entries.append(
-                    RoomSyncResultBuilder(
-                        room_id=event.room_id,
-                        rtype="archived",
-                        events=[leave_event]
-                        if leave_event is not None
-                        and leave_event.internal_metadata.is_out_of_band_membership()
-                        else None,
-                        newly_joined=False,
-                        full_state=True,
-                        since_token=since_token,
-                        upto_token=leave_token,
-                        end_token=leave_token,
-                    )
-                )
+            )
 
         return _RoomChanges(room_entries, invited, knocked, [], [])
 
