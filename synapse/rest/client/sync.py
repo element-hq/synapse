@@ -780,15 +780,7 @@ class SlidingSyncRestServlet(RestServlet):
             "pos": "s58_224_0_13_10_1_1_16_0_1",
             "lists": {
                 "foo-list": {
-                    "count": 1337,
-                    "ops": [{
-                        "op": "SYNC",
-                        "range": [0, 99],
-                        "room_ids": [
-                            "!foo:bar",
-                            // ... 99 more room IDs
-                        ]
-                    }]
+                    "count": 1337
                 }
             },
             // Aggregated rooms from lists and room subscriptions
@@ -854,6 +846,11 @@ class SlidingSyncRestServlet(RestServlet):
     PATTERNS = client_patterns(
         "/org.matrix.simplified_msc3575/sync$", releases=[], v1=False, unstable=True
     )
+
+    # Only for tests. When set, each list in the response also includes the rooms
+    # in its requested ranges as `test_room_ids`, so tests can check which rooms a
+    # list matched.
+    test_include_list_room_ids = False
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -974,21 +971,13 @@ class SlidingSyncRestServlet(RestServlet):
     def encode_lists(
         self, lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
     ) -> JsonDict:
-        def encode_operation(
-            operation: SlidingSyncResult.SlidingWindowList.Operation,
-        ) -> JsonDict:
-            return {
-                "op": operation.op.value,
-                "range": operation.range,
-                "room_ids": operation.room_ids,
-            }
-
-        serialized_lists = {}
+        # MSC4186 lists only carry the count. Clients order the rooms themselves.
+        serialized_lists: JsonDict = {}
         for list_key, list_result in lists.items():
-            serialized_lists[list_key] = {
-                "count": list_result.count,
-                "ops": [encode_operation(op) for op in list_result.ops],
-            }
+            serialized_list: JsonDict = {"count": list_result.count}
+            if self.test_include_list_room_ids:
+                serialized_list["test_room_ids"] = sorted(list_result.room_ids)
+            serialized_lists[list_key] = serialized_list
 
         return serialized_lists
 

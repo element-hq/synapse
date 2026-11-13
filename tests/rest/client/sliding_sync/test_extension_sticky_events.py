@@ -1063,9 +1063,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
             "extensions": {STICKY_EVENTS_EXT: {"enabled": True}},
         }
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
-        self.assertEqual(
-            response_body["lists"]["main"]["ops"][0]["room_ids"], [room_id_a]
-        )
+        self.assertEqual(self.get_list_room_ids(response_body, "main"), {room_id_a})
         # Room B is out of range, so its sticky event is not returned
         self._assert_sticky_events_response(response_body, None)
 
@@ -1074,9 +1072,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(
             sync_body, since=from_token, tok=user1_tok
         )
-        self.assertEqual(
-            response_body["lists"]["main"]["ops"][0]["room_ids"], [room_id_b]
-        )
+        self.assertEqual(self.get_list_room_ids(response_body, "main"), {room_id_b})
         self._assert_sticky_events_response(
             response_body, {room_id_b: [sticky_event_id]}
         )

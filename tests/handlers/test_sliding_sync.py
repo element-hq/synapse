@@ -655,7 +655,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=now_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
 
         self.assertIncludes(room_id_results, set(), exact=True)
 
@@ -695,7 +695,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -752,7 +752,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -844,7 +844,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -941,7 +941,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_kick_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1054,7 +1054,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=before_room_forgets,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
 
         # We shouldn't see the room because it was forgotten
         self.assertIncludes(room_id_results, set(), exact=True)
@@ -1097,7 +1097,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room2_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1168,7 +1168,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1226,7 +1226,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1291,7 +1291,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1373,7 +1373,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_kick_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1449,7 +1449,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1522,7 +1522,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1599,7 +1599,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1687,7 +1687,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=to_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1775,7 +1775,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
 
         self.assertIncludes(room_id_results, set(), exact=True)
 
@@ -1821,7 +1821,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
 
         self.assertIncludes(room_id_results, set(), exact=True)
 
@@ -1874,7 +1874,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -1954,7 +1954,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -2031,7 +2031,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -2123,7 +2123,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -2206,7 +2206,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_change1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -2288,7 +2288,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_change1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
 
         self.assertEqual(room_id_results, {room_id1})
         # We must NOT be `newly_joined` (or `newly_left`, for that matter)
@@ -2358,7 +2358,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -2460,7 +2460,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -2563,7 +2563,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_display_name_change_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -2650,7 +2650,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
 
         # Room shouldn't show up because we joined after the from/to range
         self.assertIncludes(room_id_results, set(), exact=True)
@@ -2699,7 +2699,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_more_changes_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -2782,7 +2782,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -2876,7 +2876,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room3_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -2996,7 +2996,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_reset_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
@@ -3237,7 +3237,7 @@ class ComputeInterestedRoomsShardTestCase(
                 to_token=stuck_activity_token,
             )
         )
-        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
+        room_id_results = interested_rooms.lists["foo-list"].room_ids
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
