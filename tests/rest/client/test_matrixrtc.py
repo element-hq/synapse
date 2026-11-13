@@ -17,16 +17,25 @@
 
 """Tests REST events for /rtc/transports and RTC config parsing and /versions setup."""
 
+import os
+import tempfile
 import unittest as stdlib_unittest
 
+import yaml
 from pydantic import ValidationError
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.config.matrixrtc import TransportConfigModel
+from synapse.appservice import ApplicationService
+from synapse.config._base import ConfigError
+from synapse.config.matrixrtc import (
+    TransportConfigModel,
+    validate_msc4195_stable_endpoints_config,
+)
 from synapse.rest import admin
 from synapse.rest.client import login, matrixrtc, register, room, versions
 from synapse.server import HomeServer
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -246,9 +255,36 @@ class StableMatrixRtcTestCase(HomeserverTestCase):
 
 
 class MatrixRtcVersionsTestCase(HomeserverTestCase):
-    """Tests that org.matrix.msc4143 is correctly advertised in /versions."""
+    """Tests that org.matrix.msc4143 and org.matrix.msc4195.stable are correctly
+    advertised in /versions."""
 
     servlets = [versions.register_servlets]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Register an application service proxying the LiveKit endpoints, which
+        # `matrix_rtc.msc4195_stable_endpoints` requires. This doesn't affect
+        # what is advertised unless that option is enabled.
+        with tempfile.NamedTemporaryFile(
+            mode="w", prefix="as_livekit_config", delete=False
+        ) as f:
+            self.addCleanup(os.remove, f.name)
+            yaml.dump(
+                {
+                    "id": "livekit",
+                    "url": None,
+                    "as_token": "as_token",
+                    "hs_token": "hs_token",
+                    "sender_localpart": "livekit",
+                    "namespaces": {},
+                    "io.element.msc4512.proxy_prefix": ApplicationService.LIVEKIT_PROXY_PREFIX,
+                    "io.element.msc4512.proxy_url": "http://lk-jwt-service.example.com",
+                },
+                f,
+            )
+            config["app_service_config_files"] = [f.name]
+        config.setdefault("experimental_features", {})["msc4512_enabled"] = True
+        return config
 
     def test_msc4143_false_by_default(self) -> None:
         channel = self.make_request("GET", "/_matrix/client/versions")
@@ -267,6 +303,135 @@ class MatrixRtcVersionsTestCase(HomeserverTestCase):
         self.assertTrue(
             channel.json_body["unstable_features"]["org.matrix.msc4143.stable"]
         )
+
+    def test_msc4195_stable_false_by_default(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertFalse(
+            channel.json_body["unstable_features"]["org.matrix.msc4195.stable"]
+        )
+
+    @unittest.override_config({"matrix_rtc": {"msc4195_stable_endpoints": True}})
+    def test_msc4195_stable_true_if_enabled(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertTrue(
+            channel.json_body["unstable_features"]["org.matrix.msc4195.stable"]
+        )
+
+
+class StableLivekitEndpointsConfigTestCase(HomeserverTestCase):
+    """Tests the validation of `matrix_rtc.msc4195_stable_endpoints`
+    against the rest of the config and the registered application
+    services."""
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["enable_registration_without_verification"] = True
+        return config
+
+    def _make_appservice(self, proxy_prefix: str | None) -> ApplicationService:
+        return ApplicationService(
+            token="as_token",
+            id="livekit",
+            sender=UserID("livekit", self.hs.hostname),
+            proxy_prefix=proxy_prefix,
+            proxy_url=(
+                "http://lk-jwt-service.example.com"
+                if proxy_prefix is not None
+                else None
+            ),
+        )
+
+    def test_disabled_requires_nothing(self) -> None:
+        self.hs.config.matrix_rtc.msc4195_stable_endpoints = False
+        self.hs.config.experimental.msc4512_enabled = False
+        validate_msc4195_stable_endpoints_config(self.hs.config, [])
+
+    def test_requires_msc4512(self) -> None:
+        self.hs.config.matrix_rtc.msc4195_stable_endpoints = True
+        self.hs.config.experimental.msc4512_enabled = False
+        with self.assertRaises(ConfigError):
+            validate_msc4195_stable_endpoints_config(
+                self.hs.config,
+                [self._make_appservice(ApplicationService.LIVEKIT_PROXY_PREFIX)],
+            )
+
+    def test_requires_livekit_appservice(self) -> None:
+        self.hs.config.matrix_rtc.msc4195_stable_endpoints = True
+        self.hs.config.experimental.msc4512_enabled = True
+        with self.assertRaises(ConfigError):
+            validate_msc4195_stable_endpoints_config(self.hs.config, [])
+        with self.assertRaises(ConfigError):
+            validate_msc4195_stable_endpoints_config(
+                self.hs.config, [self._make_appservice(None)]
+            )
+        with self.assertRaises(ConfigError):
+            validate_msc4195_stable_endpoints_config(
+                self.hs.config,
+                [self._make_appservice("rtc/livekit/get_token")],
+            )
+
+    def test_passes_with_livekit_appservice(self) -> None:
+        self.hs.config.matrix_rtc.msc4195_stable_endpoints = True
+        self.hs.config.experimental.msc4512_enabled = True
+        validate_msc4195_stable_endpoints_config(
+            self.hs.config,
+            [
+                self._make_appservice(None),
+                self._make_appservice(ApplicationService.LIVEKIT_PROXY_PREFIX),
+            ],
+        )
+
+    def _write_appservice_file(self, proxy_prefix: str | None) -> str:
+        """Writes an application service registration file and returns its path."""
+        registration: JsonDict = {
+            "id": "livekit",
+            "url": None,
+            "as_token": "as_token",
+            "hs_token": "hs_token",
+            "sender_localpart": "livekit",
+            "namespaces": {},
+        }
+        if proxy_prefix is not None:
+            registration["io.element.msc4512.proxy_prefix"] = proxy_prefix
+            registration["io.element.msc4512.proxy_url"] = (
+                "http://lk-jwt-service.example.com"
+            )
+        with tempfile.NamedTemporaryFile(
+            mode="w", prefix="as_livekit_config", delete=False
+        ) as f:
+            self.addCleanup(os.remove, f.name)
+            yaml.dump(registration, f)
+            return f.name
+
+    def test_validate_config_loads_appservices(self) -> None:
+        """`HomeServerConfig.validate_config` should load the application service
+        registrations and run the check against them."""
+        self.hs.config.matrix_rtc.msc4195_stable_endpoints = True
+        self.hs.config.experimental.msc4512_enabled = True
+
+        self.hs.config.appservice.app_service_config_files = []
+        with self.assertRaises(ConfigError):
+            self.hs.config.validate_config()
+
+        self.hs.config.appservice.app_service_config_files = [
+            self._write_appservice_file(None)
+        ]
+        with self.assertRaises(ConfigError):
+            self.hs.config.validate_config()
+
+        self.hs.config.appservice.app_service_config_files = [
+            self._write_appservice_file(ApplicationService.LIVEKIT_PROXY_PREFIX)
+        ]
+        self.hs.config.validate_config()
+
+    def test_validate_config_skips_appservices_if_disabled(self) -> None:
+        """Application service registrations shouldn't be loaded (and thus can't
+        fail validation) if the option is disabled."""
+        self.hs.config.matrix_rtc.msc4195_stable_endpoints = False
+        self.hs.config.appservice.app_service_config_files = ["/does/not/exist"]
+        self.hs.config.validate_config()
 
 
 class TransportConfigModelTestCase(stdlib_unittest.TestCase):

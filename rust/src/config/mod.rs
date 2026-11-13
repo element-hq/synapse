@@ -33,6 +33,7 @@ pub struct SynapseHomeServerConfig {
     pub room: RoomConfig,
     pub auth: AuthConfig,
     pub server: ServerConfig,
+    pub matrix_rtc: MatrixRtcConfig,
     pub experimental: ExperimentalConfig,
 }
 
@@ -50,6 +51,11 @@ pub struct ServerConfig {
     pub msc4140_enabled: bool,
     pub public_baseurl: String,
     pub include_profile_updates_in_sync: bool,
+}
+
+#[derive(FromPyObject, Clone)]
+pub struct MatrixRtcConfig {
+    pub msc4195_stable_endpoints: bool,
 }
 
 #[derive(FromPyObject, Clone)]

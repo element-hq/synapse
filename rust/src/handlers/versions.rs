@@ -281,6 +281,9 @@ pub struct UnstableFeatureMap {
     /// MSC4143: Matrix RTC transports (stable identifier)
     #[serde(rename = "org.matrix.msc4143.stable")]
     msc4143_stable: bool,
+    /// MSC4195: LiveKit transport for MatrixRTC (stable identifier)
+    #[serde(rename = "org.matrix.msc4195.stable")]
+    msc4195_stable: bool,
     /// MSC4446: Allow moving the fully read marker backwards.
     #[serde(rename = "com.beeper.msc4446")]
     msc4446_enabled: bool,
@@ -340,6 +343,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
         msc4491_enabled: config.experimental.msc4491_enabled,
         msc4143_enabled: config.experimental.msc4143_enabled,
         msc4143_stable: true,
+        msc4195_stable: config.matrix_rtc.msc4195_stable_endpoints,
         msc4446_enabled: config.experimental.msc4446_enabled,
         msc4502: config.experimental.msc4502_enabled,
         e2ee_forced_public: config
