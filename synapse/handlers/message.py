@@ -1103,22 +1103,22 @@ class EventCreationHandler:
                         event.internal_metadata.stream_ordering,
                     )
 
-        async with self._worker_lock_handler.acquire_read_write_lock(
-            NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
-        ):
-            return await self._create_and_send_nonmember_event_locked(
-                requester=requester,
-                event_dict=event_dict,
-                prev_event_ids=prev_event_ids,
-                state_event_ids=state_event_ids,
-                ratelimit=ratelimit,
-                txn_id=txn_id,
-                ignore_shadow_ban=ignore_shadow_ban,
-                outlier=outlier,
-                depth=depth,
-                prev_state_events=prev_state_events,
-                delay_id=delay_id,
-            )
+            async with self._worker_lock_handler.acquire_read_write_lock(
+                NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
+            ):
+                return await self._create_and_send_nonmember_event_locked(
+                    requester=requester,
+                    event_dict=event_dict,
+                    prev_event_ids=prev_event_ids,
+                    state_event_ids=state_event_ids,
+                    ratelimit=ratelimit,
+                    txn_id=txn_id,
+                    ignore_shadow_ban=ignore_shadow_ban,
+                    outlier=outlier,
+                    depth=depth,
+                    prev_state_events=prev_state_events,
+                    delay_id=delay_id,
+                )
 
     async def _create_and_send_nonmember_event_locked(
         self,
