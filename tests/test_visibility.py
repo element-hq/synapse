@@ -589,9 +589,12 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
 class FilterEventsOutOfBandEventsForClientTestCase(
     unittest.FederatingHomeserverTestCase
 ):
-    def test_out_of_band_invite_rejection(self) -> None:
-        # this is where we have received an invite event over federation, and then
-        # rejected it.
+    def _receive_and_reject_invite(self) -> tuple[EventBase, EventBase]:
+        """Receive an invite over federation and reject it locally.
+
+        Returns the invite event and the rejection event, both of which are
+        out-of-band membership events.
+        """
         invite_pdu = {
             "room_id": "!room:id",
             "depth": 1,
@@ -637,6 +640,10 @@ class FilterEventsOutOfBandEventsForClientTestCase(
                 [invite_event_id, reject_event_id]
             )
         )
+        return invite_event, reject_event
+
+    def test_out_of_band_invite_rejection(self) -> None:
+        invite_event, reject_event = self._receive_and_reject_invite()
 
         # the invited user should be able to see both the invite and the rejection
         filtered_events = self.get_success(
@@ -666,6 +673,28 @@ class FilterEventsOutOfBandEventsForClientTestCase(
             ),
             [],
         )
+
+    def test_always_included_event_without_state_has_no_membership(self) -> None:
+        """An event let through by `always_include_ids` that has no state is
+        returned without a membership annotation rather than failing the request.
+
+        Regression test for https://github.com/element-hq/synapse/issues/19858.
+        """
+        invite_event, reject_event = self._receive_and_reject_invite()
+
+        filtered_events = self.get_success(
+            filter_and_transform_events_for_client(
+                self.hs.get_storage_controllers(),
+                "@other:test",
+                [invite_event, reject_event],
+                always_include_ids=frozenset({invite_event.event_id}),
+            )
+        )
+        self.assertEqual(
+            [e.event.event_id for e in filtered_events],
+            [invite_event.event_id],
+        )
+        self.assertEqual([e.membership for e in filtered_events], [None])
 
 
 async def inject_visibility_event(
