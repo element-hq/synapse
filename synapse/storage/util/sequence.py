@@ -184,6 +184,16 @@ class PostgresSequenceGenerator(SequenceGenerator):
             """
             txn.execute(sql)
 
+            # Since we just auto-repaired, update `last_value` with the new value
+            # (otherwise we'd make stale comparisons below)
+            #
+            # `setval` returns the value the sequence was set to, and marks the sequence
+            # as `is_called` (i.e. the next `nextval` will return a value strictly
+            # greater than it), so this is now the true "last value".
+            row = txn.fetchone()
+            assert row is not None
+            (last_value,) = row
+
         txn.close()
 
         # If we have values in the stream positions table then they have to be
