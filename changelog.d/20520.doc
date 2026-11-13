@@ -1,0 +1,1 @@
+Fix the documentation of the `allowed_lifetime_min` retention option, which bounds `max_lifetime` rather than `min_lifetime`.
