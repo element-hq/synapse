@@ -172,7 +172,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
              event_id: The ID of the event to delete.
         """
         # Try to retrieve the event's content from the database or the event cache.
-        event = await self.get_event(event_id)
+        event = await self.get_event(event_id, allow_none=True)
 
         def delete_expired_event_txn(txn: LoggingTransaction) -> None:
             # Delete the expiry timestamp associated with this event from the database.

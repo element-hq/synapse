@@ -111,3 +111,30 @@ class EphemeralMessageTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, expected_code, channel.result)
 
         return channel.json_body
+
+    def test_expiry_of_missing_event(self) -> None:
+        """Remove the expiry entry even if the event has already been purged."""
+        store = self.hs.get_datastores().main
+        event_id = "$missing:test"
+
+        self.get_success(
+            store.db_pool.simple_insert(
+                table="event_expiry",
+                values={
+                    "event_id": event_id,
+                    "expiry_ts": self.clock.time_msec() - 1000,
+                },
+            )
+        )
+
+        self.get_success(store.expire_event(event_id))
+
+        expiry_ts = self.get_success(
+            store.db_pool.simple_select_one_onecol(
+                table="event_expiry",
+                keyvalues={"event_id": event_id},
+                retcol="expiry_ts",
+                allow_none=True,
+            )
+        )
+        self.assertIsNone(expiry_ts)
