@@ -194,6 +194,11 @@ impl PushRuleEvaluator {
 
             let rule_id = &push_rule.rule_id().to_string();
 
+            if self.has_mentions && rule_id == "global/override/.org.matrix.msc4028.encrypted_event"
+            {
+                continue;
+            }
+
             // For backwards-compatibility the legacy mention rules are disabled
             // if the event contains the 'm.mentions' property.
             // Additionally, MSC4210 always disables the legacy rules.
