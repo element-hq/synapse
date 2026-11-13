@@ -26,7 +26,7 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.api.errors
 import synapse.rest.admin
-from synapse.api.constants import EventTypes
+from synapse.api.constants import EventTypes, JoinRules, Membership
 from synapse.events import EventBase
 from synapse.rest.client import directory, login, room
 from synapse.server import HomeServer
@@ -34,6 +34,7 @@ from synapse.types import JsonDict, RoomAlias, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.test_utils.event_injection import inject_member_event
 
 
 class DirectoryTestCase(unittest.HomeserverTestCase):
@@ -109,6 +110,104 @@ class DirectoryTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual({"room_id": "!8765asdf:test", "servers": ["test"]}, response)
+
+
+class RestrictedRoomAliasServersTestCase(unittest.HomeserverTestCase):
+    """Tests that alias resolution only returns servers that can authorise joins."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.handler = hs.get_directory_handler()
+        self.store = hs.get_datastores().main
+
+        self.user = self.register_user("user", "pass")
+        self.user_tok = self.login("user", "pass")
+        self.room_alias = RoomAlias.from_string("#restricted:test")
+
+    def _create_room(self, join_rule: str, invite_level: int = 50) -> str:
+        room_id = self.helper.create_room_as(
+            self.user,
+            room_version="9",
+            tok=self.user_tok,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.JoinRules,
+                        "state_key": "",
+                        "content": {
+                            "join_rule": join_rule,
+                            "allow": [{"type": "m.room_membership", "room_id": "!a:b"}],
+                        },
+                    }
+                ],
+                "power_level_content_override": {"invite": invite_level},
+            },
+        )
+        self.get_success(
+            inject_member_event(self.hs, room_id, "@remote:remote1", Membership.JOIN)
+        )
+        self.get_success(
+            self.store.create_room_alias_association(
+                self.room_alias, room_id, ["remote1", "remote2"]
+            )
+        )
+        return room_id
+
+    def test_restricted_room(self) -> None:
+        room_id = self._create_room(JoinRules.RESTRICTED)
+
+        result = self.get_success(self.handler.get_association(self.room_alias))
+
+        self.assertEqual({"room_id": room_id, "servers": ["test"]}, result)
+
+    def test_restricted_room_remote_inviter(self) -> None:
+        room_id = self._create_room(JoinRules.RESTRICTED)
+        self.helper.send_state(
+            room_id,
+            EventTypes.PowerLevels,
+            {"users": {self.user: 100, "@remote:remote1": 50}, "invite": 50},
+            tok=self.user_tok,
+        )
+
+        result = self.get_success(self.handler.get_association(self.room_alias))
+
+        self.assertEqual({"room_id": room_id, "servers": ["test", "remote1"]}, result)
+
+    def test_restricted_room_inviter_not_in_room(self) -> None:
+        room_id = self._create_room(JoinRules.RESTRICTED)
+        self.helper.send_state(
+            room_id,
+            EventTypes.PowerLevels,
+            {"users": {self.user: 100, "@remote:remote2": 50}, "invite": 50},
+            tok=self.user_tok,
+        )
+
+        result = self.get_success(self.handler.get_association(self.room_alias))
+
+        self.assertEqual({"room_id": room_id, "servers": ["test"]}, result)
+
+    def test_restricted_room_everyone_can_invite(self) -> None:
+        room_id = self._create_room(JoinRules.RESTRICTED, invite_level=0)
+
+        result = self.get_success(self.handler.get_association(self.room_alias))
+
+        self.assertEqual(room_id, result["room_id"])
+        self.assertEqual("test", result["servers"][0])
+        self.assertCountEqual(["test", "remote1", "remote2"], result["servers"])
+
+    def test_public_room(self) -> None:
+        room_id = self._create_room(JoinRules.PUBLIC)
+
+        result = self.get_success(self.handler.get_association(self.room_alias))
+
+        self.assertEqual(room_id, result["room_id"])
+        self.assertEqual("test", result["servers"][0])
+        self.assertCountEqual(["test", "remote1", "remote2"], result["servers"])
 
 
 class TestCreateAlias(unittest.HomeserverTestCase):
