@@ -61,8 +61,12 @@ Options for each entry:
 * `room_avatar_url` (string or null): A valid, existing `mxc://` URI for the room
   avatar, which may refer to local or remote media on another homeserver. Mutually
   exclusive with `room_avatar_path`. Defaults to null.
-* `room_avatar_path` (string or null): A local file to upload as the room
-  avatar. Mutually exclusive with `room_avatar_url`. Defaults to null.
+* `room_avatar_path` (string or null):
+
+  NOTE: This option is not yet functional.
+
+  A local file to upload as the room avatar. Mutually exclusive with `room_avatar_url`.
+  Defaults to null.
 
   Uploads run on the main process by default. To use a media worker, set the
   top-level `media_instance_running_background_jobs` to its `worker_name` in
@@ -148,7 +152,7 @@ Example configuration:
 
           - id: maintenance
             room_name: Maintenance announcements
-            room_avatar_path: /etc/synapse/maintenance-avatar.png
+            room_avatar_path: /etc/synapse/maintenance-avatar.png # TODO: not yet functional
             allowed_user_ids:
               - "@engineer_charlie:example.com"
               - "@full_time_phil:example.com"
