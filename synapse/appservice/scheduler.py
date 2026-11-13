@@ -436,8 +436,11 @@ class _TransactionController:
         Args:
             service:
         """
+        if service.id in self.recoverers:
+            logger.info("AS ID %s already has a recoverer", service.id)
+            return
+
         logger.info("Starting recoverer for AS ID %s", service.id)
-        assert service.id not in self.recoverers
         recoverer = self.RECOVERER_CLASS(
             self.server_name,
             self.clock,
