@@ -1,0 +1,1 @@
+Fix running homeserver shutdown handlers at the end of each test.

@@ -250,16 +250,6 @@ class MatrixRtcVersionsTestCase(HomeserverTestCase):
 
     servlets = [versions.register_servlets]
 
-    def tearDown(self) -> None:
-        # MemoryReactor doesn't trigger the shutdown phases, and we want the
-        # Tokio thread pool to be stopped
-        # XXX: This logic should probably get moved somewhere else
-        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
-        for phase in ["before", "during", "after"]:
-            triggers = shutdown_triggers.get(phase, [])
-            for callbable, args, kwargs in triggers:
-                callbable(*args, **kwargs)
-
     def test_msc4143_false_by_default(self) -> None:
         channel = self.make_request("GET", "/_matrix/client/versions")
         self.assertEqual(channel.code, 200, channel.result)
