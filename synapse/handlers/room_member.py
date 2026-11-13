@@ -770,6 +770,13 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # The requester may be a regular user, but puppeted by the server.
         request_by_server = requester.authenticated_entity == self._server_name
 
+        is_requester_server_announcements_user = (
+            self.config.serverannouncements.room_management_mxid is not None
+            and requester.user.to_string()
+            == self.config.serverannouncements.room_management_mxid
+            and request_by_server
+        )
+
         # If the request is initiated by the server, ignore whether the
         # requester or target is suspended.
         if not request_by_server:
@@ -804,7 +811,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 )
 
         if (
-            not self.allow_per_room_profiles and not is_requester_server_notices_user
+            not self.allow_per_room_profiles
+            and not is_requester_server_notices_user
+            and not is_requester_server_announcements_user
         ) or requester.shadow_banned:
             # Strip profile data, knowing that new profile data will be added to
             # the event's content below using the target's global profile.
@@ -825,7 +834,12 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 errcode=Codes.BAD_JSON,
             )
 
-        if "avatar_url" in content and content.get("avatar_url") is not None:
+        if (
+            "avatar_url" in content
+            and content.get("avatar_url") is not None
+            and not is_requester_server_notices_user
+            and not is_requester_server_announcements_user
+        ):
             if not await self.profile_handler.check_avatar_size_and_mime_type(
                 content["avatar_url"],
             ):
@@ -897,12 +911,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             block_invite_result: tuple[Codes, dict] | None = None
 
             if (
-                self._server_notices_mxid is not None
-                and requester.user.to_string() == self._server_notices_mxid
-            ) or (
-                requester.user.to_string()
-                == self.config.serverannouncements.room_management_mxid
-                and request_by_server
+                is_requester_server_notices_user
+                or is_requester_server_announcements_user
             ):
                 # Allow internal server identities to manage their room invites.
                 is_requester_admin = True

@@ -1,0 +1,1 @@
+Fix server announcements room reconciliation failing when the management user avatar exceeds max_avatar_size.

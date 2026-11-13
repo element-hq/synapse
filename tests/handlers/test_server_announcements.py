@@ -207,6 +207,36 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
             self.get_success(self.state.get_current_state_ids(room_id)), after
         )
 
+    @override_config({"max_avatar_size": 50})
+    def test_reconcile_with_max_avatar_size(self) -> None:
+        """Test that server announcement rooms can be reconciled when max_avatar_size is configured."""
+        room_id = self._reconcile()
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Server Updates",
+                "avatar_url": "mxc://test/avatar",
+            },
+        )
+
+        # Update metadata about the room and reconcile again
+        self.config.rooms = [
+            attr.evolve(
+                self.room_config,
+                room_avatar_url="mxc://test/avatar2",
+            )
+        ]
+        self.assertEqual(self._reconcile(), room_id)
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Server Updates",
+                "avatar_url": "mxc://test/avatar2",
+            },
+        )
+
     def test_metadata_and_allowlist_changes(self) -> None:
         """Test that updating config reflects on next reconciliation."""
         room_id = self._reconcile()
