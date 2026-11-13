@@ -1,0 +1,1 @@
+Fix the `portdb` CI job by upgrading the PostgreSQL client that the runner image preinstalls.
