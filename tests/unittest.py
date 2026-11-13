@@ -949,11 +949,13 @@ class HomeserverTestCase(TestCase):
         # completes. Fortunately, we can detect this by checking `d.paused`.
         loop_count = 0
         while not d.called or d.paused:
-            # 100 loops is arbitrary but based on previous code which used to "pump" and
+            # 5000 loops is arbitrary but based on previous code which used to "pump" and
             # advance the reactor 100 times. This also makes the assumption that any
-            # work on other threads will finish before we give up after sleeping ~0.1s
-            # of real-time (100 * 0.001).
-            if loop_count > 100:
+            # work on other threads will finish before we give up after sleeping ~5s
+            # of real-time (5000 * 0.001).
+            # 100 loops proved to be too tight on contested machines with 5s this
+            # should realistically never happen
+            if loop_count > 5000:
                 raise defer.TimeoutError("Timed out waiting for deferred to finish")
 
             # Suspend execution of this thread to allow other threads to do work. This
