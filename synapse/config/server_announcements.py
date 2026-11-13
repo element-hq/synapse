@@ -21,7 +21,7 @@ incomplete.
 ## server_announcements
 
 This feature allows homeserver admins to create and manage "announcement" rooms. These
-rooms and their events will be visible to all users on the homeserver, except those
+rooms and their events are delivered to all users on the homeserver, except those
 listed in the room's `excluded_user_ids`.
 
 Read-only users don't *actually* join announcement rooms, but they will see it in their
@@ -52,7 +52,8 @@ every startup).
 Options for each entry:
 
 * `id` (string, required): A unique, nonempty configuration identifier, not a
-  Matrix room ID. Do not change it after the associated room has been created.
+  Matrix room ID. It may only contain ASCII letters, digits, `.`, `_` and `-`.
+  Do not change it after the associated room has been created.
   It maps the configuration entry to its existing room. Purging the room
   deletes its mapping, allowing the same `id` to map to a new room.
 * `room_name` (string, required): The name of the room. Shown publicly to all users.
@@ -60,8 +61,12 @@ Options for each entry:
 * `room_avatar_url` (string or null): A valid, existing `mxc://` URI for the room
   avatar, which may refer to local or remote media on another homeserver. Mutually
   exclusive with `room_avatar_path`. Defaults to null.
-* `room_avatar_path` (string or null): A local file to upload as the room
-  avatar. Mutually exclusive with `room_avatar_url`. Defaults to null.
+* `room_avatar_path` (string or null):
+
+  NOTE: This option is not yet functional.
+
+  A local file to upload as the room avatar. Mutually exclusive with `room_avatar_url`.
+  Defaults to null.
 
   Uploads run on the main process by default. To use a media worker, set the
   top-level `media_instance_running_background_jobs` to its `worker_name` in
@@ -71,13 +76,14 @@ Options for each entry:
   The file's path, content hash, and uploaded MXC URI are stored, so unchanged
   images are not uploaded again on each restart. Replacing the file at the same
   path updates the avatar on the next restart.
-* `allowed_user_ids` (array): Full Matrix user IDs allowed to send announcements.
-  Each must be a valid, local user; remote users are not supported because these
-  rooms are not federated. Defaults to an empty list, allowing no users to send
-  announcements. Sender accounts must already exist and must not be deactivated.
+* `allowed_user_ids` (array): Full Matrix user IDs allowed to post announcements
+  from a normal Matrix client. Each must be a valid, local user; remote users are
+  not supported because these rooms are not federated. Defaults to an empty list:
+  announcements can still be sent through the admin API. Sender accounts must
+  already exist and must not be deactivated.
 * `excluded_user_ids` (array): Full Matrix user IDs excluded from automatically
-  receiving announcements from this room, for example appservice users or audit
-  bots.
+  receiving announcements from this room, for example bots that act on the messages
+  they receive.
 
   Each must be a valid, local user, and must not be in `allowed_user_ids`: senders
   are joined to the room, so they always receive its events. Defaults to an empty
@@ -87,10 +93,17 @@ Options for each entry:
   rooms manually (as they are world-readable). But they will not automatically receive
   announcement events.
 
+  Changes to this list do not remove rooms that clients already have. Clients of a
+  newly excluded user keep the room but stop receiving its events. A user removed
+  from the list receives new events, but not the room's state, until their client does
+  an initial sync.
+
 The internal room manager user (which is used to create announcement rooms and update
-their room state) is configured with `room_management_localpart` below. It is a
-management identity, not a user-visible sender, and must not be included in
-`allowed_user_ids`. Create separate accounts for senders.
+their room state) is configured with `room_management_localpart` below. It sends
+the announcements posted through the admin API (see
+`docs/admin_api/server_announcements.md`). It has no account, so it must not be
+included in `allowed_user_ids`; create separate accounts for people posting from a
+normal client.
 
 Removing an room entry does not delete the room. The room is retained and no longer
 reconciled. Re-adding the same `id` resumes management of the room.
@@ -113,11 +126,13 @@ Do not register an account for this identity. Synapse uses it without registrati
 and refuses to start with announcement rooms configured if an account with this
 ID already exists.
 
-This identity stays joined solely to manage rooms, including when `allowed_user_ids`
-is empty, and cannot send announcements. It must not appear in `allowed_user_ids`.
+This identity stays joined to manage rooms, including when `allowed_user_ids`
+is empty, and sends announcements through the admin API. It must not appear in
+`allowed_user_ids`.
 
 This localpart cannot change after a room has been created. To use a different creator,
-purge the existing announcement rooms and recreate them with the new value.
+purge the existing announcement rooms, then restart Synapse to recreate them
+with the new management user.
 Purging deletes their mappings, so the same configuration IDs can be reused.
 
 Example configuration:
@@ -137,12 +152,13 @@ Example configuration:
 
           - id: maintenance
             room_name: Maintenance announcements
-            room_avatar_path: /etc/synapse/maintenance-avatar.png
+            room_avatar_path: /etc/synapse/maintenance-avatar.png # TODO: not yet functional
             allowed_user_ids:
               - "@engineer_charlie:example.com"
               - "@full_time_phil:example.com"
 """
 
+import re
 from typing import Any
 
 import attr
@@ -153,6 +169,10 @@ from synapse.types import JsonDict, UserID, contains_invalid_mxid_characters
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
 from ._base import Config, ConfigError
+
+# The admin API uses the id as a URL path segment, which must not need
+# percent-encoding.
+_CONFIG_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -244,9 +264,15 @@ class ServerAnnouncementsConfig(Config):
             room_unique_identifier = room.get("id")
             if (
                 not isinstance(room_unique_identifier, str)
-                or not room_unique_identifier.strip()
+                or not room_unique_identifier
             ):
                 raise ConfigError("Must be a nonempty string", config_path + ("id",))
+            if not _CONFIG_ID_PATTERN.fullmatch(room_unique_identifier):
+                raise ConfigError(
+                    "Must only contain ASCII letters, digits, '.', '_' and '-': "
+                    f"{room_unique_identifier!r}",
+                    config_path + ("id",),
+                )
             if room_unique_identifier in room_unique_identifiers:
                 raise ConfigError(
                     f"Duplicate server announcement id: {room_unique_identifier!r}",
@@ -341,9 +367,9 @@ class ServerAnnouncementsConfig(Config):
                     )
                 if user_id == self.room_management_mxid:
                     raise ConfigError(
-                        "The internal server announcements creator is used to "
-                        "create and manage rooms, not send messages in them. It "
-                        "cannot be included in allowed_user_ids",
+                        "The internal server announcements creator has no "
+                        "account; announcements from it go through the admin API. "
+                        "It cannot be included in allowed_user_ids",
                         user_config_path,
                     )
 

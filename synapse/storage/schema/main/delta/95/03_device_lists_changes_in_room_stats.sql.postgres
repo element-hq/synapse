@@ -1,0 +1,22 @@
+--
+-- This file is licensed under the Affero General Public License (AGPL) version 3.
+--
+-- Copyright (C) 2026 Element Creations Ltd
+--
+-- This program is free software: you can redistribute it and/or modify
+-- it under the terms of the GNU Affero General Public License as
+-- published by the Free Software Foundation, either version 3 of the
+-- License, or (at your option) any later version.
+--
+-- See the GNU Affero General Public License for more details:
+-- <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+
+-- We need to increase the number of rows to sample for `room_id` column,
+-- otherwise the stats will underestimate the number of distinct rooms and make
+-- the query planner use the wrong index.
+ALTER TABLE device_lists_changes_in_room ALTER COLUMN room_id SET STATISTICS 1000;
+
+-- Manually tell the query planner that we expect the number of distinct values
+-- in the `stream_id` column to be proportional to the number of rows.
+ALTER TABLE device_lists_changes_in_room ALTER COLUMN stream_id SET (n_distinct = -0.05);

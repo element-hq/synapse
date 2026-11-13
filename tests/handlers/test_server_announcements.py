@@ -18,7 +18,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import SynapseError
+from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.config import ConfigError
 from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.handlers.server_announcements import (
@@ -28,7 +28,7 @@ from synapse.handlers.server_announcements import (
 from synapse.rest import admin
 from synapse.rest.client import login, register, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -70,10 +70,10 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         assert room_id is not None
         return room_id
 
-    def _content(self, room_id: str, event_type: str) -> JsonDict:
+    def _content(self, room_id: str, event_type: str, state_key: str = "") -> JsonDict:
         """Pull a state event from the database and return its `content` dict."""
         event = self.get_success(
-            self.state.get_current_state_event(room_id, event_type, "")
+            self.state.get_current_state_event(room_id, event_type, state_key)
         )
         assert event is not None
         return dict(event.content)
@@ -102,6 +102,14 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             self._content(room_id, EventTypes.RoomAvatar), {"url": "mxc://test/avatar"}
         )
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Server Updates",
+                "avatar_url": "mxc://test/avatar",
+            },
+        )
         powers = self._content(room_id, EventTypes.PowerLevels)
         self.assertEqual(powers["users"][self.alice], 50)
         self.assertEqual(powers["state_default"], 100)
@@ -116,7 +124,13 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
     def test_multiple_rooms_including_empty_allowlist(self) -> None:
         """Test that configuring multiple rooms works."""
         self.config.rooms.append(
-            attr.evolve(self.room_config, config_id="maintenance", allowed_user_ids=[])
+            attr.evolve(
+                self.room_config,
+                config_id="maintenance",
+                room_name="Maintenance",
+                room_avatar_url=None,
+                allowed_user_ids=[],
+            )
         )
         first = self._reconcile()
         second = self.get_success(
@@ -126,6 +140,71 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(
             self.get_success(self.store.get_users_in_room(second)), [self.creator]
+        )
+        self._reconcile()
+        self.assertEqual(
+            self._content(first, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Server Updates",
+                "avatar_url": "mxc://test/avatar",
+            },
+        )
+        self.assertEqual(
+            self._content(second, EventTypes.Member, self.creator),
+            {
+                "membership": "join",
+                "displayname": "Maintenance",
+                "avatar_url": None,
+            },
+        )
+
+    @parameterized.expand(
+        [
+            ("Renamed", "mxc://test/avatar"),
+            ("Server Updates", "mxc://test/new-avatar"),
+            ("Server Updates", None),
+        ]
+    )
+    def test_management_profile_changes(
+        self, name: str, avatar_url: str | None
+    ) -> None:
+        """
+        Test that reconcilitation of management user profiles works, and doesn't send
+        unnecessary events.
+        """
+        # Create the room.
+        room_id = self._reconcile()
+        before = self.get_success(self.state.get_current_state_ids(room_id))
+        self.assertEqual(self._reconcile(), room_id)
+        self.assertEqual(
+            self.get_success(self.state.get_current_state_ids(room_id)), before
+        )
+
+        # Update the room name and avatar in the config.
+        #
+        # We expect the management user's name and avatar in the room to match that of
+        # the room.
+        self.config.rooms = [
+            attr.evolve(self.room_config, room_name=name, room_avatar_url=avatar_url)
+        ]
+        self.assertEqual(self._reconcile(), room_id)
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {"membership": "join", "displayname": name, "avatar_url": avatar_url},
+        )
+
+        # Check that the management user's profile info changed.
+        after = self.get_success(self.state.get_current_state_ids(room_id))
+        self.assertNotEqual(
+            before[(EventTypes.Member, self.creator)],
+            after[(EventTypes.Member, self.creator)],
+        )
+
+        # Check that reconciling again doesn't send another join event.
+        self.assertEqual(self._reconcile(), room_id)
+        self.assertEqual(
+            self.get_success(self.state.get_current_state_ids(room_id)), after
         )
 
     def test_metadata_and_allowlist_changes(self) -> None:
@@ -148,6 +227,10 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self._content(room_id, EventTypes.Name), {"name": "Renamed"})
         self.assertEqual(self._content(room_id, EventTypes.Topic), {"topic": ""})
         self.assertEqual(self._content(room_id, EventTypes.RoomAvatar), {})
+        self.assertEqual(
+            self._content(room_id, EventTypes.Member, self.creator),
+            {"membership": "join", "displayname": "Renamed", "avatar_url": None},
+        )
 
         # Check that bob was added to the room, and alice was removed.
         self.assertCountEqual(
@@ -353,6 +436,122 @@ class ServerAnnouncementsTestCase(unittest.HomeserverTestCase):
             self.get_success(self.store.get_server_announcement_room("updates")),
             room_id,
         )
+
+    def _send(
+        self, event_type: str, content: JsonDict, config_id: str = "updates"
+    ) -> tuple[str, str]:
+        return self.get_success(
+            self.handler.send_announcement(
+                create_requester("@admin:test"), config_id, event_type, content, None
+            )
+        )
+
+    def test_send_announcement(self) -> None:
+        """Test that an announcement is sent by the management user."""
+        room_id = self._reconcile()
+        content = {"msgtype": "m.text", "body": "Maintenance tonight"}
+        sent_room_id, event_id = self._send(EventTypes.Message, content)
+        self.assertEqual(sent_room_id, room_id)
+
+        event = self.get_success(self.store.get_event(event_id))
+        self.assertEqual(event.room_id, room_id)
+        self.assertEqual(event.sender, self.creator)
+        self.assertEqual(event.type, EventTypes.Message)
+        self.assertEqual(dict(event.content), content)
+
+    @parameterized.expand([("10",), ("12",)])
+    def test_redact_announcement(self, version: str) -> None:
+        """Test that an announcement can be redacted with `redacts` given in
+        content, whether the room version puts it in the event's content or at
+        its top level.
+        """
+        from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+
+        self.hs.config.server.default_room_version = KNOWN_ROOM_VERSIONS[version]
+        self._reconcile()
+        _, event_id = self._send(EventTypes.Message, {"msgtype": "m.text", "body": "x"})
+        _, redaction_id = self._send(EventTypes.Redaction, {"redacts": event_id})
+
+        redaction = self.get_success(self.store.get_event(redaction_id))
+        self.assertEqual(redaction.redacts, event_id)
+        redacted = self.get_success(self.store.get_event(event_id))
+        self.assertEqual(dict(redacted.content), {})
+
+    def test_redaction_requires_redacts(self) -> None:
+        self._reconcile()
+        error = self.get_failure(
+            self.handler.send_announcement(
+                create_requester("@admin:test"),
+                "updates",
+                EventTypes.Redaction,
+                {},
+                None,
+            ),
+            SynapseError,
+        )
+        self.assertEqual(error.value.code, 400)
+        self.assertEqual(error.value.errcode, Codes.MISSING_PARAM)
+
+    def test_send_announcement_unknown_id(self) -> None:
+        self._reconcile()
+        self.get_failure(
+            self.handler.send_announcement(
+                create_requester("@admin:test"),
+                "unknown",
+                EventTypes.Message,
+                {"msgtype": "m.text", "body": "x"},
+                None,
+            ),
+            NotFoundError,
+        )
+
+    def test_send_announcement_rejects_member_events(self) -> None:
+        self._reconcile()
+        error = self.get_failure(
+            self.handler.send_announcement(
+                create_requester("@admin:test"),
+                "updates",
+                EventTypes.Member,
+                {"membership": "join"},
+                None,
+            ),
+            SynapseError,
+        )
+        self.assertEqual(error.value.code, 400)
+        self.assertEqual(error.value.errcode, Codes.INVALID_PARAM)
+
+    def test_send_announcement_after_room_shutdown(self) -> None:
+        """Test that sending into a room that was shut down without being purged
+        fails with an error naming the management user.
+        """
+        room_id = self._reconcile()
+        self.get_success(
+            self.hs.get_room_shutdown_handler().shutdown_room(
+                room_id,
+                {
+                    "requester_user_id": "@admin:test",
+                    "new_room_user_id": None,
+                    "new_room_name": None,
+                    "message": None,
+                    "block": False,
+                    "purge": False,
+                    "force_purge": False,
+                },
+            )
+        )
+        error = self.get_failure(
+            self.handler.send_announcement(
+                create_requester("@admin:test"),
+                "updates",
+                EventTypes.Message,
+                {"msgtype": "m.text", "body": "x"},
+                None,
+            ),
+            SynapseError,
+        )
+        self.assertEqual(error.value.code, 403)
+        self.assertIn(self.creator, error.value.msg)
+        self.assertIn(room_id, error.value.msg)
 
 
 class SyntheticJoinEventTestCase(unittest.TestCase):

@@ -174,7 +174,8 @@ class ServerAnnouncementsHistoryTestCase(unittest.HomeserverTestCase):
         paginate back to the announcement, but a removed sender only sees the
         history up to their leave."""
         self.hs.config.serverannouncements.rooms = []
-        self.hs.get_datastores().main.get_server_announcement_room_ids.invalidate_all()
+        store = self.hs.get_datastores().main
+        store.get_server_announcement_config_ids_by_room_id.invalidate_all()
 
         body = self._get(f"/rooms/{self.room_id}/messages?dir=b")
         event_ids = [event["event_id"] for event in body["chunk"]]

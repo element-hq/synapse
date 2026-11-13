@@ -91,15 +91,6 @@ class RustLogContextTestCase(HomeserverTestCase):
 
         return hs
 
-    def tearDown(self) -> None:
-        # MemoryReactor doesn't trigger the shutdown phases, and we want the Tokio
-        # thread pool to be stopped.
-        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
-        for phase in ["before", "during", "after"]:
-            triggers = shutdown_triggers.get(phase, [])
-            for callbable, args, kwargs in triggers:
-                callbable(*args, **kwargs)
-
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:

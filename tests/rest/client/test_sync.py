@@ -24,6 +24,7 @@ import logging
 import attr
 from parameterized import parameterized
 
+from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
@@ -47,9 +48,17 @@ from synapse.rest.client import (
     receipts,
     room,
     sync,
+    tags,
 )
 from synapse.server import HomeServer
-from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
+from synapse.types import (
+    JsonDict,
+    RoomStreamToken,
+    StateKey,
+    StateMap,
+    StreamKeyType,
+    StreamToken,
+)
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -1938,6 +1947,27 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
             if e["type"] == EventTypes.Member
         ]
 
+    def _park_incremental_path(self) -> tuple[Deferred, list[str]]:
+        """Make the next incremental room state computation wait on the
+        returned Deferred. By then the request has entered
+        `building_response`. The list receives the room ID of the parked
+        computation."""
+        handler = self.hs.get_sync_handler()
+        original = handler._compute_state_delta_for_incremental_sync
+        gate: "Deferred[None]" = Deferred()
+        parked: list[str] = []
+
+        async def wrapper(
+            room_id: str, *args: object, **kwargs: object
+        ) -> tuple[StateMap[str], set[StateKey]]:
+            if not parked:
+                parked.append(room_id)
+                await gate
+            return await original(room_id, *args, **kwargs)  # type: ignore[arg-type]
+
+        handler._compute_state_delta_for_incremental_sync = wrapper  # type: ignore[method-assign]
+        return gate, parked
+
     @parameterized.expand([("state", False), ("state_after", True)])
     def test_member_sent_once_when_acknowledged(
         self, _: str, use_state_after: bool
@@ -2145,7 +2175,7 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         cache = self.hs.get_sync_handler().get_lazy_loaded_members_cache(
             (self.alice, self.alice_device)
         )
-        cache.mark_sent(self.bob, kick["event_id"], t0_token)
+        cache.record(self.bob, kick["event_id"], t0_token.room_key)
 
         response = self._sync(use_state_after, t0, timeline_limit=1)
         self.assertNotIn(kick["event_id"], self._timeline_ids(response))
@@ -2185,7 +2215,7 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         cache = self.hs.get_sync_handler().get_lazy_loaded_members_cache(
             (self.alice, self.alice_device)
         )
-        cache.mark_sent(self.alice, join["event_id"], t0_token)
+        cache.record(self.alice, join["event_id"], t0_token.room_key)
 
         # Do a sync from t0, which will include the full state for the newly
         # joined room. Despite what the cache says, the full state should still
@@ -2200,6 +2230,128 @@ class SyncLazyLoadedMembersCacheTestCase(unittest.HomeserverTestCase):
         ]
         self.assertIn(self.alice, members)
 
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_reload_overlapping_old_request(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """An incremental sync from an older token, built while the request
+        from before the reload is still running, must send the members the
+        client has not received since that token
+        (element-hq/element-web#35567).
+
+        Element Web reloads from a token persisted minutes earlier, while the
+        request from before the reload may still be building on the server.
+        Entries recorded after the reload's token, before or during its build,
+        are for responses the reloaded client never processed.
+        """
+        t0 = self._sync(use_state_after)["next_batch"]
+        # bob's membership is sent and recorded in the response ending at
+        # t_live, which the reload will not have processed.
+        self.helper.send(self.room_id, body="pad", tok=self.bob_tok)
+        t_live = self._sync(use_state_after, t0)["next_batch"]
+        self.helper.send(self.room_id, body="hi", tok=self.bob_tok)
+
+        gate, parked = self._park_incremental_path()
+        reload = self._sync_request(use_state_after, t0, await_result=False)
+        self.pump()
+        self.assertEqual(parked, [self.room_id])
+
+        # The request from before the reload is from t_live, whose response
+        # carried bob's membership, so it leaves bob out.
+        old = self._sync(use_state_after, t_live)
+        self.assertEqual(self._members_in_state(old, use_state_after), [])
+
+        gate.callback(None)
+        reload.await_result()
+        self.assertEqual(reload.code, 200, reload.result)
+        self.assertEqual(
+            self._members_in_state(reload.json_body, use_state_after), [self.bob]
+        )
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_two_clients_on_one_device_do_not_trust_each_other(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """Two clients sharing a device build responses one after another and
+        end at the same position. What one of them was sent must not be left
+        out for the other.
+
+        Client X syncs from before charlie's join. Client Y starts with an
+        initial sync whose timeline no longer holds the join, so Y has never
+        seen charlie's membership. X's next response carries the join and
+        ends at the same position Y's did. When charlie then sends a message,
+        Y must still be sent his membership.
+        """
+        charlie = self.register_user("charlie", "password")
+        charlie_tok = self.login("charlie", "password")
+
+        x0 = self._sync(use_state_after)["next_batch"]
+
+        self.helper.join(self.room_id, charlie, tok=charlie_tok)
+        for i in range(10):
+            self.helper.send(self.room_id, body=f"after join {i}", tok=self.alice_tok)
+
+        y0 = self._sync(use_state_after)["next_batch"]
+        x1 = self._sync(use_state_after, x0)["next_batch"]
+        self.assertEqual(x1, y0)
+
+        self.helper.send(self.room_id, body="hello", tok=charlie_tok)
+        response = self._sync(use_state_after, y0)
+        self.assertIn(charlie, self._members_in_state(response, use_state_after))
+
+    @parameterized.expand([("state", False), ("state_after", True)])
+    def test_initial_sync_after_other_client(
+        self, _: str, use_state_after: bool
+    ) -> None:
+        """An initial sync that ends where another client of the device already
+        is must not record what it sent. That client has not seen it.
+
+        As in `test_two_clients_on_one_device_do_not_trust_each_other`, but
+        the incremental sync comes first, so the initial sync is the response
+        that must not record.
+        """
+        x0 = self._sync(use_state_after)["next_batch"]
+        self.helper.send(self.room_id, body="b", tok=self.bob_tok)
+        self.helper.send(self.room_id, body="a", tok=self.alice_tok)
+
+        # Client X does an incremental sync that only gets alice's message,
+        # not bob's.
+        rx = self._sync(use_state_after, x0, timeline_limit=1)
+        x1 = rx["next_batch"]
+        self.assertNotIn(self.bob, self._members_in_state(rx, use_state_after))
+
+        # Client Y does an initial sync that includes bob's message. It ends at
+        # the same position as X's sync.
+        ry = self._sync(use_state_after, timeline_limit=2)
+        self.assertEqual(ry["next_batch"], x1)
+        self.assertIn(self.bob, self._members_in_state(ry, use_state_after))
+
+        # Client X does an incremental sync including a new message from bob,
+        # and must get bob's membership.
+        self.helper.send(self.room_id, body="c", tok=self.bob_tok)
+        rx2 = self._sync(use_state_after, x1, timeline_limit=1)
+        self.assertIn(self.bob, self._members_in_state(rx2, use_state_after))
+
+    def test_cache_kept_while_device_keeps_syncing(self) -> None:
+        """The cache's rules only hold within one cache object, so a device
+        that keeps syncing must keep its object. Only a device idle for the
+        cache's lifetime starts afresh."""
+        handler = self.hs.get_sync_handler()
+        key = (self.alice, self.alice_device)
+        t0 = self._sync(use_state_after=False)["next_batch"]
+        cache = handler.get_lazy_loaded_members_cache(key)
+
+        # Two syncs, each within the lifetime but more than it apart in total.
+        self.reactor.advance(20 * 60)
+        t1 = self._sync(use_state_after=False, since=t0)["next_batch"]
+        self.reactor.advance(20 * 60)
+        self._sync(use_state_after=False, since=t1)
+        self.assertIs(handler.get_lazy_loaded_members_cache(key), cache)
+
+        # Idle for the whole lifetime: dropped.
+        self.reactor.advance(31 * 60)
+        self.assertIsNot(handler.get_lazy_loaded_members_cache(key), cache)
+
 
 class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
     """Tests that server announcement rooms are delivered to users who are not
@@ -2212,6 +2364,7 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
         sync.register_servlets,
         account_data.register_servlets,
+        tags.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -2486,6 +2639,48 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
             self._sync(self.bob_tok, since, full_state=True, filter=filter)
         )
 
+    def test_excluded_user(self) -> None:
+        """A user in `excluded_user_ids` is not delivered the room, while other
+        non-members still are.
+        """
+        carol = self.register_user("carol", "pass")
+        carol_tok = self.login("carol", "pass")
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], excluded_user_ids=[self.bob])
+        ]
+        self._announce("hello")
+
+        since = self._sync(self.bob_tok)["next_batch"]
+        self._announce("again")
+
+        self._assert_not_delivered(self._sync(self.bob_tok))
+        self._assert_not_delivered(self._sync(self.bob_tok, since))
+        self._assert_not_delivered(self._sync(self.bob_tok, since, full_state=True))
+        self._assert_delivered(self._sync(carol_tok), carol)
+
+    def test_excluded_former_member(self) -> None:
+        """A member removed from the room by the config and excluded from it
+        gets their real leave instead of the synthetic join.
+        """
+        since = self._sync(self.former_tok)["next_batch"]
+
+        self.config.rooms = [
+            attr.evolve(
+                self.config.rooms[0],
+                allowed_user_ids=[self.announcer],
+                excluded_user_ids=[self.former],
+            )
+        ]
+        self.get_success(self.handler.reconcile_rooms())
+        self._announce("hello")
+
+        for response in (
+            self._sync(self.former_tok, since),
+            self._sync(self.former_tok),
+        ):
+            self.assertNotIn(self.room_id, response["rooms"].get("join", {}))
+            self.assertIn(self.room_id, response["rooms"]["leave"])
+
     def test_removed_member(self) -> None:
         """A member removed from the room by the config switches straight to the
         synthetic join and the room's current power levels, then gets later
@@ -2584,7 +2779,10 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self._timeline_ids(room), [])
         self.assertEqual(
             room["account_data"]["events"],
-            [{"type": "m.marked_unread", "content": {"unread": True}}],
+            [
+                {"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}},
+                {"type": "m.marked_unread", "content": {"unread": True}},
+            ],
         )
 
     def test_marked_unread_with_new_announcement(self) -> None:
@@ -2608,8 +2806,189 @@ class ServerAnnouncementsSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self._timeline_ids(room), [event_id])
         self.assertEqual(
             room["account_data"]["events"],
-            [{"type": "m.marked_unread", "content": {"unread": True}}],
+            [
+                {"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}},
+                {"type": "m.marked_unread", "content": {"unread": True}},
+            ],
         )
+
+    def test_tag_without_new_events(self) -> None:
+        """A non-member who tags an announcement room gets `m.tag` on their next
+        incremental sync, even when nothing else happened in the room.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [
+                {
+                    "type": "m.tag",
+                    "content": {
+                        "tags": {"m.favourite": {"order": 0.5}, "m.server_notice": {}}
+                    },
+                }
+            ],
+        )
+
+    def test_tag_removed_without_new_events(self) -> None:
+        """A non-member who removes their last tag from an announcement room gets
+        `m.tag` with only `m.server_notice` on their next incremental sync, even
+        when nothing else happened in the room.
+        """
+        self._announce("hello")
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        since = self._sync(self.bob_tok)["next_batch"]
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+
+    def test_server_notice_tag_on_initial_sync(self) -> None:
+        """A non-member gets the `m.server_notice` tag for an announcement room on
+        an initial sync, without it being stored for them.
+        """
+        self._announce("hello")
+
+        room = self._assert_delivered(self._sync(self.bob_tok), self.bob)
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+        self.assertEqual(
+            self.get_success(self.store.get_tags_for_room(self.bob, self.room_id)), {}
+        )
+
+    def test_server_notice_tag_with_new_announcement(self) -> None:
+        """A non-member gets the `m.server_notice` tag alongside a new announcement
+        on an incremental sync.
+        """
+        self._announce("hello")
+        since = self._sync(self.bob_tok)["next_batch"]
+        event_id = self._announce("again")
+
+        room = self._assert_delivered(self._sync(self.bob_tok, since), self.bob)
+        self.assertEqual(self._timeline_ids(room), [event_id])
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+
+    def test_server_notice_tag_respects_filter(self) -> None:
+        """A non-member whose filter hides `m.tag` doesn't get the `m.server_notice`
+        tag, but still gets the announcement.
+        """
+        event_id = self._announce("hello")
+
+        room = self._assert_delivered(
+            self._sync(
+                self.bob_tok,
+                filter={"room": {"account_data": {"not_types": ["m.tag"]}}},
+            ),
+            self.bob,
+        )
+        self.assertIn(event_id, self._timeline_ids(room))
+        self.assertEqual(room["account_data"]["events"], [])
+
+    def test_server_notice_tag_not_sent_to_room_members(self) -> None:
+        """A sender who is really joined to an announcement room doesn't get the
+        `m.server_notice` tag.
+        """
+        self._announce("hello")
+
+        response = self._sync(self.announcer_tok)
+        room = response["rooms"]["join"][self.room_id]
+        self.assertEqual(room["account_data"]["events"], [])
+
+    def test_server_notice_tag_cannot_be_removed(self) -> None:
+        """A user can't remove the `m.server_notice` tag from an announcement room,
+        and still gets it on their next sync.
+        """
+        self._announce("hello")
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.server_notice",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+        room = self._assert_delivered(self._sync(self.bob_tok), self.bob)
+        self.assertEqual(
+            room["account_data"]["events"],
+            [{"type": "m.tag", "content": {"tags": {"m.server_notice": {}}}}],
+        )
+
+    def test_excluded_user_cannot_tag(self) -> None:
+        """A user in `excluded_user_ids` has no membership in the announcement
+        room to tag it with, and may remove `m.server_notice` from it.
+        """
+        self.config.rooms = [
+            attr.evolve(self.config.rooms[0], excluded_user_ids=[self.bob])
+        ]
+
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.favourite",
+            {"order": 0.5},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{self.room_id}/tags/m.server_notice",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+    def test_server_notice_tag_removable_from_other_rooms(self) -> None:
+        """A user can still remove the `m.server_notice` tag from a room that isn't
+        an announcement room.
+        """
+        other_room_id = self.helper.create_room_as(self.bob, tok=self.bob_tok)
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.bob}/rooms/{other_room_id}/tags/m.server_notice",
+            {},
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        channel = self.make_request(
+            "DELETE",
+            f"/user/{self.bob}/rooms/{other_room_id}/tags/m.server_notice",
+            access_token=self.bob_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
 
     def test_state_after(self) -> None:
         """With `use_state_after`, a non-member gets the synthetic join in

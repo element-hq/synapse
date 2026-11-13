@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 class _KeyQueryCriteriaDataModel(RequestBodyModel):
     model_config = ConfigDict(extra="allow")
 
-    minimum_valid_until_ts: StrictInt | None
+    minimum_valid_until_ts: StrictInt | None = None
 
 
 class RemoteKey(RestServlet):
