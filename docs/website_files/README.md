@@ -18,7 +18,9 @@ Currently we use these files to make a few modifications:
 * We add a version picker pertaining to the different documentation versions
   shipped with each version of Synapse. This functionality was implemented through
   the `version-picker.js` and `version-picker.css` files, and is currently the only
-  requirement for the custom `theme/`.
+  requirement for the custom `theme/`. The list of versions is read from
+  `versions.json` at the root of the website, which the docs deployment workflow
+  (`.github/workflows/docs.yaml`) regenerates on every deployment.
 
 More information can be found in mdbook's official documentation for
 [injecting page JS/CSS](https://rust-lang.github.io/mdBook/format/config.html)
