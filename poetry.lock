@@ -3245,14 +3245,14 @@ keyring = ["keyring (>=21.2.0)"]
 
 [[package]]
 name = "twisted"
-version = "26.10.0rc1"
+version = "26.10.0"
 description = "An asynchronous networking framework written in Python"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "twisted-26.10.0rc1-py3-none-any.whl", hash = "sha256:9a8689a7ab8180b16917aa585cc4d8dafcef620162b17b8aab3719b485b321e8"},
-    {file = "twisted-26.10.0rc1.tar.gz", hash = "sha256:a2201fed4dd4919b0fe732aa2c4ac95e4dff3ba04cfc10b1383e7aac29005e27"},
+    {file = "twisted-26.10.0-py3-none-any.whl", hash = "sha256:3732f42af218925a0fe78d6668db55853f7fb532245a89a2669babe7d3000fa8"},
+    {file = "twisted-26.10.0.tar.gz", hash = "sha256:5f0355403e507fc23ceea85e9dbb4bc59335aabde41dd324e8b8cea180dd38de"},
 ]
 
 [package.dependencies]
