@@ -1173,7 +1173,7 @@ This setting has the following sub-options:
 
   * `max_lifetime`: Maximum message retention time of the default message retention policy. Defaults to `null`.
 
-* `allowed_lifetime_min`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `min_lifetime` that's beyond this bound, Synapse will cap the room's policy to these limits when running purge jobs. Defaults to `null`.
+* `allowed_lifetime_min`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `max_lifetime` that's below this bound, Synapse will use this value as the room's `max_lifetime` when running purge jobs. In other words, this is the minimum allowed value for `max_lifetime`; it does not apply to `min_lifetime`. Defaults to `null`.
 
 * `allowed_lifetime_max`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `max_lifetime` that's beyond this bound, Synapse will cap the room's policy to these limits when running purge jobs. Defaults to `null`.
 
