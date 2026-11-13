@@ -56,6 +56,13 @@ reverse proxy is using.
 
 **NOTE**: You only need one of these.
 
+If your reverse proxy rejects a valid Matrix request, it should return a
+[standard Matrix error
+response](https://spec.matrix.org/latest/client-server-api/#standard-error-response).
+For example, a proxy rejecting an oversized request should return a JSON
+error with the `M_TOO_LARGE` errcode, rather than a proxy-specific HTML error
+page.
+
 ### nginx
 
 ```nginx
@@ -83,9 +90,17 @@ server {
         # Nginx by default only allows file uploads up to 1M in size
         # Increase client_max_body_size to match max_upload_size defined in homeserver.yaml
         client_max_body_size 50M;
-	
-	# Synapse responses may be chunked, which is an HTTP/1.1 feature.
-	proxy_http_version 1.1;
+
+        # Return a Matrix error if nginx rejects an oversized request.
+        error_page 413 = @matrix_too_large;
+
+        # Synapse responses may be chunked, which is an HTTP/1.1 feature.
+        proxy_http_version 1.1;
+    }
+
+    location @matrix_too_large {
+        default_type application/json;
+        return 413 '{"errcode":"M_TOO_LARGE","error":"Request body too large"}';
     }
 }
 ```
