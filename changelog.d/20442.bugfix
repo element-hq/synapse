@@ -1,0 +1,1 @@
+Fix event persistence failing when a rejected event arrives over federation and a module has registered an `on_new_event` callback. Such callbacks are now skipped for rejected events, as the module documentation says they are.
