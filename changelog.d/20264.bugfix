@@ -1,0 +1,1 @@
+Fix a crash when verifying OpenID tokens on workers via `/_matrix/federation/v1/openid/userinfo`.
