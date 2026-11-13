@@ -3682,7 +3682,7 @@ Options for each entry include:
 
 * `idp_brand` (string): An optional brand for this identity provider, allowing clients to style the login flow according to the identity provider in question. See the [spec](https://spec.matrix.org/latest/) for possible options here.
 
-* `discover` (boolean): Set to false to disable the use of the OIDC discovery mechanism to discover endpoints. Defaults to true.
+* `discover` (boolean): Set to false to disable the use of the OIDC discovery mechanism to discover endpoints. Defaults to true. Note that the endpoints you configure are still checked unless `skip_verification` is set: in particular, `issuer`, `authorization_endpoint` and `token_endpoint` must use `https`: an internal address like `http://keycloak:8080` is rejected.
 
 * `issuer` (string): Required. The OIDC issuer. Used to validate tokens and (if discovery is enabled) to discover the provider's endpoints.
 
@@ -3732,7 +3732,7 @@ Options for each entry include:
 
 * `jwks_uri` (string): URI where to fetch the JWKS. Required if discovery is disabled and the "openid" scope is used.
 
-* `skip_verification` (boolean): Set to `true` to skip metadata verification. Use this if you are connecting to a provider that is not OpenID Connect compliant. Defaults to false. Avoid this in production.
+* `skip_verification` (boolean): Set to `true` to skip metadata verification. Use this if you are connecting to a provider that is not OpenID Connect compliant. Defaults to false. Avoid this in production. If the provider is only reachable over a private network with a certificate from a local certificate authority, prefer keeping verification enabled and starting Synapse with the `SSL_CERT_FILE` environment variable set to that authority's certificate, which must be readable by the user Synapse runs as.
 
 * `user_profile_method` (string|null): Whether to fetch the user profile from the userinfo endpoint, or to rely on the data returned in the id_token from the `token_endpoint`. Valid values are: `auto` or `userinfo_endpoint`. Defaults to `auto`, which uses the userinfo endpoint if `openid` is not included in `scopes`. Set to `userinfo_endpoint` to always use the userinfo endpoint.
 
