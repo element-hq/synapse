@@ -696,30 +696,12 @@ class FederationSender(AbstractFederationSender):
                             )
                             return
 
-                    # If we've rescinded an invite then we want to tell the
-                    # other server.
-                    if (
-                        event.type == EventTypes.Member
-                        and event.membership == Membership.LEAVE
-                        and event.sender != event.state_key
-                    ):
-                        # We check if this leave event is rescinding an invite
-                        # by looking if there is an invite event for the user in
-                        # the auth events. It could otherwise be a kick or
-                        # unban, which we don't want to send (if the user wasn't
-                        # already in the room).
-                        auth_events = await self.store.get_events_as_list(
-                            event.auth_event_ids()
-                        )
-                        for auth_event in auth_events:
-                            if (
-                                auth_event.type == EventTypes.Member
-                                and auth_event.state_key == event.state_key
-                                and auth_event.membership == Membership.INVITE
-                            ):
-                                destinations = set(destinations)
-                                destinations.add(get_domain_from_id(event.state_key))
-                                break
+                    # The target's server may not be in the room, and so not in
+                    # `destinations`, but still needs to hear that its user's
+                    # membership ended.
+                    if await self._ends_remote_out_of_band_membership(event):
+                        destinations = set(destinations)
+                        destinations.add(get_domain_from_id(event.state_key))
 
                     sharded_destinations = {
                         d
@@ -817,6 +799,28 @@ class FederationSender(AbstractFederationSender):
 
         finally:
             self._is_processing = False
+
+    async def _ends_remote_out_of_band_membership(self, event: EventBase) -> bool:
+        """Whether `event` ends the invite of a user whose server may not be in the
+        room.
+
+        That is a leave or ban, by someone else, whose auth events hold the target's
+        invite. Other kicks, unbans and bans end a membership in the room, or none.
+        """
+        if not (
+            event.type == EventTypes.Member
+            and event.membership in (Membership.LEAVE, Membership.BAN)
+            and event.sender != event.state_key
+        ):
+            return False
+
+        auth_events = await self.store.get_events_as_list(event.auth_event_ids())
+        return any(
+            auth_event.type == EventTypes.Member
+            and auth_event.state_key == event.state_key
+            and auth_event.membership == Membership.INVITE
+            for auth_event in auth_events
+        )
 
     async def _send_pdu(self, pdu: EventBase, destinations: Iterable[str]) -> None:
         # We loop through all destinations to see whether we already have

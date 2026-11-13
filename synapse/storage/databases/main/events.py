@@ -548,10 +548,20 @@ class PersistEventsStore:
         state = await self.store.get_partial_filtered_current_state_ids(
             event.room_id, state_filter
         )
-        pl_id = state[(EventTypes.PowerLevels, "")]
-        pl_event = await self.store.get_event(pl_id, allow_none=True)
+        create_id = state.get((EventTypes.Create, ""))
+        if create_id is None:
+            # We have no current state for a room we are not in, such as one we
+            # only hold an out-of-band membership for, so cannot check the
+            # sender's power level.
+            return False
 
-        create_id = state[(EventTypes.Create, "")]
+        pl_id = state.get((EventTypes.PowerLevels, ""))
+        pl_event = (
+            await self.store.get_event(pl_id, allow_none=True)
+            if pl_id is not None
+            else None
+        )
+
         create_event = await self.store.get_event(create_id, allow_none=True)
 
         if create_event is None:
@@ -3631,13 +3641,15 @@ class PersistEventsStore:
                 and event.internal_metadata.is_out_of_band_membership()
             ):
                 # The only sort of out-of-band-membership events we expect to see here
-                # are remote invites/knocks and LEAVE events corresponding to
-                # rejected/retracted invites and rescinded knocks.
+                # are remote invites/knocks, LEAVE events corresponding to
+                # rejected/retracted invites and rescinded knocks, and BAN events
+                # corresponding to retracted invites.
                 assert event.type == EventTypes.Member
                 assert event.membership in (
                     Membership.INVITE,
                     Membership.KNOCK,
                     Membership.LEAVE,
+                    Membership.BAN,
                 )
 
                 self.db_pool.simple_upsert_txn(
@@ -3672,7 +3684,7 @@ class PersistEventsStore:
                     "event_stream_ordering": event.internal_metadata.stream_ordering,
                     "event_instance_name": event.internal_metadata.instance_name,
                 }
-                if event.membership == Membership.LEAVE:
+                if event.membership in (Membership.LEAVE, Membership.BAN):
                     # Inherit the meta data from the remote invite/knock. When using
                     # sliding sync filters, this will prevent the room from
                     # disappearing/appearing just because you left the room.

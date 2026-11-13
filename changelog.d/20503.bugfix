@@ -1,0 +1,1 @@
+Fix a long-standing bug where kicking or banning a remote user's pending invite did not reach their server unless the inviter did it, and a ban never did.
