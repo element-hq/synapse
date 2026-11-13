@@ -20,7 +20,7 @@
 #
 import json
 from collections.abc import Set
-from typing import TYPE_CHECKING, Collection, cast
+from typing import TYPE_CHECKING, Collection, Iterable, cast
 
 import attr
 from canonicaljson import encode_canonical_json
@@ -43,7 +43,6 @@ from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonValue, UserID
-from synapse.util.iterutils import batch_iter
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -661,86 +660,19 @@ class ProfileWorkerStore(SQLBaseStore):
         if not user_ids:
             return {}
 
-        include_displayname = (
-            field_names is None or ProfileFields.DISPLAYNAME in field_names
-        )
-        include_avatar_url = (
-            field_names is None or ProfileFields.AVATAR_URL in field_names
-        )
-        custom_field_names: set[str] | None = (
-            None
-            if field_names is None
-            else set(field_names)
-            - {ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL}
-        )
-
-        # Pick the custom fields in SQL rather than in Python.
-        fields_args: list[list[str]] = []
-        if custom_field_names is None:
-            fields_column = "fields"
-        elif not custom_field_names:
-            fields_column = "NULL"
-        elif isinstance(self.database_engine, PostgresEngine):
-            # `JSONB_OBJECT_AGG` over no rows gives NULL, which we treat as `{}`.
-            key_clause, key_args = make_in_list_sql_clause(
-                self.database_engine, "f.key", custom_field_names
-            )
-            fields_column = f"""(
-                SELECT JSONB_OBJECT_AGG(f.key, f.value)
-                FROM JSONB_EACH(fields) AS f
-                WHERE {key_clause}
-            )"""
-            fields_args.extend(key_args)
-        else:
-            # SQLite runs in-process, so there is no transfer to save. Rebuilding
-            # the object with `json_each`/`json_group_object` would also change
-            # value types (`true` becomes `1`, nested objects become strings), so
-            # filter in Python below instead.
-            fields_column = "fields"
-
-        def _get_profile_data_for_users_txn(
-            txn: LoggingTransaction,
-        ) -> list[tuple[str, str | None, str | None, str | JsonDict | None]]:
-            rows: list[tuple[str, str | None, str | None, str | JsonDict | None]] = []
-            for batch_user_ids in batch_iter(user_ids, 100):
-                user_id_clause, user_id_args = make_in_list_sql_clause(
-                    self.database_engine, "full_user_id", batch_user_ids
-                )
-                txn.execute(
-                    f"""
-                    SELECT
-                        full_user_id,
-                        {"displayname" if include_displayname else "NULL"},
-                        {"avatar_url" if include_avatar_url else "NULL"},
-                        {fields_column}
-                    FROM profiles
-                    WHERE {user_id_clause}
-                    """,
-                    (*fields_args, *user_id_args),
-                )
-                rows.extend(
-                    cast(
-                        list[tuple[str, str | None, str | None, str | JsonDict | None]],
-                        txn.fetchall(),
-                    )
-                )
-            return rows
-
-        rows = await self.db_pool.runInteraction(
-            "get_profile_data_for_users", _get_profile_data_for_users_txn
+        rows: Iterable[
+            tuple[str, str | None, str | None, str | JsonDict | None]
+        ] = await self.db_pool.simple_select_many_batch(
+            table="profiles",
+            column="full_user_id",
+            iterable=user_ids,
+            retcols=("full_user_id", "displayname", "avatar_url", "fields"),
+            desc="get_profile_data_for_users",
         )
 
         results: dict[str, dict[str, JsonValue | dict[str, JsonValue]]] = {}
         for full_user_id, displayname, avatar_url, fields in rows:
             user_fields = db_to_json(fields or {})
-
-            # On SQLite the custom fields haven't been filtered yet
-            if custom_field_names is not None and isinstance(
-                self.database_engine, Sqlite3Engine
-            ):
-                user_fields = {
-                    k: v for k, v in user_fields.items() if k in custom_field_names
-                }
 
             # When the displayname and avatar URL aren't set,
             # they are stored as NULL in the database.
@@ -750,6 +682,9 @@ class ProfileWorkerStore(SQLBaseStore):
                 user_fields[ProfileFields.DISPLAYNAME] = displayname
             if avatar_url is not None:
                 user_fields[ProfileFields.AVATAR_URL] = avatar_url
+
+            if field_names is not None:
+                user_fields = {k: v for k, v in user_fields.items() if k in field_names}
 
             if user_fields:
                 results[full_user_id] = user_fields
