@@ -2938,6 +2938,9 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         self._event_reports_id_gen = IdGenerator(db_conn, "event_reports", "id")
         self._room_reports_id_gen = IdGenerator(db_conn, "room_reports", "id")
         self._user_reports_id_gen = IdGenerator(db_conn, "user_reports", "id")
+        self._safety_report_complaints_id_gen = IdGenerator(
+            db_conn, "safety_report_complaints", "id"
+        )
 
         self._instance_name = hs.get_instance_name()
 
@@ -3179,6 +3182,46 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
                 "reason": reason,
             },
             desc="add_user_report",
+        )
+        return next_id
+
+    async def add_safety_report_complaint(
+        self,
+        regarding: str,
+        harm: str,
+        description: str | None,
+        user_id: str,
+        received_ts: int,
+        metadata: str | None = None,
+    ) -> int:
+        """Add a complaint submitted via the generic reporting API (MSC4457).
+
+        Args:
+            regarding: The identifier the complaint is about (user ID, event ID,
+                room ID, etc.).
+            harm: The harm identifier being reported. Currently, the available harms
+                are defined by MSC4456:
+                https://github.com/matrix-org/matrix-spec-proposals/pull/4456
+            description: Text the user supplied to support the complaint.
+            user_id: User who submitted the complaint.
+            received_ts: Time when the user submitted the complaint (milliseconds).
+            metadata: Optional additional data to store with the complaint.
+        Returns:
+            ID of the complaint.
+        """
+        next_id = self._safety_report_complaints_id_gen.get_next()
+        await self.db_pool.simple_insert(
+            table="safety_report_complaints",
+            values={
+                "id": next_id,
+                "regarding": regarding,
+                "harm": harm,
+                "description": description,
+                "received_ts": received_ts,
+                "user_id": user_id,
+                "metadata": metadata,
+            },
+            desc="add_safety_report_complaint",
         )
         return next_id
 

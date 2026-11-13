@@ -2377,6 +2377,24 @@ properties:
     examples:
       - per_second: 2.0
         burst_count: 20.0
+  rc_reports_failed:
+    $ref: "#/$defs/rc"
+    description: >-
+      Ratelimiting settings for failed reports.
+
+      This ratelimits how many reports a user can make via the generic reporting
+      endpoint ([MSC4457](https://github.com/matrix-org/matrix-spec-proposals/pull/4457))
+      which are rejected because the event, room, room alias, user, media or
+      server being reported does not exist, or (for events) is not visible to
+      them. Only these rejected reports count towards this limit.
+
+      This applies in addition to `rc_reports`.
+    default:
+      per_second: 0.1
+      burst_count: 10.0
+    examples:
+      - per_second: 0.5
+        burst_count: 20.0
   rc_room_creation:
     $ref: "#/$defs/rc"
     description: >-
