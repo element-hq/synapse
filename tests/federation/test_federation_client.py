@@ -29,6 +29,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import SynapseError
 from synapse.events import EventBase
+from synapse.events.snapshot import EventContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -385,9 +386,10 @@ class FederationClientTest(FederatingHomeserverTestCase):
         )
 
         # The send_invite call should fail with 403
+        context = EventContext.for_outlier(self._storage_controllers)
         f = self.get_failure(
             self.hs.get_federation_client().send_invite(
-                "other.example.com", room_id, invite_event.event_id, invite_event
+                "other.example.com", room_id, invite_event, context
             ),
             SynapseError,
         ).value
