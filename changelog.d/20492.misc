@@ -1,1 +1,1 @@
-Refactor `MediaRepository` to reduce duplicated code in media uploads, remote media downloads, thumbnail generation and media deletion. Contributed by @famedly @itsoyou.
+Refactor `MediaRepository` media upload and thumbnail generation to reduce duplicated code. Contributed by @famedly @itsoyou.
