@@ -33,6 +33,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    SlidingSync,
 )
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
@@ -61,7 +62,6 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.handlers.sliding_sync import (
-    EXTENSION_WILDCARD,
     HaveSentRoomFlag,
     OperationType,
     PerConnectionState,
@@ -117,10 +117,10 @@ class _StickyEventsScope:
     rooms: AbstractSet[str]
 
     def includes_list(self, list_key: str) -> bool:
-        return EXTENSION_WILDCARD in self.lists or list_key in self.lists
+        return SlidingSync.EXTENSION_WILDCARD in self.lists or list_key in self.lists
 
     def includes_room(self, room_id: str) -> bool:
-        return EXTENSION_WILDCARD in self.rooms or room_id in self.rooms
+        return SlidingSync.EXTENSION_WILDCARD in self.rooms or room_id in self.rooms
 
 
 _EMPTY_STICKY_EVENTS_SCOPE = _StickyEventsScope(lists=frozenset(), rooms=frozenset())

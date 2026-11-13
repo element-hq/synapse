@@ -30,6 +30,7 @@ from synapse.api.constants import (
     EduTypes,
     EventTypes,
     ProfileUpdateAction,
+    SlidingSync,
 )
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.logging.opentracing import trace
@@ -49,7 +50,6 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.handlers.sliding_sync import (
-    EXTENSION_WILDCARD,
     HaveSentRoomFlag,
     MutablePerConnectionState,
     OperationType,
@@ -279,7 +279,7 @@ class SlidingSyncExtensionHandler:
         # See what rooms from the room subscriptions we should get account data for
         for room_id in requested_room_ids:
             # A wildcard means we process all rooms from the room subscriptions
-            if room_id == EXTENSION_WILDCARD:
+            if room_id == SlidingSync.EXTENSION_WILDCARD:
                 relevant_room_ids.update(actual_room_ids)
                 break
 
@@ -292,7 +292,7 @@ class SlidingSyncExtensionHandler:
             actual_list: SlidingSyncResult.SlidingWindowList | None = None
 
             # A wildcard means we process rooms from all lists
-            if list_key == EXTENSION_WILDCARD:
+            if list_key == SlidingSync.EXTENSION_WILDCARD:
                 for actual_list in actual_lists.values():
                     # We only expect a single SYNC operation for any list
                     assert len(actual_list.ops) == 1

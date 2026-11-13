@@ -523,15 +523,6 @@ class SlidingSyncResult:
         )
 
 
-EXTENSION_WILDCARD: Final = "*"
-"""
-The reserved value in the `lists`/`rooms` of an extension request that means
-"all lists" or "all room subscriptions" respectively (MSC3575).
-
-This is slated for removal as per MSC4508.
-"""
-
-
 class StateValues:
     """
     Understood values of the (type, state_key) tuple in `required_state`.

@@ -522,6 +522,16 @@ class StickyEvent:
     """
 
 
+class SlidingSync:
+    EXTENSION_WILDCARD: Final = "*"
+    """
+    The reserved value in the `lists`/`rooms` of an extension request that means
+    "all lists" or "all room subscriptions" respectively (MSC3575).
+
+    This is slated for removal as per MSC4508.
+    """
+
+
 class StateDag:
     GET_MISSING_EVENTS_FIELD: Final = "org.matrix.msc4242.state_dag"
     MAX_MISSING_EVENTS: Final = 1000
