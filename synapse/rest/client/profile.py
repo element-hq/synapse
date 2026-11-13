@@ -23,7 +23,10 @@
 
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
+
+from pydantic import AfterValidator, Discriminator, Field, Tag
+from pydantic_core import PydanticCustomError
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, SynapseError
@@ -31,16 +34,71 @@ from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
+    parse_and_validate_json_object_from_request,
     parse_boolean,
     parse_json_object_from_request,
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.types import JsonDict, Requester, UserID
+from synapse.types import Absent, AbsentType, JsonDict, Requester, UserID
+from synapse.types.rest import RequestBodyModel
 from synapse.util.stringutils import is_namedspaced_grammar
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+
+PROFILE_QUERY_MAX_TARGET_USERS = 100
+"""Maximum amount of target user profiles to allow querying via the profile
+query endpoint. Defined in MSC4536.
+"""
+
+PROFILE_QUERY_MAX_FIELD_NAMES = 30
+"""Maximum amount of field names to allow querying via the profile query endpoint.
+Defined in MSC4536."""
+
+
+# The validators below raise `PydanticCustomError` with a type other than
+# `value_error`, so that `validate_json_object` responds with `M_BAD_JSON` (a
+# plain `ValueError` would map to `M_INVALID_PARAM`), while still using our own
+# error messages.
+
+
+def _validate_user_id(value: str) -> str:
+    if not UserID.is_valid(value):
+        raise PydanticCustomError(
+            "invalid_user_id", "Invalid user id {user_id}", {"user_id": value}
+        )
+    return value
+
+
+def _validate_profile_field_name(value: str) -> str:
+    if not value:
+        raise PydanticCustomError(
+            "string_too_short", "Field name can not be an empty string"
+        )
+    # Match the limit used when setting custom profile fields, where the limit
+    # is measured in UTF-8 bytes rather than characters.
+    if len(value.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
+        raise PydanticCustomError(
+            "string_too_long",
+            "Field name too long (max {max_length} bytes)",
+            {"max_length": MAX_CUSTOM_FIELD_LEN},
+        )
+    return value
+
+
+UserIdStr = Annotated[str, AfterValidator(_validate_user_id)]
+"""A string that must be a valid Matrix user ID."""
+
+ProfileFieldName = Annotated[str, AfterValidator(_validate_profile_field_name)]
+"""A non-empty profile field name of at most `MAX_CUSTOM_FIELD_LEN` UTF-8 bytes."""
+
+
+def _absent_or_value(value: Any) -> str:
+    """Discriminator for `X | AbsentType` unions, so that Pydantic only validates
+    (and reports errors for) the branch that applies. Without it, invalid input
+    also produces a confusing "should be an instance of AbsentType" error."""
+    return "absent" if value is Absent else "value"
 
 
 def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
@@ -85,7 +143,7 @@ async def _auth_and_ratelimit_profile_lookup(
 
 class ProfileRestServlet(RestServlet):
     PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)$", v1=True)
-    CATEGORY = "Event sending requests"
+    CATEGORY = "Profile requests"
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -349,10 +407,91 @@ class UnstableProfileFieldRestServlet(ProfileFieldRestServlet):
     )
 
 
+class ProfileQueryRestServlet(RestServlet):
+    PATTERNS = client_patterns(
+        "/org.matrix.msc4536/profile/query$",
+        unstable=True,
+        releases=(),
+    )
+    CATEGORY = "Profile requests"
+
+    class PostBody(RequestBodyModel):
+        users: Annotated[
+            list[UserIdStr],
+            Field(min_length=1, max_length=PROFILE_QUERY_MAX_TARGET_USERS),
+        ]
+        """
+        List of user IDs to query profiles for.
+        """
+
+        fields: Annotated[
+            Annotated[
+                list[ProfileFieldName],
+                Field(min_length=1, max_length=PROFILE_QUERY_MAX_FIELD_NAMES),
+                Tag("value"),
+            ]
+            | Annotated[AbsentType, Tag("absent")],
+            Discriminator(_absent_or_value),
+        ] = Absent
+        """
+        If specified, the profile fields to return.
+
+        If absent, return whole profiles.
+        """
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.profile_handler = hs.get_profile_handler()
+        self.auth = hs.get_auth()
+
+    async def on_POST(
+        self,
+        request: SynapseRequest,
+    ) -> tuple[int, JsonDict]:
+        """Profiles query endpoint (MSC4536)
+
+        Allows querying multiple profiles in one go as an authenticated user. Hard
+        limited to 100 profiles in one request as per MSC4536.
+
+        Note, currently does not return information about remote profiles, ie this
+        won't cause a remote lookup like when using the `/profile/<user>` or
+        `/profile/<user_id>/<field>` endpoints. This is subject to change
+        with MSC4259 bringing support for federated profile information.
+        """
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
+        if not requester:
+            raise SynapseError(
+                HTTPStatus.UNAUTHORIZED,
+                "You must be authenticated to query profiles.",
+                Codes.MISSING_TOKEN,
+            )
+
+        content = parse_and_validate_json_object_from_request(request, self.PostBody)
+
+        target_users = set(content.users)
+        field_names = set(content.fields) if content.fields is not Absent else None
+
+        filtered_profiles = (
+            await self.profile_handler.check_profile_query_allowed_for_users(
+                target_users=target_users,
+                requester=requester.user,
+            )
+        )
+
+        ret = await self.profile_handler.get_locally_known_profiles(
+            user_ids=filtered_profiles, field_names=field_names
+        )
+
+        return 200, ret
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ProfileFieldRestServlet(hs).register(http_server)
 
     if hs.config.experimental.msc4133_enabled:
         UnstableProfileFieldRestServlet(hs).register(http_server)
+    if hs.config.experimental.msc4536_enabled:
+        ProfileQueryRestServlet(hs).register(http_server)
 
     ProfileRestServlet(hs).register(http_server)

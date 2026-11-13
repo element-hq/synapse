@@ -294,6 +294,9 @@ information.
     ^/_matrix/client/unstable/org.matrix.msc4140/rooms/.*/delayed_event/
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/[^/]+(/restart)?)?$
 
+    # Unstable MSC4536 support (profile query)
+    ^/_matrix/client/unstable/org.matrix.msc4536/profile/query$
+
     # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
     ^/_synapse/mas/
 

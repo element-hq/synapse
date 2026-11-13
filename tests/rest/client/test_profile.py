@@ -25,6 +25,7 @@ import logging
 import urllib.parse
 from http import HTTPStatus
 from typing import Any
+from unittest.mock import AsyncMock
 
 from canonicaljson import encode_canonical_json
 from parameterized import parameterized
@@ -32,11 +33,12 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import Codes
+from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
 from synapse.rest import admin
 from synapse.rest.client import login, profile, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.profile import MAX_PROFILE_SIZE
-from synapse.types import UserID
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -53,7 +55,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.hs = self.setup_test_homeserver()
+        self.mock_federation_client = AsyncMock()
+
+        self.hs = self.setup_test_homeserver(
+            federation_client=self.mock_federation_client,
+        )
         return self.hs
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -964,6 +970,477 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     user_id=UserID.from_string("@rin:test"),
                 )
             )
+
+    def test_query_profiles_endpoint_when_msc4536_not_enabled(self) -> None:
+        """With MSC4536 not enabled, the profiles query endpoint should
+        not be enabled.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [
+                    self.other,
+                ],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.UNRECOGNIZED)
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled(self) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should
+        be enabled.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [
+                    self.other,
+                ],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertFalse("errcode" in channel.json_body.keys())
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_requires_auth(self) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should
+        be enabled and require an authenticated user.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [
+                    self.other,
+                ],
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.MISSING_TOKEN)
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_invalid_user_id(self) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should
+        be enabled, and throw an error for invalid user ids.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [
+                    self.other,
+                    "what_is_this",
+                ],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
+        self.assertEqual(
+            channel.json_body.get("error"), "'.users[1]': Invalid user id what_is_this"
+        )
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_empty_users(
+        self,
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should reject an
+        empty `users` list.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_missing_users(
+        self,
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should reject a
+        request without a `users` list.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.MISSING_PARAM)
+
+    @parameterized.expand(
+        [
+            ("string", "@owner:test"),
+            ("object", {"@owner:test": 1}),
+            ("list_of_int", [1]),
+            ("list_of_object", [{"a": 1}]),
+            ("list_with_null", ["@owner:test", None]),
+        ]
+    )
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_malformed_users(
+        self, _label: str, users: object
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should reject a
+        `users` value that is not a list of strings with a 400.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={"users": users},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_respects_limit(self) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should
+        be enabled, and should allow up to 100 users but reject more.
+        """
+        users = [self.register_user(f"user{i}", "password") for i in range(101)]
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": users[:100],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(set(channel.json_body.keys()), set(users[:100]))
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": users,
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
+
+    @parameterized.expand(
+        [
+            # Empty field names are not allowed.
+            (
+                "empty",
+                "",
+                Codes.BAD_JSON,
+                "'.fields': Field name can not be an empty string",
+            ),
+            # Exactly at the limit.
+            ("at_limit", "a" * MAX_CUSTOM_FIELD_LEN, None, None),
+            # One byte over the limit.
+            (
+                "over_limit",
+                "a" * (MAX_CUSTOM_FIELD_LEN + 1),
+                Codes.BAD_JSON,
+                f"'.fields': Field name too long (max {MAX_CUSTOM_FIELD_LEN} bytes)",
+            ),
+            # Under the limit in characters, but over it in UTF-8 bytes
+            # ("é" is 2 bytes).
+            (
+                "over_limit_multibyte",
+                "é" * (MAX_CUSTOM_FIELD_LEN // 2 + 1),
+                Codes.BAD_JSON,
+                f"'.fields': Field name too long (max {MAX_CUSTOM_FIELD_LEN} bytes)",
+            ),
+        ]
+    )
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_field_name_length(
+        self,
+        _label: str,
+        field_name: str,
+        expected_errcode: str | None,
+        expected_error: str | None,
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should reject empty
+        field names, and field names longer than the maximum custom profile field
+        name length, measured in UTF-8 bytes.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [self.owner],
+                "fields": ["displayname", field_name],
+            },
+            access_token=self.owner_tok,
+        )
+        if expected_errcode is None:
+            self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        else:
+            self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+            self.assertEqual(channel.json_body.get("errcode"), expected_errcode)
+            self.assertEqual(channel.json_body.get("error"), expected_error)
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_returns_profile_data(
+        self,
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should
+        be enabled, and it should return profiles.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [
+                    self.owner,
+                ],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(
+            channel.json_body,
+            {
+                self.owner: {
+                    "displayname": "owner",
+                },
+            },
+        )
+
+    @parameterized.expand(
+        [
+            # No `fields`: the whole profile, custom fields included.
+            (
+                "all_fields",
+                None,
+                {
+                    "displayname": "owner",
+                    "org.example.pronouns": "they/them",
+                    "m.status": {"text": "Swimming", "emoji": "🏊"},
+                },
+            ),
+            # Only a custom field.
+            (
+                "custom_field",
+                ["org.example.pronouns"],
+                {"org.example.pronouns": "they/them"},
+            ),
+            # A mix of a standard field and a custom field with an object value.
+            (
+                "standard_and_custom_fields",
+                ["displayname", "m.status"],
+                {
+                    "displayname": "owner",
+                    "m.status": {"text": "Swimming", "emoji": "🏊"},
+                },
+            ),
+        ]
+    )
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_returns_custom_fields(
+        self, _label: str, fields: list[str] | None, expected_profile: JsonDict
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should return custom
+        profile fields, both as part of the whole profile and when requested via
+        `fields`.
+        """
+        store = self.hs.get_datastores().main
+        self.get_success(
+            store.set_profile_field(
+                user_id=UserID.from_string(self.owner),
+                field_name="org.example.pronouns",
+                new_value="they/them",
+            )
+        )
+        self.get_success(
+            store.set_profile_field(
+                user_id=UserID.from_string(self.owner),
+                field_name="m.status",
+                new_value={"text": "Swimming", "emoji": "🏊"},
+            )
+        )
+
+        content: JsonDict = {"users": [self.owner]}
+        if fields is not None:
+            content["fields"] = fields
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content=content,
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {self.owner: expected_profile})
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_omits_users_without_requested_fields(
+        self,
+    ) -> None:
+        """With MSC4536 enabled, users with none of the requested fields set must
+        be omitted from the response, rather than returned as an empty object.
+        """
+        self.get_success(
+            self.hs.get_datastores().main.set_profile_field(
+                user_id=UserID.from_string(self.owner),
+                field_name="org.example.pronouns",
+                new_value="they/them",
+            )
+        )
+
+        # Only the owner has the requested field set.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [self.owner, self.other],
+                "fields": ["org.example.pronouns"],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body,
+            {self.owner: {"org.example.pronouns": "they/them"}},
+        )
+
+        # Neither user has the requested field set.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [self.owner, self.other],
+                "fields": ["org.example.unset"],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {})
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_filters_out_remote_users(
+        self,
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should
+        be enabled, and it should filter out remote profiles.
+
+        Ensure we make no federated lookups.
+
+        NOTE! This is subject to change with MSC4259 bringing support for
+        storing remote profiles on the homeserver.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [
+                    self.owner,
+                    "@user:remote",
+                ],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(
+            channel.json_body,
+            {
+                self.owner: {
+                    "displayname": "owner",
+                },
+            },
+        )
+        self.mock_federation_client.make_query.assert_not_called()
+
+    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
+    def test_query_profiles_endpoint_when_msc4536_enabled_returns_profile_data_not_sharing_room_lookups_allowed(
+        self,
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should
+        be enabled, and it should return profiles, even if not sharing rooms.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [
+                    self.other,
+                ],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(
+            channel.json_body,
+            {
+                self.other: {
+                    "displayname": "Bob",
+                },
+            },
+        )
+
+    @unittest.override_config(
+        {
+            "experimental_features": {"msc4536_enabled": True},
+            "require_auth_for_profile_requests": True,
+            "limit_profile_requests_to_users_who_share_rooms": True,
+        }
+    )
+    def test_query_profiles_endpoint_when_msc4536_enabled_returns_profile_data_not_sharing_room_lookups_disallowed(
+        self,
+    ) -> None:
+        """With MSC4536 enabled, the profiles query endpoint should
+        be enabled, and it should not return profiles when profile requests are
+        restricted to users who share rooms.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [
+                    self.other,
+                ],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(
+            channel.json_body,
+            {},
+        )
+
+    @unittest.override_config(
+        {
+            "experimental_features": {"msc4536_enabled": True},
+            "require_auth_for_profile_requests": True,
+            "limit_profile_requests_to_users_who_share_rooms": True,
+        }
+    )
+    def test_query_profiles_endpoint_when_msc4536_enabled_returns_own_profile_not_sharing_room_lookups_disallowed(
+        self,
+    ) -> None:
+        """With MSC4536 enabled and profile requests restricted to users who share
+        rooms, the profiles query endpoint should still return the requester's own
+        profile, even when the requester is not joined to any room.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
+            content={
+                "users": [
+                    self.owner,
+                    self.other,
+                ],
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body,
+            {self.owner: {"displayname": "owner"}},
+        )
 
 
 class ProfilesRestrictedTestCase(unittest.HomeserverTestCase):

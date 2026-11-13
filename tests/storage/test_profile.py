@@ -21,6 +21,8 @@
 
 from http import HTTPStatus
 
+from parameterized import parameterized
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import ProfileFields
@@ -28,7 +30,7 @@ from synapse.api.errors import StoreError
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import PostgresEngine
-from synapse.types import UserID
+from synapse.types import JsonValue, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -197,3 +199,142 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(len(res), len(expected_values))
         self.assertEqual(res, expected_values)
+
+    def _set_up_profiles_for_field_filtering(self) -> tuple[UserID, UserID, UserID]:
+        """Create three local profiles for the `get_profile_data_for_users` tests:
+
+        - frank: displayname, avatar_url and custom fields with string, nested
+          object and boolean values (so JSON types surviving the filter are
+          checked, not just strings).
+        - bob: displayname only.
+        - carol: a profile row with nothing set.
+        """
+        bob_user_id = UserID.from_string("@bob:test")
+        carol_user_id = UserID.from_string("@carol:test")
+        for user_id in (self.u_frank, bob_user_id, carol_user_id):
+            self.get_success(self.store.create_profile(user_id))
+
+        frank_fields: list[tuple[str, JsonValue | dict[str, JsonValue]]] = [
+            (ProfileFields.DISPLAYNAME, "Frank"),
+            (ProfileFields.AVATAR_URL, "mxc://test/frank"),
+            ("m.status", {"emoji": "💬", "text": "In a meeting"}),
+            ("org.example.pronouns", "he/him"),
+            ("org.example.verified", True),
+        ]
+        for field_name, value in frank_fields:
+            self.get_success(
+                self.store.set_profile_field(
+                    user_id=self.u_frank, field_name=field_name, new_value=value
+                )
+            )
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=bob_user_id,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Bob",
+            )
+        )
+
+        return self.u_frank, bob_user_id, carol_user_id
+
+    def test_get_profile_data_for_users_all_fields(self) -> None:
+        """Without `field_names`, every set field is returned. Users with an
+        empty profile, and users without a profile row, are omitted.
+        """
+        frank_user_id, bob_user_id, carol_user_id = (
+            self._set_up_profiles_for_field_filtering()
+        )
+
+        result = self.get_success(
+            self.store.get_profile_data_for_users(
+                {
+                    frank_user_id.to_string(),
+                    bob_user_id.to_string(),
+                    carol_user_id.to_string(),
+                    "@unknown-person:test",
+                }
+            )
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "@frank:test": {
+                    ProfileFields.DISPLAYNAME: "Frank",
+                    ProfileFields.AVATAR_URL: "mxc://test/frank",
+                    "m.status": {"emoji": "💬", "text": "In a meeting"},
+                    "org.example.pronouns": "he/him",
+                    "org.example.verified": True,
+                },
+                "@bob:test": {ProfileFields.DISPLAYNAME: "Bob"},
+            },
+        )
+
+    @parameterized.expand(
+        [
+            # Only a column-backed field.
+            (
+                "column_field",
+                {ProfileFields.DISPLAYNAME},
+                {
+                    "@frank:test": {ProfileFields.DISPLAYNAME: "Frank"},
+                    "@bob:test": {ProfileFields.DISPLAYNAME: "Bob"},
+                },
+            ),
+            # Only custom fields, including a nested object and a boolean.
+            (
+                "custom_fields",
+                {"m.status", "org.example.verified"},
+                {
+                    "@frank:test": {
+                        "m.status": {"emoji": "💬", "text": "In a meeting"},
+                        "org.example.verified": True,
+                    },
+                },
+            ),
+            # A mix of column-backed, custom and unknown fields.
+            (
+                "mixed_fields",
+                {ProfileFields.AVATAR_URL, "org.example.pronouns", "org.example.unset"},
+                {
+                    "@frank:test": {
+                        ProfileFields.AVATAR_URL: "mxc://test/frank",
+                        "org.example.pronouns": "he/him",
+                    },
+                },
+            ),
+            # Only fields that no user has set: every user is omitted.
+            (
+                "unset_fields",
+                {"org.example.unset"},
+                {},
+            ),
+            # No fields at all: every user is omitted.
+            (
+                "no_fields",
+                set(),
+                {},
+            ),
+        ]
+    )
+    def test_get_profile_data_for_users_filters_fields(
+        self, _label: str, field_names: set[str], expected: dict
+    ) -> None:
+        """`field_names` restricts the result to the named fields, covering the
+        column-backed fields (`displayname`, `avatar_url`), custom fields, and
+        names that aren't set for some or all users. Users with none of the
+        requested fields set are omitted.
+        """
+        frank_user_id, bob_user_id, carol_user_id = (
+            self._set_up_profiles_for_field_filtering()
+        )
+        user_ids = {
+            frank_user_id.to_string(),
+            bob_user_id.to_string(),
+            carol_user_id.to_string(),
+        }
+
+        result = self.get_success(
+            self.store.get_profile_data_for_users(user_ids, field_names=field_names)
+        )
+        self.assertEqual(result, expected)

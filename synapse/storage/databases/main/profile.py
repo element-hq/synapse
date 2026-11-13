@@ -633,7 +633,7 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
     async def get_profile_data_for_users(
-        self, user_ids: Collection[str]
+        self, user_ids: set[str], field_names: set[str] | None = None
     ) -> dict[str, dict[str, JsonValue | dict[str, JsonValue]]]:
         """Fetch displayname/avatar_url/custom fields for a list of users.
 
@@ -642,12 +642,18 @@ class ProfileWorkerStore(SQLBaseStore):
 
         Args:
             user_ids: List of user IDs to filter against.
+            field_names: If given, only these fields are returned. Applies to
+                `displayname` and `avatar_url` as well as custom fields; names
+                that aren't set for a user are left out. `None` returns all
+                fields.
 
         Returns:
             Dictionary from user_id -> field name -> field value
             for the requested users.
 
-            This includes `displayname`, `avatar_url` and all custom fields.
+            Users without a profile row, or with no profile information matching
+            the requested fields, are omitted.
+
             For `displayname` and `avatar_url`, when they are stored as NULL
             in the database column, the dictionary entry will be omitted.
         """
@@ -677,7 +683,11 @@ class ProfileWorkerStore(SQLBaseStore):
             if avatar_url is not None:
                 user_fields[ProfileFields.AVATAR_URL] = avatar_url
 
-            results[full_user_id] = user_fields
+            if field_names is not None:
+                user_fields = {k: v for k, v in user_fields.items() if k in field_names}
+
+            if user_fields:
+                results[full_user_id] = user_fields
 
         return results
 
