@@ -33,6 +33,11 @@ usage() {
   echo "        temporarily deleted (as well as homeserver code temporarily tweaked"
   echo "        not to rely on any of those changes when applying background updates)"
   echo "  Defaults to 9999."
+  echo "--test-upgrade-from=<full schema number>"
+  echo "  Applies the given full schema snapshot, then uses the 'upgrade an existing database' migration path"
+  echo "  instead of the 'set up a new/fresh database' migration path."
+  echo "  This mainly influences the use of \`run_create\` vs \`run_upgrade\` in schema deltas."
+  echo "  This option is intended for testing that both paths lead to the same final schema."
   echo "-h"
   echo "  Display this help text."
   echo ""
@@ -46,7 +51,15 @@ usage() {
 }
 
 SCHEMA_NUMBER="9999"
-while getopts "p:co:hn:" opt; do
+TEST_UPGRADE_FROM=""
+
+while getopts "p:co:hn:-:" opt; do
+  # Process long options (https://stackoverflow.com/a/28466267)
+  if [ "$opt" = "-" ]; then   # long option: reformulate OPT and OPTARG
+    opt="${OPTARG%%=*}"       # extract long option name
+    OPTARG="${OPTARG#"$opt"}" # extract long option argument (may be empty)
+    OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
+  fi
   case $opt in
     p)
       export PGUSER=$OPTARG
@@ -65,6 +78,9 @@ while getopts "p:co:hn:" opt; do
       ;;
     n)
       SCHEMA_NUMBER="$OPTARG"
+      ;;
+    test-upgrade-from)
+      TEST_UPGRADE_FROM="$OPTARG"
       ;;
     \?)
       echo "ERROR: Invalid option: -$OPTARG" >&2
@@ -197,8 +213,49 @@ databases:
 trusted_key_servers: []
 EOF
 
+
+# Create the SQL text needed to set up a database at a specific full schema version,
+# without applying any further upgrades.
+# This bypasses Synapse's database setup logic and is only suitable for testing.
+#
+# Usage: make_preapplied_full_schema_text <sqlite/postgres> <main/state/common>
+make_preapplied_full_schema_text() {
+  local engine="$1" database="$2"
+
+  # If a glob doesn't match, don't fail. Just expand to empty result.
+  shopt -s nullglob
+
+  # Apply all .sql and .sql.{engine} files from the common schema.
+  for file in synapse/storage/schema/common/full_schemas/$TEST_UPGRADE_FROM/*.sql{,$engine} ; do
+    cat $file
+  done
+
+  # Then apply all .sql and .sql.{engine} files from the per-database schema.
+  if [ "$database" != "common" ]; then
+    for file in synapse/storage/schema/$database/full_schemas/$TEST_UPGRADE_FROM/*.sql{,$engine} ; do
+      cat $file
+    done
+  fi
+
+  # Put the nullglob flag back, just in case.
+  shopt -u nullglob
+
+  # We need the schema_version table, defined here
+  cat "synapse/storage/schema/common/schema_version.sql"
+
+  # Then we need to set the applied schema_version manually,
+  # since we bypassed Synapse's own logic that does this.
+  echo "INSERT INTO schema_version (version, upgraded) VALUES ($TEST_UPGRADE_FROM, false);"
+}
+
 # Generate the server's signing key.
 echo "Generating SQLite3 db schema..."
+if [ -n "$TEST_UPGRADE_FROM" ]; then
+  echo "Pre-applying old full schema to SQLite3 databases..."
+  make_preapplied_full_schema_text sqlite common | sqlite3 -bail "$SQLITE_COMMON_DB"
+  make_preapplied_full_schema_text sqlite main | sqlite3 -bail "$SQLITE_MAIN_DB"
+  make_preapplied_full_schema_text sqlite state | sqlite3 -bail "$SQLITE_STATE_DB"
+fi
 python -m synapse.app.homeserver --generate-keys -c "$SQLITE_CONFIG"
 
 # Make sure the SQLite3 database is using the latest schema and has no pending background update.
@@ -210,6 +267,12 @@ echo "Creating postgres databases..."
 createdb --lc-collate=C --lc-ctype=C --template=template0 "$POSTGRES_COMMON_DB_NAME"
 createdb --lc-collate=C --lc-ctype=C --template=template0 "$POSTGRES_MAIN_DB_NAME"
 createdb --lc-collate=C --lc-ctype=C --template=template0 "$POSTGRES_STATE_DB_NAME"
+if [ -n "$TEST_UPGRADE_FROM" ]; then
+  echo "Pre-applying old full schema to Postgres databases..."
+  make_preapplied_full_schema_text postgres common | psql -w "$POSTGRES_COMMON_DB_NAME"
+  make_preapplied_full_schema_text postgres main | psql -w "$POSTGRES_MAIN_DB_NAME"
+  make_preapplied_full_schema_text postgres state | psql -w "$POSTGRES_STATE_DB_NAME"
+fi
 
 echo "Running db background jobs..."
 poetry run python synapse/_scripts/update_synapse_database.py --database-config "$POSTGRES_CONFIG" --run-background-updates
