@@ -95,6 +95,9 @@ class StatsController:
                 assert row is not None
                 vals, freqs = row
 
+                if vals is None or freqs is None:
+                    continue
+
                 for room_id, freq in zip(vals, freqs):
                     room_estimates[room_id] += int(freq * table_size)
 
