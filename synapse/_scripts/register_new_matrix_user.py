@@ -25,12 +25,17 @@ import getpass
 import hashlib
 import hmac
 import logging
+import socket
 import sys
+import urllib.parse
 from typing import Any, Callable, Iterable, TextIO
 
 import requests
+import requests.adapters
 import yaml
 from typing_extensions import Never
+from urllib3.connection import HTTPConnection
+from urllib3.connectionpool import HTTPConnectionPool
 
 _CONFLICTING_SHARED_SECRET_OPTS_ERROR = """\
 Conflicting options 'registration_shared_secret' and 'registration_shared_secret_path'
@@ -47,6 +52,49 @@ The secret given via `registration_shared_secret_path` must not be empty.
 
 _DEFAULT_SERVER_URL = "http://localhost:8008"
 
+_UNIX_SOCKET_SCHEME = "http+unix"
+
+
+class UnixSocketHTTPConnection(HTTPConnection):
+    def __init__(self, unix_socket_path: str, **kwargs: Any) -> None:
+        super().__init__("localhost", **kwargs)
+        self._unix_socket_path = unix_socket_path
+
+    def connect(self) -> None:
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(self._unix_socket_path)
+
+
+class UnixSocketHTTPConnectionPool(HTTPConnectionPool):
+    def __init__(self, unix_socket_path: str) -> None:
+        super().__init__("localhost")
+        self._unix_socket_path = unix_socket_path
+
+    def _new_conn(self) -> UnixSocketHTTPConnection:
+        return UnixSocketHTTPConnection(self._unix_socket_path)
+
+
+class UnixSocketAdapter(requests.adapters.HTTPAdapter):
+    def get_connection_with_tls_context(
+        self,
+        request: requests.PreparedRequest,
+        verify: Any,
+        proxies: dict[str, str] | None = None,
+        cert: Any = None,
+    ) -> UnixSocketHTTPConnectionPool:
+        assert request.url is not None
+        unix_socket_path = urllib.parse.unquote(
+            request.url.split("://", 1)[1].split("/", 1)[0]
+        )
+        return UnixSocketHTTPConnectionPool(unix_socket_path)
+
+
+def get_requests_session(server_location: str) -> requests.Session:
+    session = requests.Session()
+    if server_location.startswith(f"{_UNIX_SOCKET_SCHEME}://"):
+        session.mount(f"{_UNIX_SOCKET_SCHEME}://", UnixSocketAdapter())
+    return session
+
 
 def request_registration(
     user: str,
@@ -60,9 +108,10 @@ def request_registration(
     exists_ok: bool = False,
 ) -> None:
     url = "%s/_synapse/admin/v1/register" % (server_location.rstrip("/"),)
+    session = get_requests_session(server_location)
 
     # Get the nonce
-    r = requests.get(url)
+    r = session.get(url)
 
     if r.status_code != 200:
         _print("ERROR! Received %d %s" % (r.status_code, r.reason))
@@ -100,7 +149,7 @@ def request_registration(
     }
 
     _print("Sending registration request...")
-    r = requests.post(url, json=data)
+    r = session.post(url, json=data)
 
     if r.status_code != 200:
         response = r.json()
@@ -390,6 +439,10 @@ def _find_client_listener(config: dict[str, Any]) -> str | None:
             for name in resource.get("names", [])
         ):
             continue
+
+        if "path" in listener:
+            quoted_path = urllib.parse.quote(listener["path"], safe="")
+            return f"{_UNIX_SOCKET_SCHEME}://{quoted_path}"
 
         # TODO: consider bind_addresses
         return f"http://localhost:{listener['port']}"
