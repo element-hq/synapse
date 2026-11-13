@@ -183,7 +183,7 @@ class RestrictedRoomAliasServersTestCase(unittest.HomeserverTestCase):
         self.helper.send_state(
             room_id,
             EventTypes.PowerLevels,
-            {"users": {self.user: 100, "@remote:remote2": 50}, "invite": 50},
+            {"users": {self.user: 100, "@remote:remote3": 50}, "invite": 50},
             tok=self.user_tok,
         )
 
