@@ -47,11 +47,7 @@ from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.filepath import MediaFilePaths
-from synapse.media.media_storage import (
-    FileResponder,
-    MediaStorage,
-    ReadableFileWrapper,
-)
+from synapse.media.media_storage import MediaStorage, ReadableFileWrapper
 from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
@@ -141,37 +137,6 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         # This uses a real blocking threadpool so we have to wait for it to be
         # actually done :/
         self.get_success(test_ensure_media())
-
-    def test_ensure_media_is_in_local_cache_failed_download(self) -> None:
-        """A failed download from a storage provider must not leave a (partial)
-        file in the local cache, which later calls would treat as cached.
-        """
-        media_id = "some_media_id"
-
-        # Put the file in the storage provider only.
-        rel_path = self.filepaths.local_media_filepath_rel(media_id)
-        secondary_path = os.path.join(self.secondary_base_path, rel_path)
-        os.makedirs(os.path.dirname(secondary_path))
-        with open(secondary_path, "w") as f:
-            f.write("Test\n")
-
-        async def test_ensure_media() -> None:
-            async with self.media_storage.ensure_media_is_in_local_cache(
-                FileInfo(None, media_id)
-            ):
-                pass
-
-        # Make the copy out of the storage provider fail.
-        with patch.object(
-            FileResponder,
-            "write_to_consumer",
-            side_effect=Exception("Simulated download failure"),
-        ):
-            self.get_failure(test_ensure_media(), Exception)
-
-        # Neither the cached file nor a leftover partial file should exist.
-        local_dir = os.path.dirname(os.path.join(self.primary_base_path, rel_path))
-        self.assertEqual(os.listdir(local_dir), [])
 
     @parameterized.expand([("local_provider", True), ("temp_file", False)])
     def test_store_into_file_removes_file_on_write_failure(

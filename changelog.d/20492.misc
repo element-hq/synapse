@@ -1,1 +1,1 @@
-Refactor `MediaRepository` and `MediaStorage` to reduce duplication, and fix a bug where a failed download from a storage provider could leave a truncated file in the local media cache. Contributed by @famedly @itsoyou.
+Refactor `MediaRepository` to reduce duplicated code in media uploads, remote media downloads, thumbnail generation and media deletion. Contributed by @famedly @itsoyou.
