@@ -39,6 +39,7 @@ class RegistrationStoreTestCase(HomeserverTestCase):
         self.device_id = "akgjhdjklgshg"
 
     def test_register(self) -> None:
+        register_ts_seconds = int(self.clock.time())
         self.get_success(self.store.register_user(self.user_id, self.pwhash))
 
         self.assertEqual(
@@ -50,7 +51,7 @@ class RegistrationStoreTestCase(HomeserverTestCase):
                 consent_ts=None,
                 consent_version=None,
                 appservice_id=None,
-                creation_ts=0,
+                creation_ts=register_ts_seconds,
                 user_type=None,
                 is_deactivated=False,
                 locked=False,
