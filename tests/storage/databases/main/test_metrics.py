@@ -55,7 +55,6 @@ class ExtremStatisticsTestCase(HomeserverTestCase):
         # Let it run for a while, then pull out the statistics from the
         # Prometheus client registry
         self.reactor.advance(60 * 60 * 1000)
-        self.pump(1)
 
         items = list(
             filter(
