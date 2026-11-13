@@ -685,7 +685,13 @@ jobs:
           . /etc/os-release
           sudo sh -c "echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main' > /etc/apt/sources.list.d/pgdg.list"
           sudo apt-get update
-      - run: sudo apt-get -qq install xmlsec1 postgresql-client
+      # Install `pg_dump` and ensure it's up to date. If it's older than the
+      # server version, it can cause mismatches in the schema dumps.
+      # (Specifically, we've seen spurious `pg_attver` changes in the schema
+      # dumps which cause this step to fail unexpectedly.)
+      - run: |
+          sudo apt-get -qq install xmlsec1 postgresql-client
+          sudo apt-get -qq install --only-upgrade 'postgresql-client-*'
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: ${{ matrix.python-version }}
