@@ -1367,6 +1367,11 @@ class FederationClient(FederationBase):
     ) -> EventBase:
         room_version = await self.store.get_room_version(room_id)
 
+        # Verify the policy server has allowed the event, raising a SynapseError if not.
+        # We use `raise_if_not_allowed` instead of asking for a signature because the
+        # event we received might already have a policy server signature.
+        await self._get_room_policy_handler().raise_if_not_allowed(pdu)
+
         content = await self._do_send_invite(destination, pdu, context, room_version)
 
         pdu_dict = content["event"]
@@ -1384,11 +1389,6 @@ class FederationClient(FederationBase):
             raise SynapseError(403, errmsg, Codes.FORBIDDEN)
 
             # FIXME: We should handle signature failures more gracefully.
-
-        # Verify the policy server has allowed the event, raising a SynapseError if not.
-        # We use `raise_if_not_allowed` instead of asking for a signature because the
-        # event we received might already have a policy server signature.
-        await self._get_room_policy_handler().raise_if_not_allowed(pdu)
 
         return pdu
 
