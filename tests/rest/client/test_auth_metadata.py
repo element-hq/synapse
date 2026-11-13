@@ -18,10 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 from http import HTTPStatus
-from typing import ClassVar
 from unittest.mock import Mock
-
-from parameterized import parameterized_class
 
 from twisted.internet.testing import MemoryReactor
 
@@ -34,34 +31,18 @@ from synapse.util.clock import Clock
 from tests.unittest import HomeserverTestCase
 
 
-@parameterized_class(
-    ("endpoint",),
-    [
-        ("/_matrix/client/unstable/org.matrix.msc2965/auth_metadata",),
-        ("/_matrix/client/v1/auth_metadata",),
-    ],
-)
 class AuthMetadataMasDisabledTestCase(HomeserverTestCase):
-    endpoint: ClassVar[str]
     servlets = [
         auth_metadata.register_servlets,
     ]
 
     def test_returns_404_when_mas_disabled(self) -> None:
         # Make an unauthenticated request for the discovery info.
-        channel = self.make_request("GET", self.endpoint)
+        channel = self.make_request("GET", "/_matrix/client/v1/auth_metadata")
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
 
 
-@parameterized_class(
-    ("endpoint",),
-    [
-        ("/_matrix/client/unstable/org.matrix.msc2965/auth_metadata",),
-        ("/_matrix/client/v1/auth_metadata",),
-    ],
-)
 class AuthMetadataMasEnabledTestCase(HomeserverTestCase):
-    endpoint: ClassVar[str]
     servlets = [
         auth_metadata.register_servlets,
     ]
@@ -89,7 +70,7 @@ class AuthMetadataMasEnabledTestCase(HomeserverTestCase):
 
         self.auth.auth_metadata.return_value = test_auth_metadata
 
-        channel = self.make_request("GET", self.endpoint)
+        channel = self.make_request("GET", "/_matrix/client/v1/auth_metadata")
 
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
         self.assertEqual(channel.json_body, test_auth_metadata)
