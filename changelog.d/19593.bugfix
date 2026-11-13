@@ -1,0 +1,1 @@
+Fix local membership events being sent without asking the room's policy server, if set, first.
