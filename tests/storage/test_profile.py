@@ -209,9 +209,9 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         - bob: displayname only.
         - carol: a profile row with nothing set.
         """
-        u_bob = UserID.from_string("@bob:test")
-        u_carol = UserID.from_string("@carol:test")
-        for user_id in (self.u_frank, u_bob, u_carol):
+        bob_user_id = UserID.from_string("@bob:test")
+        carol_user_id = UserID.from_string("@carol:test")
+        for user_id in (self.u_frank, bob_user_id, carol_user_id):
             self.get_success(self.store.create_profile(user_id))
 
         frank_fields: list[tuple[str, JsonValue | dict[str, JsonValue]]] = [
@@ -229,24 +229,28 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
             )
         self.get_success(
             self.store.set_profile_field(
-                user_id=u_bob, field_name=ProfileFields.DISPLAYNAME, new_value="Bob"
+                user_id=bob_user_id,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Bob",
             )
         )
 
-        return self.u_frank, u_bob, u_carol
+        return self.u_frank, bob_user_id, carol_user_id
 
     def test_get_profile_data_for_users_all_fields(self) -> None:
         """Without `field_names`, every set field is returned. Users with an
         empty profile, and users without a profile row, are omitted.
         """
-        u_frank, u_bob, u_carol = self._set_up_profiles_for_field_filtering()
+        frank_user_id, bob_user_id, carol_user_id = (
+            self._set_up_profiles_for_field_filtering()
+        )
 
         result = self.get_success(
             self.store.get_profile_data_for_users(
                 {
-                    u_frank.to_string(),
-                    u_bob.to_string(),
-                    u_carol.to_string(),
+                    frank_user_id.to_string(),
+                    bob_user_id.to_string(),
+                    carol_user_id.to_string(),
                     "@unknown-person:test",
                 }
             )
@@ -321,8 +325,14 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         names that aren't set for some or all users. Users with none of the
         requested fields set are omitted.
         """
-        u_frank, u_bob, u_carol = self._set_up_profiles_for_field_filtering()
-        user_ids = {u_frank.to_string(), u_bob.to_string(), u_carol.to_string()}
+        frank_user_id, bob_user_id, carol_user_id = (
+            self._set_up_profiles_for_field_filtering()
+        )
+        user_ids = {
+            frank_user_id.to_string(),
+            bob_user_id.to_string(),
+            carol_user_id.to_string(),
+        }
 
         result = self.get_success(
             self.store.get_profile_data_for_users(user_ids, field_names=field_names)
