@@ -161,6 +161,12 @@ class SlidingSyncInterestedRooms:
     The set of rooms the user consider as direct-message (DM) rooms
     """
 
+    un_partial_stated_rooms: AbstractSet[str]
+    """
+    The set of rooms whose partial state was resolved in the token range: their
+    member counts may have changed without any new event in the room.
+    """
+
     @staticmethod
     def empty() -> "SlidingSyncInterestedRooms":
         return SlidingSyncInterestedRooms(
@@ -172,6 +178,7 @@ class SlidingSyncInterestedRooms:
             newly_joined_rooms=set(),
             newly_left_rooms=set(),
             dm_room_ids=set(),
+            un_partial_stated_rooms=set(),
         )
 
 
@@ -646,8 +653,11 @@ class SlidingSyncRoomLists:
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
-        relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
-            previous_connection_state, from_token, relevant_room_map
+        (
+            relevant_rooms_to_send_map,
+            un_partial_stated_rooms,
+        ) = await self._filter_relevant_rooms_to_send(
+            previous_connection_state, from_token, to_token, relevant_room_map
         )
 
         return SlidingSyncInterestedRooms(
@@ -659,6 +669,7 @@ class SlidingSyncRoomLists:
             newly_joined_rooms=newly_joined_room_ids,
             newly_left_rooms=set(newly_left_room_map),
             dm_room_ids=dm_room_ids,
+            un_partial_stated_rooms=un_partial_stated_rooms,
         )
 
     async def _compute_interested_rooms_fallback(
@@ -834,8 +845,11 @@ class SlidingSyncRoomLists:
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
-        relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
-            previous_connection_state, from_token, relevant_room_map
+        (
+            relevant_rooms_to_send_map,
+            un_partial_stated_rooms,
+        ) = await self._filter_relevant_rooms_to_send(
+            previous_connection_state, from_token, to_token, relevant_room_map
         )
 
         return SlidingSyncInterestedRooms(
@@ -847,20 +861,28 @@ class SlidingSyncRoomLists:
             newly_joined_rooms=newly_joined_room_ids,
             newly_left_rooms=newly_left_room_ids,
             dm_room_ids=dm_room_ids,
+            un_partial_stated_rooms=un_partial_stated_rooms,
         )
 
     async def _filter_relevant_rooms_to_send(
         self,
         previous_connection_state: PerConnectionState,
         from_token: StreamToken | None,
+        to_token: StreamToken,
         relevant_room_map: dict[str, RoomSyncConfig],
-    ) -> dict[str, RoomSyncConfig]:
+    ) -> tuple[dict[str, RoomSyncConfig], AbstractSet[str]]:
         """Filters the `relevant_room_map` down to those rooms that may have
-        updates we need to fetch and return."""
+        updates we need to fetch and return.
+
+        Returns:
+            The filtered map, and the rooms whose partial state was resolved in
+            the token range.
+        """
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
         relevant_rooms_to_send_map: dict[str, RoomSyncConfig] = relevant_room_map
+        un_partial_stated_rooms: AbstractSet[str] = set()
         if relevant_room_map:
             with start_active_span("filter_relevant_rooms_to_send"):
                 if from_token:
@@ -945,13 +967,26 @@ class SlidingSyncRoomLists:
                             raise SlidingSyncUnknownPosition()
 
                     rooms_should_send.update(rooms_that_have_updates)
+
+                    # A room whose partial state was resolved (faster joins)
+                    # gets no new event for it, yet its member counts and
+                    # members may have changed: send it again, as `/sync` does.
+                    un_partial_stated_rooms = (
+                        await self.store.get_un_partial_stated_rooms_between(
+                            from_token.un_partial_stated_rooms_key,
+                            to_token.un_partial_stated_rooms_key,
+                            relevant_room_map.keys(),
+                        )
+                    )
+                    rooms_should_send.update(un_partial_stated_rooms)
+
                     relevant_rooms_to_send_map = {
                         room_id: room_sync_config
                         for room_id, room_sync_config in relevant_room_map.items()
                         if room_id in rooms_should_send
                     }
 
-        return relevant_rooms_to_send_map
+        return relevant_rooms_to_send_map, un_partial_stated_rooms
 
     @trace
     async def _get_rewind_changes_to_current_membership_to_token(

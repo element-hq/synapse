@@ -22,15 +22,18 @@ from twisted.internet.testing import MemoryReactor
 import synapse.rest.admin
 from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
+from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
+from tests.server import TimedOutException
 from tests.test_utils.event_injection import (
     create_event,
     inject_event,
     inject_member_event,
+    mark_event_as_partial_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +75,106 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         self.persistence = persistence
 
         super().prepare(reactor, clock, hs)
+
+    def test_rooms_meta_when_partial_state_is_resolved(self) -> None:
+        """
+        Test that a room joined with partial state (faster joins) comes down
+        again once its state is complete, with its member counts: the counts sent
+        while it was partial may be wrong, and the end of the resync adds no
+        event to the room.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.get_success(
+            mark_event_as_partial_state(self.hs, join_response["event_id"], room_id1)
+        )
+
+        # Lazy-loading the members: the partially-stated room is sent
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [[EventTypes.Member, StateValues.LAZY]],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(set(response_body["rooms"].keys()), {room_id1}, exact=True)
+
+        self._resolve_partial_state(room_id1)
+
+        # The room comes down again, with its member counts
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body.get("rooms", {}).keys()), {room_id1}, exact=True
+        )
+        self.assertEqual(response_body["rooms"][room_id1]["joined_count"], 2)
+        self.assertEqual(response_body["rooms"][room_id1]["invited_count"], 0)
+
+    def test_rooms_meta_when_partial_state_is_resolved_wakes_sync(self) -> None:
+        """
+        Test that a waiting Sliding Sync request returns once the partial state of a
+        room is resolved, with the member counts of the room.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.get_success(
+            mark_event_as_partial_state(self.hs, join_response["event_id"], room_id1)
+        )
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [[EventTypes.Member, StateValues.LAZY]],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+
+        self._resolve_partial_state(room_id1)
+
+        # Should respond before the 10 second timeout
+        channel.await_result(timeout_ms=3000)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body["rooms"][room_id1]["joined_count"], 2)
+
+    def _resolve_partial_state(self, room_id: str) -> None:
+        """End the resync of the state of a room, as the federation handler does."""
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="partial_state_events",
+                keyvalues={"room_id": room_id},
+                desc="_resolve_partial_state",
+            )
+        )
+        stream_id = self.get_success(self.store.clear_partial_state_room(room_id))
+        assert stream_id is not None
+        self.get_success(
+            self.hs.get_notifier().on_un_partial_stated_room(room_id, stream_id)
+        )
 
     def test_rooms_meta_when_joined_initial(self) -> None:
         """
