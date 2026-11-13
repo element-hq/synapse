@@ -888,17 +888,18 @@ class FederationServer(FederationBase):
             )
             raise SynapseError(403, Codes.FORBIDDEN)
 
-        # Verify the policy server has allowed the event, raising a SynapseError if not.
-        # We use `raise_if_not_allowed` instead of asking for a signature because the
-        # event we received might already have a policy server signature.
-        await self._room_policy_handler.raise_if_not_allowed(pdu)
-
         try:
             pdu = await self._check_sigs_and_hash(room_version, pdu)
         except InvalidEventSignatureError as e:
             errmsg = f"event id {pdu.event_id}: {e}"
             logger.warning("%s", errmsg)
             raise SynapseError(403, errmsg, Codes.FORBIDDEN)
+
+        # Verify the policy server has allowed the event, raising a SynapseError if not.
+        # We use `raise_if_not_allowed` instead of asking for a signature because the
+        # event we received might already have a policy server signature.
+        await self._room_policy_handler.raise_if_not_allowed(pdu)
+
         ret_pdu = await self.handler.on_invite_request(
             origin=origin,
             event=pdu,
@@ -1254,17 +1255,17 @@ class FederationServer(FederationBase):
                 )
             )
 
-        # Verify the policy server has allowed the event, raising a SynapseError if not.
-        # We use `raise_if_not_allowed` instead of asking for a signature because the
-        # event we received might already have a policy server signature.
-        await self._room_policy_handler.raise_if_not_allowed(event)
-
         try:
             event = await self._check_sigs_and_hash(room_version, event)
         except InvalidEventSignatureError as e:
             errmsg = f"event id {event.event_id}: {e}"
             logger.warning("%s", errmsg)
             raise SynapseError(403, errmsg, Codes.FORBIDDEN)
+
+        # Verify the policy server has allowed the event, raising a SynapseError if not.
+        # We use `raise_if_not_allowed` instead of asking for a signature because the
+        # event we received might already have a policy server signature.
+        await self._room_policy_handler.raise_if_not_allowed(event)
 
         try:
             return await self._federation_event_handler.on_send_membership_event(

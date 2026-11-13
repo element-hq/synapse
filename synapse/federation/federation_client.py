@@ -1375,11 +1375,6 @@ class FederationClient(FederationBase):
 
         pdu = event_from_pdu_json(pdu_dict, room_version)
 
-        # Verify the policy server has allowed the event, raising a SynapseError if not.
-        # We use `raise_if_not_allowed` instead of asking for a signature because the
-        # event we received might already have a policy server signature.
-        await self._get_room_policy_handler().raise_if_not_allowed(pdu)
-
         # Check signatures are correct.
         try:
             pdu = await self._check_sigs_and_hash(room_version, pdu)
@@ -1389,6 +1384,11 @@ class FederationClient(FederationBase):
             raise SynapseError(403, errmsg, Codes.FORBIDDEN)
 
             # FIXME: We should handle signature failures more gracefully.
+
+        # Verify the policy server has allowed the event, raising a SynapseError if not.
+        # We use `raise_if_not_allowed` instead of asking for a signature because the
+        # event we received might already have a policy server signature.
+        await self._get_room_policy_handler().raise_if_not_allowed(pdu)
 
         return pdu
 
