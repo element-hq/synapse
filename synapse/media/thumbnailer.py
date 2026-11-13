@@ -25,6 +25,7 @@ from io import BytesIO
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, cast
 
+import PIL.features
 from PIL import Image, ImageSequence
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError, cs_error
@@ -73,11 +74,20 @@ class ThumbnailError(Exception):
 
 
 class Thumbnailer:
-    FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
+    FORMATS = {
+        "image/jpeg": "JPEG",
+        "image/png": "PNG",
+        "image/webp": "WEBP",
+        "image/avif": "AVIF",
+    }
 
     # Which image formats we allow Pillow to open.
     # This should intentionally be kept restrictive, because the decoder of any
     # format in this list becomes part of our trusted computing base.
+    # FIXME: 'avif' is not here because Debian trixie ships Pillow 11.1.0,
+    # lower then the 11.2.1 required for AVIF support.
+    # Add 'avif' to PILLOW_FORMATS when supported distros starts shipping
+    # Pillow newer than 11.2.1
     PILLOW_FORMATS = ("jpeg", "png", "webp", "gif")
 
     # Pillow reports MPO (a JPEG holding a stereo pair) as multi-frame, so
@@ -98,8 +108,14 @@ class Thumbnailer:
         # Cached so a broken animation isn't re-decoded for every thumbnail size.
         self._animation_broken = False
 
+        # FIXME: see FIXME on PILLOW_FORMATS
+        # Remove conditional AVIF support when supported distros starts shipping
+        # Pillow newer than 11.2.1
+        additional_formats = ("avif",) if PIL.features.check("avif") else ()
         try:
-            self.image = Image.open(input_path, formats=self.PILLOW_FORMATS)
+            self.image = Image.open(
+                input_path, formats=self.PILLOW_FORMATS + additional_formats
+            )
         except OSError as e:
             # If an error occurs opening the image, a thumbnail won't be able to
             # be generated.
