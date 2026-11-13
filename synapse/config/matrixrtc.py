@@ -15,15 +15,27 @@
 #
 #
 
-from typing import Any
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
-from pydantic import Field, StrictStr, ValidationError, field_validator, model_validator
+from pydantic import (
+    Field,
+    StrictBool,
+    StrictStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from typing_extensions import Self
 
+from synapse.appservice import ApplicationService
 from synapse.types import JsonDict
 from synapse.util.pydantic_models import ParseModel
 
 from ._base import Config, ConfigError
+
+if TYPE_CHECKING:
+    from synapse.config.homeserver import HomeServerConfig
 
 
 class TransportConfigModel(ParseModel):
@@ -51,6 +63,12 @@ class TransportConfigModel(ParseModel):
 
 class MatrixRtcConfigModel(ParseModel):
     transports: list[dict[str, Any]] = []
+
+    msc4195_stable_endpoints: StrictBool = False
+    """
+    Whether to advertise the `org.matrix.msc4195.stable` feature flag in `/versions`,
+    telling clients that the stable MSC4195 LiveKit endpoints are served by this server.
+    """
 
     @field_validator("transports")
     @classmethod
@@ -83,3 +101,46 @@ class MatrixRtcConfig(Config):
             ) from e
 
         self.transports = parsed.transports
+        self.msc4195_stable_endpoints = parsed.msc4195_stable_endpoints
+
+
+def validate_msc4195_stable_endpoints_config(
+    config: "HomeServerConfig", appservices: Iterable[ApplicationService]
+) -> None:
+    """Checks that if the config requests to advertise the stable MSC4195 endpoints
+    we also have an application service that covers the `rtc/livekit` namespace.
+
+    This can only happen once the application service registrations have been loaded,
+    which is why it isn't done in `MatrixRtcConfig.read_config`.
+
+    Args:
+        config: The homeserver config.
+        appservices: The loaded application services.
+
+    Raises:
+        ConfigError: If the feature flag is enabled but no application service
+            proxies the LiveKit endpoints.
+    """
+    if not config.matrix_rtc.msc4195_stable_endpoints:
+        return
+
+    if not config.experimental.msc4512_enabled:
+        raise ConfigError(
+            "`matrix_rtc.msc4195_stable_endpoints` requires "
+            "`experimental_features.msc4512_enabled` to be enabled so "
+            "that an application service can proxy the MSC4195 endpoints.",
+            ("matrix_rtc", "msc4195_stable_endpoints"),
+        )
+
+    if not any(
+        appservice.is_path_covered_by_proxy_prefix(
+            ApplicationService.LIVEKIT_PROXY_PREFIX
+        )
+        for appservice in appservices
+    ):
+        raise ConfigError(
+            "`matrix_rtc.msc4195_stable_endpoints` requires an application "
+            " service to be configured for proxying requests in the "
+            f"`{ApplicationService.LIVEKIT_PROXY_PREFIX}` namespace.",
+            ("matrix_rtc", "msc4195_stable_endpoints"),
+        )

@@ -97,10 +97,13 @@ class ApplicationService:
     # values.
     NS_LIST = [NS_USERS, NS_ALIASES, NS_ROOMS]
 
+    # The proxy prefix for LiveKit related paths.
+    LIVEKIT_PROXY_PREFIX = "rtc/livekit"
+
     # Prefixes are applied after the version segment(s) (either /vX/ or /unstable/foo/):
     # - /_matrix/client/(unstable/[^/]+|v[^/]+)/{prefix}/.*
     # - /_matrix/federation/(unstable/[^/]+|v[^/]+)/{prefix}/.*
-    ALLOWED_PROXY_PREFIXES = {"rtc/livekit"}
+    ALLOWED_PROXY_PREFIXES = {LIVEKIT_PROXY_PREFIX}
 
     def __init__(
         self,
@@ -232,6 +235,22 @@ class ApplicationService:
             prefix == allowed or prefix.startswith(allowed + "/")
             for allowed in ApplicationService.ALLOWED_PROXY_PREFIXES
         )
+
+    def is_path_covered_by_proxy_prefix(self, path: str) -> bool:
+        """Checks whether this application service proxies all requests under the
+        given path.
+
+        Args:
+            path: The path to check, relative to the version segment of the
+                Client-Server or Server-Server API and without leading or trailing
+                slashes, e.g. "rtc/livekit".
+
+        Returns:
+            True if the service has a proxy prefix that covers the whole path.
+        """
+        if self.proxy_prefix is None:
+            return False
+        return path == self.proxy_prefix or path.startswith(self.proxy_prefix + "/")
 
     @cached(num_args=1, cache_context=True)
     async def _matches_user_in_member_list(

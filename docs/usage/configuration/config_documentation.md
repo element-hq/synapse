@@ -2721,6 +2721,12 @@ This setting has the following sub-options:
 
     Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
+* `msc4195_stable_endpoints` (boolean): Whether to advertise the `org.matrix.msc4195.stable` feature flag from [MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195) which indicates to clients that Synapse serves the stable endpoints for interacting with LiveKit SFUs.
+
+  This requires at least version 0.10.0 of https://github.com/element-hq/lk-jwt-service.
+
+  Defaults to `false`.
+
 Example configuration:
 ```yaml
 matrix_rtc:
@@ -2730,6 +2736,7 @@ matrix_rtc:
   - type: livekit
     url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
+  msc4195_stable_endpoints: true
 ```
 ---
 ## Registration

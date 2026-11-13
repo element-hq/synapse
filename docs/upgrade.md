@@ -117,6 +117,27 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.166.0
+
+## Advertising the stable MatrixRTC LiveKit endpoints
+
+Synapse can now advertise the `org.matrix.msc4195.stable` feature flag from
+[MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195) in
+`/_matrix/client/versions`. This lets clients know that they can use the stable
+endpoints for interacting with LiveKit SFUs. Admins that are running at least
+version 0.10.0 of [lk-jwt-service](https://github.com/element-hq/lk-jwt-service)
+(the first version to introduce the stable endpoints) as an application service
+should enable this via the new [`matrix_rtc.msc4195_stable_endpoints`](usage/configuration/config_documentation.md#matrix_rtc)
+config option:
+
+```yaml
+matrix_rtc:
+  transports:
+    - type: m.livekit
+      url: wss://livekit.example.com
+  msc4195_stable_endpoints: true
+```
+
 # Upgrading to v1.165.0
 
 ## Python 3.11+ is now required
