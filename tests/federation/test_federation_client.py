@@ -18,9 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import urllib
 from http import HTTPStatus
 from typing import Any
-import urllib
 from unittest import mock
 
 import twisted.web.client
@@ -28,7 +28,6 @@ from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import SynapseError
-from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.rest import admin
 from synapse.rest.client import login, room
