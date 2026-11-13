@@ -21,14 +21,15 @@
 
 //! An implementation of Matrix server ACL rules.
 
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
 use anyhow::Error;
 use pyo3::{prelude::*, pybacked::PyBackedStr};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 
-use crate::push::utils::{glob_to_regex, GlobMatchType};
+use crate::push::utils::glob_to_pattern;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -46,12 +47,69 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     Ok(())
 }
 
+#[derive(Debug, Clone, Default)]
+struct AclList {
+    exact: HashSet<String>,
+    patterns: Vec<Regex>,
+}
+
+const ACL_REGEX_SIZE_LIMIT: usize = 1 << 20;
+
+fn build_patterns(globs: &[String]) -> Result<Vec<Regex>, Error> {
+    if globs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pattern = format!(r"\A(?:{})\z", globs.join("|"));
+    match RegexBuilder::new(&pattern)
+        .case_insensitive(true)
+        .size_limit(ACL_REGEX_SIZE_LIMIT)
+        .build()
+    {
+        Ok(re) => Ok(vec![re]),
+        Err(regex::Error::CompiledTooBig(_)) if globs.len() > 1 => {
+            let (a, b) = globs.split_at(globs.len() / 2);
+            let mut out = build_patterns(a)?;
+            out.extend(build_patterns(b)?);
+            Ok(out)
+        }
+        Err(regex::Error::CompiledTooBig(_)) => Ok(vec![RegexBuilder::new(&pattern)
+            .case_insensitive(true)
+            .build()?]),
+        Err(e) => Err(e.into()),
+    }
+}
+
+impl AclList {
+    fn new(entries: &[PyBackedStr]) -> Result<Self, Error> {
+        let mut exact = HashSet::new();
+        let mut globs = Vec::new();
+        for entry in entries {
+            let entry: &str = entry;
+            if entry.is_ascii() && !entry.contains(['*', '?']) {
+                exact.insert(entry.to_ascii_lowercase());
+            } else {
+                globs.push(glob_to_pattern(entry));
+            }
+        }
+
+        Ok(AclList {
+            exact,
+            patterns: build_patterns(&globs)?,
+        })
+    }
+
+    fn matches(&self, server_name: &str, lowercased: Option<&str>) -> bool {
+        lowercased.is_some_and(|l| self.exact.contains(l))
+            || self.patterns.iter().any(|p| p.is_match(server_name))
+    }
+}
+
 #[derive(Debug, Clone)]
 #[pyclass(frozen, skip_from_py_object)]
 pub struct ServerAclEvaluator {
     allow_ip_literals: bool,
-    allow: Vec<Regex>,
-    deny: Vec<Regex>,
+    allow: AclList,
+    deny: AclList,
 }
 
 #[pymethods]
@@ -62,14 +120,8 @@ impl ServerAclEvaluator {
         allow: Vec<PyBackedStr>,
         deny: Vec<PyBackedStr>,
     ) -> Result<Self, Error> {
-        let allow = allow
-            .iter()
-            .map(|s| glob_to_regex(s, GlobMatchType::Whole))
-            .collect::<Result<_, _>>()?;
-        let deny = deny
-            .iter()
-            .map(|s| glob_to_regex(s, GlobMatchType::Whole))
-            .collect::<Result<_, _>>()?;
+        let allow = AclList::new(&allow)?;
+        let deny = AclList::new(&deny)?;
 
         Ok(ServerAclEvaluator {
             allow_ip_literals,
@@ -93,13 +145,17 @@ impl ServerAclEvaluator {
             }
         }
 
+        let lowercased = server_name
+            .is_ascii()
+            .then(|| server_name.to_ascii_lowercase());
+
         // next, check the deny list
-        if self.deny.iter().any(|e| e.is_match(server_name)) {
+        if self.deny.matches(server_name, lowercased.as_deref()) {
             return false;
         }
 
         // then the allow list.
-        if self.allow.iter().any(|e| e.is_match(server_name)) {
+        if self.allow.matches(server_name, lowercased.as_deref()) {
             return true;
         }
 
