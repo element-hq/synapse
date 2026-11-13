@@ -153,10 +153,10 @@ class RoomPolicyHandler:
         """
         try:
             await self.raise_if_not_allowed(event)
-        except Exception as ex:
+        except Exception:
             # We probably caught either a refusal to sign, an invalid signature, or
             # some other transient or network error. These are all rejection cases.
-            logger.warning("Failed to get a signature from the policy server: %s", ex)
+            logger.exception("Failed to get a signature from the policy server")
             return False
 
         return True
