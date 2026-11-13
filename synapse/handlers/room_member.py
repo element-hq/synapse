@@ -1052,6 +1052,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 if action == "kick":
                     raise AuthError(403, "The target user is not in the room")
 
+        rejecting_local_invite = False
+
         if effective_membership_state == Membership.JOIN:
             if requester.is_guest:
                 guest_can_join = await self._can_guest_join(partial_state_before_join)
@@ -1182,6 +1184,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     # the inviter was on our server, but has now left. Carry on
                     # with the normal rejection codepath, which will also send the
                     # rejection out to any other servers we believe are still in the room.
+                    rejecting_local_invite = True
 
                     # thanks to overzealous cleaning up of event_forward_extremities in
                     # `delete_old_current_state_events`, it's possible to end up with no
@@ -1201,13 +1204,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         knock.event_id, txn_id, requester, content
                     )
 
-                # We hold no events to build another leave on (a rejected invite or
-                # a rescinded knock leaves us with outliers only). An identical
-                # leave by the same sender returns the existing event, as
-                # `deduplicate_state_event` does in rooms we are in.
-                elif (
-                    current_membership_type == Membership.LEAVE and not latest_event_ids
-                ):
+                # An identical leave by the same sender returns the existing event,
+                # as `deduplicate_state_event` does in rooms we are in.
+                elif current_membership_type == Membership.LEAVE:
                     leave = await self.store.get_event(current_membership_event_id)
                     expected_content = {**content, "membership": Membership.LEAVE}
                     if (
@@ -1241,9 +1240,10 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     requester, remote_room_hosts, room_id, target, content
                 )
 
-        # A room we are not in may have no forward extremities to build an event on.
-        # Refuse as the auth rules refuse a sender who is not in the room.
-        if not is_host_in_room and not latest_event_ids:
+        # We can only build an event in a room we are in, or on top of an invite
+        # sent by one of our users. Refuse as the auth rules refuse a sender who is
+        # not in the room.
+        if not is_host_in_room and not rejecting_local_invite:
             raise UnstableSpecAuthError(
                 403,
                 "%s not in room %s." % (requester.user, room_id),
