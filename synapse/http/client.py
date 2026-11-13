@@ -47,7 +47,7 @@ from twisted.internet.interfaces import (
     IAddress,
     IDelayedCall,
     IHostResolution,
-    IOpenSSLContextFactory,
+    IOpenSSLClientConnectionCreator,
     IReactorCore,
     IReactorPluggableNameResolver,
     IResolutionReceiver,
@@ -55,6 +55,7 @@ from twisted.internet.interfaces import (
 )
 from twisted.internet.protocol import connectionDone
 from twisted.internet.task import Cooperator
+from twisted.protocols.tls import TLSMemoryBIOProtocol
 from twisted.python.failure import Failure
 from twisted.web._newclient import ResponseDone
 from twisted.web.client import (
@@ -1086,12 +1087,14 @@ class _MultipartParserProtocol(protocol.Protocol):
         self.parser: MultipartParser | None = None
         self.multipart_response = MultipartResponse()
         self.has_redirect = False
-        self.in_json = False
-        self.json_done = False
         self.file_length = 0
         self.total_length = 0
-        self.in_disposition = False
-        self.in_content_type = False
+        # Callbacks can fire once per network chunk, so buffer each value until it ends.
+        self.part_count = 0
+        self.part_header_count = 0
+        self.header_field = bytearray()
+        self.header_value = bytearray()
+        self.json_buffer = bytearray()
 
     def dataReceived(self, incoming_data: bytes) -> None:
         if self.deferred.called:
@@ -1100,33 +1103,40 @@ class _MultipartParserProtocol(protocol.Protocol):
         # we don't have a parser yet, instantiate it
         if not self.parser:
 
+            def on_part_begin() -> None:
+                self.part_count += 1
+                self.part_header_count = 0
+
             def on_header_field(data: bytes, start: int, end: int) -> None:
-                if data[start:end].lower() == b"location":
-                    self.has_redirect = True
-                if data[start:end].lower() == b"content-disposition":
-                    self.in_disposition = True
-                if data[start:end].lower() == b"content-type":
-                    self.in_content_type = True
+                self.header_field += data[start:end]
 
             def on_header_value(data: bytes, start: int, end: int) -> None:
-                # the first header should be content-type for application/json
-                if not self.in_json and not self.json_done:
-                    assert data[start:end] == b"application/json"
-                    self.in_json = True
-                elif self.has_redirect:
-                    self.multipart_response.url = data[start:end]
-                elif self.in_content_type:
-                    self.multipart_response.content_type = data[start:end]
-                    self.in_content_type = False
-                elif self.in_disposition:
-                    self.multipart_response.disposition = data[start:end]
-                    self.in_disposition = False
+                self.header_value += data[start:end]
+
+            def on_header_end() -> None:
+                field = bytes(self.header_field).lower()
+                value = bytes(self.header_value)
+                # python-multipart 0.0.9 never calls on_header_begin, so reset here.
+                self.header_field.clear()
+                self.header_value.clear()
+                self.part_header_count += 1
+                # the first part should be the application/json metadata
+                if self.part_count == 1:
+                    if self.part_header_count == 1 and field != b"content-type":
+                        raise ValueError(f"Expected content-type, got {field!r}")
+                    if field == b"content-type" and value != b"application/json":
+                        raise ValueError(f"Expected application/json, got {value!r}")
+                elif field == b"location":
+                    self.has_redirect = True
+                    self.multipart_response.url = value
+                elif field == b"content-type":
+                    self.multipart_response.content_type = value
+                elif field == b"content-disposition":
+                    self.multipart_response.disposition = value
 
             def on_part_data(data: bytes, start: int, end: int) -> None:
-                # we've seen json header but haven't written the json data
-                if self.in_json and not self.json_done:
-                    self.multipart_response.json = data[start:end]
-                    self.json_done = True
+                if self.part_count == 1:
+                    self.json_buffer += data[start:end]
                 # we have a redirect header rather than a file, and have already captured it
                 elif self.has_redirect:
                     return
@@ -1142,10 +1152,17 @@ class _MultipartParserProtocol(protocol.Protocol):
                             self.deferred.errback()
                     self.file_length += end - start
 
+            def on_part_end() -> None:
+                if self.part_count == 1 and self.json_buffer:
+                    self.multipart_response.json = bytes(self.json_buffer)
+
             callbacks: "multipart.MultipartCallbacks" = {
+                "on_part_begin": on_part_begin,
                 "on_header_field": on_header_field,
                 "on_header_value": on_header_value,
+                "on_header_end": on_header_end,
                 "on_part_data": on_part_data,
+                "on_part_end": on_part_end,
             }
             self.parser = MultipartParser(self.boundary, callbacks)
 
@@ -1314,7 +1331,7 @@ def encode_query_args(args: QueryParams | None) -> bytes:
     return query_str.encode("utf8")
 
 
-@implementer(IPolicyForHTTPS)
+@implementer(IPolicyForHTTPS, IOpenSSLClientConnectionCreator)
 class InsecureInterceptableContextFactory(ssl.ContextFactory):
     """
     Factory for PyOpenSSL SSL contexts which accepts any certificate for any domain.
@@ -1329,8 +1346,15 @@ class InsecureInterceptableContextFactory(ssl.ContextFactory):
     def getContext(self) -> SSL.Context:
         return self._context
 
-    def creatorForNetloc(self, hostname: bytes, port: int) -> IOpenSSLContextFactory:
+    def creatorForNetloc(
+        self, hostname: bytes, port: int
+    ) -> IOpenSSLClientConnectionCreator:
         return self
+
+    def clientConnectionForTLS(
+        self, tls_protocol: TLSMemoryBIOProtocol
+    ) -> SSL.Connection:
+        return SSL.Connection(self.getContext(), None)
 
 
 def is_unknown_endpoint(

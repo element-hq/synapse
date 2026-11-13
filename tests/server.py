@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import os.path
+import select
 import sqlite3
 import time
 import uuid
@@ -47,7 +48,7 @@ from unittest.mock import Mock, patch
 
 import attr
 from incremental import Version
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, override
 from zope.interface import implementer
 
 import twisted
@@ -69,6 +70,7 @@ from twisted.internet.interfaces import (
     IPushProducer,
     IReactorPluggableNameResolver,
     IReactorTime,
+    IReadDescriptor,
     IResolverSimple,
     ITCPTransport,
     ITransport,
@@ -99,6 +101,7 @@ from synapse.storage import DataStore
 from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
+from synapse.synapse_rust.runtime import set_virtual_time_msec
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
@@ -592,6 +595,9 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self.lookups: dict[str, str] = {}
         self._thread_callbacks: deque[Callable[..., R]] = deque()
 
+        # Pin the Rust clock to our virtual time. `advance()` keeps it in step.
+        set_virtual_time_msec(int(self.seconds() * 1000))
+
         lookups = self.lookups
 
         @implementer(IResolverSimple)
@@ -607,11 +613,13 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # on newer Twisted versions to use the test reactor's clock.
         #
         # This is *super* dirty since it is never undone and relies on the next
-        # test to overwrite it.
+        # test to overwrite it. The patch only holds a weak reference to this
+        # reactor, so that it doesn't keep the reactor (and through its
+        # shutdown triggers, the whole homeserver) alive until the next test.
         if twisted.version > Version("Twisted", 23, 8, 0):
             from twisted.protocols import tls
 
-            tls._get_default_clock = lambda: self
+            tls._get_default_clock = weakref.ref(self)  # type: ignore[assignment]
 
         super().__init__()
 
@@ -632,6 +640,37 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # `MemoryReactorClock` never clears the hooks that have already been called.
         # So manually clear the hooks here after they have been run.
         self.whenRunningHooks.clear()
+
+    @override
+    def addSystemEventTrigger(
+        self,
+        phase: str,
+        eventType: str,
+        callable: Callable[P, object],
+        *args: P.args,
+        **kw: P.kwargs,
+    ) -> Any:
+        """
+        Override the call from `MemoryReactor` to return an ID that
+        `removeSystemEventTrigger` accepts. `MemoryReactor` returns `None`.
+        """
+        super().addSystemEventTrigger(phase, eventType, callable, *args, **kw)
+        return (phase, eventType, self.triggers[phase][eventType][-1])
+
+    @override
+    def removeSystemEventTrigger(self, triggerID: Any) -> None:
+        """
+        Override the call from `MemoryReactor`, which raises
+        `NotImplementedError`.
+
+        `HomeServer.shutdown()` removes each shutdown handler's trigger before it
+        calls the handler, and skips the handler if the removal fails. Without
+        this, no shutdown handler would ever run in a test. One of them stops
+        the homeserver's Tokio runtime, which would otherwise carry on running
+        its tasks during later tests.
+        """
+        phase, eventType, trigger = triggerID
+        self.triggers[phase][eventType].remove(trigger)
 
     def installNameResolver(self, resolver: IHostnameResolver) -> IHostnameResolver:
         raise NotImplementedError()
@@ -715,7 +754,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self,
         host: str,
         port: int,
-        factory: ClientFactory,
+        factory: "ClientFactory[Any]",
         timeout: float = 30,
         bindAddress: tuple[str, int] | None = None,
     ) -> IConnector:
@@ -733,7 +772,12 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
 
         return conn
 
+    @override
     def advance(self, amount: float) -> None:
+        # Move the Rust clock before `super().advance()` fires any callbacks,
+        # since those may read it.
+        set_virtual_time_msec(int((self.seconds() + amount) * 1000))
+
         # first advance our reactor's time, and run any "callLater" callbacks that
         # makes ready
         super().advance(amount)
@@ -757,18 +801,28 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
             # main thread.
             super().advance(0)
 
+        # Now poll anything registered with `addReader`. A real reactor does
+        # this in its poll loop, but `MemoryReactor` only stores the readers, so
+        # results from Rust futures (see `TwistedDispatch`) would never reach
+        # their deferreds. Firing those deferreds can in turn queue more
+        # callbacks hence the recursive `advance(0)`.
+        readable = self._poll_readers()
+        if readable:
+            for reader in readable:
+                reader.doRead()
+            self.advance(0)
 
-def cleanup_test_reactor_system_event_triggers(
-    reactor: ThreadedMemoryReactorClock,
-) -> None:
-    """Cleanup any registered system event triggers.
-    The `twisted.internet.test.ThreadedMemoryReactor` does not implement
-    `removeSystemEventTrigger` so won't clean these triggers up on it's own properly.
-    When trying to override `removeSystemEventTrigger` in `ThreadedMemoryReactorClock`
-    in order to implement this functionality, twisted complains about the reactor being
-    unclean and fails some tests.
-    """
-    reactor.triggers.clear()
+    def _poll_readers(self) -> list[IReadDescriptor]:
+        """The readers registered with `addReader` that have data waiting."""
+        readers = {reader.fileno(): reader for reader in self.getReaders()}
+        if not readers:
+            return []
+
+        # Now poll the readers to see if any have data waiting.
+        poller = select.poll()
+        for fileno in readers:
+            poller.register(fileno, select.POLLIN)
+        return [readers[fileno] for fileno, _event in poller.poll(0)]
 
 
 def validate_connector(connector: tcp.Connector, expected_ip: str) -> None:
@@ -864,9 +918,15 @@ def make_fake_db_pool(
 
     pool.runWithConnection = runWithConnection  # type: ignore[method-assign]
     pool.runInteraction = runInteraction  # type: ignore[assignment]
-    # Replace the thread pool with a threadless 'thread' pool
+
+    # First, stop the original thread pool.
+    pool.threadpool.stop()
+    # Then, replace it with a threadless 'thread' pool
     pool.threadpool = ThreadPool(reactor)
+
+    # Start it up.
     pool.running = True
+
     return pool
 
 
@@ -1146,6 +1206,7 @@ def connect_client(
     """
     factory = reactor.tcpClients.pop(client_id)[2]
     client = factory.buildProtocol(None)
+    assert client is not None
     server = AccumulatingProtocol()
     server.makeConnection(FakeTransport(client, reactor))
     client.makeConnection(FakeTransport(server, reactor))
@@ -1369,6 +1430,22 @@ def setup_test_homeserver(
         if cleanup_hs is not None:
             deferred = defer.ensureDeferred(cleanup_hs.shutdown())
         return deferred
+
+    # Tests always run on the fake reactor, which has the hooks cleared below.
+    assert isinstance(reactor, MemoryReactorClock)
+
+    def forget_reactor_hooks() -> None:
+        # The fake reactor never runs, so its `callWhenRunning` hooks and
+        # system event triggers never fire. Any still registered after the
+        # homeserver has shut down point at its handlers. The Rust runtime
+        # holds the reactor through a reference the garbage collector can't
+        # see, so with them in place the whole homeserver would leak. Drop
+        # them once the homeserver has shut down (cleanups run in reverse
+        # order).
+        reactor.whenRunningHooks.clear()
+        reactor.triggers.clear()
+
+    cleanup_func(forget_reactor_hooks)
 
     # Register the cleanup hook for the homeserver.
     # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting

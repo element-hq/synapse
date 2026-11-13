@@ -21,6 +21,7 @@ use serde::Serialize;
 
 use crate::config::{types::RoomCreationPreset, SynapseHomeServerConfig};
 use crate::deferred::create_deferred;
+use crate::runtime::RustRuntime;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
 
 /// `GET /_matrix/client/versions` response
@@ -45,9 +46,9 @@ impl<'py> IntoPyObject<'py> for VersionsResponse {
 pub struct VersionsHandler {
     pub global_unstable_feature_map: Arc<UnstableFeatureMap>,
     pub store: Arc<Store>,
-    /// The Twisted reactor, used to bridge our `async` response back into a
-    /// Twisted deferred that Python can `await`.
-    pub reactor: Py<PyAny>,
+    /// The per-homeserver Rust state, used to bridge our `async` response
+    /// back into a Twisted deferred that Python can `await`.
+    pub runtime: RustRuntime,
 }
 
 #[pymethods]
@@ -63,7 +64,7 @@ impl VersionsHandler {
         let store = Arc::clone(&self.store);
         let global_unstable_feature_map = Arc::clone(&self.global_unstable_feature_map);
 
-        create_deferred(py, self.reactor.bind(py), async move {
+        create_deferred(py, &self.runtime, async move {
             build_versions_response(&store, &global_unstable_feature_map, user_id.as_deref())
                 .await
                 .map_err(|err| {
@@ -155,6 +156,11 @@ async fn build_versions_response(
             "v1.10".to_string(),
             "v1.11".to_string(),
             "v1.12".to_string(),
+            "v1.13".to_string(),
+            "v1.14".to_string(),
+            "v1.15".to_string(),
+            "v1.16".to_string(),
+            "v1.17".to_string(),
         ]),
         unstable_features: unstable_feature_map,
     })
@@ -272,6 +278,9 @@ pub struct UnstableFeatureMap {
     /// MSC4143: Matrix RTC transports (LiveKit backend)
     #[serde(rename = "org.matrix.msc4143")]
     msc4143_enabled: bool,
+    /// MSC4143: Matrix RTC transports (stable identifier)
+    #[serde(rename = "org.matrix.msc4143.stable")]
+    msc4143_stable: bool,
     /// MSC4446: Allow moving the fully read marker backwards.
     #[serde(rename = "com.beeper.msc4446")]
     msc4446_enabled: bool,
@@ -330,6 +339,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
         msc4445_initial_sync_timeline_topological_ordering: true,
         msc4491_enabled: config.experimental.msc4491_enabled,
         msc4143_enabled: config.experimental.msc4143_enabled,
+        msc4143_stable: true,
         msc4446_enabled: config.experimental.msc4446_enabled,
         msc4502: config.experimental.msc4502_enabled,
         e2ee_forced_public: config

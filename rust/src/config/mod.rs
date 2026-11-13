@@ -48,6 +48,7 @@ pub struct AuthConfig {
 #[derive(FromPyObject, Clone)]
 pub struct ServerConfig {
     pub msc4140_enabled: bool,
+    pub public_baseurl: String,
     pub include_profile_updates_in_sync: bool,
 }
 
@@ -70,7 +71,6 @@ pub struct ExperimentalConfig {
     pub msc4306_enabled: bool,
     pub msc4169_enabled: bool,
     pub msc4354_enabled: bool,
-    pub msc4222_enabled: bool,
     pub msc4491_enabled: bool,
     pub msc4143_enabled: bool,
     pub msc4446_enabled: bool,

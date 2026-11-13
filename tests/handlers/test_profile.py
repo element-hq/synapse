@@ -659,7 +659,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     affected_fields=None,
                 ),
                 ProfileUpdate(
-                    stream_id=7,
+                    stream_id=9,
                     user_id="@gracie:test",
                     action="left_room",
                     affected_fields=None,
@@ -684,6 +684,45 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     user_id=self.frank.to_string(),
                     action="update",
                     affected_fields=frozenset({"m.status"}),
+                ),
+            ],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_left_room_event_if_we_leave_the_last_shared_room(
+        self,
+    ) -> None:
+        """Test that when we leave a room, we get profile update rows with a "left room"
+        action for users we no longer share a room with.
+        """
+        self.register_user("roger", "password")
+        roger_token = self.login("roger", "password")
+        room_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        self.helper.join(room_id, "@roger:test", tok=roger_token)
+
+        # Make us leave the room
+        self.helper.leave(room_id, self.frank.to_string(), tok=self.frank_token)
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id=self.frank.to_string(),
+                field_names={"m.status"},
+            )
+        )
+        # We're no longer in any rooms with roger, and the profile update stream
+        # should have an update regarding that.
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id="@roger:test",
+                    action="left_room",
+                    affected_fields=None,
                 ),
             ],
         )
@@ -1193,6 +1232,130 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         self.assertTrue(
             self.get_success(self.handler.check_avatar_size_and_mime_type(remote_mxc))
+        )
+
+    @parameterized.expand(
+        [
+            "m.status",
+            "m.call",
+            "org.matrix.msc4426.status",
+            "org.matrix.msc4426.call",
+        ]
+    )
+    def test_get_profile_filters_out_msc4426_fields_for_remote_users(
+        self, field_name: str
+    ) -> None:
+        # Set some fields for our local user
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value="value",
+            )
+        )
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="some_other_field",
+                new_value="value",
+            )
+        )
+
+        # Mock the remote user lookup
+        self.mock_federation.make_query.return_value = {
+            field_name: "value",
+            "some_other_field": "value",
+        }
+
+        # Test our local user
+        local_profile = self.get_success(
+            self.handler.get_profile(
+                user_id=self.frank.to_string(),
+            )
+        )
+        self.assertEqual(
+            local_profile,
+            {
+                "displayname": "1234abcd",
+                field_name: "value",
+                "some_other_field": "value",
+            },
+        )
+
+        # Test our remote user
+        remote_profile = self.get_success(
+            self.handler.get_profile(
+                user_id=self.alice.to_string(),
+            )
+        )
+        self.assertEqual(
+            remote_profile,
+            {
+                "some_other_field": "value",
+            },
+        )
+
+        # Mock the remote user lookup again to only return the filtered field
+        self.mock_federation.make_query.return_value = {
+            field_name: "value",
+        }
+
+        # Ensure empty dictionary
+        remote_profile = self.get_success(
+            self.handler.get_profile(
+                user_id=self.alice.to_string(),
+            )
+        )
+        self.assertEqual(
+            remote_profile,
+            {},
+        )
+
+    @parameterized.expand(
+        [
+            "m.status",
+            "m.call",
+            "org.matrix.msc4426.status",
+            "org.matrix.msc4426.call",
+        ]
+    )
+    def test_get_profile_field_filters_out_msc4426_fields_for_remote_users(
+        self, field_name: str
+    ) -> None:
+        # Set a field value for our local user
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value="value",
+            )
+        )
+
+        # No need to mock the remote user query since we shouldn't do one if
+        # the field is one that we want to ignore.
+
+        # Test our local user
+        field_value = self.get_success(
+            self.handler.get_profile_field(
+                target_user=self.frank,
+                field_name=field_name,
+            )
+        )
+        self.assertEqual(
+            field_value,
+            "value",
+        )
+
+        # Test our remote user
+        self.get_failure(
+            self.handler.get_profile_field(
+                target_user=self.alice,
+                field_name=field_name,
+            ),
+            SynapseError,
         )
 
     def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:

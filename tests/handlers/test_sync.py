@@ -18,7 +18,7 @@
 #
 #
 from http import HTTPStatus
-from typing import Collection, ContextManager, cast
+from typing import Collection, ContextManager, Sequence, cast
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
@@ -33,7 +33,9 @@ from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sync import (
+    LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE,
     LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE,
+    LazyLoadedMembersCache,
     SyncConfig,
     SyncRequestKey,
     SyncResult,
@@ -48,6 +50,7 @@ from synapse.types import (
     MultiWriterStreamToken,
     RoomStreamToken,
     StreamKeyType,
+    StreamToken,
     UserID,
     create_requester,
 )
@@ -877,6 +880,322 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             # ... And the state should be empty
             self.assertEqual(sync_room_result.state, {})
 
+    def test_state_after_leave_last_local_user(self) -> None:
+        """When the leaving user is the last local user in the room (causing the
+        server to clear current_state_events), the leave event must still appear
+        in state_after on an incremental sync.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        The leave gets no row of its own, only an `event_id = null` row for the
+        leaving user's membership.
+
+        Regression test for https://github.com/element-hq/synapse/issues/18793
+        """
+        if not self.use_state_after:
+            self.skipTest("Only relevant for `state_after` (MSC4222)")
+
+        # Alice is the sole local user. She creates a room and joins.
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+
+        room_id = self.helper.create_room_as(alice, tok=alice_tok)
+
+        # Sync up to get a since_token.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+            )
+        )
+        # A state change before the leave, which has a delta of its own.
+        topic_event = self.helper.send_state(
+            room_id, "m.room.topic", {"topic": "before leaving"}, tok=alice_tok
+        )["event_id"]
+
+        # Alice leaves. She is the last local user, so the server clears
+        # current_state_events for this room.
+        leave_event = self.helper.leave(room_id, alice, tok=alice_tok)["event_id"]
+
+        # Incremental sync with include_leave so we see the archived room.
+        filter_dict: JsonDict = {"room": {"include_leave": True}}
+        sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(
+                    alice,
+                    filter_collection=FilterCollection(self.hs, filter_dict),
+                    use_state_after=True,
+                ),
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The room must appear in the archived section.
+        self.assertEqual(len(sync_result.archived), 1)
+        sync_room_result = sync_result.archived[0]
+        self.assertEqual(sync_room_result.room_id, room_id)
+
+        # state_after must include the leave membership event and the state
+        # change that happened just before the leave, and nothing else (i.e.
+        # not the entire cleared room state).
+        self.assertEqual(
+            {key: event.event_id for key, event in sync_room_result.state.items()},
+            {
+                ("m.room.member", alice): leave_event,
+                ("m.room.topic", ""): topic_event,
+            },
+        )
+
+    def test_state_after_leave_last_local_user_after_own_membership_change(
+        self,
+    ) -> None:
+        """When the last local user changes their own membership event (e.g. their
+        display name) and then leaves within the same incremental sync window, the
+        leave event (not the earlier membership event) must appear in state_after.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        The user's membership then has a row for their display name change, followed
+        by an `event_id = null` row, and none for their leave, so the earlier row must
+        not be used.
+        """
+        if not self.use_state_after:
+            self.skipTest("Only relevant for `state_after` (MSC4222)")
+
+        # Alice is the sole local user. She creates a room and joins.
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+
+        room_id = self.helper.create_room_as(alice, tok=alice_tok)
+
+        # Sync up to get a since_token.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+            )
+        )
+
+        # Alice changes her display name. This membership event has a delta of
+        # its own for her `m.room.member` state key.
+        self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            {"membership": "join", "displayname": "Alice"},
+            tok=alice_tok,
+            state_key=alice,
+        )
+
+        # Alice leaves. She is the last local user, so the server clears
+        # current_state_events for this room.
+        leave_event = self.helper.leave(room_id, alice, tok=alice_tok)["event_id"]
+
+        # Incremental sync. A newly left room is sent down in the archived section.
+        sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The room must appear in the archived section.
+        self.assertEqual(len(sync_result.archived), 1)
+        sync_room_result = sync_result.archived[0]
+        self.assertEqual(sync_room_result.room_id, room_id)
+
+        # state_after must have Alice's leave, not her display name change.
+        self.assertEqual(
+            {key: event.event_id for key, event in sync_room_result.state.items()},
+            {("m.room.member", alice): leave_event},
+        )
+
+    def test_state_after_leave_last_local_user_membership_filtered_from_timeline(
+        self,
+    ) -> None:
+        """When the last local user leaves and their timeline filter excludes
+        membership events, the leave event must still appear in state_after on an
+        incremental sync.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        The leave has no row of its own, and the filter keeps it out of the timeline
+        too.
+        """
+        if not self.use_state_after:
+            self.skipTest("Only relevant for `state_after` (MSC4222)")
+
+        # Alice is the sole local user. She creates a room and joins.
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+
+        room_id = self.helper.create_room_as(alice, tok=alice_tok)
+
+        # Sync up to get a since_token.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+            )
+        )
+
+        # A message before the leave, so the filtered timeline isn't empty (a room
+        # with nothing to send down is left out of the sync response).
+        message_event = self.helper.send(room_id, "hello", tok=alice_tok)["event_id"]
+
+        # Alice leaves. She is the last local user, so the server clears
+        # current_state_events for this room.
+        leave_event = self.helper.leave(room_id, alice, tok=alice_tok)["event_id"]
+
+        # Incremental sync with a timeline filter that excludes membership events,
+        # so the leave is not in the timeline.
+        filter_dict: JsonDict = {
+            "room": {"timeline": {"not_types": [EventTypes.Member]}}
+        }
+        sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(
+                    alice,
+                    filter_collection=FilterCollection(self.hs, filter_dict),
+                    use_state_after=True,
+                ),
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The room must appear in the archived section, with only the message in
+        # the timeline.
+        self.assertEqual(len(sync_result.archived), 1)
+        sync_room_result = sync_result.archived[0]
+        self.assertEqual(sync_room_result.room_id, room_id)
+        self.assertEqual(
+            [event.event.event_id for event in sync_room_result.timeline.events],
+            [message_event],
+        )
+
+        # state_after must still have Alice's leave.
+        self.assertEqual(
+            {key: event.event_id for key, event in sync_room_result.state.items()},
+            {("m.room.member", alice): leave_event},
+        )
+
+    @parameterized.expand(
+        [(True,), (False,)],
+        name_func=lambda func, num, p: (
+            f"{func.__name__}_{'existing' if p.args[0] else 'new'}_topic"
+        ),
+    )
+    def test_state_after_leave_last_local_user_with_state_change_persisted_together(
+        self, topic_existed: bool
+    ) -> None:
+        """When another state event is persisted in the same batch as the last local
+        user's leave, both the leave and that state event must appear in state_after
+        on an incremental sync, whether or not the room already had that state.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        Neither the leave nor the state event persisted with it gets a row of its own:
+        the leave only gets the `event_id = null` row of the leaving user's membership,
+        and the state event only gets one if the room already had that state, so the
+        two cases are recovered differently.
+        """
+        if not self.use_state_after:
+            self.skipTest("Only relevant for `state_after` (MSC4222)")
+
+        # Alice is the sole local user. She creates a room and joins.
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+
+        room_id = self.helper.create_room_as(alice, tok=alice_tok)
+        if topic_existed:
+            self.helper.send_state(
+                room_id, EventTypes.Topic, {"topic": "before leaving"}, tok=alice_tok
+            )
+
+        # Sync up to get a since_token.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+            )
+        )
+
+        # Alice sets the topic and leaves, with both events persisted in one batch.
+        # She is the last local user, so the server clears current_state_events for
+        # this room, and neither event gets a delta of its own.
+        self.get_success(
+            self.hs.get_event_creation_handler().create_and_send_new_client_events(
+                requester=alice_requester,
+                room_id=room_id,
+                prev_event_id=None,
+                event_dicts=[
+                    {
+                        "type": EventTypes.Topic,
+                        "state_key": "",
+                        "room_id": room_id,
+                        "sender": alice,
+                        "content": {"topic": "set when leaving"},
+                    },
+                    {
+                        "type": EventTypes.Member,
+                        "state_key": alice,
+                        "room_id": room_id,
+                        "sender": alice,
+                        "content": {"membership": "leave"},
+                    },
+                ],
+                ratelimit=False,
+            )
+        )
+
+        # Incremental sync. A newly left room is sent down in the archived section.
+        sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice, use_state_after=True),
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The room must appear in the archived section, with the topic change and
+        # the leave in the timeline.
+        self.assertEqual(len(sync_result.archived), 1)
+        sync_room_result = sync_result.archived[0]
+        self.assertEqual(sync_room_result.room_id, room_id)
+        timeline_events = [event.event for event in sync_room_result.timeline.events]
+        self.assertEqual(
+            [(event.type, event.state_key) for event in timeline_events],
+            [(EventTypes.Topic, ""), (EventTypes.Member, alice)],
+        )
+        topic_event, leave_event = (event.event_id for event in timeline_events)
+
+        # state_after must have both the topic change and Alice's leave.
+        self.assertEqual(
+            {key: event.event_id for key, event in sync_room_result.state.items()},
+            {
+                (EventTypes.Topic, ""): topic_event,
+                (EventTypes.Member, alice): leave_event,
+            },
+        )
+
     def _patch_get_latest_events(self, latest_events: list[str]) -> ContextManager:
         """Monkey-patch `get_prev_events_for_room`
 
@@ -1175,6 +1494,13 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self.other_user = self.register_user("other_user", "password")
         self.other_tok = self.login("other_user", "password")
         self.joined_room = self.helper.create_room_as(self.user, tok=self.tok)
+        self.get_success(
+            self.store.set_profile_field(
+                UserID.from_string(self.user),
+                ProfileFields.AVATAR_URL,
+                "mxc://example.invalid/abcdef",
+            )
+        )
         self.get_success(
             self.store.set_profile_field(
                 user_id=UserID.from_string(self.user),
@@ -1978,8 +2304,11 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         assert incremental_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            set(incremental_result.profile_updates["@other_user:test"].keys()),
-            {"avatar_url", "displayname"},
+            incremental_result.profile_updates["@other_user:test"],
+            {
+                "displayname": "other_user",
+                # avatar_url unset (user doesn't have one)
+            },
         )
 
         # If we have more events from the other_user, and do another lazy sync,
@@ -2064,7 +2393,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self,
     ) -> None:
         """Test that with `include_profile_updates_in_sync` enabled the incremental
-        sync response includes a 'null' for users who are no longer sharing rooms.
+        sync response includes a 'null' for users who are no longer sharing rooms, due
+        to the other user leaving the last room.
         """
         requester = create_requester(self.user)
         initial_result = self.get_success(
@@ -2086,6 +2416,59 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         self.helper.leave(
             room=self.joined_room, user=self.other_user, tok=self.other_tok
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertIsNone(
+            incremental_result.profile_updates["@other_user:test"],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_sends_down_null_profile_we_no_longer_sharing_rooms(
+        self,
+    ) -> None:
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync response includes a 'null' for users who are no longer sharing rooms, due
+        us leaving the last shared room.
+        """
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.helper.leave(
+            room=self.joined_room,
+            user=self.user,
+            tok=self.tok,
         )
         incremental_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
@@ -2259,7 +2642,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             user=third_user,
             tok=third_tok,
         )
-        # Set a status field we don't except to see in sync
+        # Set a status field we don't expect to see in sync
         self.get_success(
             self.profile_handler.set_field(
                 target_user=UserID.from_string(third_user),
@@ -2292,14 +2675,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             [third_user],
         )
         self.assertEqual(
-            incremental_result.profile_updates["@third_user:test"]["displayname"],
-            "third_user",
-        )
-        self.assertIsNone(
-            incremental_result.profile_updates["@third_user:test"]["avatar_url"],
-        )
-        self.assertFalse(
-            "m.status" in incremental_result.profile_updates["@third_user:test"].keys(),
+            incremental_result.profile_updates["@third_user:test"],
+            {
+                "displayname": "third_user",
+                # avatar_url unset (user doesn't have one)
+                # m.status unset (not requested in sync)
+            },
         )
 
     @parameterized.expand(
@@ -2335,6 +2716,14 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        # Sanity-check that initial sync includes the fields
+        self.assertEqual(
+            initial_result.profile_updates["@user:test"],
+            {
+                "m.status": {"text": "Swimming in the Great Lakes!", "emoji": "🏊"},
+                "avatar_url": "mxc://example.invalid/abcdef",
+            },
+        )
         self.get_success(
             self.profile_handler.set_field(
                 target_user=UserID.from_string(self.user),
@@ -2359,12 +2748,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         assert incremental_result.profile_updates["@user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@user:test"]["m.status"],
-            {"text": "On holiday", "emoji": "🏖"},
-        )
-        # We didn't ask for displayname
-        self.assertFalse(
-            "displayname" in incremental_result.profile_updates["@user:test"].keys(),
+            incremental_result.profile_updates["@user:test"],
+            {
+                "m.status": {"text": "On holiday", "emoji": "🏖"},
+                # avatar_url not included (it didn't change during this sync window)
+                # displayname not included (we didn't request it in sync)
+            },
         )
 
     @parameterized.expand([[True, False], [True, True], [False, False], [False, True]])
@@ -2877,7 +3266,7 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
 
         # Calculating the incrementals state will return the second state, and not the
         # first.
-        state = self.get_success(
+        state, _ = self.get_success(
             self.sync_handler._compute_state_delta_for_incremental_sync(
                 room_id=joined_room,
                 sync_config=generate_sync_config(user, use_state_after=True),
@@ -2909,7 +3298,7 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
         since_token = self.hs.get_event_sources().get_current_token()
         end_stream_token = self.hs.get_event_sources().get_current_token()
 
-        state = self.get_success(
+        state, _ = self.get_success(
             self.sync_handler._compute_state_delta_for_incremental_sync(
                 room_id=joined_room,
                 sync_config=generate_sync_config(user, use_state_after=True),
@@ -2925,3 +3314,233 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
         )
 
         self.assertEqual(state, {})
+
+
+class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
+    """Direct tests of the per-device cache of lazy-loaded members sent."""
+
+    # A position after every other position in these tests.
+    _END = RoomStreamToken(stream=1000)
+
+    @staticmethod
+    def _token(stream: int) -> StreamToken:
+        """A token whose room position is `stream`. Only the room position
+        matters to the cache."""
+        return StreamToken.START.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=stream)
+        )
+
+    def _respond(
+        self,
+        cache: LazyLoadedMembersCache,
+        since: int | None,
+        ends_at: int,
+        sent: Sequence[str] = (),
+    ) -> None:
+        """Build a response from `since` that ends at `ends_at` and sends the
+        membership `$<name>` of each `@<name>:test` in `sent`."""
+        since_token = None if since is None else self._token(since)
+        with cache.building_response(since_token) as handle:
+            handle.next_batch = RoomStreamToken(stream=ends_at)
+            for name in sent:
+                handle.mark_sent(f"@{name}:test", f"${name}")
+
+    def _cached(self, cache: LazyLoadedMembersCache, name: str) -> bool:
+        """Whether the cache holds the membership `$<name>` of `@<name>:test`,
+        at any position."""
+        return cache.was_sent(f"@{name}:test", f"${name}", self._END)
+
+    def test_forgets_only_entries_after_since(self) -> None:
+        """A request from `since` forgets the entries recorded after it and
+        keeps the rest."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+        cache.record("@b:test", "$b", RoomStreamToken(stream=7))
+
+        # The client synced past both responses.
+        self._respond(cache, since=7, ends_at=7)
+        self.assertTrue(self._cached(cache, "a"))
+        self.assertTrue(self._cached(cache, "b"))
+
+        # The client lost the response that ended at 7.
+        self._respond(cache, since=6, ends_at=7)
+        self.assertTrue(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
+
+        # A later request from an even older token forgets the rest.
+        self._respond(cache, since=4, ends_at=7)
+        self.assertFalse(self._cached(cache, "a"))
+
+    def test_only_entries_at_or_before_since_are_trusted(self) -> None:
+        """A response does not trust an entry recorded after its `since`,
+        including one recorded while it is being built."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@old:test", "$old", RoomStreamToken(stream=4))
+
+        with cache.building_response(self._token(4)) as handle:
+            # Another response for the device is built in the meantime.
+            self._respond(cache, since=4, ends_at=5, sent=["a"])
+            self.assertTrue(self._cached(cache, "a"))
+
+            self.assertTrue(handle.was_sent("@old:test", "$old"))
+            self.assertFalse(handle.was_sent("@a:test", "$a"))
+            handle.next_batch = RoomStreamToken(stream=6)
+            handle.mark_sent("@b:test", "$b")
+
+        # Once built, it deleted the other response's entry, and recorded its
+        # own as it ended later.
+        self.assertFalse(self._cached(cache, "a"))
+        self.assertTrue(self._cached(cache, "b"))
+        self.assertTrue(self._cached(cache, "old"))
+
+    def test_initial_sync_forgets_everything(self) -> None:
+        """An initial sync has no `since`, so it trusts nothing and deletes
+        everything. It still records only if it ends after the newest
+        position. A client that processed the response ending there has not
+        seen it."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+        with cache.building_response(None) as handle:
+            self.assertFalse(handle.was_sent("@a:test", "$a"))
+            handle.next_batch = RoomStreamToken(stream=5)
+            handle.mark_sent("@b:test", "$b")
+        self.assertFalse(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
+
+        self._respond(cache, since=None, ends_at=6, sent=["c"])
+        self.assertTrue(self._cached(cache, "c"))
+
+    def test_different_event_is_not_sent(self) -> None:
+        """An entry only covers the membership event it was recorded with, so
+        a changed membership counts as not sent."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@a:test", "$a1", RoomStreamToken(stream=5))
+        self.assertFalse(cache.was_sent("@a:test", "$a2", self._END))
+
+    def test_out_of_order_records_are_still_forgotten(self) -> None:
+        """Entries need not be recorded in position order. Those after a
+        request's `since` must still be forgotten."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@b:test", "$b", RoomStreamToken(stream=7))
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+
+        self._respond(cache, since=6, ends_at=7)
+        self.assertTrue(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
+
+    def test_evicts_least_recently_used(self) -> None:
+        """The cache holds `LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE` entries and
+        evicts the least recently used one. A hit counts as a use."""
+        cache = LazyLoadedMembersCache()
+        for i in range(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE):
+            cache.record(f"@u{i}:test", f"$u{i}", RoomStreamToken(stream=1))
+        # Touch the oldest entry so that it is no longer the eviction candidate.
+        self.assertTrue(self._cached(cache, "u0"))
+
+        cache.record("@new:test", "$new", RoomStreamToken(stream=1))
+        self.assertTrue(self._cached(cache, "u0"))
+        self.assertFalse(self._cached(cache, "u1"))
+        self.assertTrue(self._cached(cache, "new"))
+
+    def test_response_ending_at_newest_position_records_nothing(self) -> None:
+        """A response from before the newest entry forgets the newer entries.
+        If it ends at the same position as the response that carried them,
+        it records nothing. The client that processed that response has not
+        seen this one. A response that ends later records."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+
+        self._respond(cache, since=4, ends_at=5, sent=["b"])
+        self.assertFalse(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
+
+        self._respond(cache, since=4, ends_at=6, sent=["c"])
+        self.assertTrue(self._cached(cache, "c"))
+
+    def test_forgetting_keeps_the_newest_position(self) -> None:
+        """Forgetting entries must not forget the position they were recorded
+        at. A later response from the same `since` finds nothing left to
+        forget, and must still record nothing if it ends at that position."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+
+        self._respond(cache, since=4, ends_at=5)
+        self.assertFalse(self._cached(cache, "a"))
+
+        self._respond(cache, since=4, ends_at=5, sent=["b"])
+        self.assertFalse(self._cached(cache, "b"))
+
+    def test_newest_position_survives_eviction(self) -> None:
+        """The newest position is kept even when the entries recorded at it
+        have been evicted, as a response can send more members than the
+        cache holds."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@old:test", "$old", RoomStreamToken(stream=5))
+        for i in range(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE):
+            cache.record(f"@u{i}:test", f"$u{i}", RoomStreamToken(stream=5))
+        self.assertFalse(self._cached(cache, "old"))
+
+        self._respond(cache, since=4, ends_at=5, sent=["b"])
+        self.assertFalse(self._cached(cache, "b"))
+
+    def test_response_sending_no_members_raises_newest(self) -> None:
+        """A response that sent no members still raises the newest position.
+        Otherwise a response built at the same time and ending at the same
+        position would record, and the client that processed the first would
+        trust what only the second sent."""
+        cache = LazyLoadedMembersCache()
+        with cache.building_response(self._token(3)) as handle:
+            self._respond(cache, since=3, ends_at=5)
+
+            handle.next_batch = RoomStreamToken(stream=5)
+            handle.mark_sent("@a:test", "$a")
+        self.assertFalse(self._cached(cache, "a"))
+
+    def test_response_ending_where_a_client_is_records_nothing(self) -> None:
+        """A request from `since` says a client is at `since`, even if no
+        response built on this cache ended there because the cache is new or
+        the response was built elsewhere. A response built at the same time
+        that ends at `since` must not record, as that client has not seen
+        it."""
+        cache = LazyLoadedMembersCache()
+        with cache.building_response(self._token(100)) as handle:
+            self._respond(cache, since=50, ends_at=100, sent=["a"])
+            self.assertFalse(self._cached(cache, "a"))
+            self.assertFalse(handle.was_sent("@a:test", "$a"))
+            handle.next_batch = RoomStreamToken(stream=101)
+            handle.mark_sent("@b:test", "$b")
+        self.assertTrue(self._cached(cache, "b"))
+
+    def test_dropped_response_ending_later_is_forgotten(self) -> None:
+        """Two responses are built at the same time. The client processes the
+        one that ends first, and the other records as it ends later. The
+        client's next request does not trust what the other sent, and
+        deletes it."""
+        cache = LazyLoadedMembersCache()
+        with cache.building_response(self._token(3)) as dropped:
+            self._respond(cache, since=3, ends_at=5, sent=["a"])
+            dropped.next_batch = RoomStreamToken(stream=6)
+            dropped.mark_sent("@b:test", "$b")
+        self.assertTrue(self._cached(cache, "b"))
+
+        with cache.building_response(self._token(5)) as handle:
+            self.assertFalse(handle.was_sent("@b:test", "$b"))
+            handle.next_batch = RoomStreamToken(stream=7)
+        self.assertFalse(self._cached(cache, "b"))
+
+    def test_failed_response_records_nothing(self) -> None:
+        """A response that was not built never reached the client, so it
+        neither records nor raises the newest position."""
+        cache = LazyLoadedMembersCache()
+        with self.assertRaises(RuntimeError):
+            with cache.building_response(None) as handle:
+                handle.next_batch = RoomStreamToken(stream=5)
+                handle.mark_sent("@a:test", "$a")
+                # Conditional only so that mypy does not see the rest of the
+                # block as unreachable.
+                if handle.since is None:
+                    raise RuntimeError("cancelled")
+        self.assertFalse(self._cached(cache, "a"))
+
+        self._respond(cache, since=None, ends_at=5, sent=["b"])
+        self.assertTrue(self._cached(cache, "b"))

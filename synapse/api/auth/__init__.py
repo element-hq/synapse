@@ -98,6 +98,20 @@ class Auth(Protocol):
             AuthError if access is denied for the user in the access token
         """
 
+    async def get_optional_user_by_req(
+        self,
+        request: SynapseRequest,
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester | None:
+        """Like `get_user_by_req`, except returns None when the request carries
+        no access token at all. A token that is present but invalid still
+        raises, as with `get_user_by_req`.
+
+        For endpoints where authentication is optional.
+        """
+
     async def get_user_by_req_experimental_feature(
         self,
         request: SynapseRequest,

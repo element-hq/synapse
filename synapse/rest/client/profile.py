@@ -36,7 +36,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.types import JsonDict, JsonValue, UserID
+from synapse.types import JsonDict, Requester, UserID
 from synapse.util.stringutils import is_namedspaced_grammar
 
 if TYPE_CHECKING:
@@ -57,6 +57,32 @@ def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
     return propagate
 
 
+async def _auth_and_ratelimit_profile_lookup(
+    hs: "HomeServer", request: SynapseRequest
+) -> Requester | None:
+    """Authenticate a profile lookup request and apply the `rc_profile` rate
+    limit to it.
+
+    Authentication is optional unless `require_auth_for_profile_requests` is
+    set. The rate limit is applied per user if credentials were supplied, else
+    per client IP address.
+
+    Returns:
+        The requester if the request was authenticated, else None.
+    """
+    auth = hs.get_auth()
+    requester: Requester | None
+    if hs.config.server.require_auth_for_profile_requests:
+        requester = await auth.get_user_by_req(request)
+    else:
+        requester = await auth.get_optional_user_by_req(request, allow_guest=True)
+
+    await hs.get_profile_lookup_ratelimiter().ratelimit(
+        requester, key=None if requester else request.getClientAddress().host
+    )
+    return requester
+
+
 class ProfileRestServlet(RestServlet):
     PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)$", v1=True)
     CATEGORY = "Event sending requests"
@@ -70,11 +96,8 @@ class ProfileRestServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, user_id: str
     ) -> tuple[int, JsonDict]:
-        requester_user = None
-
-        if self.hs.config.server.require_auth_for_profile_requests:
-            requester = await self.auth.get_user_by_req(request)
-            requester_user = requester.user
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
+        requester_user = requester.user if requester else None
 
         if not UserID.is_valid(user_id):
             raise SynapseError(
@@ -115,15 +138,15 @@ class ProfileFieldRestServlet(RestServlet):
                     r"^/_matrix/client/unstable/uk\.tcpip\.msc4133/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)$"
                 )
             )
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> tuple[int, JsonDict]:
-        requester_user = None
-
-        if self.hs.config.server.require_auth_for_profile_requests:
-            requester = await self.auth.get_user_by_req(request)
-            requester_user = requester.user
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
+        requester_user = requester.user if requester else None
 
         if not UserID.is_valid(user_id):
             raise SynapseError(
@@ -145,16 +168,27 @@ class ProfileFieldRestServlet(RestServlet):
         user = UserID.from_string(user_id)
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
+        ret: JsonDict = {}
         if field_name == ProfileFields.DISPLAYNAME:
-            field_value: (
-                JsonValue | dict[str, JsonValue]
-            ) = await self.profile_handler.get_displayname(user)
+            displayname = await self.profile_handler.get_displayname(user)
+            if displayname is not None:
+                ret[field_name] = displayname
         elif field_name == ProfileFields.AVATAR_URL:
-            field_value = await self.profile_handler.get_avatar_url(user)
+            avatar_url = await self.profile_handler.get_avatar_url(user)
+            if avatar_url is not None:
+                ret[field_name] = avatar_url
         else:
-            field_value = await self.profile_handler.get_profile_field(user, field_name)
+            # Custom fields deliberately behave differently from `displayname` and
+            # `avatar_url`: an unset custom field raises a 404 rather than returning
+            # `200 {}`. The spec allows both, see MSC4537:
+            # https://github.com/matrix-org/matrix-spec-proposals/pull/4537
+            # This is likely to change once the spec settles on either 404 or
+            # `200 {}` only, which would be a breaking change.
+            ret[field_name] = await self.profile_handler.get_profile_field(
+                user, field_name
+            )
 
-        return 200, {field_name: field_value}
+        return 200, ret
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, field_name: str
@@ -172,13 +206,21 @@ class ProfileFieldRestServlet(RestServlet):
         is_admin = await self.auth.is_server_admin(requester)
 
         if not field_name:
-            raise SynapseError(400, "Field name too short", errcode=Codes.INVALID_PARAM)
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Field name too short",
+                errcode=Codes.INVALID_PARAM,
+            )
 
         if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
-            raise SynapseError(400, "Field name too long", errcode=Codes.KEY_TOO_LARGE)
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Field name too long",
+                errcode=Codes.KEY_TOO_LARGE,
+            )
         if not is_namedspaced_grammar(field_name):
             raise SynapseError(
-                400,
+                HTTPStatus.BAD_REQUEST,
                 "Field name does not follow Common Namespaced Identifier Grammar",
                 errcode=Codes.INVALID_PARAM,
             )
@@ -188,7 +230,29 @@ class ProfileFieldRestServlet(RestServlet):
             new_value = content[field_name]
         except KeyError:
             raise SynapseError(
-                400, f"Missing key '{field_name}'", errcode=Codes.MISSING_PARAM
+                HTTPStatus.BAD_REQUEST,
+                f"Missing key '{field_name}'",
+                errcode=Codes.MISSING_PARAM,
+            )
+
+        if new_value is None and not self._include_profile_updates_in_sync:
+            # > Servers MAY reject null values.
+            # — https://spec.matrix.org/v1.19/client-server-api/#put_matrixclientv3profileuseridkeyname
+            #
+            # Although we can safely handle nulls internally, for interoperability reasons it is preferable if we
+            # reject them.
+            # That way, clients don't accidentally rely on being able to send them.
+            #
+            # The exception is if we have the profile update stream enabled, ie send
+            # down profile updates via sync streams, we will still accept null values
+            # for some time, as Element Web depends on removing User Status via
+            # a PUT and `null` value.
+            # https://github.com/element-hq/synapse/issues/20424 tracks removing
+            # this special case once enough clients have updated.
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"'{field_name}' cannot be `null`.",
+                Codes.INVALID_PARAM,
             )
 
         propagate = _read_propagate(self.hs, request)

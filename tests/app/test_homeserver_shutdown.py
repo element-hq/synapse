@@ -29,7 +29,6 @@ from synapse.logging.context import LoggingContext
 from synapse.storage.background_updates import UpdaterStatus
 
 from tests.server import (
-    cleanup_test_reactor_system_event_triggers,
     get_clock,
     setup_test_homeserver,
 )
@@ -69,9 +68,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Run the reactor so any `callWhenRunning` functions can be cleared out.
         self.reactor.run()
-        # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
-        # we use in tests doesn't handle this properly (see doc comment)
-        cleanup_test_reactor_system_event_triggers(self.reactor)
 
         async def shutdown() -> None:
             # Use a logcontext just to double-check that we don't mangle the logcontext
@@ -103,6 +99,38 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
                 f"{get_memory_debug_info_for_object(hs_after_shutdown)}",
             )
 
+    def test_rust_runtime_is_garbage_collected_with_the_homeserver(self) -> None:
+        """The `RustRuntime` should be garbage collected with its homeserver.
+
+        This catches reference cycles through Rust fields, which Python's
+        garbage collector cannot see into.
+        """
+        self.reactor, self.clock = get_clock()
+        self.hs = setup_test_homeserver(
+            cleanup_func=self.addCleanup,
+            reactor=self.reactor,
+            homeserver_to_use=SynapseHomeServer,
+            clock=self.clock,
+        )
+
+        # Trigger the homeserver to create the Rust handlers, otherwise nothing
+        # in these tests would create them (as we don't register any servlets).
+        self.hs.get_rust_handlers()
+
+        # Get a weakref to the Rust runtime so that we can check it got garbage
+        # collected.
+        runtime_ref = weakref.ref(self.hs.get_rust_runtime())
+
+        # The same shutdown sequence as `test_clean_homeserver_shutdown`.
+        self.reactor.run()
+        self.get_success(self.hs.shutdown())
+        self.reactor.advance(0)
+        del self.hs
+        gc.collect()
+
+        # Check the RustRuntime has been garbage collected.
+        self.assertIsNone(runtime_ref(), "RustRuntime outlived its HomeServer")
+
     @logcontext_clean
     def test_clean_homeserver_shutdown_mid_background_updates(self) -> None:
         """Ensure the `SynapseHomeServer` can be fully shutdown and garbage collected
@@ -129,9 +157,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Run the reactor so any `callWhenRunning` functions can be cleared out.
         self.reactor.run()
-        # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
-        # we use in tests doesn't handle this properly (see doc comment)
-        cleanup_test_reactor_system_event_triggers(self.reactor)
 
         # Ensure the background updates are not complete.
         self.assertNotEqual(store.db_pool.updates.get_status(), UpdaterStatus.COMPLETE)
@@ -193,9 +218,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Run the reactor so any `callWhenRunning` functions can be cleared out.
         self.reactor.run()
-        # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
-        # we use in tests doesn't handle this properly (see doc comment)
-        cleanup_test_reactor_system_event_triggers(self.reactor)
 
         async def shutdown() -> None:
             # Use a logcontext just to double-check that we don't mangle the logcontext

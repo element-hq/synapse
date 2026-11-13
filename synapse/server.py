@@ -45,7 +45,6 @@ from typing_extensions import TypeAlias
 
 from twisted.internet import defer
 from twisted.internet.base import _SystemEventID
-from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.tcp import Port
 from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
@@ -64,7 +63,10 @@ from synapse.appservice.api import ApplicationServiceApi
 from synapse.appservice.scheduler import ApplicationServiceScheduler
 from synapse.config.homeserver import HomeServerConfig
 from synapse.crypto import context_factory
-from synapse.crypto.context_factory import RegularPolicyForHTTPS
+from synapse.crypto.context_factory import (
+    RegularPolicyForHTTPS,
+    ServerContextFactory,
+)
 from synapse.crypto.keyring import Keyring
 from synapse.events.builder import EventBuilderFactory
 from synapse.events.presence_router import PresenceRouter
@@ -129,6 +131,7 @@ from synapse.handlers.room_policy import RoomPolicyHandler
 from synapse.handlers.room_summary import RoomSummaryHandler
 from synapse.handlers.search import SearchHandler
 from synapse.handlers.send_email import SendEmailHandler
+from synapse.handlers.server_announcements import ServerAnnouncementsHandler
 from synapse.handlers.set_password import SetPasswordHandler
 from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sso import SsoHandler
@@ -177,6 +180,7 @@ from synapse.streams.events import EventSources
 from synapse.synapse_rust.handlers import RustHandlers
 from synapse.synapse_rust.msc4388_rendezvous import MSC4388RendezvousHandler
 from synapse.synapse_rust.rendezvous import RendezvousHandler
+from synapse.synapse_rust.runtime import RustRuntime
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches import CACHE_METRIC_REGISTRY
@@ -357,8 +361,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._module_web_resources: dict[str, Resource] = {}
         self._module_web_resources_consumed = False
 
-        # This attribute is set by the free function `refresh_certificate`.
-        self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
+        # Set by `synapse.app._base.start` when there is a TLS listener.
+        self.tls_server_context_factory: Optional[ServerContextFactory] = None
 
         self._is_shutdown = False
         self._async_shutdown_handlers: list[ShutdownInfo] = []
@@ -723,6 +727,14 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
     @cache_in_self
+    def get_profile_lookup_ratelimiter(self) -> Ratelimiter:
+        return Ratelimiter(
+            store=self.get_datastores().main,
+            clock=self.get_clock(),
+            cfg=self.config.ratelimiting.rc_profile,
+        )
+
+    @cache_in_self
     def get_federation_client(self) -> FederationClient:
         return FederationClient(self)
 
@@ -965,6 +977,18 @@ class HomeServer(metaclass=abc.ABCMeta):
         return RustHandlers(self)
 
     @cache_in_self
+    def get_rust_runtime(self) -> RustRuntime:
+        """The per-homeserver state for the Rust side of Synapse: the tokio
+        thread pool, plus anything else Rust code keeps for the lifetime of the
+        homeserver.
+
+        The tokio runtime is started lazily on first use, and shut down when
+        this homeserver is shut down.
+        """
+        # TODO: make the number of worker threads configurable
+        return RustRuntime(hs=self, worker_threads=4)
+
+    @cache_in_self
     def get_event_sources(self) -> EventSources:
         return EventSources(self)
 
@@ -1048,6 +1072,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_federation_registry(self) -> FederationHandlerRegistry:
         return FederationHandlerRegistry(self)
+
+    @cache_in_self
+    def get_server_announcements_handler(self) -> ServerAnnouncementsHandler:
+        return ServerAnnouncementsHandler(self)
 
     @cache_in_self
     def get_server_notices_manager(self) -> ServerNoticesManager:
@@ -1188,7 +1216,11 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_msc4388_rendezvous_handler(self) -> MSC4388RendezvousHandler:
-        return MSC4388RendezvousHandler(self)
+        return MSC4388RendezvousHandler(
+            self,
+            max_unauthenticated_sessions=self.config.experimental.msc4388_max_unauthenticated_sessions,
+            ttl=self.config.experimental.msc4388_session_ttl_ms,
+        )
 
     @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":
@@ -1216,6 +1248,7 @@ class HomeServer(metaclass=abc.ABCMeta):
                 host=self.config.redis.redis_host,
                 port=self.config.redis.redis_port,
                 dbid=self.config.redis.redis_dbid,
+                username=self.config.redis.redis_username,
                 password=self.config.redis.redis_password,
                 reconnect=True,
             )
@@ -1229,6 +1262,7 @@ class HomeServer(metaclass=abc.ABCMeta):
                 hs=self,
                 path=self.config.redis.redis_path,
                 dbid=self.config.redis.redis_dbid,
+                username=self.config.redis.redis_username,
                 password=self.config.redis.redis_password,
                 reconnect=True,
             )

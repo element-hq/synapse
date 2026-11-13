@@ -29,7 +29,6 @@ from synapse.api.constants import (
     AccountDataTypes,
     EduTypes,
     EventTypes,
-    ProfileFields,
     ProfileUpdateAction,
     StickyEvent,
 )
@@ -60,7 +59,6 @@ from synapse.types.handlers.sliding_sync import (
     SlidingSyncResult,
     StateValues,
 )
-from synapse.types.rest.client import SlidingSyncStickyEventsToken
 from synapse.util.async_helpers import (
     concurrently_execute,
     gather_optional_coroutines,
@@ -100,10 +98,10 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        all_interested_room_ids: set[str],
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        newly_joined_room_ids: AbstractSet[str],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions:
@@ -114,53 +112,50 @@ class SlidingSyncExtensionHandler:
             previous_connection_state: Snapshot of the current per-connection state
             new_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state during this request.
-            all_interested_room_ids: The IDs of all rooms that the client is interested in,
-                even if they don't appear in the current limited window.
-                See `SlidingSyncInterestedRooms.all_rooms`.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
             actual_room_response_map: A map of room ID to room results in the the
                 Sliding Sync response.
+            newly_joined_room_ids: The rooms the user newly joined in the token range.
             to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
 
-        if sync_config.extensions is None:
-            return SlidingSyncResult.Extensions()
+        extensions = sync_config.extensions or SlidingSyncConfig.Extensions()
 
         to_device_coro = None
-        if sync_config.extensions.to_device is not None:
+        if extensions.to_device is not None:
             to_device_coro = self.get_to_device_extension_response(
                 sync_config=sync_config,
-                to_device_request=sync_config.extensions.to_device,
+                to_device_request=extensions.to_device,
                 to_token=to_token,
             )
 
         e2ee_coro = None
-        if sync_config.extensions.e2ee is not None:
+        if extensions.e2ee is not None:
             e2ee_coro = self.get_e2ee_extension_response(
                 sync_config=sync_config,
-                e2ee_request=sync_config.extensions.e2ee,
+                e2ee_request=extensions.e2ee,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         account_data_coro = None
-        if sync_config.extensions.account_data is not None:
+        if extensions.account_data is not None:
             account_data_coro = self.get_account_data_extension_response(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
                 new_connection_state=new_connection_state,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
-                account_data_request=sync_config.extensions.account_data,
+                account_data_request=extensions.account_data,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         receipts_coro = None
-        if sync_config.extensions.receipts is not None:
+        if extensions.receipts is not None:
             receipts_coro = self.get_receipts_extension_response(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
@@ -168,53 +163,57 @@ class SlidingSyncExtensionHandler:
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
-                receipts_request=sync_config.extensions.receipts,
+                receipts_request=extensions.receipts,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         typing_coro = None
-        if sync_config.extensions.typing is not None:
+        if extensions.typing is not None:
             typing_coro = self.get_typing_extension_response(
                 sync_config=sync_config,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
-                typing_request=sync_config.extensions.typing,
+                typing_request=extensions.typing,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         thread_subs_coro = None
         if (
-            sync_config.extensions.thread_subscriptions is not None
+            extensions.thread_subscriptions is not None
             and self._enable_thread_subscriptions
         ):
             thread_subs_coro = self.get_thread_subscriptions_extension_response(
                 sync_config=sync_config,
-                thread_subscriptions_request=sync_config.extensions.thread_subscriptions,
+                thread_subscriptions_request=extensions.thread_subscriptions,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         sticky_events_coro = None
-        if (
-            sync_config.extensions.sticky_events is not Absent
-            and self._enable_sticky_events
-        ):
+        # Called even when the request omits the extension, so that sticky events
+        # in out-of-scope rooms are still tracked.
+        if self._enable_sticky_events:
             sticky_events_coro = self.get_sticky_events_extension_response(
                 sync_config=sync_config,
-                sticky_events_request=sync_config.extensions.sticky_events,
-                all_interested_room_ids=all_interested_room_ids,
+                previous_connection_state=previous_connection_state,
+                new_connection_state=new_connection_state,
+                actual_lists=actual_lists,
+                actual_room_ids=actual_room_ids,
+                actual_room_response_map=actual_room_response_map,
+                newly_joined_room_ids=newly_joined_room_ids,
+                sticky_events_request=extensions.sticky_events,
                 to_token=to_token,
                 from_token=from_token,
             )
 
         profiles_coro = None
-        if sync_config.extensions.profiles is not Absent and self._enable_profiles:
+        if extensions.profiles is not Absent and self._enable_profiles:
             profiles_coro = self.get_profiles_extension_response(
                 sync_config=sync_config,
-                profiles_request=sync_config.extensions.profiles,
+                profiles_request=extensions.profiles,
                 actual_room_ids=actual_room_ids,
                 to_token=to_token,
                 from_token=from_token,
@@ -255,8 +254,8 @@ class SlidingSyncExtensionHandler:
 
     def find_relevant_room_ids_for_extension(
         self,
-        requested_lists: StrCollection | None,
-        requested_room_ids: StrCollection | None,
+        requested_lists: StrCollection,
+        requested_room_ids: StrCollection,
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: AbstractSet[str],
     ) -> set[str]:
@@ -285,42 +284,40 @@ class SlidingSyncExtensionHandler:
         relevant_room_ids: set[str] = set()
 
         # See what rooms from the room subscriptions we should get account data for
-        if requested_room_ids is not None:
-            for room_id in requested_room_ids:
-                # A wildcard means we process all rooms from the room subscriptions
-                if room_id == "*":
-                    relevant_room_ids.update(actual_room_ids)
-                    break
+        for room_id in requested_room_ids:
+            # A wildcard means we process all rooms from the room subscriptions
+            if room_id == "*":
+                relevant_room_ids.update(actual_room_ids)
+                break
 
-                if room_id in actual_room_ids:
-                    relevant_room_ids.add(room_id)
+            if room_id in actual_room_ids:
+                relevant_room_ids.add(room_id)
 
         # See what rooms from the sliding window lists we should get account data for
-        if requested_lists is not None:
-            for list_key in requested_lists:
-                # Just some typing because we share the variable name in multiple places
-                actual_list: SlidingSyncResult.SlidingWindowList | None = None
+        for list_key in requested_lists:
+            # Just some typing because we share the variable name in multiple places
+            actual_list: SlidingSyncResult.SlidingWindowList | None = None
 
-                # A wildcard means we process rooms from all lists
-                if list_key == "*":
-                    for actual_list in actual_lists.values():
-                        # We only expect a single SYNC operation for any list
-                        assert len(actual_list.ops) == 1
-                        sync_op = actual_list.ops[0]
-                        assert sync_op.op == OperationType.SYNC
-
-                        relevant_room_ids.update(sync_op.room_ids)
-
-                    break
-
-                actual_list = actual_lists.get(list_key)
-                if actual_list is not None:
+            # A wildcard means we process rooms from all lists
+            if list_key == "*":
+                for actual_list in actual_lists.values():
                     # We only expect a single SYNC operation for any list
                     assert len(actual_list.ops) == 1
                     sync_op = actual_list.ops[0]
                     assert sync_op.op == OperationType.SYNC
 
                     relevant_room_ids.update(sync_op.room_ids)
+
+                break
+
+            actual_list = actual_lists.get(list_key)
+            if actual_list is not None:
+                # We only expect a single SYNC operation for any list
+                assert len(actual_list.ops) == 1
+                sync_op = actual_list.ops[0]
+                assert sync_op.op == OperationType.SYNC
+
+                relevant_room_ids.update(sync_op.room_ids)
 
         return relevant_room_ids
 
@@ -845,7 +842,9 @@ class SlidingSyncExtensionHandler:
                     )
 
             fetched_receipts = ReceiptEventSource.filter_out_private_receipts(
-                fetched_receipts, sync_config.user.to_string()
+                fetched_receipts,
+                sync_config.user.to_string(),
+                await self.store.get_server_announcement_room_ids(),
             )
 
             for receipt in fetched_receipts:
@@ -1025,27 +1024,167 @@ class SlidingSyncExtensionHandler:
     async def get_sticky_events_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        sticky_events_request: SlidingSyncConfig.Extensions.StickyEventsExtension,
-        all_interested_room_ids: set[str],
+        previous_connection_state: "PerConnectionState",
+        new_connection_state: "MutablePerConnectionState",
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_room_ids: set[str],
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        newly_joined_room_ids: AbstractSet[str],
+        sticky_events_request: (
+            SlidingSyncConfig.Extensions.StickyEventsExtension | AbsentType
+        ),
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
     ) -> SlidingSyncResult.Extensions.StickyEventsExtension | None:
-        if not sticky_events_request.enabled:
+        """Handle Sticky Events extension (MSC4354 / MSC4480)
+
+        Args:
+            sync_config: Sync configuration
+            previous_connection_state: The current per-connection state
+            new_connection_state: A mutable copy of the per-connection
+                state, used to record updates to the state.
+            actual_lists: Sliding window API. A map of list key to list results in the
+                Sliding Sync response.
+            actual_room_ids: The actual room IDs in the the Sliding Sync response.
+            actual_room_response_map: A map of room ID to room results in the the
+                Sliding Sync response.
+            newly_joined_room_ids: The rooms the user newly joined in the token range.
+            sticky_events_request: The sticky_events extension from the request,
+                or absent if the request didn't include it.
+            to_token: The point in the stream to sync up to.
+            from_token: The point in the stream to sync from.
+        """
+        if sticky_events_request is Absent or not sticky_events_request.enabled:
+            # While the extension is disabled, no room is in scope for it. We still
+            # keep track of which rooms gain sticky events in the meantime, so that
+            # when the extension is re-enabled the client receives the (unexpired)
+            # sticky events sent while it was disabled, rather than only those
+            # sent after the request's `pos`.
+            await self._record_sticky_events_in_out_of_scope_rooms(
+                previous_connection_state=previous_connection_state,
+                new_connection_state=new_connection_state,
+                relevant_room_ids=set(),
+                to_token=to_token,
+                from_token=from_token,
+            )
             return None
-        now = self.clock.time_msec()
-        # If there is no `since` token specified, start from the beginning of the stream
-        # to make sure the client receives all visible (unexpired) sticky events
-        since_token = sticky_events_request.since or SlidingSyncStickyEventsToken.START
-        (
-            sticky_events_to_id,
-            room_to_event_ids,
-        ) = await self.store.get_sticky_events_in_rooms(
-            all_interested_room_ids,
-            from_id=since_token.sticky_events_stream_id,
-            to_id=to_token.sticky_events_key,
-            now=now,
-            limit=min(sticky_events_request.limit, StickyEvent.MAX_EVENTS_IN_SYNC),
+
+        relevant_room_ids = self.find_relevant_room_ids_for_extension(
+            requested_lists=sticky_events_request.lists,
+            requested_room_ids=sticky_events_request.rooms,
+            actual_lists=actual_lists,
+            actual_room_ids=actual_room_ids,
         )
+
+        if not relevant_room_ids:
+            # No rooms are relevant, so shortcut out after recording
+            # any sticky events we're missing in out-of-scope rooms.
+            await self._record_sticky_events_in_out_of_scope_rooms(
+                previous_connection_state=previous_connection_state,
+                new_connection_state=new_connection_state,
+                relevant_room_ids=set(),
+                to_token=to_token,
+                from_token=from_token,
+            )
+            return SlidingSyncResult.Extensions.StickyEventsExtension(
+                room_id_to_sticky_events={},
+            )
+
+        room_id_to_sticky_events: dict[str, list[FilteredEvent]] = {}
+        # We need to handle the different cases depending on if we have sent
+        # down sticky events previously or not, so we split the relevant rooms
+        # up into different collections based on status.
+        initial_rooms: set[str] = set()
+        previously_rooms: dict[str, MultiWriterStreamToken] = {}
+        live_rooms: set[str] = set()
+
+        for room_id in relevant_room_ids:
+            if not from_token or room_id in newly_joined_room_ids:
+                initial_rooms.add(room_id)
+                continue
+
+            # If we're sending down the room from scratch again for some
+            # reason, we should also resend all the sticky events.
+            room_result = actual_room_response_map.get(room_id)
+            if room_result is not None and room_result.initial:
+                initial_rooms.add(room_id)
+                continue
+
+            room_status = previous_connection_state.sticky_events.have_sent_room(
+                room_id
+            )
+            if room_status.status == HaveSentRoomFlag.LIVE:
+                live_rooms.add(room_id)
+            elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
+                assert room_status.last_token is not None
+                previously_rooms[room_id] = room_status.last_token
+            elif room_status.status == HaveSentRoomFlag.NEVER:
+                initial_rooms.add(room_id)
+            else:
+                assert_never(room_status.status)
+
+        # Build the groups of rooms to read sticky events for and their stream
+        # position to read from.
+        # [(set of appliable rooms, from_token), ...]
+        groups: list[tuple[AbstractSet[str], MultiWriterStreamToken]] = []
+        if initial_rooms:
+            # Read from the start of the stream to get all unexpired sticky
+            # events.
+            groups.append((initial_rooms, StreamToken.START.sticky_events_key))
+        previously_rooms_by_token: dict[MultiWriterStreamToken, set[str]] = {}
+        for room_id, last_token in previously_rooms.items():
+            previously_rooms_by_token.setdefault(last_token, set()).add(room_id)
+        groups.extend(
+            (room_ids, last_token)
+            for last_token, room_ids in previously_rooms_by_token.items()
+        )
+        if live_rooms:
+            assert from_token is not None
+            groups.append((live_rooms, from_token.stream_token.sticky_events_key))
+
+        now = self.clock.time_msec()
+
+        # Now build a list of events to send, limited by the requested limit
+        remaining_limit = min(
+            sticky_events_request.limit, StickyEvent.MAX_EVENTS_IN_SYNC
+        )
+        room_to_event_ids: dict[str, list[str]] = {}
+        for room_ids, group_from_token in groups:
+            if remaining_limit <= 0:
+                # We've run out of budget. Record that these rooms still need
+                # to be read from `group_from_token` on a subsequent request.
+                new_connection_state.sticky_events.record_partially_sent_rooms(
+                    room_ids, group_from_token
+                )
+                continue
+
+            (
+                read_to_token,
+                group_room_to_event_ids,
+            ) = await self.store.get_sticky_events_in_rooms(
+                room_ids,
+                from_token=group_from_token,
+                to_token=to_token.sticky_events_key,
+                now=now,
+                limit=remaining_limit,
+            )
+            num_read = 0
+            for room_id, event_ids in group_room_to_event_ids.items():
+                room_to_event_ids.setdefault(room_id, []).extend(event_ids)
+                num_read += len(event_ids)
+
+            if num_read >= remaining_limit:
+                # We hit the limit, so there may be more sticky events to send
+                # for these rooms. Record where we got up to so that the next
+                # request continues from there.
+                new_connection_state.sticky_events.record_partially_sent_rooms(
+                    room_ids, read_to_token
+                )
+            else:
+                # We read everything up to `to_token` for these rooms.
+                new_connection_state.sticky_events.record_sent_rooms(room_ids)
+            remaining_limit -= num_read
+
         # No need to preserve sticky event order here because we will
         # reassemble it in the right order after.
         all_sticky_event_ids = {
@@ -1056,14 +1195,9 @@ class SlidingSyncExtensionHandler:
             self._storage_controllers,
             sync_config.user.to_string(),
             unfiltered_events,
-            # As per MSC4354:
-            # > History visibility checks MUST NOT be applied to sticky events.
-            # > Any joined user is authorised to see sticky events for the duration they remain sticky.
-            always_include_ids=frozenset(all_sticky_event_ids),
         )
         filtered_event_map = {ev.event.event_id: ev for ev in filtered_events}
 
-        room_id_to_sticky_events: dict[str, list[FilteredEvent]] = {}
         for room_id, sticky_event_ids in room_to_event_ids.items():
             filtered_events_for_room = [
                 filtered_event_map[event_id]
@@ -1077,11 +1211,60 @@ class SlidingSyncExtensionHandler:
 
             room_id_to_sticky_events[room_id] = filtered_events_for_room
 
+        await self._record_sticky_events_in_out_of_scope_rooms(
+            previous_connection_state=previous_connection_state,
+            new_connection_state=new_connection_state,
+            relevant_room_ids=relevant_room_ids,
+            to_token=to_token,
+            from_token=from_token,
+        )
+
         return SlidingSyncResult.Extensions.StickyEventsExtension(
             room_id_to_sticky_events=room_id_to_sticky_events,
-            next_batch=SlidingSyncStickyEventsToken(
-                sticky_events_stream_id=sticky_events_to_id
-            ),
+        )
+
+    async def _record_sticky_events_in_out_of_scope_rooms(
+        self,
+        previous_connection_state: "PerConnectionState",
+        new_connection_state: "MutablePerConnectionState",
+        relevant_room_ids: AbstractSet[str],
+        to_token: StreamToken,
+        from_token: SlidingSyncStreamToken | None,
+    ) -> None:
+        """Record which rooms (may) have sticky events that we're not sending
+        down because they are not in scope for the sticky events extension, so
+        that we can send them when the room comes back into scope.
+
+        We only need to check rooms that are `LIVE`: `PREVIOUSLY` rooms keep
+        pointing at their previous position and `NEVER` rooms will get everything
+        when they come into scope.
+
+        Args:
+            previous_connection_state: The current per-connection state
+            new_connection_state: A mutable copy of the per-connection
+                state, used to record updates to the state.
+            relevant_room_ids: The rooms that are in scope for the extension
+                (empty if the extension is disabled).
+            to_token: The point in the stream to sync up to.
+            from_token: The point in the stream to sync from.
+        """
+        if from_token is None:
+            # No previous connection state, so nothing to record.
+            return
+
+        rooms_out_of_scope = [
+            room_id
+            for room_id, room_status in previous_connection_state.sticky_events._statuses.items()
+            if room_status.status == HaveSentRoomFlag.LIVE
+            and room_id not in relevant_room_ids
+        ]
+        changed_rooms = await self.store.get_rooms_with_sticky_events_between(
+            rooms_out_of_scope,
+            from_token=from_token.stream_token.sticky_events_key,
+            to_token=to_token.sticky_events_key,
+        )
+        new_connection_state.sticky_events.record_unsent_rooms(
+            changed_rooms, from_token.stream_token.sticky_events_key
         )
 
     async def _get_profile_ids_for_profiles_extension(
@@ -1421,28 +1604,13 @@ class SlidingSyncExtensionHandler:
             per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
             per_user_removals: set[str] = set()
             for field_name in user_fields:
-                # For custom fields the lack of a field means it will be `Absent`,
-                # for displayname/avatar_url it will be `None`, due to way we store
-                # things differently.
-                # FIXME: I intend to simplify this by pushing the special-case logic
-                # for these 'original' profile fields into the storage layer instead.
-                absent_type = (
-                    Absent
-                    if field_name
-                    not in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
-                    else None
-                )
                 field_value: JsonValue | dict[str, JsonValue] | AbsentType = (
-                    profile_data.get(field_name, absent_type)
+                    profile_data.get(field_name, Absent)
                 )
                 if (
                     # If the field isn't found on the profile and it is present in
                     # `updated_fields`, that means an existing field has been removed.
-                    # We need the check against `updated_fields` as some profile fields
-                    # are `None` by default, for example each and every user created
-                    # by Synapse will have `avatar_url: None`, and we don't want to
-                    # constantly send that to the clients.
-                    field_value is absent_type and field_name in updated_fields
+                    field_value is Absent and field_name in updated_fields
                 ):
                     per_user_removals.add(field_name)
                 else:

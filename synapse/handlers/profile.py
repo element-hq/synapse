@@ -66,6 +66,12 @@ MAX_AVATAR_URL_LEN = 1000
 MAX_CUSTOM_FIELD_LEN = 255
 UPDATE_JOIN_STATES_ACTION_NAME = "update_join_states"
 UPDATE_JOIN_STATES_LOCK_NAME = "update_join_states_lock"
+MSC4426_FIELDS = (
+    "m.status",
+    "m.call",
+    "org.matrix.msc4426.status",
+    "org.matrix.msc4426.call",
+)
 
 
 class ProfileHandler:
@@ -161,6 +167,17 @@ class ProfileHandler:
                     args={"user_id": user_id},
                     ignore_backoff=ignore_backoff,
                 )
+
+                # Strip out MSC4426 User Status fields as we currently don't have support
+                # for federating these. Without this, clients will cache stale data
+                # of user status fields they may receive through a federated profile
+                # fetch. Until we start delivering profile fields for remote users in
+                # the sync stream, like we do for local users, we should strip these
+                # profile fields away to avoid confusing users.
+                # TODO: remove when profile fields are pushed over federation and the
+                # profile updates stream is adjusted to deliver remote profile fields.
+                for key in MSC4426_FIELDS:
+                    result.pop(key, None)
                 return result
             except RequestSendFailed as e:
                 raise SynapseError(502, "Failed to fetch profile") from e
@@ -613,6 +630,16 @@ class ProfileHandler:
 
             return field_value
         else:
+            # Strip out MSC4426 User Status fields as we currently don't have support
+            # for federating these. Without this, clients will cache stale data
+            # of user status fields they may receive through a federated profile field
+            # fetch. Until we start delivering profile fields for remote users in
+            # the sync stream, like we do for local users, we should strip these
+            # profile fields away to avoid confusing users.
+            # TODO: remove when profile fields are pushed over federation and the
+            # profile updates stream is adjusted to deliver remote profile fields.
+            if field_name in MSC4426_FIELDS:
+                raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)
             try:
                 result = await self.federation.make_query(
                     destination=target_user.domain,
@@ -985,9 +1012,9 @@ class ProfileHandler:
         self, target_user: UserID, requester: UserID | None = None
     ) -> None:
         """Checks whether a profile query is allowed. If the
-        'require_auth_for_profile_requests' config flag is set to True and a
-        'requester' is provided, the query is only allowed if the two users
-        share a room.
+        'limit_profile_requests_to_users_who_share_rooms' config flag is set to
+        True and a 'requester' is provided, the query is only allowed if the two
+        users share a room.
 
         Args:
             target_user: The owner of the queried profile.

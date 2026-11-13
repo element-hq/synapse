@@ -19,6 +19,7 @@
 #
 #
 import logging
+from abc import ABC, abstractmethod
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BaseAuth:
+class BaseAuth(ABC):
     """Common base class for all auth implementations."""
 
     def __init__(self, hs: "HomeServer"):
@@ -129,6 +130,9 @@ class BaseAuth:
             Resolves to the current membership of the user in the room and the
             membership event ID of the user. If the user is not in the room and
             never has been, then `(Membership.JOIN, None)` is returned.
+
+            The same is returned for a user who left a server announcement room,
+            so that they keep reading it like a user who never joined.
         """
 
         try:
@@ -137,24 +141,42 @@ class BaseAuth:
             #  * The user is a non-guest user, and was ever in the room
             #  * The user is a guest user, and has joined the room
             # else it will throw.
-            return await self.check_user_in_room(
+            membership, member_event_id = await self.check_user_in_room(
                 room_id, requester, allow_departed_users=allow_departed_users
             )
         except AuthError:
-            visibility = await self._storage_controllers.state.get_current_state_event(
-                room_id, EventTypes.RoomHistoryVisibility, ""
-            )
-            if (
-                visibility
-                and visibility.content.get("history_visibility")
-                == HistoryVisibility.WORLD_READABLE
-            ):
+            if await self._is_world_readable(room_id):
                 return Membership.JOIN, None
             raise AuthError(
                 403,
                 "User %r not in room %s, and room previews are disabled"
                 % (requester.user, room_id),
             )
+
+        # Allow users who left a server announcement room to keep reading it.
+        if (
+            membership != Membership.JOIN
+            and await self._is_server_announcement_room(room_id)
+            and await self._is_world_readable(room_id)
+        ):
+            return Membership.JOIN, None
+
+        return membership, member_event_id
+
+    async def _is_world_readable(self, room_id: str) -> bool:
+        """Whether the room's history is visible to anyone."""
+        visibility = await self._storage_controllers.state.get_current_state_event(
+            room_id, EventTypes.RoomHistoryVisibility, ""
+        )
+        return (
+            visibility is not None
+            and visibility.content.get("history_visibility")
+            == HistoryVisibility.WORLD_READABLE
+        )
+
+    async def _is_server_announcement_room(self, room_id: str) -> bool:
+        """Whether the room is a server announcement room."""
+        return room_id in await self.store.get_server_announcement_room_ids()
 
     async def validate_appservice_can_control_user_id(
         self, app_service: ApplicationService, user_id: str
@@ -187,6 +209,7 @@ class BaseAuth:
                 403, "Application service has not registered this user (%s)" % user_id
             )
 
+    @abstractmethod
     async def is_server_admin(self, requester: Requester) -> bool:
         """Check if the given user is a local server admin.
 
@@ -239,6 +262,40 @@ class BaseAuth:
         )
 
         return user_level >= send_level
+
+    @abstractmethod
+    async def get_user_by_req(
+        self,
+        request: SynapseRequest,
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester:
+        """Get a registered user's ID. See `Auth.get_user_by_req`."""
+        raise NotImplementedError()
+
+    async def get_optional_user_by_req(
+        self,
+        request: SynapseRequest,
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester | None:
+        """Like `get_user_by_req`, except returns None when the request carries
+        no access token at all. A token that is present but invalid still
+        raises, as with `get_user_by_req`.
+
+        For endpoints where authentication is optional.
+        """
+        if not self.has_access_token(request):
+            return None
+
+        return await self.get_user_by_req(
+            request,
+            allow_guest=allow_guest,
+            allow_expired=allow_expired,
+            allow_locked=allow_locked,
+        )
 
     @staticmethod
     def has_access_token(request: Request) -> bool:

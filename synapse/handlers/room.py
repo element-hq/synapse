@@ -615,6 +615,7 @@ class RoomCreationHandler:
             (EventTypes.RoomEncryption, ""),
             (EventTypes.ServerACL, ""),
             (EventTypes.PowerLevels, ""),
+            (EventTypes.RtcSlot, None),
         ]
 
         room_type = old_room_create_event.content.get(EventContentFields.ROOM_TYPE)
@@ -1108,8 +1109,11 @@ class RoomCreationHandler:
         if (
             self._server_notices_mxid is not None
             and user_id == self._server_notices_mxid
+        ) or (
+            user_id == self.config.serverannouncements.room_management_mxid
+            and requester.authenticated_entity == self.hs.hostname
         ):
-            # allow the server notices mxid to create rooms
+            # Allow internal server identities to create their managed rooms.
             is_requester_admin = True
         else:
             is_requester_admin = await self.auth.is_server_admin(requester)
@@ -1244,10 +1248,6 @@ class RoomCreationHandler:
         creation_content = config.get("creation_content", {})
         # override any attempt to set room versions via the creation_content
         creation_content["room_version"] = room_version.identifier
-        # We do not currently support federating state DAG rooms.
-        # See related restriction in /send_join requests in federation_client.py.
-        if room_version.msc4242_state_dags:
-            creation_content[EventContentFields.FEDERATE] = False
 
         # trusted private chats have the invited users marked as additional creators
         if (
@@ -2504,9 +2504,26 @@ class RoomShutdownHandler:
             logger.info("Kicking %r from %r...", user_id, room_id)
 
             try:
-                # Kick users from room
+                # Whether the user is the fake one that manages server announcement
+                # rooms. Despite the user not existing, they're still joined in the
+                # room's state. So we need to generate a leave membership event for them
+                # before purging the room.
+                #
+                # But this user should not be moved to the new room.
+                is_announcement_manager = (
+                    user_id == self.hs.config.serverannouncements.room_management_mxid
+                    and await self.store.get_server_announcement_id(room_id) is not None
+                    and await self.store.get_user_by_id(user_id) is None
+                )
+
+                # Remove the local user from the room being shut down.
                 target_requester = create_requester(
-                    user_id, authenticated_entity=requester_user_id
+                    user_id,
+                    authenticated_entity=(
+                        self.hs.hostname
+                        if is_announcement_manager
+                        else requester_user_id
+                    ),
                 )
                 _, stream_id = await self.room_member_handler.update_membership(
                     requester=target_requester,
@@ -2518,7 +2535,7 @@ class RoomShutdownHandler:
                     require_consent=False,
                 )
 
-                # Wait for leave to come in over replication before trying to forget.
+                # Wait for the leave to come in over replication before trying to forget.
                 await self._replication.wait_for_stream_position(
                     self.hs.config.worker.events_shard_config.get_instance(room_id),
                     "events",
@@ -2529,8 +2546,8 @@ class RoomShutdownHandler:
                     target_requester.user, room_id, do_not_schedule_purge=True
                 )
 
-                # Join users to new room
-                if new_room_user_id:
+                # Join users to the new room
+                if new_room_user_id and not is_announcement_manager:
                     if membership == Membership.JOIN:
                         assert new_room_id is not None
                         await self.room_member_handler.update_membership(
@@ -2546,10 +2563,19 @@ class RoomShutdownHandler:
                 result["kicked_users"].append(user_id)
                 if update_result_fct:
                     await update_result_fct(result)
-            except Exception:
-                logger.exception(
-                    "Failed to leave old room and join new room for %r", user_id
-                )
+            except Exception as exc:
+                if (
+                    isinstance(exc, SynapseError)
+                    and exc.errcode == Codes.USER_ACCOUNT_SUSPENDED
+                ):
+                    logger.warning(
+                        "Failed to leave old room and join new room for suspended user (probably expected) %r",
+                        user_id,
+                    )
+                else:
+                    logger.exception(
+                        "Failed to leave old room and join new room for %r", user_id
+                    )
                 result["failed_to_kick_users"].append(user_id)
                 if update_result_fct:
                     await update_result_fct(result)

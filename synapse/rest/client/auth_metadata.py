@@ -30,15 +30,20 @@ class AuthMetadataServlet(RestServlet):
     Advertises the OAuth 2.0 server metadata for the homeserver.
     """
 
+    # The unstable path is still requested by matrix-rust-sdk clients that last saw
+    # `/versions` before we advertised Matrix v1.15, and can be removed once those
+    # clients no longer get stuck on it.
+    # See https://github.com/element-hq/synapse/issues/20459
     PATTERNS = [
         *client_patterns(
             "/auth_metadata$",
             releases=("v1",),
+            unstable=False,
         ),
         *client_patterns(
             "/org.matrix.msc2965/auth_metadata$",
-            unstable=True,
             releases=(),
+            unstable=True,
         ),
     ]
 
@@ -50,7 +55,7 @@ class AuthMetadataServlet(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # This endpoint is unauthenticated and the response only depends on
         # the metadata we get from Matrix Authentication Service. Internally,
-        # MasDelegatedAuth.issuer() is already caching the
+        # MasDelegatedAuth.auth_metadata() is already caching the
         # response in memory anyway. Ideally we would follow any Cache-Control directive
         # given by MAS, but this is fine for now.
         #

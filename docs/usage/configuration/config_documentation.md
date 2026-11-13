@@ -311,7 +311,8 @@ presence:
 ---
 ### `require_auth_for_profile_requests`
 
-*(boolean)* Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless `allow_profile_lookup_over_federation` is set to false. Defaults to `false`.
+*(boolean)* Whether to require authentication to retrieve profile data (avatars, display names) of other users through the client API. Note that profile data is also available via the federation API, unless `allow_profile_lookup_over_federation` is set to false.
+This option must be enabled in order to use `limit_profile_requests_to_users_who_share_rooms`. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -320,7 +321,8 @@ require_auth_for_profile_requests: true
 ---
 ### `limit_profile_requests_to_users_who_share_rooms`
 
-*(boolean)* Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server. Defaults to `false`.
+*(boolean)* Use this option to require a user to share a room with another user in order to retrieve their profile information. Only checked on Client-Server requests. Profile requests from other servers should be checked by the requesting server.
+The check can only be applied to authenticated requests, so this option requires `require_auth_for_profile_requests` to be enabled as well. Synapse will refuse to start if this option is enabled without it. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -375,8 +377,9 @@ For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
 _Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
+_Changed in Synapse 1.162:_ the default room version was increased from [11](https://spec.matrix.org/v1.16/rooms/v11/) to [12](https://spec.matrix.org/v1.16/rooms/v12/)
 
-Defaults to `"11"`.
+Defaults to `"12"`.
 
 Example configuration:
 ```yaml
@@ -610,7 +613,7 @@ listeners:
 ---
 ### `manhole`
 
-*(integer|null)* Turn on the Twisted telnet manhole service on the given port.
+*(integer|null)* Turn on the Twisted manhole service on the given port.
 
 This can also be set by the `--manhole` argument when starting Synapse.
 
@@ -1108,7 +1111,7 @@ user_ips_max_age: 14d
 ---
 ### `request_token_inhibit_3pid_errors`
 
-*(boolean)* Inhibits the `/requestToken` endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (`sid`) to clients. Defaults to `false`.
+*(boolean)* Inhibits the `/requestToken` endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (`sid`) to clients. Defaults to `true`.
 
 Example configuration:
 ```yaml
@@ -2020,7 +2023,7 @@ rc_presence:
 
 *(object)* Ratelimiting settings for delayed event management.
 
-This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account, or its source IP when requests are unauthenticated.
+This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 
@@ -2113,6 +2116,27 @@ Default configuration:
 rc_user_directory:
   per_second: 0.016
   burst_count: 200.0
+```
+---
+### `rc_profile`
+
+*(object)* This option allows admins to ratelimit profile lookups by clients.
+
+Requests are limited per user when the request is authenticated, otherwise per client IP address.
+
+_Added in Synapse 1.162.0._
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_profile:
+  per_second: 1.0
+  burst_count: 500.0
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
@@ -2676,17 +2700,24 @@ turn_allow_guests: false
 
 This setting has the following sub-options:
 
-* `transports` (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to `[]`.
+* `transports` (array): A list of MatrixRTC transports advertised to clients on `/_matrix/client/v1/rtc/transports` and, if it is enabled via `experimental_features.msc4143_enabled`, the unstable `/_matrix/client/unstable/org.matrix.msc4143/rtc/transports` endpoint. Defaults to `[]`.
 
   Options for each entry include:
 
-  * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
+  * `type` (string): The type of transport to advertise to clients.
 
-  * `url` (string): The WebSocket URL of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is required.
+    - Transports of type `m.livekit` advertise the stable transport based on LiveKit's selective
+      forwarding unit (SFU).
+
+    - Transports of type `livekit` advertise the unstable version of the LiveKit-based transport.
+      This type is deprecated and should only be used when backwards compatibility for clients
+      that don't yet support the stable transport is required.
+
+  * `url` (string): The WebSocket URL of the LiveKit SFU. If `type` is "m.livekit", this is required. If `type` is "livekit", either this or `livekit_service_url` is required.
 
     Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
 
-  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
+  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If `type` is "livekit", either this or `url` is required.
 
     Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
@@ -2694,6 +2725,8 @@ Example configuration:
 ```yaml
 matrix_rtc:
   transports:
+  - type: m.livekit
+    url: wss://livekit.example.com
   - type: livekit
     url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
@@ -4619,6 +4652,20 @@ Example configuration:
 run_background_tasks_on: worker1
 ```
 ---
+### `task_scheduler`
+
+*(object)* Configuration for the task scheduler.
+
+This setting has the following sub-options:
+
+* `max_concurrent_tasks` (integer): The maximum number of tasks that can run concurrently in the task scheduler. Setting this too high may swamp the database connection pool. Defaults to `5`.
+
+Example configuration:
+```yaml
+task_scheduler:
+  max_concurrent_tasks: 5
+```
+---
 ### `update_user_directory_from_worker`
 
 *(string|null)* The [worker](../../workers.md#updating-the-user-directory) that is used to update the user directory. If not provided this defaults to the main process.
@@ -4670,6 +4717,8 @@ _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
 _Changed in Synapse 1.116.0: Added password\_path_
 
+_Changed in Synapse 1.162.0: Added username_
+
 This setting has the following sub-options:
 
 * `enabled` (boolean): Whether to use Redis support. Defaults to `false`.
@@ -4679,6 +4728,8 @@ This setting has the following sub-options:
 * `port` (integer): Optional port to use to connect to Redis. Defaults to `6379`.
 
 * `path` (string): The full path to a local Unix socket file. **If this is used, `host` and `port` are ignored.** Defaults to `"/tmp/redis.sock"`.
+
+* `username` (string|null): Optional username if configured on the Redis instance (Redis 6+ ACL authentication). Requires `password` (or `password_path`) to also be set. Defaults to `null`.
 
 * `password` (string|null): Optional password if configured on the Redis instance. Defaults to `null`.
 
@@ -4702,6 +4753,7 @@ redis:
   enabled: true
   host: localhost
   port: 6379
+  username: <username>
   password_path: <path_to_the_password_file>
   dbid: <dbid>
 ```

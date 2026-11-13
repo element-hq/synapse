@@ -29,7 +29,7 @@ from signedjson.sign import sign_json
 
 from synapse.api.errors import Codes
 from synapse.rest import admin
-from synapse.rest.client import keys, login
+from synapse.rest.client import keys, login, room, sync
 from synapse.types import JsonDict
 
 from tests import unittest
@@ -342,6 +342,43 @@ class KeyQueryTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
 
+    def test_device_signing_null_or_non_object_auth(self) -> None:
+        """A null `auth` asks for UIA like an omitted one, and a non-object `auth`
+        is rejected, rather than either causing a 500."""
+        password = "wonderland"
+        device_id = "ABCDEFGHI"
+        alice_id = self.register_user("alice", password)
+        alice_token = self.login("alice", password, device_id=device_id)
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/device_signing/upload",
+            self.make_device_keys(alice_id, device_id),
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        keys = self.make_device_keys(alice_id, device_id)
+        keys["auth"] = None
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/device_signing/upload",
+            keys,
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
+        self.assertIn("session", channel.json_body)
+
+        keys["auth"] = "m.login.password"
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/device_signing/upload",
+            keys,
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.BAD_JSON)
+
 
 class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -351,3 +388,37 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
 
     OIDC_ADMIN_TOKEN = "_oidc_admin_token"
     ACCOUNT_MANAGEMENT_URL = "https://my-account.issuer"
+
+
+class KeyChangesTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        keys.register_servlets,
+        admin.register_servlets_for_client_rest_resource,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def test_user_joins_after_invite(self) -> None:
+        alice_id = self.register_user("alice", "wonderland")
+        alice_token = self.login("alice", "wonderland")
+        bob_id = self.register_user("bob", "builder")
+        bob_token = self.login("bob", "builder")
+
+        room_id = self.helper.create_room_as(alice_id, tok=alice_token)
+        self.helper.invite(room_id, src=alice_id, targ=bob_id, tok=alice_token)
+
+        channel = self.make_request("GET", "/sync", access_token=alice_token)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        next_batch = channel.json_body["next_batch"]
+
+        self.helper.join(room_id, bob_id, tok=bob_token)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/keys/changes?from={next_batch}&to={next_batch}",
+            access_token=alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body["changed"], [bob_id])
+        self.assertEqual(channel.json_body["left"], [])

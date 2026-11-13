@@ -105,7 +105,7 @@ class ApplicationServicesHandler:
         # clock components.
         current_id = max_token.stream
 
-        services = self.store.get_app_services()
+        services = self._get_services_to_notify()
         if not services or not self.notify_appservices:
             return
 
@@ -300,7 +300,7 @@ class ApplicationServicesHandler:
         #
         # Note that whether these events are actually relevant to these appservices
         # is decided later on.
-        services = self.store.get_app_services()
+        services = self._get_services_to_notify()
         services = [
             service
             for service in services
@@ -374,13 +374,21 @@ class ApplicationServicesHandler:
                         # follow the base stream position.
                         new_token = MultiWriterStreamToken(stream=new_token.stream)
 
-                        events = await self._handle_receipts(service, new_token)
-                        self.scheduler.enqueue_for_appservice(service, ephemeral=events)
+                        while True:
+                            events, reached_token = await self._handle_receipts(
+                                service, new_token
+                            )
+                            self.scheduler.enqueue_for_appservice(
+                                service, ephemeral=events
+                            )
 
-                        # Persist the latest handled stream token for this appservice
-                        await self.store.set_appservice_stream_type_pos(
-                            service, "read_receipt", new_token.stream
-                        )
+                            # Persist the latest handled stream token for this appservice
+                            await self.store.set_appservice_stream_type_pos(
+                                service, "read_receipt", reached_token.stream
+                            )
+
+                            if reached_token.stream >= new_token.stream:
+                                break
 
                     elif stream_key == StreamKeyType.PRESENCE:
                         assert isinstance(new_token, int)
@@ -460,14 +468,16 @@ class ApplicationServicesHandler:
 
     async def _handle_receipts(
         self, service: ApplicationService, new_token: MultiWriterStreamToken
-    ) -> list[JsonMapping]:
+    ) -> tuple[list[JsonMapping], MultiWriterStreamToken]:
         """
-        Return the latest read receipts that the given application service should receive.
+        Return the next batch of read receipts that the given application service
+        should receive.
 
-        First fetch all read receipts between the last receipt stream token that this
-        application service should have previously received (non-inclusive) and the
-        latest read receipt stream token (inclusive). Then from that set, return only
-        those read receipts that the given application service may be interested in.
+        First fetch the oldest read receipts between the last receipt stream token that
+        this application service should have previously received (non-inclusive) and
+        the latest read receipt stream token (inclusive), up to a cap. Then from that
+        set, return only those read receipts that the given application service may be
+        interested in.
 
         Args:
             service: The application service to check for which events it should receive.
@@ -476,23 +486,40 @@ class ApplicationServicesHandler:
                 token. Prevents accidentally duplicating work.
 
         Returns:
-            A list of JSON dictionaries containing data derived from the read receipts that
-            should be sent to the given application service.
+            A two-tuple containing the following:
+                * A list of JSON dictionaries containing data derived from the read
+                  receipts that should be sent to the given application service.
+                * The receipt stream token up to which receipts were actually handled.
+                  This is earlier than `new_token` if the fetch was truncated; callers
+                  must call this method again to fetch the remaining receipts.
         """
         from_key = await self.store.get_type_stream_id_for_appservice(
             service, "read_receipt"
         )
-        if new_token is not None and new_token.stream <= from_key:
-            logger.debug("Rejecting token lower than or equal to stored: %s", new_token)
-            return []
+        if new_token.stream <= from_key:
+            if new_token.stream == from_key:
+                logger.debug(
+                    "Receipt token %s already handled for appservice %s",
+                    new_token,
+                    service.id,
+                )
+            else:
+                logger.warning(
+                    "Receipt token %s is behind stored position %s for appservice %s",
+                    new_token,
+                    from_key,
+                    service.id,
+                )
+
+            return [], MultiWriterStreamToken(stream=from_key)
 
         from_token = MultiWriterStreamToken(stream=from_key)
 
         receipts_source = self.event_sources.sources.receipt
-        receipts, _ = await receipts_source.get_new_events_as(
+        receipts, reached_token = await receipts_source.get_new_events_as(
             service=service, from_key=from_token, to_key=new_token
         )
-        return receipts
+        return receipts, reached_token
 
     async def _handle_presence(
         self,
@@ -819,14 +846,17 @@ class ApplicationServicesHandler:
     async def _get_services_for_event(
         self, event: EventBase
     ) -> list[ApplicationService]:
-        """Retrieve a list of application services interested in this event.
+        """Retrieve the application services interested in this event that we can
+        send it to. Services without a `url` are skipped: see
+        `_get_services_to_notify`.
 
         Args:
             event: The event to check.
         Returns:
-            A list of services interested in this event based on the service regex.
+            A list of services with a `url` interested in this event based on the
+            service regex.
         """
-        services = self.store.get_app_services()
+        services = self._get_services_to_notify()
 
         # we can't use a list comprehension here. Since python 3, list
         # comprehensions use a generator internally. This means you can't yield
@@ -837,6 +867,20 @@ class ApplicationServicesHandler:
                 interested_list.append(s)
 
         return interested_list
+
+    def _get_services_to_notify(self) -> list[ApplicationService]:
+        """Retrieve the application services that we can send transactions to.
+
+        A service registered with a `url` of `null` has asked for no traffic
+        (https://spec.matrix.org/v1.19/application-service-api/#registration), so
+        there is no point gathering anything to send to it. It still owns its
+        namespaces: look-ups by namespace must keep using `get_app_services`.
+        """
+        return [
+            service
+            for service in self.store.get_app_services()
+            if service.url is not None
+        ]
 
     def _get_services_for_user(self, user_id: str) -> list[ApplicationService]:
         services = self.store.get_app_services()

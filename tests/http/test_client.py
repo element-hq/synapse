@@ -19,14 +19,21 @@
 #
 #
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from io import BytesIO
-from unittest.mock import Mock
+from typing import Any
+from unittest.mock import Mock, patch
 
 from netaddr import IPSet
 
+from OpenSSL import SSL
 from twisted.internet.defer import Deferred
 from twisted.internet.error import DNSLookupError
+from twisted.internet.interfaces import IOpenSSLClientConnectionCreator
+from twisted.internet.protocol import Factory, Protocol
 from twisted.internet.testing import AccumulatingProtocol
+from twisted.protocols.tls import TLSMemoryBIOFactory
 from twisted.python.failure import Failure
 from twisted.web.client import Agent, ResponseDone
 from twisted.web.iweb import UNKNOWN_LENGTH
@@ -36,6 +43,8 @@ from synapse.http.client import (
     BlocklistingAgentWrapper,
     BlocklistingReactorWrapper,
     BodyExceededMaxSize,
+    InsecureInterceptableContextFactory,
+    MultipartParser,
     MultipartResponse,
     _DiscardBodyWithMaxSizeProtocol,
     _MultipartParserProtocol,
@@ -45,6 +54,21 @@ from synapse.http.client import (
 
 from tests.server import FakeTransport, get_clock
 from tests.unittest import TestCase
+
+
+class InsecureInterceptableContextFactoryTests(TestCase):
+    def test_client_connection_creator(self) -> None:
+        """The insecure test policy provides connections without verification."""
+        policy = InsecureInterceptableContextFactory()
+        creator = policy.creatorForNetloc(b"example.com", 443)
+        self.assertTrue(IOpenSSLClientConnectionCreator.providedBy(creator))
+
+        factory = TLSMemoryBIOFactory(creator, True, Factory.forProtocol(Protocol))
+        protocol = factory.buildProtocol(None)
+        assert protocol is not None
+        connection = creator.clientConnectionForTLS(protocol)
+        self.assertIs(connection.get_context(), policy.getContext())
+        self.assertEqual(connection.get_context().get_verify_mode(), SSL.VERIFY_NONE)
 
 
 class ReadMultipartResponseTests(TestCase):
@@ -163,6 +187,55 @@ class ReadMultipartResponseTests(TestCase):
             multipart_response.url, b"https://cdn.example.org/ab/c1/2345.txt"
         )
 
+    @contextmanager
+    def _parser_without_on_header_begin(self) -> Iterator[None]:
+        """Make the parser skip `on_header_begin`, as python-multipart 0.0.9 does."""
+
+        def parser(boundary: Any, callbacks: Any) -> Any:
+            callbacks = {k: v for k, v in callbacks.items() if k != "on_header_begin"}
+            return MultipartParser(boundary, callbacks)
+
+        with patch("synapse.http.client.MultipartParser", parser):
+            yield
+
+    def test_parse_file_without_on_header_begin(self) -> None:
+        """
+        Headers of the file part are still captured when the parser never calls
+        `on_header_begin`, which the oldest supported python-multipart does not.
+        """
+        with self._parser_without_on_header_begin():
+            result, deferred, protocol = self._build_multipart_response(249, 250)
+            protocol.dataReceived(self.multipart_response_data1)
+            protocol.dataReceived(self.multipart_response_data2)
+            protocol.connectionLost(Failure(ResponseDone()))
+
+        multipart_response: MultipartResponse = deferred.result  # type: ignore[assignment]
+
+        self.assertEqual(multipart_response.json, b"{}")
+        self.assertEqual(result.getvalue(), b"file_to_stream")
+        self.assertEqual(multipart_response.content_type, b"text/plain")
+        self.assertEqual(
+            multipart_response.disposition, b"inline; filename=test_upload"
+        )
+
+    def test_parse_redirect_without_on_header_begin(self) -> None:
+        """
+        The `Location` header of a redirect part is still captured when the parser
+        never calls `on_header_begin`, and no file data is written.
+        """
+        with self._parser_without_on_header_begin():
+            result, deferred, protocol = self._build_multipart_response(249, 250)
+            protocol.dataReceived(self.redirect_data)
+            protocol.connectionLost(Failure(ResponseDone()))
+
+        multipart_response: MultipartResponse = deferred.result  # type: ignore[assignment]
+
+        self.assertEqual(multipart_response.json, b"{}")
+        self.assertEqual(result.getvalue(), b"")
+        self.assertEqual(
+            multipart_response.url, b"https://cdn.example.org/ab/c1/2345.txt"
+        )
+
     def test_too_large(self) -> None:
         """A response which is too large raises an exception."""
         result, deferred, protocol = self._build_multipart_response(UNKNOWN_LENGTH, 180)
@@ -203,6 +276,103 @@ class ReadMultipartResponseTests(TestCase):
 
         # The data is never consumed.
         self.assertEqual(result.getvalue(), b"")
+
+    def _parse_chunks(self, chunks: list[bytes]) -> tuple[object, bytes]:
+        """Feed `chunks` one `dataReceived` call at a time; returns (response or error, file)."""
+        result, deferred, protocol = self._build_multipart_response(
+            UNKNOWN_LENGTH, 10_000
+        )
+        for chunk in chunks:
+            protocol.dataReceived(chunk)
+        protocol.connectionLost(Failure(ResponseDone()))
+
+        outcome: list[object] = []
+        deferred.addBoth(outcome.append)
+        parsed = outcome[0]
+        if isinstance(parsed, Failure):
+            parsed = repr(parsed.value)
+        return parsed, result.getvalue()
+
+    def _assert_all_splits_match(self, data: bytes) -> None:
+        """Parsing `data` split at any offset, or byte by byte, matches the unsplit parse."""
+        expected, expected_file = self._parse_chunks([data])
+
+        bad_splits = [
+            i
+            for i in range(1, len(data))
+            if self._parse_chunks([data[:i], data[i:]]) != (expected, expected_file)
+        ]
+        self.assertEqual(bad_splits, [])
+
+        byte_by_byte = self._parse_chunks([data[i : i + 1] for i in range(len(data))])
+        self.assertEqual(byte_by_byte, (expected, expected_file))
+
+    def test_parse_file_split_across_chunks(self) -> None:
+        """The JSON and file parts are captured intact however the body is chunked."""
+        data = (
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Content-Type: application/json\r\n\r\n"
+            b'{"some": "metadata", "n": 12345}\r\n'
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Content-Type: text/plain\r\n"
+            b"Content-Disposition: inline; filename=test_upload\r\n\r\n"
+            b"file_to_stream\r\n"
+            b"--6067d4698f8d40a0a794ea7d7379d53a--\r\n"
+        )
+        expected, expected_file = self._parse_chunks([data])
+        assert isinstance(expected, MultipartResponse)
+        self.assertEqual(expected.json, b'{"some": "metadata", "n": 12345}')
+        self.assertEqual(expected.content_type, b"text/plain")
+        self.assertEqual(expected.disposition, b"inline; filename=test_upload")
+        self.assertEqual(expected.length, len(b"file_to_stream"))
+        self.assertEqual(expected_file, b"file_to_stream")
+
+        self._assert_all_splits_match(data)
+
+    def test_parse_redirect_split_across_chunks(self) -> None:
+        """The redirect Location is captured intact however the body is chunked."""
+        url = b"https://cdn.example.org/attachments/1234/5678/image.png?ex=6a71620d&is=6a70108d&hm=6e2a5760c6"
+        data = (
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Content-Type: application/json\r\n\r\n"
+            b"{}\r\n"
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Location: " + url + b"\r\n\r\n"
+            b"\r\n"
+            b"--6067d4698f8d40a0a794ea7d7379d53a--\r\n"
+        )
+        expected, expected_file = self._parse_chunks([data])
+        assert isinstance(expected, MultipartResponse)
+        self.assertEqual(expected.url, url)
+        self.assertEqual(expected.json, b"{}")
+        self.assertEqual(expected_file, b"")
+
+        self._assert_all_splits_match(data)
+
+    def test_rejects_first_part_without_content_type_first(self) -> None:
+        """The first header of the metadata part must be Content-Type."""
+        data = (
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Content-Disposition: inline\r\n"
+            b"Content-Type: application/json\r\n\r\n"
+            b"{}\r\n"
+            b"--6067d4698f8d40a0a794ea7d7379d53a--\r\n"
+        )
+        parsed, _ = self._parse_chunks([data])
+        self.assertIsInstance(parsed, str)
+        self.assertIn("Expected content-type", str(parsed))
+
+    def test_rejects_first_part_that_is_not_json(self) -> None:
+        """The metadata part must be application/json."""
+        data = (
+            b"--6067d4698f8d40a0a794ea7d7379d53a\r\n"
+            b"Content-Type: text/plain\r\n\r\n"
+            b"{}\r\n"
+            b"--6067d4698f8d40a0a794ea7d7379d53a--\r\n"
+        )
+        parsed, _ = self._parse_chunks([data])
+        self.assertIsInstance(parsed, str)
+        self.assertIn("Expected application/json", str(parsed))
 
 
 class ReadBodyWithMaxSizeTests(TestCase):
@@ -367,6 +537,7 @@ class BlocklistingAgentTest(TestCase):
 
             # Make the connection and pump data through it.
             client = client_factory.buildProtocol(None)
+            assert client is not None
             server = AccumulatingProtocol()
             server.makeConnection(FakeTransport(client, self.reactor))
             client.makeConnection(FakeTransport(server, self.reactor))
@@ -411,6 +582,7 @@ class BlocklistingAgentTest(TestCase):
 
             # Make the connection and pump data through it.
             client = client_factory.buildProtocol(None)
+            assert client is not None
             server = AccumulatingProtocol()
             server.makeConnection(FakeTransport(client, self.reactor))
             client.makeConnection(FakeTransport(server, self.reactor))
