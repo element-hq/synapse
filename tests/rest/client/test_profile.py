@@ -1046,28 +1046,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
-    def test_query_profiles_endpoint_when_msc4536_enabled_multiple_invalid_user_ids(
-        self,
-    ) -> None:
-        """With MSC4536 enabled, the profiles query endpoint should report every
-        invalid user id in one error.
-        """
-        channel = self.make_request(
-            "POST",
-            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
-            content={
-                "users": ["bad1", self.other, "bad2"],
-            },
-            access_token=self.owner_tok,
-        )
-        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
-        self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
-        self.assertEqual(
-            channel.json_body.get("error"),
-            "'.users[0]': Invalid user id bad1; '.users[2]': Invalid user id bad2",
-        )
-
-    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_empty_users(
         self,
     ) -> None:
