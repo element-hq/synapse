@@ -692,7 +692,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
             f"Expecting to not see regular event ({regular_event_id}) before user1 joined.",
         )
 
-    @patch.object(StickyEvent, "MAX_EVENTS_IN_SYNC", 3)
+    @patch.object(StickyEvent, "MAX_STICKY_EVENTS_IN_SYNC", 3)
     def test_pagination_with_many_sticky_events(self) -> None:
         """
         Test that pagination works correctly when there are more sticky events than
@@ -701,7 +701,7 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         The MSC doesn't define a limit or how to set one.
         See thread: https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r2885670008
 
-        But Synapse currently emits 100 at a time, controlled by `MAX_EVENTS_IN_SYNC`.
+        But Synapse currently emits 100 at a time, controlled by `MAX_STICKY_EVENTS_IN_SYNC`.
         In this test we patch it to 3 (as sending 100 events is not very efficient).
         """
 
