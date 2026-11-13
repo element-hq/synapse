@@ -1,12 +1,15 @@
 from unittest.mock import AsyncMock, patch
 
+from parameterized import parameterized
+
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.rest.client.login
 import synapse.rest.client.room
 from synapse.api.constants import AccountDataTypes, EventTypes, Membership
-from synapse.api.errors import Codes, LimitExceededError, SynapseError
+from synapse.api.errors import AuthError, Codes, LimitExceededError, SynapseError
+from synapse.api.room_versions import RoomVersions
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
@@ -445,6 +448,112 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         new_count = rows[0][0]
 
         self.assertEqual(initial_count, new_count)
+
+    def _reject_invite_from_unreachable_server(self) -> tuple[str, str]:
+        """
+        Has bob reject an invite to a room our server is not in, sent by a server
+        that cannot be reached.
+
+        Returns:
+            The room ID and the event ID of bob's leave.
+        """
+        remote_server = "other.invalid"
+        room_id = f"!room:{remote_server}"
+
+        # The remote server invites bob. Our server stores the invite as an
+        # outlier: it has no other event of the room.
+        invite = make_test_pdu_event(
+            {
+                "type": EventTypes.Member,
+                "content": {"membership": Membership.INVITE},
+                "room_id": room_id,
+                "sender": f"@inviter:{remote_server}",
+                "state_key": self.bob,
+            },
+            # Room IDs of later room versions are the hash of a create event, which
+            # this test does not build.
+            RoomVersions.V11,
+        )
+        self.get_success(
+            self.hs.get_federation_handler().on_invite_request(
+                origin=remote_server, event=invite, room_version=invite.room_version
+            )
+        )
+
+        # Bob rejects the invite. The `make_leave` request to the remote server
+        # fails, so our server builds the leave itself, as another outlier.
+        with patch.object(
+            self.hs.get_federation_client(),
+            "make_membership_event",
+            AsyncMock(side_effect=SynapseError(502, "Failed to make_leave")),
+        ):
+            leave_event_id, _ = self.get_success(
+                self.handler.update_membership(
+                    requester=create_requester(self.bob),
+                    target=self.bob_ID,
+                    room_id=room_id,
+                    action=Membership.LEAVE,
+                )
+            )
+        return room_id, leave_event_id
+
+    def test_repeat_leave_after_out_of_band_leave(self) -> None:
+        """
+        Leaving a room again after an out-of-band leave returns the existing leave,
+        and a leave with a different reason is forbidden.
+        """
+        # Bob's leave is an outlier in a room our server is not in, so there is no
+        # event to build a second leave on.
+        room_id, leave_event_id = self._reject_invite_from_unreachable_server()
+
+        # Clients repeat the request when they did not see the first leave. The
+        # same leave again returns the event we already have.
+        event_id, _ = self.get_success(
+            self.handler.update_membership(
+                requester=create_requester(self.bob),
+                target=self.bob_ID,
+                room_id=room_id,
+                action=Membership.LEAVE,
+            )
+        )
+        self.assertEqual(event_id, leave_event_id)
+
+        # A different leave would be a new event. It is refused, as the auth rules
+        # refuse a leave from a user who has already left.
+        failure = self.get_failure(
+            self.handler.update_membership(
+                requester=create_requester(self.bob),
+                target=self.bob_ID,
+                room_id=room_id,
+                action=Membership.LEAVE,
+                content={"reason": "changed my mind"},
+            ),
+            AuthError,
+        )
+        self.assertEqual(failure.value.code, 403)
+
+    @parameterized.expand([(Membership.INVITE,), (Membership.BAN,), ("kick",)])
+    def test_membership_change_after_out_of_band_leave(self, action: str) -> None:
+        """
+        A local user cannot invite, ban or kick in a room our server is not in and
+        has no forward extremities of.
+        """
+        # The only events our server has of the room are bob's invite and leave,
+        # both outliers.
+        room_id, _ = self._reject_invite_from_unreachable_server()
+
+        # Alice is not in the room either, so the request is refused. There is no
+        # event to build her invite, ban or kick on.
+        failure = self.get_failure(
+            self.handler.update_membership(
+                requester=create_requester(self.alice),
+                target=self.bob_ID,
+                room_id=room_id,
+                action=action,
+            ),
+            AuthError,
+        )
+        self.assertEqual(failure.value.code, 403)
 
 
 class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
