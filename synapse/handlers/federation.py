@@ -982,7 +982,8 @@ class FederationHandler:
 
         # Send the signed event back to the room, and potentially receive some
         # further information about the room in the form of partial state events
-        knock_response = await self.federation_client.send_knock(target_hosts, event)
+        send_knock_result = await self.federation_client.send_knock(target_hosts, event)
+        knock_response = send_knock_result.response
 
         # Store any stripped room state events in the "unsigned" key of the event.
         # This is a bit of a hack and is cribbing off of invites. Basically we
@@ -1040,6 +1041,20 @@ class FederationHandler:
         stream_id = await self._federation_event_handler.persist_events_and_notify(
             event.room_id, [(event, context)]
         )
+
+        # Remember which server fulfilled the knock, so that we can route a
+        # rescission of the knock through it later, and know which server to
+        # trust for an out-of-band retraction of the knock (MSC4233). A crash
+        # between persisting the knock and this write leaves the knock without
+        # a remembered route, which MSC4233 already covers: we fall back to
+        # generating the leave locally.
+        await self.store.store_local_knock_via_server(
+            user_id=knockee,
+            room_id=event.room_id,
+            via_server=send_knock_result.origin,
+            knock_event_id=event.event_id,
+        )
+
         return event.event_id, stream_id
 
     async def _handle_queued_pdus(
@@ -1648,6 +1663,22 @@ class FederationHandler:
     async def do_remotely_reject_invite(
         self, target_hosts: Iterable[str], room_id: str, user_id: str, content: JsonDict
     ) -> tuple[EventBase, int]:
+        """Leave a room we are not resident in, via the make_leave/send_leave dance.
+
+        Used both to reject an out-of-band invite and, under MSC4233, to
+        rescind an out-of-band knock through the server the knock was
+        fulfilled through: the two are the same federation dance and differ
+        only in which hosts we are given.
+
+        Args:
+            target_hosts: The servers to try, in order.
+            room_id: The room to leave.
+            user_id: The local user leaving.
+            content: The content for the leave event.
+
+        Returns:
+            The persisted leave event and its stream ID.
+        """
         origin, event, room_version = await self._make_and_verify_event(
             target_hosts, room_id, user_id, "leave", content=content
         )
