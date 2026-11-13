@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING
 from synapse.api.constants import EventTypes, Membership, RoomCreationPreset
 from synapse.events import EventBase
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, create_requester
-from synapse.util.caches.descriptors import cached
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -98,7 +97,6 @@ class ServerNoticesManager:
         )
         return event
 
-    @cached()
     async def maybe_get_notice_room_for_user(self, user_id: str) -> str | None:
         """Try to look up the server notice room for this user if it exists.
 
@@ -137,7 +135,6 @@ class ServerNoticesManager:
 
         return None
 
-    @cached()
     async def get_or_create_notice_room_for_user(self, user_id: str) -> str:
         """Get the room for notices for a given user
 
@@ -240,8 +237,6 @@ class ServerNoticesManager:
             creator_join_profile=join_profile,
             ignore_forced_encryption=True,
         )
-
-        self.maybe_get_notice_room_for_user.invalidate((user_id,))
 
         max_id = await self._account_data_handler.add_tag_to_room(
             user_id, room_id, SERVER_NOTICE_ROOM_TAG, {}
