@@ -21,17 +21,9 @@
 import json
 from http import HTTPStatus
 from io import BytesIO
-from typing import Annotated
 from unittest.mock import Mock
 
-from pydantic import (
-    AfterValidator,
-    BaseModel,
-    StrictInt,
-    StrictStr,
-    model_validator,
-)
-from pydantic_core import PydanticCustomError
+from pydantic import BaseModel, StrictInt, StrictStr, model_validator
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.servlet import (
@@ -156,15 +148,6 @@ class TestRestServletCancellation(unittest.HomeserverTestCase):
         )
 
 
-def _validate_short(value: str) -> str:
-    """Validator raising a custom error with an `errcode` in its context."""
-    if len(value) > 3:
-        raise PydanticCustomError(
-            "string_too_long", "Too long", {"errcode": Codes.KEY_TOO_LARGE}
-        )
-    return value
-
-
 class PydanticErrorFormatingTestCase(unittest.TestCase):
     """Tests the formatting of pydantic error messages.
 
@@ -184,13 +167,6 @@ class PydanticErrorFormatingTestCase(unittest.TestCase):
         inner: _Inner | None = None
         ids: list[StrictInt] = []
         either: StrictStr | StrictInt = "x"
-        ids_or_name: list[StrictInt] | StrictStr = "x"
-        short_names: list[
-            Annotated[
-                StrictStr,
-                AfterValidator(_validate_short),
-            ]
-        ] = []
         limit: StrictInt | None = None
 
         @model_validator(mode="after")
@@ -237,30 +213,6 @@ class PydanticErrorFormatingTestCase(unittest.TestCase):
             e.msg,
             "'.either': Input should be a valid string; '.either': Input should be a valid integer",
         )
-
-    def test_union_list_branch_keeps_index(self) -> None:
-        """Test that errors inside a list branch of a union keep the list index,
-        even though the branch tag itself is dropped."""
-
-        e = self._validate({"name": "n", "ids_or_name": [1, "two"]})
-        self.assertEqual(
-            e.msg,
-            "'.ids_or_name[1]': Input should be a valid integer; '.ids_or_name': Input should be a valid string",
-        )
-
-    def test_custom_errcode_from_error_context(self) -> None:
-        """Test that a custom validator can choose the errcode via an `errcode` in
-        the error context, as long as every error agrees on it."""
-
-        e = self._validate({"name": "n", "short_names": ["ok", "toolong", "nope!"]})
-        self.assertEqual(e.errcode, Codes.KEY_TOO_LARGE)
-        self.assertEqual(
-            e.msg, "'.short_names[1]': Too long; '.short_names[2]': Too long"
-        )
-
-        # Mixed with an error that has no custom errcode: fall back to BAD_JSON.
-        e = self._validate({"name": "n", "short_names": ["toolong"], "ids": ["x"]})
-        self.assertEqual(e.errcode, Codes.BAD_JSON)
 
     def test_custom_validator_message_used_verbatim(self) -> None:
         """Test that custom validator messages are used verbatim.

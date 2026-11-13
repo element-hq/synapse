@@ -59,8 +59,8 @@ Defined in MSC4536."""
 
 # The validators below raise `PydanticCustomError` with a type other than
 # `value_error`, so that `validate_json_object` responds with `M_BAD_JSON` (a
-# plain `ValueError` would map to `M_INVALID_PARAM`), or with the `errcode` given
-# in the error context, while still using our own error messages.
+# plain `ValueError` would map to `M_INVALID_PARAM`), while still using our own
+# error messages.
 
 
 def _validate_user_id(value: str) -> str:
@@ -74,13 +74,13 @@ def _validate_user_id(value: str) -> str:
 def _validate_profile_field_name(value: str) -> str:
     if not value:
         raise PydanticCustomError("string_too_short", "Field name too short")
-    # Match the limit and error code used when setting custom profile fields,
-    # where the limit is measured in UTF-8 bytes rather than characters.
+    # Match the limit used when setting custom profile fields, where the limit
+    # is measured in UTF-8 bytes rather than characters.
     if len(value.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
         raise PydanticCustomError(
             "string_too_long",
             "Field name too long (max {max_length} bytes)",
-            {"max_length": MAX_CUSTOM_FIELD_LEN, "errcode": Codes.KEY_TOO_LARGE},
+            {"max_length": MAX_CUSTOM_FIELD_LEN},
         )
     return value
 

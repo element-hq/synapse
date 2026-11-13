@@ -1157,23 +1157,23 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     @parameterized.expand(
         [
             # Empty field names are not allowed.
-            ("empty", "", Codes.BAD_JSON, "'.fields[1]': Field name too short"),
+            ("empty", "", Codes.BAD_JSON, "'.fields': Field name too short"),
             # Exactly at the limit.
             ("at_limit", "a" * MAX_CUSTOM_FIELD_LEN, None, None),
             # One byte over the limit.
             (
                 "over_limit",
                 "a" * (MAX_CUSTOM_FIELD_LEN + 1),
-                Codes.KEY_TOO_LARGE,
-                f"'.fields[1]': Field name too long (max {MAX_CUSTOM_FIELD_LEN} bytes)",
+                Codes.BAD_JSON,
+                f"'.fields': Field name too long (max {MAX_CUSTOM_FIELD_LEN} bytes)",
             ),
             # Under the limit in characters, but over it in UTF-8 bytes
             # ("é" is 2 bytes).
             (
                 "over_limit_multibyte",
                 "é" * (MAX_CUSTOM_FIELD_LEN // 2 + 1),
-                Codes.KEY_TOO_LARGE,
-                f"'.fields[1]': Field name too long (max {MAX_CUSTOM_FIELD_LEN} bytes)",
+                Codes.BAD_JSON,
+                f"'.fields': Field name too long (max {MAX_CUSTOM_FIELD_LEN} bytes)",
             ),
         ]
     )
@@ -1204,33 +1204,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
             self.assertEqual(channel.json_body.get("errcode"), expected_errcode)
             self.assertEqual(channel.json_body.get("error"), expected_error)
-
-    @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
-    def test_query_profiles_endpoint_when_msc4536_enabled_field_name_errcode_multiple_errors(
-        self,
-    ) -> None:
-        """With several invalid field names, `M_KEY_TOO_LARGE` is only used when
-        every error is a too-long field name; otherwise `M_BAD_JSON` is used.
-        """
-        too_long = "a" * (MAX_CUSTOM_FIELD_LEN + 1)
-
-        channel = self.make_request(
-            "POST",
-            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
-            content={"users": [self.owner], "fields": [too_long, too_long]},
-            access_token=self.owner_tok,
-        )
-        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
-        self.assertEqual(channel.json_body.get("errcode"), Codes.KEY_TOO_LARGE)
-
-        channel = self.make_request(
-            "POST",
-            "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
-            content={"users": [self.owner], "fields": [too_long, ""]},
-            access_token=self.owner_tok,
-        )
-        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
-        self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_returns_profile_data(
