@@ -99,3 +99,28 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./book
           destination_dir: ./${{ needs.pre.outputs.branch-version }}
+
+      # Publish the list of available docs versions as `versions.json` at the
+      # root of the site. The version picker (`docs/website_files/version-picker.js`)
+      # reads it, so it doesn't need the rate-limited GitHub API.
+      - name: Generate versions.json
+        run: |
+          # Re-fetch gh-pages so that it includes the deployment above.
+          git fetch origin gh-pages
+          mkdir -p versions-out
+          # Every top-level directory on gh-pages is a docs version, except for
+          # the excluded ones. The version deployed in this run is added
+          # explicitly in case the fetch above doesn't see it yet.
+          { git ls-tree -d --name-only origin/gh-pages; echo "${{ needs.pre.outputs.branch-version }}"; } \
+            | grep -vxE 'dev-docs|v1\.91\.0|v1\.80\.0|v1\.69\.0' \
+            | sort -u \
+            | jq --raw-input . | jq --slurp . \
+            > versions-out/versions.json
+
+      - name: Deploy versions.json to gh pages
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./versions-out
+          # Only add/replace `versions.json` at the root, keep everything else.
+          keep_files: true
