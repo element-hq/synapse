@@ -3964,6 +3964,22 @@ class SyncHandler:
                 # An out of band room won't have any state changes.
                 state = {}
 
+            # MSC4222 clients only read state from `state_after`, so an out-of-band
+            # membership that ends the timeline must be put there: as an outlier it
+            # is never in the computed state. Sliding sync does the same in
+            # `get_room_sync_data`. `events` is unfiltered, so this holds when a
+            # filter hides the membership. On an incremental sync a filter that
+            # empties the batch still drops the room, as the empty-batch shortcut
+            # above returns first.
+            if sync_config.use_state_after and events:
+                last_event = events[-1]
+                if (
+                    last_event.type == EventTypes.Member
+                    and last_event.state_key == sync_config.user.to_string()
+                    and last_event.internal_metadata.is_out_of_band_membership()
+                ):
+                    state[(last_event.type, last_event.state_key)] = last_event
+
             summary: JsonDict | None = {}
 
             # we include a summary in room responses when we're lazy loading
