@@ -22,6 +22,7 @@
 
 """Contains handlers for federation events."""
 
+import contextlib
 import enum
 import itertools
 import logging
@@ -78,6 +79,7 @@ from synapse.federation.federation_base import (
 )
 from synapse.federation.federation_client import InvalidResponseError
 from synapse.handlers.pagination import PURGE_PAGINATION_LOCK_NAME
+from synapse.handlers.worker_lock import INBOUND_EVENT_HANDLING_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
@@ -700,6 +702,23 @@ class FederationHandler:
             # impossible.
             await self.store.clean_room_for_join(room_id)
 
+        # The room's servers may send us events while we join: its resident server
+        # typically sends one right after it accepted our join, before we have
+        # persisted it. `room_queues` used to queue them, but it lives in this
+        # process only: a worker that handles inbound federation would drop them, as
+        # we're not in the room yet. So, unless we are in the room already, we hold
+        # the room's inbound event lock until the join is persisted: they wait in the
+        # staging area, and whoever takes the lock next handles them (the next event
+        # we receive in the room, or `_handle_old_staged_events`). `room_queues` is
+        # then only used when we are in the room already.
+        inbound_event_lock: contextlib.AbstractAsyncContextManager[object]
+        if is_host_joined:
+            inbound_event_lock = contextlib.nullcontext()
+        else:
+            inbound_event_lock = self._worker_locks.acquire_lock(
+                INBOUND_EVENT_HANDLING_LOCK_NAME, room_id
+            )
+
         try:
             # Try the host we successfully got a response to /make_join/
             # request first.
@@ -710,7 +729,10 @@ class FederationHandler:
             except ValueError:
                 pass
 
-            async with self._is_partial_state_room_linearizer.queue(room_id):
+            async with (
+                inbound_event_lock,
+                self._is_partial_state_room_linearizer.queue(room_id),
+            ):
                 already_partial_state_room = await self.store.is_partial_state_room(
                     room_id
                 )

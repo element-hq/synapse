@@ -1,0 +1,1 @@
+Fix a bug where a homeserver with workers could drop an event that the room's servers sent while it was joining the room over federation, so that the event was missing until a later one referenced it. Contributed by Nick Hainke.

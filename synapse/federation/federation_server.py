@@ -66,7 +66,10 @@ from synapse.federation.federation_base import (
 )
 from synapse.federation.persistence import TransactionActions
 from synapse.federation.units import Edu, Transaction, serialize_and_filter_pdus
-from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
+from synapse.handlers.worker_lock import (
+    INBOUND_EVENT_HANDLING_LOCK_NAME,
+    NEW_EVENT_DURING_PURGE_LOCK_NAME,
+)
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import (
     make_deferred_yieldable,
@@ -131,11 +134,6 @@ last_pdu_ts_metric = Gauge(
     "The timestamp of the last PDU which was successfully received from the given domain",
     labelnames=("origin_server_name", SERVER_NAME_LABEL),
 )
-
-
-# The name of the lock to use when process events in a room received over
-# federation.
-_INBOUND_EVENT_HANDLING_LOCK_NAME = "federation_inbound_pdu"
 
 
 class FederationServer(FederationBase):
@@ -220,7 +218,7 @@ class FederationServer(FederationBase):
             # Try and acquire the processing lock for the room, if we get it start a
             # background process for handling the events in the room.
             lock = await self.store.try_acquire_lock(
-                _INBOUND_EVENT_HANDLING_LOCK_NAME, room_id
+                INBOUND_EVENT_HANDLING_LOCK_NAME, room_id
             )
             if lock:
                 logger.info("Handling old staged inbound events in %s", room_id)
@@ -1453,7 +1451,7 @@ class FederationServer(FederationBase):
         # Try and acquire the processing lock for the room, if we get it start a
         # background process for handling the events in the room.
         lock = await self.store.try_acquire_lock(
-            _INBOUND_EVENT_HANDLING_LOCK_NAME, pdu.room_id
+            INBOUND_EVENT_HANDLING_LOCK_NAME, pdu.room_id
         )
         if lock:
             self._process_incoming_pdus_in_room_inner(
@@ -1554,7 +1552,7 @@ class FederationServer(FederationBase):
                         # lead to deadlocks if we're not careful. However, it is
                         # safe on this occasion as we only ever take a write
                         # lock when deleting a room, which we would never do
-                        # while holding the `_INBOUND_EVENT_HANDLING_LOCK_NAME`
+                        # while holding the `INBOUND_EVENT_HANDLING_LOCK_NAME`
                         # lock.
                         async with self._worker_lock_handler.acquire_read_write_lock(
                             NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
@@ -1610,7 +1608,7 @@ class FederationServer(FederationBase):
                 origin, event = next
 
             new_lock = await self.store.try_acquire_lock(
-                _INBOUND_EVENT_HANDLING_LOCK_NAME, room_id
+                INBOUND_EVENT_HANDLING_LOCK_NAME, room_id
             )
             if not new_lock:
                 return
