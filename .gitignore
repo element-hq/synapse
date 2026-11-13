@@ -79,3 +79,6 @@ book/
 
 # Don't include users' poetry configs
 /poetry.toml
+
+# ess
+/charts
