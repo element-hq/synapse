@@ -980,7 +980,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
                 "users": [
-                    "@alice:test",
+                    self.other,
                 ],
             },
             access_token=self.owner_tok,
@@ -998,7 +998,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
                 "users": [
-                    "@non-existent:test",
+                    self.other,
                 ],
             },
             access_token=self.owner_tok,
@@ -1016,7 +1016,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
                 "users": [
-                    "@alice:test",
+                    self.other,
                 ],
             },
         )
@@ -1033,7 +1033,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
                 "users": [
-                    "@alice:test",
+                    self.other,
                     "what_is_this",
                 ],
             },
@@ -1056,7 +1056,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "POST",
             "/_matrix/client/unstable/org.matrix.msc4536/profile/query",
             content={
-                "users": ["bad1", "@alice:test", "bad2"],
+                "users": ["bad1", self.other, "bad2"],
             },
             access_token=self.owner_tok,
         )
