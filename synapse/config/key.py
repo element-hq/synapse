@@ -23,6 +23,7 @@
 import hashlib
 import logging
 import os
+import re
 from typing import TYPE_CHECKING, Any, Iterator
 
 import attr
@@ -33,7 +34,6 @@ from signedjson.key import (
     VerifyKey,
     decode_signing_key_base64,
     decode_verify_key_bytes,
-    generate_signing_key,
     is_signing_algorithm_supported,
     read_signing_keys,
     write_signing_keys,
@@ -41,7 +41,12 @@ from signedjson.key import (
 from unpaddedbase64 import decode_base64
 
 from synapse.types import JsonDict
-from synapse.util.stringutils import random_string, random_string_with_symbols
+from synapse.util.signing_key import (
+    PLACEHOLDER_SIGNING_KEY_ID,
+    derive_signing_key_version,
+    generate_signing_key,
+)
+from synapse.util.stringutils import random_string_with_symbols
 
 from ._base import Config, ConfigError, read_file
 
@@ -102,6 +107,40 @@ config file.
 """
 
 logger = logging.getLogger(__name__)
+_SIGNING_KEY_VERSION_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def load_signing_keys(lines: list[str]) -> list[SigningKey]:
+    loaded_signing_keys = read_signing_keys(lines)
+    for signing_key in loaded_signing_keys:
+        expected_version = derive_signing_key_version(signing_key)
+        if signing_key.version == expected_version:
+            continue
+        if signing_key.version.isdigit():
+            logger.warning(
+                "Signing key %s:%s uses a numeric key id. Numeric signing key ids "
+                "are deprecated for compatibility reasons; preserving the existing "
+                "key id unchanged.",
+                signing_key.alg,
+                signing_key.version,
+            )
+        elif not _SIGNING_KEY_VERSION_RE.fullmatch(signing_key.version):
+            logger.error(
+                "Signing key %s:%s uses a non-spec-compliant key id. "
+                "Preserving the existing key id unchanged for compatibility.",
+                signing_key.alg,
+                signing_key.version,
+            )
+        else:
+            # TODO: phase out/reject newly introduced non-content-derived signing
+            # key ids loaded via `signing_key` or `signing_key_path`.
+            logger.info(
+                "Signing key %s:%s is not content-derived; expected %s.",
+                signing_key.alg,
+                signing_key.version,
+                expected_version,
+            )
+    return loaded_signing_keys
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -125,7 +164,7 @@ class KeyConfig(Config):
     ) -> None:
         # the signing key can be specified inline or in a separate file
         if "signing_key" in config:
-            self.signing_key = read_signing_keys([config["signing_key"]])
+            self.signing_key = load_signing_keys([config["signing_key"]])
         else:
             assert config_dir_path is not None
             signing_key_path = config.get("signing_key_path")
@@ -263,7 +302,7 @@ class KeyConfig(Config):
 
         signing_keys = self.read_file(signing_key_path, name)
         try:
-            loaded_signing_keys = read_signing_keys(
+            loaded_signing_keys = load_signing_keys(
                 [
                     signing_key_line
                     for signing_key_line in signing_keys.splitlines(keepends=False)
@@ -314,16 +353,17 @@ class KeyConfig(Config):
             with open(
                 signing_key_path, "w", opener=lambda p, f: os.open(p, f, mode=0o640)
             ) as signing_key_file:
-                key_id = "a_" + random_string(4)
-                write_signing_keys(signing_key_file, (generate_signing_key(key_id),))
+                write_signing_keys(signing_key_file, (generate_signing_key(),))
         else:
             signing_keys = self.read_file(signing_key_path, "signing_key")
             if len(signing_keys.split("\n")[0].split()) == 1:
                 # handle keys in the old format.
-                key_id = "a_" + random_string(4)
                 key = decode_signing_key_base64(
-                    NACL_ED25519, key_id, signing_keys.split("\n")[0]
+                    NACL_ED25519,
+                    PLACEHOLDER_SIGNING_KEY_ID,
+                    signing_keys.split("\n")[0],
                 )
+                key.version = derive_signing_key_version(key)
                 with open(
                     signing_key_path, "w", opener=lambda p, f: os.open(p, f, mode=0o640)
                 ) as signing_key_file:
