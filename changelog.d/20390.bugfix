@@ -1,0 +1,1 @@
+Fix the `/_synapse/admin/v1/statistics/database/rooms` Admin API failing with a 500 error when Postgres has no statistics, or no most common `room_id` values, for one of the tables it checks.

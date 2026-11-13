@@ -1,0 +1,1 @@
+Fix sliding sync and `/keys/changes` not reporting a user in `device_lists.changed` when they join a room after being invited.

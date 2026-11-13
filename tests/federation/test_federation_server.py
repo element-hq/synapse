@@ -584,6 +584,52 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(events, [])
 
+    def test_ignores_non_state_seed_from_other_state_dag_room(self) -> None:
+        """
+        A non-state seed from another state DAG room, which the remote server is not
+        joined to, must not have its `prev_state_events` returned.
+        """
+        other_room_id = self.helper.create_room_as(
+            room_creator=self.local_user_id,
+            tok=self.local_user_token,
+            room_version=RoomVersions.MSC4242v12.identifier,
+        )
+        other_message_id = self.helper.send(
+            other_room_id, body="secret", tok=self.local_user_token
+        )["event_id"]
+
+        # This uses self.room_id as the room ID
+        events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[other_message_id],
+            walk_state_dag=True,
+            limit=20,
+        )
+        self.assertEqual(events, [])
+
+    def test_ignores_non_state_seed_from_non_state_dag_room(self) -> None:
+        """
+        A non-state seed from a room which has no state DAG is treated as unknown,
+        rather than failing the request.
+        """
+        other_room_id = self.helper.create_room_as(
+            room_creator=self.local_user_id,
+            tok=self.local_user_token,
+            room_version=RoomVersions.V12.identifier,
+        )
+        other_message_id = self.helper.send(
+            other_room_id, body="hello", tok=self.local_user_token
+        )["event_id"]
+
+        # This uses self.room_id as the room ID
+        events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[other_message_id],
+            walk_state_dag=True,
+            limit=20,
+        )
+        self.assertEqual(events, [])
+
 
 class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
     """
