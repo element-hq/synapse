@@ -876,6 +876,272 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self._assert_small_png(channel.json_body)
 
+    def _respond(self, client_index: int, content_type: bytes, body: bytes) -> None:
+        """Answer the `client_index`th outbound connection with `body`."""
+        client = self.reactor.tcpClients[client_index][2].buildProtocol(None)
+        assert client is not None
+        server = AccumulatingProtocol()
+        server.makeConnection(FakeTransport(client, self.reactor))
+        client.makeConnection(FakeTransport(server, self.reactor))
+        client.dataReceived(
+            b"HTTP/1.0 200 OK\r\nContent-Length: %d\r\nContent-Type: %s\r\n\r\n"
+            % (len(body), content_type)
+            + body
+        )
+        self.pump()
+
+    # The fake reactor only ever opens one connection per host, so the image and
+    # the favicon live on hosts of their own.
+    SITE_LOGO_HTML = (
+        b"""<html><head><link rel="icon" href="//icons.matrix.org/favicon.png">"""
+        b"""</head><body><img src="http://cdn.matrix.org/foo.png"></body></html>"""
+    )
+
+    @override_config({"experimental_features": {"msc4448_enabled": True}})
+    def test_site_logo(self) -> None:
+        """MSC4448: the favicon is precached as the site logo and returned when asked for."""
+        self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
+        self.lookups["cdn.matrix.org"] = [(IPv4Address, "10.1.2.4")]
+        self.lookups["icons.matrix.org"] = [(IPv4Address, "10.1.2.5")]
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org"
+            "&msc4448_include=msc4448:site_logo",
+            shorthand=False,
+            await_result=False,
+        )
+        self.pump()
+
+        self._respond(0, b'text/html; charset="utf8"', self.SITE_LOGO_HTML)
+        # The preview image, then the favicon (its scheme-relative URL resolved
+        # against the page).
+        self._respond(1, b"image/png", SMALL_PNG)
+        self.assertEqual(self.reactor.tcpClients[2][0], "10.1.2.5")
+        self._respond(2, b"image/png", SMALL_PNG)
+
+        self.assertEqual(channel.code, 200)
+        self._assert_small_png(channel.json_body)
+        self.assertTrue(channel.json_body["msc4448:site_logo"].startswith("mxc://"))
+        self.assertEqual(channel.json_body["msc4448:site_logo:size"], len(SMALL_PNG))
+
+        # The logo and the image are different media.
+        self.assertNotEqual(
+            channel.json_body["msc4448:site_logo"], channel.json_body["og:image"]
+        )
+
+        # A client which does not ask for the logo is served the same cached
+        # preview without it; nothing is fetched again.
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
+            shorthand=False,
+        )
+        self.assertEqual(len(self.reactor.tcpClients), 3)
+        self.assertEqual(channel.code, 200)
+        self._assert_small_png(channel.json_body)
+        self.assertNotIn("msc4448:site_logo", channel.json_body)
+        self.assertNotIn("msc4448:site_logo:size", channel.json_body)
+
+    @override_config({"experimental_features": {"msc4448_enabled": True}})
+    def test_site_logo_fetched_on_demand(self) -> None:
+        """MSC4448: the logo is only fetched once a client asks for it, then cached."""
+        self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
+        self.lookups["cdn.matrix.org"] = [(IPv4Address, "10.1.2.4")]
+        self.lookups["icons.matrix.org"] = [(IPv4Address, "10.1.2.5")]
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
+            shorthand=False,
+            await_result=False,
+        )
+        self.pump()
+
+        self._respond(0, b'text/html; charset="utf8"', self.SITE_LOGO_HTML)
+        self._respond(1, b"image/png", SMALL_PNG)
+
+        # The favicon was not fetched, and its URL is not leaked.
+        self.assertEqual(len(self.reactor.tcpClients), 2)
+        self.assertEqual(channel.code, 200)
+        self._assert_small_png(channel.json_body)
+        self.assertNotIn("msc4448:site_logo", channel.json_body)
+        self.assertNotIn("msc4448:site_logo:source", channel.json_body)
+
+        # The first client asking for the logo fetches it.
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org"
+            "&msc4448_include=msc4448:site_logo",
+            shorthand=False,
+            await_result=False,
+        )
+        self.pump()
+
+        self.assertEqual(self.reactor.tcpClients[2][0], "10.1.2.5")
+        self._respond(2, b"image/png", SMALL_PNG)
+
+        self.assertEqual(channel.code, 200)
+        self._assert_small_png(channel.json_body)
+        self.assertTrue(channel.json_body["msc4448:site_logo"].startswith("mxc://"))
+        self.assertEqual(channel.json_body["msc4448:site_logo:size"], len(SMALL_PNG))
+        self.assertNotIn("msc4448:site_logo:source", channel.json_body)
+
+        # Later clients are served the logo from the in-memory cache, then from
+        # the database once that is gone; nothing is fetched again.
+        for _ in range(2):
+            channel = self.make_request(
+                "GET",
+                "/_matrix/client/v1/media/preview_url?url=http://matrix.org"
+                "&msc4448_include=msc4448:site_logo",
+                shorthand=False,
+            )
+            self.assertEqual(len(self.reactor.tcpClients), 3)
+            self.assertEqual(channel.code, 200)
+            self.assertTrue(channel.json_body["msc4448:site_logo"].startswith("mxc://"))
+            self.url_previewer._cache.pop("http://matrix.org")
+
+    @override_config({"experimental_features": {"msc4448_enabled": True}})
+    def test_site_logo_deduplicated(self) -> None:
+        """MSC4448: pages sharing a favicon share one copy of the site logo."""
+        logos = []
+        # The fake reactor only ever opens one connection per host, so each page
+        # uses hosts of its own. The favicon URLs differ too: only the bytes matter.
+        for i, host in enumerate(["matrix.org", "blog.matrix.org"]):
+            self.lookups[host] = [(IPv4Address, f"10.1.{i}.3")]
+            self.lookups[f"cdn.{host}"] = [(IPv4Address, f"10.1.{i}.4")]
+            self.lookups[f"icons.{host}"] = [(IPv4Address, f"10.1.{i}.5")]
+            html = (
+                f"""<html><head><link rel="icon" href="//icons.{host}/favicon.png">"""
+                f"""</head><body><img src="http://cdn.{host}/foo.png"></body></html>"""
+            ).encode()
+
+            channel = self.make_request(
+                "GET",
+                f"/_matrix/client/v1/media/preview_url?url=http://{host}"
+                "&msc4448_include=msc4448:site_logo",
+                shorthand=False,
+                await_result=False,
+            )
+            self.pump()
+
+            self._respond(3 * i, b'text/html; charset="utf8"', html)
+            self._respond(3 * i + 1, b"image/png", SMALL_PNG)
+            # Different bytes from the preview image, so only logos can match.
+            self._respond(3 * i + 2, b"image/png", SMALL_PNG + b"logo")
+
+            self.assertEqual(channel.code, 200)
+            logos.append(channel.json_body["msc4448:site_logo"])
+
+        # Both pages point at the same logo.
+        self.assertEqual(logos[0], logos[1])
+
+        # Only that one copy of it is left.
+        media_id = logos[0].rsplit("/", 1)[1]
+        media = self.get_success(
+            self.hs.get_datastores().main.get_local_media(media_id)
+        )
+        assert media is not None and media.sha256 is not None
+        rows = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_list(
+                "local_media_repository", {"sha256": media.sha256}, ["media_id"]
+            )
+        )
+        self.assertEqual(rows, [(media_id,)])
+
+    @override_config({"experimental_features": {"msc4448_enabled": True}})
+    def test_site_logo_replaces_favicon_as_image(self) -> None:
+        """MSC4448: a favicon standing in for a missing image is fetched once and
+        returned as the logo, or as the image for clients not asking for a logo."""
+        self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
+        self.lookups["icons.matrix.org"] = [(IPv4Address, "10.1.2.5")]
+
+        html = (
+            b"""<html><head>"""
+            b"""<link rel="icon" href="http://icons.matrix.org/favicon.png">"""
+            b"""</head></html>"""
+        )
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org"
+            "&msc4448_include=msc4448:site_logo",
+            shorthand=False,
+            await_result=False,
+        )
+        self.pump()
+
+        self._respond(0, b'text/html; charset="utf8"', html)
+        self._respond(1, b"image/png", SMALL_PNG)
+
+        # The favicon was fetched exactly once.
+        self.assertEqual(len(self.reactor.tcpClients), 2)
+        self.assertEqual(channel.code, 200)
+        self.assertNotIn("og:image", channel.json_body)
+        self.assertNotIn("matrix:image:size", channel.json_body)
+        self.assertTrue(channel.json_body["msc4448:site_logo"].startswith("mxc://"))
+        self.assertEqual(channel.json_body["msc4448:site_logo:size"], len(SMALL_PNG))
+
+        # Without asking for the logo the favicon is still the image, as before.
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
+            shorthand=False,
+        )
+        self.assertEqual(len(self.reactor.tcpClients), 2)
+        self.assertEqual(channel.code, 200)
+        self._assert_small_png(channel.json_body)
+        self.assertNotIn("msc4448:site_logo", channel.json_body)
+
+    @override_config({"experimental_features": {"msc4448_enabled": True}})
+    def test_site_logo_unsupported_format(self) -> None:
+        """MSC4448: a favicon in a format clients can't safely display is dropped."""
+        self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
+        self.lookups["cdn.matrix.org"] = [(IPv4Address, "10.1.2.4")]
+        self.lookups["icons.matrix.org"] = [(IPv4Address, "10.1.2.5")]
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org"
+            "&msc4448_include=msc4448:site_logo",
+            shorthand=False,
+            await_result=False,
+        )
+        self.pump()
+
+        self._respond(0, b'text/html; charset="utf8"', self.SITE_LOGO_HTML)
+        self._respond(1, b"image/png", SMALL_PNG)
+        self._respond(2, b"image/x-icon", SMALL_PNG)
+
+        self.assertEqual(channel.code, 200)
+        self._assert_small_png(channel.json_body)
+        self.assertNotIn("msc4448:site_logo", channel.json_body)
+        self.assertNotIn("msc4448:site_logo:size", channel.json_body)
+
+    def test_site_logo_disabled(self) -> None:
+        """MSC4448: without the feature flag the favicon is neither fetched nor returned."""
+        self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
+        self.lookups["cdn.matrix.org"] = [(IPv4Address, "10.1.2.4")]
+        self.lookups["icons.matrix.org"] = [(IPv4Address, "10.1.2.5")]
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org"
+            "&msc4448_include=msc4448:site_logo",
+            shorthand=False,
+            await_result=False,
+        )
+        self.pump()
+
+        self._respond(0, b'text/html; charset="utf8"', self.SITE_LOGO_HTML)
+        self._respond(1, b"image/png", SMALL_PNG)
+
+        # The favicon was not fetched.
+        self.assertEqual(len(self.reactor.tcpClients), 2)
+        self.assertEqual(channel.code, 200)
+        self._assert_small_png(channel.json_body)
+        self.assertNotIn("msc4448:site_logo", channel.json_body)
+
     def test_nonexistent_image(self) -> None:
         """If the preview image doesn't exist, ensure some data is returned."""
         self.lookups["matrix.org"] = [(IPv4Address, "10.1.2.3")]
