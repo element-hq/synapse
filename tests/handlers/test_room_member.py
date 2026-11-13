@@ -7,7 +7,9 @@ import synapse.rest.client.login
 import synapse.rest.client.room
 from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import Codes, LimitExceededError, SynapseError
+from synapse.api.room_versions import RoomVersions
 from synapse.crypto.event_signing import add_hashes_and_signatures
+from synapse.events.snapshot import EventContext
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
@@ -15,7 +17,7 @@ from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import make_request
-from tests.test_utils.event_builders import make_test_pdu_event
+from tests.test_utils.event_builders import make_test_event, make_test_pdu_event
 from tests.unittest import (
     FederatingHomeserverTestCase,
     HomeserverTestCase,
@@ -445,6 +447,109 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         new_count = rows[0][0]
 
         self.assertEqual(initial_count, new_count)
+
+
+class ForgetOutOfBandMembershipTestCase(HomeserverTestCase):
+    """Tests forgetting a room the user has an out-of-band membership in, i.e. a
+    remote invite or a knock on a room the server is not in."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        synapse.rest.client.login.register_servlets,
+        synapse.rest.client.room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.alice = self.register_user("alice", "pass")
+        self.alice_token = self.login("alice", "pass")
+        self.room_id = "!room:remote.server"
+
+    def _persist_out_of_band_membership(self, sender: str, membership: str) -> None:
+        """Persist an out-of-band `membership` event for alice in the remote room,
+        as receiving a remote invite or knocking through a remote server would."""
+        event = make_test_event(
+            {
+                "room_id": self.room_id,
+                "sender": sender,
+                "state_key": self.alice,
+                "depth": 1,
+                "origin_server_ts": 1,
+                "type": EventTypes.Member,
+                "content": {"membership": membership},
+                "auth_events": [],
+                "prev_events": [],
+            },
+            room_version=RoomVersions.V10,
+        )
+        event.internal_metadata.outlier = True
+        event.internal_metadata.out_of_band_membership = True
+
+        self.get_success(
+            self.store.maybe_store_room_on_outlier_membership(
+                room_id=self.room_id, room_version=event.room_version
+            )
+        )
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.get_success(
+            persistence.persist_event(
+                event, EventContext.for_outlier(self.hs.get_storage_controllers())
+            )
+        )
+
+    def _forget(self, expected_code: int) -> None:
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{self.room_id}/forget",
+            {},
+            access_token=self.alice_token,
+        )
+        self.assertEqual(channel.code, expected_code, channel.result)
+
+    def test_forget_pending_out_of_band_invite(self) -> None:
+        """A user cannot forget a room they hold a pending remote invite to."""
+        self._persist_out_of_band_membership(
+            "@inviter:remote.server", Membership.INVITE
+        )
+
+        self._forget(400)
+        self.assertFalse(
+            self.get_success(self.store.did_forget(self.alice, self.room_id))
+        )
+
+    def test_forget_pending_out_of_band_knock(self) -> None:
+        """A user cannot forget a room they have a pending knock on."""
+        self._persist_out_of_band_membership(self.alice, Membership.KNOCK)
+
+        self._forget(400)
+        self.assertFalse(
+            self.get_success(self.store.did_forget(self.alice, self.room_id))
+        )
+
+    def test_forget_after_rejecting_out_of_band_invite(self) -> None:
+        """A user can forget a room after rejecting its remote invite."""
+        self._persist_out_of_band_membership(
+            "@inviter:remote.server", Membership.INVITE
+        )
+        # Fall back to a locally generated rejection.
+        with patch.object(
+            self.hs.get_federation_handler(),
+            "do_remotely_reject_invite",
+            side_effect=Exception(),
+        ):
+            self.helper.leave(self.room_id, self.alice, tok=self.alice_token)
+
+        self._forget(200)
+        self.assertTrue(
+            self.get_success(self.store.did_forget(self.alice, self.room_id))
+        )
+        rooms = self.get_success(
+            self.store.get_rooms_for_local_user_where_membership_is(
+                self.alice, Membership.LIST
+            )
+        )
+        self.assertNotIn(self.room_id, [r.room_id for r in rooms])
 
 
 class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
