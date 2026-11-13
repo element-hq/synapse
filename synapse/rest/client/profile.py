@@ -73,7 +73,7 @@ def _validate_user_id(value: str) -> str:
 
 def _validate_profile_field_name(value: str) -> str:
     if not value:
-        raise PydanticCustomError("string_too_short", "Field name too short")
+        raise PydanticCustomError("string_too_short", "Field name can not be an empty string")
     # Match the limit used when setting custom profile fields, where the limit
     # is measured in UTF-8 bytes rather than characters.
     if len(value.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
