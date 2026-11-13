@@ -209,7 +209,7 @@ impl RustRuntime {
             reactor,
             tokio: Mutex::new(TokioState::NotStarted),
             worker_threads,
-            clock: Clock::new(),
+            clock: Clock::Process,
             dispatcher,
             dispatch_reader,
         });
