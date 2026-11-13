@@ -1,0 +1,1 @@
+Add a `Cache-Control` header to the experimental [MSC1763](https://github.com/matrix-org/matrix-spec-proposals/pull/1763) `/retention/configuration` endpoint, configurable via `experimental_features.msc1763_configuration_cache_ttl` (default 6 hours).

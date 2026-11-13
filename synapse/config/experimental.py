@@ -70,6 +70,16 @@ class ExperimentalConfig(Config):
 
         # MSC1763 (retention policy configuration endpoint)
         self.msc1763_enabled: bool = experimental.get("msc1763_enabled", False)
+        # How long clients may cache the retention configuration response for
+        # (advertised via `Cache-Control: max-age`).
+        self.msc1763_configuration_cache_ttl_ms: int = self.parse_duration(
+            experimental.get("msc1763_configuration_cache_ttl", "6h")
+        )
+        if self.msc1763_configuration_cache_ttl_ms < 0:
+            raise ConfigError(
+                "msc1763_configuration_cache_ttl must not be negative",
+                ("experimental_features", "msc1763_configuration_cache_ttl"),
+            )
 
         # MSC3026 (busy presence state)
         self.msc3026_enabled: bool = experimental.get("msc3026_enabled", False)
