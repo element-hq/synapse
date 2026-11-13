@@ -84,7 +84,10 @@ class WorkerLocksHandler:
 
         # Map from lock name/key to set of `WaitingLock` that are active for
         # that lock.
-        self._locks: dict[tuple[str, str], WeakSet[WaitingLock | WaitingMultiLock]] = {}
+        self._locks: dict[
+            tuple[str, str],
+            WeakSet[WaitingLock | WaitingMultiLock | WaitingLockSnapshot],
+        ] = {}
 
         self._clock.looping_call(self._cleanup_locks, Duration(seconds=30))
 
@@ -175,6 +178,54 @@ class WorkerLocksHandler:
 
         return lock
 
+    async def wait_for_current_read_write_lock_holders(
+        self,
+        lock_name: str,
+        lock_key: str,
+        *,
+        write: bool,
+        timeout: Duration | None = None,
+    ) -> bool:
+        """Wait for the current holders of a read/write lock to release it.
+
+        This snapshots the lock tokens which exist when the method is called and
+        waits only for those tokens. Lock holders which arrive after the snapshot
+        do not delay the wait.
+
+        Note: this does not acquire the lock, so by the time this returns the
+        lock may well have been taken out again by someone else.
+
+        Args:
+            timeout: How long to wait before giving up. `None` means wait
+                forever, which should only be used by callers that are not
+                blocking a request: lock holders can be slow (handling an
+                inbound PDU holds `NEW_EVENT_DURING_PURGE_LOCK_NAME` while it
+                fetches missing events over federation), and stale locks are
+                only reaped after `_LOCK_TIMEOUT`.
+
+        Returns:
+            True if all the snapshotted holders released the lock, False if we
+            gave up waiting first.
+        """
+
+        tokens = await self._store.get_read_write_lock_tokens(
+            lock_name, lock_key, write=write
+        )
+        if not tokens:
+            return True
+
+        waiter = WaitingLockSnapshot(
+            clock=self._clock,
+            store=self._store,
+            lock_name=lock_name,
+            lock_key=lock_key,
+            write=write,
+            tokens=tokens,
+            timeout=timeout,
+        )
+        self._locks.setdefault((lock_name, lock_key), WeakSet()).add(waiter)
+        return await waiter.wait()
+
     def notify_lock_released(self, lock_name: str, lock_key: str) -> None:
         """Notify that a lock has been released.
 
@@ -195,7 +246,7 @@ class WorkerLocksHandler:
             return
 
         def _wake_all_locks(
-            locks: Collection[WaitingLock | WaitingMultiLock],
+            locks: Collection[WaitingLock | WaitingMultiLock | WaitingLockSnapshot],
         ) -> None:
             for lock in locks:
                 lock.release_lock()
@@ -212,8 +263,153 @@ class WorkerLocksHandler:
         self._locks = {key: value for key, value in self._locks.items() if value}
 
 
+class _LockWaiter:
+    """Shared retry behaviour for the waiters below.
+
+    Waiters are woken up by `WorkerLocksHandler._on_lock_released`, but also
+    retry periodically since not every release comes with a notification (e.g.
+    stale locks being reaped, or direct users of the storage layer).
+
+    Subclasses are `attrs` classes which declare the fields used here.
+    """
+
+    clock: Clock
+    start_ts_ms: int
+    deferred: "defer.Deferred[None]"
+    _timeout_interval: float
+
+    def release_lock(self) -> None:
+        """Wake the waiter up (by resolving the deferred)"""
+        if not self.deferred.called:
+            with PreserveLoggingContext():
+                self.deferred.callback(None)
+
+    async def _wait_to_retry(self) -> None:
+        """Wait until we are woken up, or until it is time to retry anyway.
+
+        The caller is responsible for creating a fresh `self.deferred` *before*
+        checking whatever it is waiting on, so that a notification arriving
+        between the check and the wait is not missed.
+        """
+        try:
+            with PreserveLoggingContext():
+                await timeout_deferred(
+                    deferred=self.deferred,
+                    timeout=self._timeout_interval,
+                    clock=self.clock,
+                )
+        except defer.TimeoutError:
+            # Only increment the timeout value if this was an actual timeout
+            # (defer.TimeoutError)
+            self._increment_timeout_interval()
+
+            time_spent_waiting = Duration(
+                milliseconds=self.clock.time_msec() - self.start_ts_ms
+            )
+            if (
+                time_spent_waiting.as_millis()
+                > WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION.as_millis()
+            ):
+                self._log_excessive_wait(time_spent_waiting)
+
+        except Exception as e:
+            self._log_wait_exception(e)
+
+    def _increment_timeout_interval(self) -> float:
+        next_interval = min(
+            WORKER_LOCK_MAX_RETRY_INTERVAL.as_secs(), self._timeout_interval * 2
+        )
+
+        # The jitter value is maintained for the timeout, to help avoid a "thundering
+        # herd" situation when all locks may time out at the same time.
+        self._timeout_interval = next_interval * random.uniform(0.9, 1.1)
+        return self._timeout_interval
+
+    def _log_excessive_wait(self, time_spent_waiting: Duration) -> None:
+        raise NotImplementedError()
+
+    def _log_wait_exception(self, e: Exception) -> None:
+        raise NotImplementedError()
+
+
 @attr.s(auto_attribs=True, eq=False)
-class WaitingLock:
+class WaitingLockSnapshot(_LockWaiter):
+    """Waits for a snapshot of read/write lock tokens to be released.
+
+    Unlike `WaitingLock` this never acquires anything, it only waits for the
+    given tokens to go away. Holders which take the lock out *after* the
+    snapshot was taken are ignored.
+    """
+
+    clock: Clock
+    store: LockStore
+    lock_name: str
+    lock_key: str
+    write: bool
+    tokens: set[str]
+    timeout: Duration | None = None
+    start_ts_ms: int = 0
+    deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
+    _timeout_interval: float = 0.1
+
+    async def wait(self) -> bool:
+        """Wait for the snapshotted tokens to be released.
+
+        Returns:
+            True if they were all released, False if we hit the timeout first.
+        """
+        self.start_ts_ms = self.clock.time_msec()
+        deadline_ts_ms = (
+            self.start_ts_ms + self.timeout.as_millis()
+            if self.timeout is not None
+            else None
+        )
+
+        with start_active_span("WaitingLockSnapshot.wait"):
+            while True:
+                # Create the deferred before querying the database so a release
+                # notification cannot be missed between the query and the wait.
+                self.deferred = defer.Deferred()
+
+                current_tokens = await self.store.get_read_write_lock_tokens(
+                    self.lock_name, self.lock_key, write=self.write
+                )
+                self.tokens.intersection_update(current_tokens)
+                if not self.tokens:
+                    return True
+
+                if deadline_ts_ms is not None:
+                    remaining_ms = deadline_ts_ms - self.clock.time_msec()
+                    if remaining_ms <= 0:
+                        return False
+
+                    # Don't sleep past the deadline.
+                    self._timeout_interval = min(
+                        self._timeout_interval, remaining_ms / 1000
+                    )
+
+                await self._wait_to_retry()
+
+    def _log_excessive_wait(self, time_spent_waiting: Duration) -> None:
+        logger.warning(
+            "(WaitingLockSnapshot (%s, %s)) Time spent waiting for lock holders "
+            "is getting excessive: %ss.",
+            self.lock_name,
+            self.lock_key,
+            time_spent_waiting.as_secs(),
+        )
+
+    def _log_wait_exception(self, e: Exception) -> None:
+        logger.warning(
+            "Caught an exception while waiting on WaitingLockSnapshot(lock_name=%s, lock_key=%s): %r",
+            self.lock_name,
+            self.lock_key,
+            e,
+        )
+
+
+@attr.s(auto_attribs=True, eq=False)
+class WaitingLock(_LockWaiter):
     clock: Clock
     store: LockStore
     handler: WorkerLocksHandler
@@ -227,12 +423,6 @@ class WaitingLock:
     _lock_span: "opentracing.Scope" = attr.Factory(
         lambda: start_active_span("WaitingLock.lock")
     )
-
-    def release_lock(self) -> None:
-        """Release the lock (by resolving the deferred)"""
-        if not self.deferred.called:
-            with PreserveLoggingContext():
-                self.deferred.callback(None)
 
     async def __aenter__(self) -> None:
         self.start_ts_ms = self.clock.time_msec()
@@ -255,45 +445,11 @@ class WaitingLock:
                     self._inner_lock = lock
                     break
 
-                try:
-                    # Wait until the notification that the lock might have been
-                    # released (by the deferred being resolved). We also
-                    # periodically wake up in case the lock was released, but we
-                    # weren't notified.
-                    with PreserveLoggingContext():
-                        await timeout_deferred(
-                            deferred=self.deferred,
-                            timeout=self._timeout_interval,
-                            clock=self.clock,
-                        )
-                except defer.TimeoutError:
-                    # Only increment the timeout value if this was an actual timeout
-                    # (defer.TimeoutError)
-                    self._increment_timeout_interval()
-
-                    now_ms = self.clock.time_msec()
-                    time_spent_trying_to_lock = Duration(
-                        milliseconds=now_ms - self.start_ts_ms
-                    )
-                    if (
-                        time_spent_trying_to_lock.as_millis()
-                        > WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION.as_millis()
-                    ):
-                        logger.warning(
-                            "(WaitingLock (%s, %s)) Time spent waiting to acquire lock "
-                            "is getting excessive: %ss. There may be a deadlock.",
-                            self.lock_name,
-                            self.lock_key,
-                            time_spent_trying_to_lock.as_secs(),
-                        )
-
-                except Exception as e:
-                    logger.warning(
-                        "Caught an exception while waiting on WaitingLock(lock_name=%s, lock_key=%s): %r",
-                        self.lock_name,
-                        self.lock_key,
-                        e,
-                    )
+                # Wait until the notification that the lock might have been
+                # released (by the deferred being resolved). We also
+                # periodically wake up in case the lock was released, but we
+                # weren't notified.
+                await self._wait_to_retry()
 
         return await self._inner_lock.__aenter__()
 
@@ -314,18 +470,26 @@ class WaitingLock:
 
         return r
 
-    def _increment_timeout_interval(self) -> float:
-        next_interval = self._timeout_interval
-        next_interval = min(WORKER_LOCK_MAX_RETRY_INTERVAL.as_secs(), next_interval * 2)
+    def _log_excessive_wait(self, time_spent_waiting: Duration) -> None:
+        logger.warning(
+            "(WaitingLock (%s, %s)) Time spent waiting to acquire lock "
+            "is getting excessive: %ss. There may be a deadlock.",
+            self.lock_name,
+            self.lock_key,
+            time_spent_waiting.as_secs(),
+        )
 
-        # The jitter value is maintained for the timeout, to help avoid a "thundering
-        # herd" situation when all locks may time out at the same time.
-        self._timeout_interval = next_interval * random.uniform(0.9, 1.1)
-        return self._timeout_interval
+    def _log_wait_exception(self, e: Exception) -> None:
+        logger.warning(
+            "Caught an exception while waiting on WaitingLock(lock_name=%s, lock_key=%s): %r",
+            self.lock_name,
+            self.lock_key,
+            e,
+        )
 
 
 @attr.s(auto_attribs=True, eq=False)
-class WaitingMultiLock:
+class WaitingMultiLock(_LockWaiter):
     lock_names: Collection[tuple[str, str]]
 
     write: bool
@@ -343,12 +507,6 @@ class WaitingMultiLock:
         lambda: start_active_span("WaitingLock.lock")
     )
 
-    def release_lock(self) -> None:
-        """Release the lock (by resolving the deferred)"""
-        if not self.deferred.called:
-            with PreserveLoggingContext():
-                self.deferred.callback(None)
-
     async def __aenter__(self) -> None:
         self.start_ts_ms = self.clock.time_msec()
         self._lock_span.__enter__()
@@ -365,43 +523,11 @@ class WaitingMultiLock:
                     self._inner_lock_cm = lock_cm
                     break
 
-                try:
-                    # Wait until the notification that the lock might have been
-                    # released (by the deferred being resolved). We also
-                    # periodically wake up in case the lock was released, but we
-                    # weren't notified.
-                    with PreserveLoggingContext():
-                        await timeout_deferred(
-                            deferred=self.deferred,
-                            timeout=self._timeout_interval,
-                            clock=self.clock,
-                        )
-                except defer.TimeoutError:
-                    # Only increment the timeout value if this was an actual timeout
-                    # (defer.TimeoutError)
-                    self._increment_timeout_interval()
-
-                    now_ms = self.clock.time_msec()
-                    time_spent_trying_to_lock = Duration(
-                        milliseconds=now_ms - self.start_ts_ms
-                    )
-                    if (
-                        time_spent_trying_to_lock.as_millis()
-                        > WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION.as_millis()
-                    ):
-                        logger.warning(
-                            "(WaitingMultiLock (%r)) Time spent waiting to acquire lock "
-                            "is getting excessive: %ss. There may be a deadlock.",
-                            self.lock_names,
-                            time_spent_trying_to_lock.as_secs(),
-                        )
-
-                except Exception as e:
-                    logger.warning(
-                        "Caught an exception while waiting on WaitingMultiLock(lock_names=%r): %r",
-                        self.lock_names,
-                        e,
-                    )
+                # Wait until the notification that the lock might have been
+                # released (by the deferred being resolved). We also
+                # periodically wake up in case the lock was released, but we
+                # weren't notified.
+                await self._wait_to_retry()
 
         assert self._inner_lock_cm
         await self._inner_lock_cm.__aenter__()
@@ -425,11 +551,17 @@ class WaitingMultiLock:
 
         return r
 
-    def _increment_timeout_interval(self) -> float:
-        next_interval = self._timeout_interval
-        next_interval = min(WORKER_LOCK_MAX_RETRY_INTERVAL.as_secs(), next_interval * 2)
+    def _log_excessive_wait(self, time_spent_waiting: Duration) -> None:
+        logger.warning(
+            "(WaitingMultiLock (%r)) Time spent waiting to acquire lock "
+            "is getting excessive: %ss. There may be a deadlock.",
+            self.lock_names,
+            time_spent_waiting.as_secs(),
+        )
 
-        # The jitter value is maintained for the timeout, to help avoid a "thundering
-        # herd" situation when all locks may time out at the same time.
-        self._timeout_interval = next_interval * random.uniform(0.9, 1.1)
-        return self._timeout_interval
+    def _log_wait_exception(self, e: Exception) -> None:
+        logger.warning(
+            "Caught an exception while waiting on WaitingMultiLock(lock_names=%r): %r",
+            self.lock_names,
+            e,
+        )
