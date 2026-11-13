@@ -1025,7 +1025,10 @@ class SyncHandler:
                 the the list.
             since_token
             potential_recents: If non-empty, the events between the since token
-                and current token to send down to clients.
+                and current token to send down to clients. On an initial sync, it
+                is only ever an out of band leave, which goes after the room's
+                history. `test_initial_sync_only_passes_out_of_band_leaves`
+                enforces this.
             newly_joined_room
         """
         with Measure(
@@ -1039,6 +1042,9 @@ class SyncHandler:
             if (
                 potential_recents is None
                 or newly_joined_room
+                # An initial sync starts the client from nothing, so it also needs
+                # the room's history before `potential_recents`.
+                or since_token is None
                 or timeline_limit < len(potential_recents)
             ):
                 limited = True
@@ -1054,9 +1060,12 @@ class SyncHandler:
             )
             if gap_token:
                 # There's a gap, so we need to ignore the passed in
-                # `potential_recents`, and reset `upto_token` to match.
-                potential_recents = None
-                upto_token = sync_result_builder.now_token
+                # `potential_recents`, and reset `upto_token` to match. On an initial
+                # sync, `potential_recents` is an out of band leave, which pagination
+                # can't find, so we keep it and paginate back from it.
+                if since_token is not None or potential_recents is None:
+                    potential_recents = None
+                    upto_token = sync_result_builder.now_token
                 limited = True
 
             log_kv({"limited": limited})
@@ -1759,7 +1768,9 @@ class SyncHandler:
             await_full_state=await_full_state,
         )
 
-        if batch:
+        # A timeline that starts with an outlier is just an out of band leave, which
+        # has no state to look up. The state before it is `state_at_timeline_end`.
+        if batch and not batch.events[0].event.internal_metadata.is_outlier():
             # Strictly speaking, this returns the state *after* the first event in the
             # timeline, but that is good enough here.
             state_at_timeline_start = (
@@ -3697,6 +3708,7 @@ class SyncHandler:
         room_entries = []
         invited = []
         knocked = []
+        left_or_banned = []
 
         for event in room_list:
             if event.room_version_id not in KNOWN_ROOM_VERSIONS:
@@ -3740,21 +3752,42 @@ class SyncHandler:
                         if user_id == event.sender:
                             continue
 
-                leave_token = now_token.copy_and_replace(
-                    StreamKeyType.ROOM, RoomStreamToken(stream=event.event_pos.stream)
+                left_or_banned.append(event)
+
+        # Of these leaves and bans, only leaves can be out of band.
+        leave_events = await self.store.get_events(
+            [
+                event.event_id
+                for event in left_or_banned
+                if event.membership == Membership.LEAVE
+            ]
+        )
+
+        for event in left_or_banned:
+            leave_token = now_token.copy_and_replace(
+                StreamKeyType.ROOM, RoomStreamToken(stream=event.event_pos.stream)
+            )
+            # An out of band leave, like a rescinded remote invite, is not in
+            # the room's timeline, so we send it after the room's history. The
+            # user may have been in the room before, and the client has nothing
+            # yet, so unlike incremental sync we don't set `out_of_band`, which
+            # would skip the room's state.
+            leave_event = leave_events.get(event.event_id)
+            room_entries.append(
+                RoomSyncResultBuilder(
+                    room_id=event.room_id,
+                    rtype="archived",
+                    events=[leave_event]
+                    if leave_event is not None
+                    and leave_event.internal_metadata.is_out_of_band_membership()
+                    else None,
+                    newly_joined=False,
+                    full_state=True,
+                    since_token=since_token,
+                    upto_token=leave_token,
+                    end_token=leave_token,
                 )
-                room_entries.append(
-                    RoomSyncResultBuilder(
-                        room_id=event.room_id,
-                        rtype="archived",
-                        events=None,
-                        newly_joined=False,
-                        full_state=True,
-                        since_token=since_token,
-                        upto_token=leave_token,
-                        end_token=leave_token,
-                    )
-                )
+            )
 
         room_ids_in_response = (
             {entry.room_id for entry in room_entries}
