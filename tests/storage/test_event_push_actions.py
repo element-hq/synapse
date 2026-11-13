@@ -895,6 +895,49 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         )
         self.assertEqual(counts.main_timeline, NotifCounts(notify_count=1))
 
+    def test_count_aggregation_display_name_change_keeps_counts(self) -> None:
+        """
+        A user who has never sent a receipt in a room changes their display name
+        there. That sends a new join event, but they are still in the room and have
+        read nothing, so their notification and highlight counts must not change.
+        """
+        user_id, token, _, other_token, room_id = self._create_users_and_room()
+
+        def _assert_counts(notify_count: int, highlight_count: int) -> None:
+            counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-unread-counts",
+                    self.store._get_unread_counts_by_receipt_txn,
+                    room_id,
+                    user_id,
+                )
+            )
+            self.assertEqual(
+                counts.main_timeline,
+                NotifCounts(notify_count=notify_count, highlight_count=highlight_count),
+            )
+
+        self._send_message(room_id, other_token)
+        self._send_message(room_id, other_token, highlight_for=user_id)
+        self.get_success(self.store._rotate_notifs())
+        _assert_counts(2, 1)
+
+        self.helper.change_membership(
+            room_id,
+            src=user_id,
+            targ=user_id,
+            membership="join",
+            extra_data={"displayname": "New name"},
+            tok=token,
+        )
+        _assert_counts(2, 1)
+
+        # A new notification brings the summary row back into use, but the
+        # highlight from before the display name change must still be counted.
+        self._send_message(room_id, other_token)
+        self.get_success(self.store._rotate_notifs())
+        _assert_counts(3, 1)
+
     def test_count_aggregation_badge_recount_is_scoped_per_room(self) -> None:
         """
         Regression test: a room whose summary row is out of date must be recounted
