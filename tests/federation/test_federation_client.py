@@ -57,6 +57,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
         self._mock_agent = mock.create_autospec(twisted.web.client.Agent, spec_set=True)
         homeserver.get_federation_http_client().agent = self._mock_agent
 
+        self._storage_controllers = homeserver.get_storage_controllers()
+
         # Move clock up to somewhat realistic time so the PDU destination retry
         # works (`now` needs to be larger than `0 + PDU_RETRY_TIME_MS`).
         self.reactor.advance(1000000000)
