@@ -488,6 +488,17 @@ def _upload(gh_token: str | None) -> None:
     current_version = get_package_version()
     tag_name = f"v{current_version}"
 
+    # Sanity check that someone actually has the release branch checked out (avoid silly
+    # mistakes)
+    repo = get_repo_and_check_clean_checkout()
+    release_branch = get_release_branch_name(current_version)
+    if repo.active_branch.name != release_branch:
+        click.echo(
+            f"Need to be on the release branch ({release_branch}) before uploading. "
+            f"Currently on ({repo.active_branch.name})."
+        )
+        click.get_current_context().abort()
+
     if gh_token:
         gh = Github(auth=github.Auth.Token(token=gh_token))
     else:
