@@ -57,13 +57,17 @@ PROFILE_QUERY_MAX_FIELD_NAMES = 30
 Defined in MSC4536."""
 
 
-# The validators below raise `PydanticCustomError` with a type other than
-# `value_error`, so that `validate_json_object(...)` responds with `M_BAD_JSON` (a
-# plain `ValueError` would map to `M_INVALID_PARAM`), while still using our own
-# error messages.
-
-
 def _validate_user_id(value: str) -> str:
+    """
+    Validate user ID.
+
+    Raise `PydanticCustomError` with a type other than `value_error`, so that
+    `validate_json_object(...)` responds with `M_BAD_JSON` (a plain `ValueError`
+    would map to `M_INVALID_PARAM`).
+
+    The requirement for `M_BAD_JSON` comes from MSC4536 for the
+    `/profile/query` endpoint.
+    """
     if not UserID.is_valid(value):
         raise PydanticCustomError(
             "invalid_user_id", "Invalid user id {user_id}", {"user_id": value}
@@ -72,6 +76,16 @@ def _validate_user_id(value: str) -> str:
 
 
 def _validate_profile_field_name(value: str) -> str:
+    """
+    Validate profile field name.
+
+    Raise `PydanticCustomError` with a type other than `value_error`, so that
+    `validate_json_object(...)` responds with `M_BAD_JSON` (a plain `ValueError`
+    would map to `M_INVALID_PARAM`).
+
+    The requirement for `M_BAD_JSON` comes from MSC4536 for the
+    `/profile/query` endpoint.
+    """
     if not value:
         raise PydanticCustomError(
             "string_too_short", "Field name can not be an empty string"
