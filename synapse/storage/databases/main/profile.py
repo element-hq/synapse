@@ -633,7 +633,7 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
     async def get_profile_data_for_users(
-        self, user_ids: set[str], field_names: set[str] | None = None
+        self, *, user_ids: set[str], field_names: set[str] | None = None
     ) -> dict[str, dict[str, JsonValue | dict[str, JsonValue]]]:
         """Fetch displayname/avatar_url/custom fields for a list of users.
 
