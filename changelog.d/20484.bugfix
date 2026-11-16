@@ -1,0 +1,1 @@
+Fix sliding sync never sending a room again once its partial state (faster joins) was resolved, leaving its member count stale. Contributed by Clément Guyon.

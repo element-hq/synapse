@@ -313,6 +313,7 @@ class SlidingSyncHandler:
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
                 newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
+                un_partial_stated=room_id in interested_rooms.un_partial_stated_rooms,
             )
 
             # Filter out empty room results during incremental sync
@@ -586,6 +587,7 @@ class SlidingSyncHandler:
         newly_joined: bool,
         newly_left: bool,
         is_dm: bool,
+        un_partial_stated: bool = False,
     ) -> SlidingSyncResult.RoomResult:
         """
         Fetch room data for the sync response.
@@ -604,6 +606,8 @@ class SlidingSyncHandler:
             newly_joined: If the user has newly joined the room
             newly_left: If the user has newly left the room
             is_dm: Whether the room is a DM room
+            un_partial_stated: Whether the partial state of the room was resolved
+                in the token range
         """
         user = sync_config.user
 
@@ -884,7 +888,9 @@ class SlidingSyncHandler:
         # For incremental syncs, we can do this first to determine if something relevant
         # has changed and strategically avoid fetching other costly things.
         room_state_delta_id_map: MutableStateMap[str] = {}
-        membership_changed = False
+        # The members of a room are only all known once its partial state is
+        # resolved, which adds no state delta: count them again then.
+        membership_changed = un_partial_stated
         name_changed = False
         avatar_changed = False
         if not initial:
