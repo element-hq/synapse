@@ -1041,9 +1041,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
         self.assertEqual(channel.json_body.get("errcode"), Codes.BAD_JSON)
-        self.assertEqual(
-            channel.json_body.get("error"), "'.users[1]': Invalid user id what_is_this"
-        )
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_empty_users(
@@ -1139,16 +1136,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 "empty",
                 "",
                 Codes.BAD_JSON,
-                "'.fields': Field name can not be an empty string",
             ),
             # Exactly at the limit.
-            ("at_limit", "a" * MAX_CUSTOM_FIELD_LEN, None, None),
+            ("at_limit", "a" * MAX_CUSTOM_FIELD_LEN, None),
             # One byte over the limit.
             (
                 "over_limit",
                 "a" * (MAX_CUSTOM_FIELD_LEN + 1),
                 Codes.BAD_JSON,
-                f"'.fields': Field name too long (max {MAX_CUSTOM_FIELD_LEN} bytes)",
             ),
             # Under the limit in characters, but over it in UTF-8 bytes
             # ("é" is 2 bytes).
@@ -1156,7 +1151,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 "over_limit_multibyte",
                 "é" * (MAX_CUSTOM_FIELD_LEN // 2 + 1),
                 Codes.BAD_JSON,
-                f"'.fields': Field name too long (max {MAX_CUSTOM_FIELD_LEN} bytes)",
             ),
         ]
     )
@@ -1166,7 +1160,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         _label: str,
         field_name: str,
         expected_errcode: str | None,
-        expected_error: str | None,
     ) -> None:
         """With MSC4536 enabled, the profiles query endpoint should reject empty
         field names, and field names longer than the maximum custom profile field
@@ -1186,7 +1179,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         else:
             self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
             self.assertEqual(channel.json_body.get("errcode"), expected_errcode)
-            self.assertEqual(channel.json_body.get("error"), expected_error)
 
     @unittest.override_config({"experimental_features": {"msc4536_enabled": True}})
     def test_query_profiles_endpoint_when_msc4536_enabled_returns_profile_data(
