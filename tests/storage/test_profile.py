@@ -247,12 +247,12 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
 
         result = self.get_success(
             self.store.get_profile_data_for_users(
-                {
+                user_ids={
                     frank_user_id.to_string(),
                     bob_user_id.to_string(),
                     carol_user_id.to_string(),
                     "@unknown-person:test",
-                }
+                },
             )
         )
 
@@ -335,6 +335,9 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         }
 
         result = self.get_success(
-            self.store.get_profile_data_for_users(user_ids, field_names=field_names)
+            self.store.get_profile_data_for_users(
+                user_ids=user_ids,
+                field_names=field_names,
+            )
         )
         self.assertEqual(result, expected)

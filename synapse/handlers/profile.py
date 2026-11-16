@@ -146,7 +146,10 @@ class ProfileHandler:
         Returns:
             A dictionary of JSON dictionaries.
         """
-        return await self.store.get_profile_data_for_users(user_ids, field_names)
+        return await self.store.get_profile_data_for_users(
+            user_ids=user_ids,
+            field_names=field_names,
+        )
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """

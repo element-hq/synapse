@@ -1549,7 +1549,7 @@ class SlidingSyncExtensionHandler:
             )
 
         profile_data_by_user = await self.store.get_profile_data_for_users(
-            profile_user_ids,
+            user_ids=profile_user_ids,
             field_names=fields,
         )
 
