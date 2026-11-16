@@ -58,7 +58,7 @@ Defined in MSC4536."""
 
 
 # The validators below raise `PydanticCustomError` with a type other than
-# `value_error`, so that `validate_json_object` responds with `M_BAD_JSON` (a
+# `value_error`, so that `validate_json_object(...)` responds with `M_BAD_JSON` (a
 # plain `ValueError` would map to `M_INVALID_PARAM`), while still using our own
 # error messages.
 
