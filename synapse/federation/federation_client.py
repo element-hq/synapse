@@ -148,6 +148,9 @@ class FederationClient(FederationBase):
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
 
+        # Avoid a cyclic dependency between this and the room policy handler itself
+        self._get_room_policy_handler = hs.get_room_policy_handler
+
         # Cache mapping `event_id` to a tuple of the event itself and the `pull_origin`
         # (which server we pulled the event from)
         self._get_pdu_cache: ExpiringCache[str, tuple[EventBase, str]] = ExpiringCache(
@@ -1363,6 +1366,11 @@ class FederationClient(FederationBase):
         context: EventContext,
     ) -> EventBase:
         room_version = await self.store.get_room_version(room_id)
+
+        # Verify the policy server has allowed the event, raising a SynapseError if not.
+        # We use `raise_if_not_allowed` instead of asking for a signature because the
+        # event we received might already have a policy server signature.
+        await self._get_room_policy_handler().raise_if_not_allowed(pdu)
 
         content = await self._do_send_invite(destination, pdu, context, room_version)
 
