@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 env:
-  LATEST_SUPPORTED_PYTHON_VERSION: 3.14
+  LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

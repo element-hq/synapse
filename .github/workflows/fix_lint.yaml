@@ -12,7 +12,7 @@ env:
   #
   # Note: This should match the nightly rust version in `tests.yml`.
   RUST_VERSION: nightly-2025-03-27
-  LATEST_SUPPORTED_PYTHON_VERSION: 3.14
+  LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
 
 jobs:
   fixup:

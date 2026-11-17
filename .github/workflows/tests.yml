@@ -23,8 +23,8 @@ env:
   # at which time of day they cut the release and when the nightly is built.
   # It's safer for future releases to just do the day before.
   RUST_NIGHTLY_VERSION: nightly-2025-03-27 # last nightly before 1.88.0
-  MINIMUM_SUPPORTED_PYTHON_VERSION: 3.11
-  LATEST_SUPPORTED_PYTHON_VERSION: 3.14
+  MINIMUM_SUPPORTED_PYTHON_VERSION: "3.11"
+  LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
 
 jobs:
   # Job to detect what has changed so we don't run e.g. Rust checks on PRs that
