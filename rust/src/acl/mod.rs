@@ -21,6 +21,7 @@
 
 //! An implementation of Matrix server ACL rules.
 
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
@@ -46,12 +47,52 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     Ok(())
 }
 
+#[derive(Debug, Clone, Default)]
+struct AclList {
+    all: bool,
+    exact: HashSet<String>,
+    suffix: Vec<String>,
+    globs: Vec<Regex>,
+}
+
+fn is_plain_ascii(s: &str) -> bool {
+    s.is_ascii() && !s.contains(['*', '?'])
+}
+
+impl AclList {
+    fn new(entries: &[PyBackedStr]) -> Result<Self, Error> {
+        let mut list = AclList::default();
+        for entry in entries {
+            let entry: &str = entry;
+            if entry == "*" {
+                list.all = true;
+            } else if is_plain_ascii(entry) {
+                list.exact.insert(entry.to_ascii_lowercase());
+            } else if let Some(rest) = entry.strip_prefix('*').filter(|r| is_plain_ascii(r)) {
+                list.suffix.push(rest.to_ascii_lowercase());
+            } else {
+                list.globs.push(glob_to_regex(entry, GlobMatchType::Whole)?);
+            }
+        }
+
+        Ok(list)
+    }
+
+    fn matches(&self, server_name: &str, lowercased: Option<&str>) -> bool {
+        self.all
+            || lowercased.is_some_and(|l| {
+                self.exact.contains(l) || self.suffix.iter().any(|s| l.ends_with(s.as_str()))
+            })
+            || self.globs.iter().any(|r| r.is_match(server_name))
+    }
+}
+
 #[derive(Debug, Clone)]
 #[pyclass(frozen, skip_from_py_object)]
 pub struct ServerAclEvaluator {
     allow_ip_literals: bool,
-    allow: Vec<Regex>,
-    deny: Vec<Regex>,
+    allow: AclList,
+    deny: AclList,
 }
 
 #[pymethods]
@@ -62,14 +103,8 @@ impl ServerAclEvaluator {
         allow: Vec<PyBackedStr>,
         deny: Vec<PyBackedStr>,
     ) -> Result<Self, Error> {
-        let allow = allow
-            .iter()
-            .map(|s| glob_to_regex(s, GlobMatchType::Whole))
-            .collect::<Result<_, _>>()?;
-        let deny = deny
-            .iter()
-            .map(|s| glob_to_regex(s, GlobMatchType::Whole))
-            .collect::<Result<_, _>>()?;
+        let allow = AclList::new(&allow)?;
+        let deny = AclList::new(&deny)?;
 
         Ok(ServerAclEvaluator {
             allow_ip_literals,
@@ -93,13 +128,17 @@ impl ServerAclEvaluator {
             }
         }
 
+        let lowercased = server_name
+            .is_ascii()
+            .then(|| server_name.to_ascii_lowercase());
+
         // next, check the deny list
-        if self.deny.iter().any(|e| e.is_match(server_name)) {
+        if self.deny.matches(server_name, lowercased.as_deref()) {
             return false;
         }
 
         // then the allow list.
-        if self.allow.iter().any(|e| e.is_match(server_name)) {
+        if self.allow.matches(server_name, lowercased.as_deref()) {
             return true;
         }
 
