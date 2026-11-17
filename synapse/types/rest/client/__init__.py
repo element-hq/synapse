@@ -32,6 +32,7 @@ from pydantic import (
 )
 from typing_extensions import Annotated, Self
 
+from synapse.api.constants import SlidingSync, StickyEvent
 from synapse.types import Absent, AbsentType, NonNegativeStrictInt
 from synapse.types.rest import RequestBodyModel
 from synapse.util.threepids import validate_email
@@ -355,9 +356,9 @@ class SlidingSyncBody(RequestBodyModel):
 
             enabled: StrictBool = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] = ["*"]
+            lists: list[StrictStr] = [SlidingSync.EXTENSION_WILDCARD]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] = ["*"]
+            rooms: list[StrictStr] = [SlidingSync.EXTENSION_WILDCARD]
 
         class ReceiptsExtension(RequestBodyModel):
             """The Receipts extension (MSC4551, previously MSC3960)
@@ -372,9 +373,9 @@ class SlidingSyncBody(RequestBodyModel):
 
             enabled: StrictBool = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] = ["*"]
+            lists: list[StrictStr] = [SlidingSync.EXTENSION_WILDCARD]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] = ["*"]
+            rooms: list[StrictStr] = [SlidingSync.EXTENSION_WILDCARD]
 
         class TypingExtension(RequestBodyModel):
             """The Typing Notification extension (MSC4508, previously MSC3961)
@@ -389,9 +390,9 @@ class SlidingSyncBody(RequestBodyModel):
 
             enabled: StrictBool = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] = ["*"]
+            lists: list[StrictStr] = [SlidingSync.EXTENSION_WILDCARD]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] = ["*"]
+            rooms: list[StrictStr] = [SlidingSync.EXTENSION_WILDCARD]
 
         class ThreadSubscriptionsExtension(RequestBodyModel):
             """The Thread Subscriptions extension (MSC4308)
@@ -409,8 +410,8 @@ class SlidingSyncBody(RequestBodyModel):
 
             Attributes:
                 enabled
-                limit: maximum number of sticky events to return in the extension
-                    (default 100). The server may cap this to a lower number.
+                limit: maximum number of sticky events to return per room. Defaults
+                    to, and is capped at, `StickyEvent.MAX_EVENTS_PER_ROOM_IN_SLIDING_SYNC`.
                 lists: List of list keys (from the Sliding Window API) to apply this
                     extension to.
                 rooms: List of room IDs (from the Room Subscription API) to apply this
@@ -418,11 +419,13 @@ class SlidingSyncBody(RequestBodyModel):
             """
 
             enabled: StrictBool = False
-            limit: NonNegativeStrictInt = 100
+            limit: NonNegativeStrictInt = (
+                StickyEvent.MAX_EVENTS_PER_ROOM_IN_SLIDING_SYNC
+            )
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: list[StrictStr] = ["*"]
+            lists: list[StrictStr] = [SlidingSync.EXTENSION_WILDCARD]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: list[StrictStr] = ["*"]
+            rooms: list[StrictStr] = [SlidingSync.EXTENSION_WILDCARD]
 
         class ProfilesExtension(RequestBodyModel):
             """The Profile Updates extension (MSC4262)
