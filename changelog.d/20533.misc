@@ -1,0 +1,1 @@
+Prevent "Schema Diff" CI job outputing spurious `pg_attver` changes.
