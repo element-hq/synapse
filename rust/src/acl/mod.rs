@@ -49,9 +49,13 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 
 #[derive(Debug, Clone, Default)]
 struct AclList {
+    /// Set if the list contains `*`, which matches every server.
     all: bool,
+    /// Lowercased entries without any wildcards.
     exact: HashSet<String>,
+    /// Lowercased suffixes of `*suffix` entries, e.g. `.example.org` for `*.example.org`.
     suffix: Vec<String>,
+    /// Compiled regexes for all remaining globs.
     globs: Vec<Regex>,
 }
 
@@ -60,17 +64,26 @@ fn is_plain_ascii(s: &str) -> bool {
 }
 
 impl AclList {
-    fn new(entries: &[PyBackedStr]) -> Result<Self, Error> {
+    fn new<I>(entries: I) -> Result<Self, Error>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<str>,
+    {
         let mut list = AclList::default();
         for entry in entries {
-            let entry: &str = entry;
+            let entry = entry.as_ref();
             if entry == "*" {
+                // `*` matches everything.
                 list.all = true;
             } else if is_plain_ascii(entry) {
+                // Plain server names are the most common and only need a set lookup.
                 list.exact.insert(entry.to_ascii_lowercase());
             } else if let Some(rest) = entry.strip_prefix('*').filter(|r| is_plain_ascii(r)) {
+                // `*domain` suffixes are second most common and can be checked with
+                // `ends_with`, as the leading `*` may also match nothing.
                 list.suffix.push(rest.to_ascii_lowercase());
             } else {
+                // Anything else needs a real regex.
                 list.globs.push(glob_to_regex(entry, GlobMatchType::Whole)?);
             }
         }
@@ -78,12 +91,29 @@ impl AclList {
         Ok(list)
     }
 
-    fn matches(&self, server_name: &str, lowercased: Option<&str>) -> bool {
-        self.all
-            || lowercased.is_some_and(|l| {
-                self.exact.contains(l) || self.suffix.iter().any(|s| l.ends_with(s.as_str()))
-            })
-            || self.globs.iter().any(|r| r.is_match(server_name))
+    fn matches(&self, server_name: &str) -> bool {
+        if self.all {
+            return true;
+        }
+
+        let lowercased = server_name.to_ascii_lowercase();
+        if self.exact.contains(&lowercased) {
+            return true;
+        }
+
+        for suffix in &self.suffix {
+            if lowercased.ends_with(suffix) {
+                return true;
+            }
+        }
+
+        for glob in &self.globs {
+            if glob.is_match(server_name) {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
@@ -128,17 +158,13 @@ impl ServerAclEvaluator {
             }
         }
 
-        let lowercased = server_name
-            .is_ascii()
-            .then(|| server_name.to_ascii_lowercase());
-
         // next, check the deny list
-        if self.deny.matches(server_name, lowercased.as_deref()) {
+        if self.deny.matches(server_name) {
             return false;
         }
 
         // then the allow list.
-        if self.allow.matches(server_name, lowercased.as_deref()) {
+        if self.allow.matches(server_name) {
             return true;
         }
 
