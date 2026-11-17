@@ -965,7 +965,7 @@ class SyncHandler:
                 from_token=from_token,
                 to_token=now_token.sticky_events_key,
                 now=now,
-                limit=StickyEvent.MAX_EVENTS_IN_SYNC,
+                limit=StickyEvent.MAX_STICKY_EVENTS_IN_SYNC,
             )
             now_token = now_token.copy_and_replace(
                 StreamKeyType.STICKY_EVENTS, to_token
