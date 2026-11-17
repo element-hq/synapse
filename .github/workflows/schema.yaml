@@ -31,7 +31,7 @@ jobs:
             --schemafile="schema/$LATEST_META_SCHEMA_VERSION/meta.schema.json" \
             schema/synapse-config.schema.yaml
       - name: Validate default config
-      # Populates the empty instance with default values and checks against the schema.
+        # Populates the empty instance with default values and checks against the schema.
         run: |-
           echo "{}" | check-jsonschema \
             --fill-defaults --schemafile=schema/synapse-config.schema.yaml -
@@ -53,5 +53,5 @@ jobs:
             schema/synapse-config.schema.yaml \
           > docs/usage/configuration/config_documentation.md
       - name: Error in case of any differences
-      # Errors if there are now any modified files (untracked files are ignored).
-        run: 'git diff --exit-code'
+        # Errors if there are now any modified files (untracked files are ignored).
+        run: "git diff --exit-code"

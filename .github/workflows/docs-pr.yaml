@@ -23,7 +23,7 @@ jobs:
       - name: Setup mdbook
         uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
         with:
-          mdbook-version: '0.5.2'
+          mdbook-version: "0.5.2"
 
       # Building the book requires running the `scripts-dev/schema_versions.py`
       # script first, which has some python dependencies.
@@ -59,7 +59,7 @@ jobs:
       - name: Setup mdbook
         uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
         with:
-          mdbook-version: '0.5.2'
+          mdbook-version: "0.5.2"
 
       # Building the book requires running the `scripts-dev/schema_versions.py`
       # script first, which has some python dependencies.

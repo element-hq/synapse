@@ -4,14 +4,14 @@
 name: Store complement-synapse image in ghcr.io
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   schedule:
-    - cron: '0 5 * * *'
+    - cron: "0 5 * * *"
   workflow_dispatch:
     inputs:
       branch:
         required: true
-        default: 'develop'
+        default: "develop"
         type: choice
         options:
           - develop
