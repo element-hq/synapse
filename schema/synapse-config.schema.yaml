@@ -3109,6 +3109,19 @@ properties:
           and, if it is enabled via `experimental_features.msc4143_enabled`, the unstable
           `/_matrix/client/unstable/org.matrix.msc4143/rtc/transports` endpoint.
         default: []
+      msc4195_stable_endpoints:
+        type: boolean
+        description: >-
+          Whether to advertise the `org.matrix.msc4195.stable` feature flag from
+          [MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195) which
+          indicates to clients that Synapse serves the stable endpoints for interacting
+          with LiveKit SFUs.
+
+
+          This requires at least version 0.10.0 of https://github.com/element-hq/lk-jwt-service.
+        default: false
+        examples:
+          - true
     default: {}
     examples:
       - transports:
@@ -3117,6 +3130,7 @@ properties:
           - type: livekit
             url: wss://livekit.example.com
             livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
+        msc4195_stable_endpoints: true
   enable_registration:
     type: boolean
     description: >-

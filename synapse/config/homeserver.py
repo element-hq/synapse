@@ -24,7 +24,7 @@ from synapse.config.push_rules import PushRulesConfig
 from ._base import ConfigError, RootConfig
 from .account_validity import AccountValidityConfig
 from .api import ApiConfig
-from .appservice import AppServiceConfig
+from .appservice import AppServiceConfig, load_appservices
 from .auth import AuthConfig
 from .auto_accept_invites import AutoAcceptInvitesConfig
 from .background_updates import BackgroundUpdateConfig
@@ -40,7 +40,7 @@ from .jwt import JWTConfig
 from .key import KeyConfig
 from .logger import LoggingConfig
 from .mas import MasConfig
-from .matrixrtc import MatrixRtcConfig
+from .matrixrtc import MatrixRtcConfig, validate_msc4195_stable_endpoints_config
 from .metrics import MetricsConfig
 from .modules import ModulesConfig
 from .oembed import OembedConfig
@@ -146,3 +146,11 @@ class HomeServerConfig(RootConfig):
                     "captcha, or token-based verification. Otherwise this check can be removed by setting the "
                     "`enable_registration_without_verification` config option to `true`."
                 )
+
+        if self.matrix_rtc.msc4195_stable_endpoints:
+            # This depends on the application service registrations, which are
+            # otherwise only loaded when setting up the datastores.
+            appservices = load_appservices(
+                self.server.server_name, self.appservice.app_service_config_files
+            )
+            validate_msc4195_stable_endpoints_config(self, appservices)
