@@ -21,6 +21,7 @@ concurrency:
 
 env:
   RUST_VERSION: 1.87.0
+  LATEST_SUPPORTED_PYTHON_VERSION: 3.14
 
 jobs:
   check_repo:
@@ -52,7 +53,7 @@ jobs:
 
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           extras: "all"
           poetry-version: "2.4.1"
       - run: |
@@ -80,7 +81,7 @@ jobs:
 
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           extras: "all test"
           poetry-version: "2.4.1"
       - run: |

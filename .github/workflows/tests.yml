@@ -23,6 +23,8 @@ env:
   # at which time of day they cut the release and when the nightly is built.
   # It's safer for future releases to just do the day before.
   RUST_NIGHTLY_VERSION: nightly-2025-03-27 # last nightly before 1.88.0
+  MINIMUM_SUPPORTED_PYTHON_VERSION: 3.11
+  LATEST_SUPPORTED_PYTHON_VERSION: 3.14
 
 jobs:
   # Job to detect what has changed so we don't run e.g. Rust checks on PRs that
@@ -114,7 +116,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           poetry-version: "2.4.1"
           extras: "all"
       - run: poetry run scripts-dev/generate_sample_config.sh --check
@@ -129,7 +131,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
       - run: "pip install 'click==8.1.1' 'GitPython>=3.1.20' 'sqlglot>=28.0.0'"
       - run: scripts-dev/check_schema_delta.py --force-colors
 
@@ -139,7 +141,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
       - run: .ci/scripts/check_lockfile.py
 
   lint:
@@ -154,6 +156,7 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           poetry-version: "2.4.1"
           install-project: "false"
 
@@ -182,6 +185,7 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           # We want to make use of type hints in optional dependencies too.
           extras: all
           # We have seen odd mypy failures that were resolved when we started
@@ -222,7 +226,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
       - run: "pip install 'towncrier>=18.6.0rc1'"
       - run: scripts-dev/check-newsfragment.sh
         env:
@@ -282,6 +286,7 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           # Install like a normal project from source with all optional dependencies
           extras: all
           install-project: "true"
@@ -347,7 +352,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
       - run: "pip install rstcheck"
       - run: "rstcheck --report-level=WARNING README.rst"
 
@@ -396,7 +401,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
       - id: get-matrix
         run: .ci/scripts/calculate_jobs.py
     outputs:
@@ -487,7 +492,9 @@ jobs:
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.11"
+          # olddeps uses the minimum Python version we support to ensure we're actually
+          # compatible with what we say we are.
+          python-version: ${{ env.MINIMUM_SUPPORTED_PYTHON_VERSION }}
 
       - name: Prepare old deps
         # Note: we install using `uv` here, not poetry or pip to allow us to test with the
@@ -634,6 +641,7 @@ jobs:
       - run: sudo apt-get -qq install xmlsec1 postgresql-client
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           poetry-version: "2.4.1"
           extras: "postgres"
       - run: .ci/scripts/test_export_data_command.sh
