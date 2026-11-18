@@ -1605,8 +1605,13 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             retcol="stream_ordering",
         )
 
+        # We need to bound by the current token to ensure that we handle
+        # out-of-order writes correctly.
         current_stream_ordering = self._stream_id_gen.get_current_token()
         if current_stream_ordering <= old_rotate_stream_ordering:
+            # There's nothing new to rotate. If we moved the rotation position
+            # backwards, we'd count the same push actions again when the token
+            # catches up.
             if current_stream_ordering < old_rotate_stream_ordering:
                 logger.warning(
                     "Skipping notification rotation: event stream position %d is "
@@ -1616,7 +1621,8 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 )
             return True
 
-        # Cap the batch size without crossing the fully persisted stream position.
+        # We don't want to try and rotate millions of rows at once, so we cap the
+        # maximum stream ordering we'll rotate up to.
         txn.execute(
             """
             SELECT stream_ordering FROM event_push_actions
@@ -1626,6 +1632,8 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             (old_rotate_stream_ordering, current_stream_ordering, self._rotate_count),
         )
         stream_row = txn.fetchone()
+        # If we didn't find a row at the offset, we can rotate up to the current
+        # token even if there are no push actions at that position.
         rotate_to_stream_ordering = (
             stream_row[0] if stream_row else current_stream_ordering
         )
