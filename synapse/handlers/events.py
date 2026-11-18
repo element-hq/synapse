@@ -24,7 +24,7 @@ import random
 from typing import TYPE_CHECKING, Iterable
 
 from synapse.api.constants import EduTypes, EventTypes, Membership, PresenceState
-from synapse.api.errors import AuthError, SynapseError
+from synapse.api.errors import AuthError, Codes, SynapseError
 from synapse.events.utils import FilteredEvent
 from synapse.handlers.presence import format_user_presence_state
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
@@ -168,6 +168,7 @@ class EventHandler:
         Returns:
             An event, or None if there is no event matching this ID.
         Raises:
+            SynapseError: if the sender of the event is ignored by the user
             AuthError: if the user does not have the rights to inspect this event.
         """
         redact_behaviour = (
@@ -196,7 +197,19 @@ class EventHandler:
             is_peeking=is_peeking,
         )
 
+        ignore_list = await self._storage_controllers.main.ignored_users(
+            user.to_string()
+        )
+
         if not filtered:
+            if event.sender in ignore_list:
+                raise SynapseError(
+                    404,
+                    "The sender of this event is ignored.",
+                    Codes.SENDER_IGNORED,
+                    {"sender": event.sender},
+                )
+
             raise AuthError(403, "You don't have permission to access that event.")
 
         return filtered[0]
