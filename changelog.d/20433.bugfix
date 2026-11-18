@@ -1,1 +1,0 @@
-Fix race where an initial sync did not return some memberships in rooms when another sync for the device was in-flight. Introduced in v1.163.0.

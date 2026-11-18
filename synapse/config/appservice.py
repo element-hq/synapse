@@ -95,16 +95,15 @@ def load_appservices(
                     )
                 seen_as_tokens[appservice.token] = config_file
                 if appservice.proxy_prefix is not None:
-                    for seen_prefix, seen_file in seen_proxy_prefixes.items():
-                        if _proxy_prefixes_overlap(
-                            appservice.proxy_prefix, seen_prefix
-                        ):
-                            raise ConfigError(
-                                "io.element.msc4512.proxy_prefix values must not overlap across "
-                                "application services: "
-                                f"{appservice.proxy_prefix} (files: {config_file}, {seen_file})"
-                            )
-                    seen_proxy_prefixes[appservice.proxy_prefix] = config_file
+                    proxy_prefix_path = appservice.proxy_prefix.path_prefix
+                    if proxy_prefix_path in seen_proxy_prefixes:
+                        raise ConfigError(
+                            "io.element.msc4512.proxy_prefix values must be unique across "
+                            "application services: "
+                            f"{proxy_prefix_path} (files: {config_file}, "
+                            f"{seen_proxy_prefixes[proxy_prefix_path]})"
+                        )
+                    seen_proxy_prefixes[proxy_prefix_path] = config_file
                 logger.info("Loaded application service: %s", appservice)
                 appservices.append(appservice)
         except Exception as e:
@@ -112,15 +111,6 @@ def load_appservices(
             logger.exception(e)
             raise
     return appservices
-
-
-def _proxy_prefixes_overlap(prefix_a: str, prefix_b: str) -> bool:
-    """Returns whether two proxy prefixes overlap by sharing a common path prefix."""
-    return (
-        prefix_a == prefix_b
-        or prefix_a.startswith(prefix_b + "/")
-        or prefix_b.startswith(prefix_a + "/")
-    )
 
 
 def _load_appservice(

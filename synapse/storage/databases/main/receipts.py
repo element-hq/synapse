@@ -674,9 +674,14 @@ class ReceiptsWorkerStore(SQLBaseStore):
         return results, reached_token
 
     async def get_linearized_receipts_for_user_in_rooms(
-        self, user_id: str, room_ids: StrCollection, to_key: MultiWriterStreamToken
+        self,
+        user_id: str,
+        room_ids: StrCollection,
+        to_key: MultiWriterStreamToken,
+        from_key: MultiWriterStreamToken | None = None,
     ) -> Mapping[str, Sequence[ReceiptInRoom]]:
-        """Fetch all receipts for the user in the given room.
+        """Fetch all receipts for the user in the given room, after `from_key`
+        if given.
 
         Returns:
             A dict from room ID to receipts in the room.
@@ -699,13 +704,17 @@ class ReceiptsWorkerStore(SQLBaseStore):
             args.append(user_id)
             args.append(to_key.get_max_stream_pos())
 
+            if from_key:
+                sql += " AND stream_id > ?"
+                args.append(from_key.stream)
+
             txn.execute(sql, args)
 
             return [
                 (room_id, receipt_type, user_id, event_id, thread_id, data)
                 for instance_name, stream_id, room_id, receipt_type, user_id, event_id, thread_id, data in txn
                 if MultiWriterStreamToken.is_stream_position_in_range(
-                    low=None,
+                    low=from_key,
                     high=to_key,
                     instance_name=instance_name,
                     pos=stream_id,

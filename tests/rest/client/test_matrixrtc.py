@@ -27,6 +27,7 @@ from synapse.config.matrixrtc import TransportConfigModel
 from synapse.rest import admin
 from synapse.rest.client import login, matrixrtc, register, room, versions
 from synapse.server import HomeServer
+from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -65,6 +66,11 @@ class MatrixRtcTestCase(HomeserverTestCase):
         matrixrtc.register_servlets,
     ]
 
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["allow_guest_access"] = True
+        return config
+
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:
@@ -84,6 +90,25 @@ class MatrixRtcTestCase(HomeserverTestCase):
     def test_matrixrtc_endpoint_requires_authentication(self) -> None:
         channel = self.make_request("GET", f"{PATH_PREFIX}/rtc/transports")
         self.assertEqual(401, channel.code, channel.json_body)
+
+    @override_config(
+        {
+            "experimental_features": {"msc4143_enabled": True},
+            "matrix_rtc": {"transports": [RTC_ENDPOINT]},
+        }
+    )
+    def test_matrixrtc_endpoint_allows_guest_access(self) -> None:
+        channel = self.make_request(
+            "POST", "/_matrix/client/v3/register?kind=guest", b"{}"
+        )
+        self.assertEqual(200, channel.code, channel.json_body)
+        guest_tok = channel.json_body["access_token"]
+
+        channel = self.make_request(
+            "GET", f"{PATH_PREFIX}/rtc/transports", access_token=guest_tok
+        )
+        self.assertEqual(200, channel.code, channel.json_body)
+        self.assert_dict({"rtc_transports": [RTC_ENDPOINT]}, channel.json_body)
 
     @override_config(
         {
@@ -249,16 +274,6 @@ class MatrixRtcVersionsTestCase(HomeserverTestCase):
     """Tests that org.matrix.msc4143 is correctly advertised in /versions."""
 
     servlets = [versions.register_servlets]
-
-    def tearDown(self) -> None:
-        # MemoryReactor doesn't trigger the shutdown phases, and we want the
-        # Tokio thread pool to be stopped
-        # XXX: This logic should probably get moved somewhere else
-        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
-        for phase in ["before", "during", "after"]:
-            triggers = shutdown_triggers.get(phase, [])
-            for callbable, args, kwargs in triggers:
-                callbable(*args, **kwargs)
 
     def test_msc4143_false_by_default(self) -> None:
         channel = self.make_request("GET", "/_matrix/client/versions")

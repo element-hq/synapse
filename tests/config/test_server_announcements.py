@@ -155,6 +155,10 @@ class ServerAnnouncementsConfigTestCase(TestCase):
                 "room_topic": "Server news",
                 "room_avatar_url": "mxc://media.example.com/avatar",
                 "allowed_user_ids": ["@alice:example.com", "@Bob:example.com"],
+                "excluded_user_ids": [
+                    "@audit_bot:example.com",
+                    "@_appservice:example.com",
+                ],
             },
             {"id": "maintenance", "room_name": "Announcements"},
         ]
@@ -169,11 +173,63 @@ class ServerAnnouncementsConfigTestCase(TestCase):
                     "mxc://media.example.com/avatar",
                     None,
                     ["@alice:example.com", "@Bob:example.com"],
+                    ["@audit_bot:example.com", "@_appservice:example.com"],
                 ),
                 ServerAnnouncementRoom(
                     "maintenance", "Announcements", None, None, None, []
                 ),
             ],
+        )
+
+    def test_excluded_user_ids_default(self) -> None:
+        """Test the defaults of the `excluded_user_ids` option are as expected."""
+        self.assertEqual(self._read_room({}).rooms[0].excluded_user_ids, [])
+        self.assertEqual(
+            self._read_room({"excluded_user_ids": []}).rooms[0].excluded_user_ids, []
+        )
+
+    @parameterized.expand(
+        [
+            ("not_a_list", "@bot:example.com", ("excluded_user_ids",)),
+            ("not_a_string", [42], ("excluded_user_ids", "<item 0>")),
+            (
+                "invalid_user_id",
+                ["not-a-user-id"],
+                ("excluded_user_ids", "<item 0>"),
+            ),
+            (
+                "remote_user",
+                ["@bot:remote.example"],
+                ("excluded_user_ids", "<item 0>"),
+            ),
+            (
+                "also_allowed",
+                ["@other:example.com", "@alice:example.com"],
+                ("excluded_user_ids", "<item 1>"),
+            ),
+        ]
+    )
+    def test_invalid_excluded_user_ids(
+        self, _name: str, excluded_user_ids: object, path_suffix: tuple[str, ...]
+    ) -> None:
+        """Invalid `excluded_user_ids` are rejected at the offending config path."""
+        with self.assertRaises(ConfigError) as err:
+            self._read_room(
+                {
+                    "allowed_user_ids": ["@alice:example.com"],
+                    "excluded_user_ids": excluded_user_ids,
+                }
+            )
+
+        self.assertEqual(
+            err.exception.path,
+            (
+                "experimental_features",
+                "server_announcements",
+                "rooms",
+                "<item 0>",
+                *path_suffix,
+            ),
         )
 
     def test_duplicate_id(self) -> None:
@@ -198,6 +254,46 @@ class ServerAnnouncementsConfigTestCase(TestCase):
                 "id",
             ),
         )
+
+    @parameterized.expand(
+        [
+            ("slash", "general/news"),
+            ("space", "general news"),
+            ("non_ascii", "général"),
+        ]
+    )
+    def test_invalid_id_characters(self, _name: str, config_id: str) -> None:
+        """An `id` with characters outside `[A-Za-z0-9._-]` is rejected."""
+        with self.assertRaisesRegex(ConfigError, "ASCII letters, digits") as err:
+            self._read_room({"id": config_id})
+        self.assertEqual(
+            err.exception.path,
+            (
+                "experimental_features",
+                "server_announcements",
+                "rooms",
+                "<item 0>",
+                "id",
+            ),
+        )
+
+    def test_empty_id(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "nonempty string") as err:
+            self._read_room({"id": ""})
+        self.assertEqual(
+            err.exception.path,
+            (
+                "experimental_features",
+                "server_announcements",
+                "rooms",
+                "<item 0>",
+                "id",
+            ),
+        )
+
+    def test_id_with_dots_and_dashes(self) -> None:
+        config = self._read_room({"id": "it-ops.general_2"})
+        self.assertEqual(config.rooms[0].config_id, "it-ops.general_2")
 
     def test_avatar_options_mutually_exclusive(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Cannot specify both") as err:

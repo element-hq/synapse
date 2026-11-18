@@ -15,16 +15,62 @@ import logging
 from typing import TYPE_CHECKING
 
 from synapse.api.constants import EventTypes, HistoryVisibility, JoinRules, Membership
+from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.api.room_versions import RoomVersion
 from synapse.config import ConfigError
 from synapse.config.server_announcements import ServerAnnouncementRoom
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import JsonDict, Requester, UserID, create_requester
 from synapse.types.state import StateFilter
+from synapse.util.hash import sha256_and_url_safe_base64
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+SYNTHETIC_JOIN_EVENT_ID_PREFIX = "$fake_announcement_join"
+
+
+def make_synthetic_join_event(
+    room_id: str, user_id: str, origin_server_ts: int
+) -> JsonDict:
+    """Build the join event shown to a user who is not actually in an announcement
+    room, so that clients list the room as joined.
+
+    The event is never persisted. Its event ID is derived from the room and user,
+    so the same user always receives the same event and clients drop repeats. The
+    prefix makes it obvious that the event ID is not a real one.
+
+    It is injected into the `/sync` responses of every user of the homeserver who
+    is not one of the room's senders.
+
+    Args:
+        room_id: The announcement room.
+        user_id: The user receiving the event.
+        origin_server_ts: The timestamp to give the event. Pass the same value
+            every time, e.g. that of the room's create event.
+
+    Returns:
+        The event's JSON in federation format.
+    """
+    return {
+        "room_id": room_id,
+        "type": EventTypes.Member,
+        "event_id": "-".join(
+            [
+                SYNTHETIC_JOIN_EVENT_ID_PREFIX,
+                # 8 first chars of room_id and user_id localpart for debugging
+                room_id[1:9],
+                UserID.from_string(user_id).localpart[:8],
+                # hash of room_id + user_id for uniqueness & staying under 255 bytes length
+                sha256_and_url_safe_base64(f"{room_id}\0{user_id}"),
+            ]
+        ),
+        "sender": user_id,
+        "state_key": user_id,
+        "origin_server_ts": origin_server_ts,
+        "content": {"membership": Membership.JOIN},
+    }
 
 
 class ServerAnnouncementsHandler:
@@ -60,6 +106,102 @@ class ServerAnnouncementsHandler:
                     "room_management_localpart",
                 ),
             )
+
+    def get_configured_room(self, config_id: str) -> ServerAnnouncementRoom | None:
+        """Return the configuration entry with the given id, if there is one."""
+        for room in self._config.rooms:
+            if room.config_id == config_id:
+                return room
+        return None
+
+    async def send_announcement(
+        self,
+        admin_requester: Requester,
+        config_id: str,
+        event_type: str,
+        content: JsonDict,
+        txn_id: str | None,
+    ) -> tuple[str, str]:
+        """Send an event as the management identity into a configured
+        announcement room.
+
+        Args:
+            admin_requester: The server admin asking for the event to be sent.
+            config_id: The config ID of the announcement room.
+            event_type: The type of the event. Must not be a state event.
+            content: The content of the event.
+            txn_id: The transaction ID, if any.
+
+        Returns:
+            The room ID and the event ID.
+
+        Raises:
+            NotFoundError: if no room with this config ID is configured.
+            SynapseError: if the event is not allowed, or the room cannot be
+                sent into.
+        """
+        if self.get_configured_room(config_id) is None:
+            raise NotFoundError(
+                f"No server announcement room with id {config_id!r} in "
+                "experimental_features.server_announcements.rooms"
+            )
+
+        room_id = await self._store.get_server_announcement_room(config_id)
+        if room_id is None:
+            raise SynapseError(
+                500,
+                f"The server announcement room {config_id!r} was deleted; "
+                "restart Synapse to recreate it",
+            )
+
+        if event_type == EventTypes.Member:
+            raise SynapseError(
+                400,
+                f"Cannot send {EventTypes.Member} events to announcement rooms",
+                Codes.INVALID_PARAM,
+            )
+
+        event_dict: JsonDict = {
+            "type": event_type,
+            "room_id": room_id,
+            "sender": self._creator,
+            "content": content,
+        }
+
+        if event_type == EventTypes.Redaction:
+            redacts = content.get("redacts")
+            if not isinstance(redacts, str):
+                raise SynapseError(
+                    400,
+                    "'redacts' must be given in content as a string",
+                    Codes.MISSING_PARAM,
+                )
+            room_version = await self._store.get_room_version(room_id)
+            # Room versions before v11 have a top-level redacts property.
+            if not room_version.updated_redaction_rules:
+                event_dict["redacts"] = redacts
+
+        if not await self._store.check_local_user_in_room(self._creator, room_id):
+            raise SynapseError(
+                403,
+                f"{self._creator} is not joined to announcement room {room_id}; "
+                "purge the room and restart Synapse to recreate it",
+                Codes.FORBIDDEN,
+            )
+
+        event, _ = await self._event_creation.create_and_send_nonmember_event(
+            self._requester, event_dict, ratelimit=False, txn_id=txn_id
+        )
+
+        logger.info(
+            "Admin %s sent server announcement %s (type %s) to '%s' (%s)",
+            admin_requester.user,
+            event.event_id,
+            event_type,
+            config_id,
+            room_id,
+        )
+        return room_id, event.event_id
 
     async def reconcile_rooms(self) -> None:
         # This can only happen on the main process.
@@ -113,6 +255,13 @@ class ServerAnnouncementsHandler:
                     user_id,
                 )
 
+        # Set the profile of the management user to that of the room (to keep things
+        # simple).
+        join_profile = {
+            "displayname": room.room_name,
+            "avatar_url": room.room_avatar_url,
+        }
+
         # Check whether this room already exists.
         room_id = await self._store.get_server_announcement_room(room.config_id)
         if room_id is None:
@@ -144,7 +293,7 @@ class ServerAnnouncementsHandler:
                     ],
                 },
                 ratelimit=False,
-                creator_join_profile={},
+                creator_join_profile=join_profile,
                 # We definitely don't want these rooms to be encrypted.
                 ignore_forced_encryption=True,
             )
@@ -231,6 +380,19 @@ class ServerAnnouncementsHandler:
         allowed = set(room.allowed_user_ids)
         for (_, user_id), event in members.items():
             if user_id == self._creator:
+                # Keep the management user's room profile in sync with the room.
+                if any(
+                    event.content.get(key) != value
+                    for key, value in join_profile.items()
+                ):
+                    await self._room_member.update_membership(
+                        self._requester,
+                        self._requester.user,
+                        room_id,
+                        Membership.JOIN,
+                        ratelimit=False,
+                        content=join_profile,
+                    )
                 continue
 
             # Kick the user if they're no longer in the configured list.

@@ -227,23 +227,26 @@ class MediaStorage:
 
         path = self._file_info_to_path(file_info)
         is_temp_file = False
+        media_filepath: str | None = None
 
-        if self.local_provider:
-            media_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
-            os.makedirs(os.path.dirname(media_filepath), exist_ok=True)
-
-            with start_active_span("writing to main media repo"):
-                with open(media_filepath, "wb") as f:
-                    yield f, media_filepath
-        else:
-            # No local provider, write to temp file
-            is_temp_file = True
-            with tempfile.NamedTemporaryFile(delete=False) as f:
-                media_filepath = f.name
-                yield cast(BinaryIO, f), media_filepath
-
-        # Spam check and store to other providers (runs for both local and temp file cases)
+        # The caller writes into the file while we are suspended at `yield`, so
+        # that must happen inside the `try` to clean up the file if they raise.
         try:
+            if self.local_provider:
+                media_filepath = os.path.join(self.local_media_directory, path)  # type: ignore[arg-type]
+                os.makedirs(os.path.dirname(media_filepath), exist_ok=True)
+
+                with start_active_span("writing to main media repo"):
+                    with open(media_filepath, "wb") as f:
+                        yield f, media_filepath
+            else:
+                # No local provider, write to temp file
+                is_temp_file = True
+                with tempfile.NamedTemporaryFile(delete=False) as f:
+                    media_filepath = f.name
+                    yield cast(BinaryIO, f), media_filepath
+
+            # Spam check and store to other providers (runs for both local and temp file cases)
             with start_active_span("spam checking and writing to storage providers"):
                 spam_check = (
                     await self._spam_checker_module_callbacks.check_media_file_for_spam(
@@ -271,10 +274,11 @@ class MediaStorage:
                         pass
 
         except Exception as e:
-            try:
-                os.remove(media_filepath)
-            except Exception:
-                pass
+            if media_filepath is not None:
+                try:
+                    os.remove(media_filepath)
+                except Exception:
+                    pass
 
             raise e from None
 
