@@ -8,8 +8,8 @@ local media store and to the configured
 
 ## Local and non-local Storages
 
-`local_provider` is set unless `enable_local_media_storage` is `false`. Its
-  directory is `MediaStorage.local_media_directory`.
+`local_provider` is only set when `enable_local_media_storage` is `true` and
+`media_store_path` is set. Its directory is `MediaStorage.local_media_directory`.
 Each storage provider is given the same relative path as the local store.
 
 ## Paths
@@ -42,6 +42,13 @@ For a new upload or a remote download, the SHA-256 is not yet known and the
 destination depends on it, so the content is written to a temporary file and
 hashed while it is being written.
 
+When the block exits, the temporary file is moved onto its final path with
+`_rename_if_not_exists`. If that path already exists, the temporary file is
+deleted and the existing file is kept. The file is only sent to the storage
+providers when this call created the local file, so media with the same content
+as earlier media is not sent to them again. Without a local store, the file is
+always sent to the storage providers.
+
 Only two cases write straight to the final file in place: URL cache files,
 and thumbnails of media with no recorded SHA-256 when a local store is present.
 Both of those are addressed by media ID, which is why the destination is available
@@ -65,37 +72,16 @@ media-ID path, so the copied rows point at SHA-256 thumbnail files that do not
 exist yet. Each such thumbnail is generated on its first request, as for any
 thumbnail missing on disk.
 
-### Gradual migration of media-ID files on local storage
-
-After a new upload or remote download creates a SHA-256 file,
-`MediaRepository._remove_media_id_files_with_sha256` deletes the local
-media-ID copies of other media with that SHA-256 (same origin for remote media).
-It runs only when the SHA-256 file was newly created, which is checked under the
-SHA-256 lock. Once the file exists, no new media-ID copy with that hash can
-appear, so later uploads skip it.
-
 ## Reading
 
-When the media's SHA-256 is known and its original file is still at its media-ID path
-in the local media store, the file is renamed onto the SHA-256 path by
-`_migrate_media_id_path_to_sha256_path_if_possible`. If the SHA-256 path already exists,
-the media-ID copy is deleted as a duplicate. Over time this rewrites media stored
-before deduplication onto SHA-256 paths, without a bulk migration.
+Files are read from where they are stored. Media stored before deduplication
+stays at its media-ID path: nothing is moved or rewritten on read, in the local
+media store or in storage providers. The SHA-256 from the database row is
+trusted, so the bytes are not hashed again.
 
-* Only original files on local disk are moved. Thumbnails, URL cache files,
-  media without a SHA-256 and storage providers are left unchanged. A storage
-  provider has no rename or delete operation, so its files keep whatever path
-  they were stored under.
-* The SHA-256 from the database row is trusted, so the bytes are not hashed
-  again.
-* No lock is taken. The row referencing the SHA-256 already exists, so a
-  concurrent delete of other media keeps the SHA-256 file. A delete of the same
-  media removes its media-ID path first, so the rename either finds no file or
-  the delete's SHA-256 clean-up finds the moved file.
-* The move is best-effort. If it fails, for example because of permissions or a
-  full disk, a warning is logged and the read continues: the file is still read
-  from its media-ID path, and the move is retried on the next read. A failed
-  move never fails the request.
+The only exception is remote media whose file is missing everywhere: it is
+downloaded again onto its SHA-256 path. See
+[Media Repository](media_repository.md#compatibility-with-media-id-paths).
 
 ### `fetch_media(file_info)`
 
@@ -113,10 +99,9 @@ thumbnailing:
 2. Otherwise each storage provider is asked for each path, in order.
    `_fetch_into_temp_file` downloads the file into a temporary file.
 3. With a local store, the temporary file is moved with `_rename_if_not_exists`
-   onto the same path the provider had, and that path is yielded. A media-ID copy
-   stays at the media-ID path, and is moved by the gradual migration on a later
-   read. Without a local store, the temporary file itself is yielded and deleted
-   when the block exits.
+   onto the same path the provider had, and that path is yielded. Without a
+   local store, the temporary file itself is yielded and deleted when the block
+   exits.
 4. `NotFoundError` is raised if no provider has the file.
 
 No lock is taken here. Files in storage providers are trusted, like the SHA-256
