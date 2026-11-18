@@ -106,7 +106,17 @@ class BaseAuth(ABC):
             if allow_departed_users and membership == Membership.LEAVE:
                 forgot = await self.store.did_forget(user_id, room_id)
                 if not forgot:
-                    return membership, member_event_id
+                    assert member_event_id is not None
+                    leave_event = await self.store.get_event(member_event_id)
+                    # An out-of-band leave (a rejected remote invite or a rescinded
+                    # knock) is stored while this server is not in the room: it is an
+                    # outlier with no state, and the user was never in the room as far
+                    # as this server knows.
+                    if not (
+                        leave_event.internal_metadata.is_outlier()
+                        and leave_event.internal_metadata.is_out_of_band_membership()
+                    ):
+                        return membership, member_event_id
         raise UnstableSpecAuthError(
             403,
             "User %s not in room %s" % (user_id, room_id),
@@ -130,6 +140,9 @@ class BaseAuth(ABC):
             Resolves to the current membership of the user in the room and the
             membership event ID of the user. If the user is not in the room and
             never has been, then `(Membership.JOIN, None)` is returned.
+
+            The same is returned for a user who left a server announcement room,
+            so that they keep reading it like a user who never joined.
         """
 
         try:
@@ -138,24 +151,42 @@ class BaseAuth(ABC):
             #  * The user is a non-guest user, and was ever in the room
             #  * The user is a guest user, and has joined the room
             # else it will throw.
-            return await self.check_user_in_room(
+            membership, member_event_id = await self.check_user_in_room(
                 room_id, requester, allow_departed_users=allow_departed_users
             )
         except AuthError:
-            visibility = await self._storage_controllers.state.get_current_state_event(
-                room_id, EventTypes.RoomHistoryVisibility, ""
-            )
-            if (
-                visibility
-                and visibility.content.get("history_visibility")
-                == HistoryVisibility.WORLD_READABLE
-            ):
+            if await self._is_world_readable(room_id):
                 return Membership.JOIN, None
             raise AuthError(
                 403,
                 "User %r not in room %s, and room previews are disabled"
                 % (requester.user, room_id),
             )
+
+        # Allow users who left a server announcement room to keep reading it.
+        if (
+            membership != Membership.JOIN
+            and await self._is_server_announcement_room(room_id)
+            and await self._is_world_readable(room_id)
+        ):
+            return Membership.JOIN, None
+
+        return membership, member_event_id
+
+    async def _is_world_readable(self, room_id: str) -> bool:
+        """Whether the room's history is visible to anyone."""
+        visibility = await self._storage_controllers.state.get_current_state_event(
+            room_id, EventTypes.RoomHistoryVisibility, ""
+        )
+        return (
+            visibility is not None
+            and visibility.content.get("history_visibility")
+            == HistoryVisibility.WORLD_READABLE
+        )
+
+    async def _is_server_announcement_room(self, room_id: str) -> bool:
+        """Whether the room is a server announcement room."""
+        return room_id in await self.store.get_server_announcement_room_ids()
 
     async def validate_appservice_can_control_user_id(
         self, app_service: ApplicationService, user_id: str

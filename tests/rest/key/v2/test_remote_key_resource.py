@@ -148,6 +148,26 @@ class RemoteKeyResourceTestCase(BaseRemoteKeyResourceTestCase):
         # the requested key should be present in the verify_keys section
         self.assertIn("ed25519:ver1", keys[0]["verify_keys"])
 
+    def test_post_key_without_minimum_validity(self) -> None:
+        """An omitted or null minimum_valid_until_ts is accepted."""
+        server_name = "remote.server"
+        testkey = signedjson.key.generate_signing_key("ver1")
+        self.expect_outgoing_key_request(server_name, testkey)
+
+        for criteria in ({}, {"minimum_valid_until_ts": None}):
+            with self.subTest(criteria=criteria):
+                channel = self.make_request(
+                    "POST",
+                    "/_matrix/key/v2/query",
+                    {"server_keys": {server_name: {"ed25519:ver1": criteria}}},
+                )
+                self.assertEqual(channel.code, 200, channel.json_body)
+                keys = channel.json_body["server_keys"]
+                self.assertEqual(len(keys), 1)
+                self.assertIn("ed25519:ver1", keys[0]["verify_keys"])
+                self.assertIn(server_name, keys[0]["signatures"])
+                self.assertIn(self.hs.hostname, keys[0]["signatures"])
+
 
 class EndToEndPerspectivesTests(BaseRemoteKeyResourceTestCase):
     """End-to-end tests of the perspectives fetch case

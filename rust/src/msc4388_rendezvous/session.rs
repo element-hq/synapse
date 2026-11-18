@@ -58,6 +58,9 @@ pub struct Session {
     transactions: VecDeque<(OpaqueIdentifier, String)>,
     last_modified: SystemTime,
     expires: SystemTime,
+    /// Whether the session was created with an access token. Unauthenticated
+    /// sessions count towards the limit on live unauthenticated sessions.
+    authenticated: bool,
 }
 
 #[derive(Serialize)]
@@ -117,7 +120,13 @@ impl<'source> IntoPyObject<'source> for PutResponse {
 
 impl Session {
     /// Create a new session with the given data and time-to-live.
-    pub fn new(id: Ulid, data: String, now: SystemTime, ttl: Duration) -> Self {
+    pub fn new(
+        id: Ulid,
+        data: String,
+        now: SystemTime,
+        ttl: Duration,
+        authenticated: bool,
+    ) -> Self {
         Self {
             id,
             data,
@@ -125,6 +134,7 @@ impl Session {
             transactions: VecDeque::new(),
             expires: now + ttl,
             last_modified: now,
+            authenticated,
         }
     }
 
@@ -133,11 +143,19 @@ impl Session {
         self.expires <= now
     }
 
+    /// Returns true if the session was created with an access token.
+    pub fn authenticated(&self) -> bool {
+        self.authenticated
+    }
+
     /// Handle a send (`PUT`) for this session: perform the compare-and-swap
     /// against the supplied `sequence_token`, recording the resulting sequence
     /// token against the transaction ID so that a retry using the same
     /// transaction ID is answered with the same response rather than being
     /// re-evaluated.
+    ///
+    /// The caller is expected to have checked `transaction_outcome` first, as
+    /// a retry must be answered before the request body is validated.
     ///
     /// Returns the new sequence token if the payload was accepted.
     pub fn send(
@@ -147,10 +165,6 @@ impl Session {
         data: String,
         now: SystemTime,
     ) -> Result<String, ConcurrentWrite> {
-        if let Some(recorded) = self.transaction_outcome(txn_id) {
-            return Ok(recorded.clone());
-        }
-
         if self.sequence_token() != sequence_token {
             return Err(ConcurrentWrite);
         }
@@ -171,7 +185,7 @@ impl Session {
 
     /// The sequence token returned by a previous successful `PUT` made with
     /// the given transaction ID, if we have seen one for this session.
-    fn transaction_outcome(&self, txn_id: &OpaqueIdentifier) -> Option<&String> {
+    pub fn transaction_outcome(&self, txn_id: &OpaqueIdentifier) -> Option<&String> {
         self.transactions
             .iter()
             .find(|(id, _)| id == txn_id)

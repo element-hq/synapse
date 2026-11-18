@@ -688,7 +688,10 @@ class DeviceHandler:
 
                 # Check if a user has newly joined/invited/knocked, or left.
                 if new_membership in joined_invited_knocked:
-                    if prev_membership not in joined_invited_knocked:
+                    if prev_membership not in joined_invited_knocked or (
+                        new_membership == Membership.JOIN
+                        and prev_membership != Membership.JOIN
+                    ):
                         newly_joined_or_invited_or_knocked_users.add(delta.state_key)
                         newly_left_users.discard(delta.state_key)
                 elif prev_membership in joined_invited_knocked:

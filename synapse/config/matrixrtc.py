@@ -30,7 +30,10 @@ class TransportConfigModel(ParseModel):
     type: StrictStr
 
     url: StrictStr | None = Field(default=None)
-    """An optional WebSocket URL pointing to the LiveKit SFU. If type is "livekit", either this or livekit_service_url is required."""
+    """
+    An optional WebSocket URL pointing to the LiveKit SFU. If type is "m.livekit", this is required.
+    If type is "livekit", either this or livekit_service_url is required.
+    """
 
     livekit_service_url: StrictStr | None = Field(default=None)
     """Deprecated. An optional HTTP URL pointing to the LiveKit authorization service. If type is "livekit", either this or url is required."""
@@ -41,6 +44,8 @@ class TransportConfigModel(ParseModel):
             raise ValueError(
                 "You must set either `url` or `livekit_service_url` when using the 'livekit' transport."
             )
+        if self.type == "m.livekit" and not self.url:
+            raise ValueError("You must set `url` when using the 'm.livekit' transport.")
         return self
 
 

@@ -73,6 +73,7 @@
       - [Rooms](admin_api/rooms.md)
       - [Scheduled tasks](admin_api/scheduled_tasks.md)
       - [Server Notices](admin_api/server_notices.md)
+      - [Server Announcements](admin_api/server_announcements.md)
       - [Statistics](admin_api/statistics.md)
       - [Users](admin_api/user_admin_api.md)
       - [Server Version](admin_api/version_api.md)

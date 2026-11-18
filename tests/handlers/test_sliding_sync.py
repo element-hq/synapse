@@ -576,6 +576,114 @@ class RoomSyncConfigTestCase(TestCase):
         combined_config = a.combine_room_sync_config(b)
         self._assert_room_config_equal(combined_config, expected, "A into B")
 
+    @parameterized.expand(
+        [
+            (
+                "same",
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={EventTypes.Name: {""}},
+                ),
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={EventTypes.Name: {""}},
+                ),
+                False,
+            ),
+            (
+                "higher_timeline_limit",
+                RoomSyncConfig(
+                    timeline_limit=11,
+                    required_state_map={EventTypes.Name: {""}},
+                ),
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={EventTypes.Name: {""}},
+                ),
+                True,
+            ),
+            (
+                "lower_timeline_limit",
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={EventTypes.Name: {""}},
+                ),
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={EventTypes.Name: {""}},
+                ),
+                False,
+            ),
+            (
+                "more_required_state",
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Name: {""},
+                        EventTypes.Member: {"@foo"},
+                    },
+                ),
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={EventTypes.Name: {""}},
+                ),
+                True,
+            ),
+            (
+                "less_required_state",
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={EventTypes.Name: {""}},
+                ),
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Name: {""},
+                        EventTypes.Member: {"@foo"},
+                    },
+                ),
+                False,
+            ),
+            (
+                "required_state_covered_by_wildcard",
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={EventTypes.Member: {"@foo"}},
+                ),
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={EventTypes.Member: {StateValues.WILDCARD}},
+                ),
+                False,
+            ),
+            (
+                "sticky_events_only",
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={EventTypes.Name: {""}},
+                    sticky_events=True,
+                ),
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={EventTypes.Name: {""}},
+                ),
+                False,
+            ),
+        ]
+    )
+    def test_requests_more_than(
+        self,
+        _test_label: str,
+        requested: RoomSyncConfig,
+        previous: RoomSyncConfig,
+        expected: bool,
+    ) -> None:
+        """
+        Test that `requested.requests_more_than(previous)` only reports an expansion
+        when `requested` asks for more timeline or state than `previous`.
+        """
+        self.assertEqual(requested.requests_more_than(previous), expected)
+
 
 # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
 # foreground update for

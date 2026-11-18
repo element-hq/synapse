@@ -32,6 +32,7 @@ DISTS = (
     "ubuntu:noble",  # 24.04 LTS (EOL 2029-05-31) (our EOL forced by Python 3.12 is 2028-10-31)
     "debian:trixie",  # (EOL 2030-06-30) (our EOL forced by Python 3.13 is 2029-10-31)
     "ubuntu:resolute",  # 26.04 (EOL 2031-04-30) (our EOL forced by Python 3.14 is 2030-10-31)
+    "ubuntu:stonking",  # 26.10 (EOL 2027-07-15) (our EOL forced by Python 3.14 is 2030-10-31)
 )
 
 DESC = """\
