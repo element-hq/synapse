@@ -20,6 +20,8 @@
 #
 
 
+from unittest.mock import patch
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import MAIN_TIMELINE, EventContentFields, RelationTypes
@@ -292,6 +294,57 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         _assert_counts(0, 0)
         _rotate()
         _assert_counts(0, 0)
+
+    def test_rotation_with_stale_event_token(self) -> None:
+        """A lagging event token must not make rotation count the same range twice."""
+        user_id, _, _, other_token, room_id = self._create_users_and_room()
+        read_event = self.helper.send(room_id, tok=other_token)["event_id"]
+        receipt_position = self.get_success(
+            self.store.get_position_for_event(read_event)
+        )
+        self.get_success(
+            self.store.insert_receipt(
+                room_id, "m.read", user_id, [read_event], MAIN_TIMELINE, {}
+            )
+        )
+
+        def assert_summary(expected: int) -> None:
+            summary = self.get_success(
+                self.store.db_pool.simple_select_one(
+                    table="event_push_summary",
+                    keyvalues={
+                        "room_id": room_id,
+                        "user_id": user_id,
+                        "thread_id": MAIN_TIMELINE,
+                    },
+                    retcols=("notif_count", "last_receipt_stream_ordering"),
+                )
+            )
+            self.assertEqual(summary, (expected, receipt_position.stream))
+
+        self.store._rotate_count = 1
+        self.helper.send_messages(room_id, 3, tok=other_token)
+        self.get_success(self.store._rotate_notifs())
+        assert_summary(3)
+
+        with patch.object(
+            self.store._stream_id_gen,
+            "get_current_token",
+            return_value=receipt_position.stream,
+        ):
+            self.get_success(self.store._rotate_notifs())
+            counts = self.get_success(
+                self.store.get_unread_event_push_actions_by_room_for_user(
+                    room_id, user_id
+                )
+            )
+            self.assertEqual(counts.main_timeline.notify_count, 3)
+        self.get_success(self.store._rotate_notifs())
+        assert_summary(3)
+
+        self.helper.send(room_id, tok=other_token)
+        self.get_success(self.store._rotate_notifs())
+        assert_summary(4)
 
     def test_count_aggregation_after_purge(self) -> None:
         """Purging history must not leave stale counts in event_push_summary.

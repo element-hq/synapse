@@ -1,0 +1,1 @@
+Prevent notification counts from increasing repeatedly if the event stream position falls behind the last notification rotation.

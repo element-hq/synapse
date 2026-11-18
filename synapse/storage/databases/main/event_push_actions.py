@@ -1605,29 +1605,30 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             retcol="stream_ordering",
         )
 
-        # We don't to try and rotate millions of rows at once, so we cap the
-        # maximum stream ordering we'll rotate before.
+        current_stream_ordering = self._stream_id_gen.get_current_token()
+        if current_stream_ordering <= old_rotate_stream_ordering:
+            if current_stream_ordering < old_rotate_stream_ordering:
+                logger.warning(
+                    "Skipping notification rotation: event stream position %d is "
+                    "behind the stored rotation position %d",
+                    current_stream_ordering,
+                    old_rotate_stream_ordering,
+                )
+            return True
+
+        # Cap the batch size without crossing the fully persisted stream position.
         txn.execute(
             """
             SELECT stream_ordering FROM event_push_actions
-            WHERE stream_ordering > ?
+            WHERE stream_ordering > ? AND stream_ordering <= ?
             ORDER BY stream_ordering ASC LIMIT 1 OFFSET ?
             """,
-            (old_rotate_stream_ordering, self._rotate_count),
+            (old_rotate_stream_ordering, current_stream_ordering, self._rotate_count),
         )
         stream_row = txn.fetchone()
-        if stream_row:
-            (offset_stream_ordering,) = stream_row
-
-            # We need to bound by the current token to ensure that we handle
-            # out-of-order writes correctly.
-            rotate_to_stream_ordering = min(
-                offset_stream_ordering, self._stream_id_gen.get_current_token()
-            )
-            caught_up = False
-        else:
-            rotate_to_stream_ordering = self._stream_id_gen.get_current_token()
-            caught_up = True
+        rotate_to_stream_ordering = (
+            stream_row[0] if stream_row else current_stream_ordering
+        )
 
         logger.info("Rotating notifications up to: %s", rotate_to_stream_ordering)
 
@@ -1635,7 +1636,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             txn, old_rotate_stream_ordering, rotate_to_stream_ordering
         )
 
-        return caught_up
+        return rotate_to_stream_ordering == current_stream_ordering
 
     def _rotate_notifs_before_txn(
         self,
