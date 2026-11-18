@@ -6,7 +6,7 @@ readme = "README.rst"
 authors = [
     { name = "Matrix.org Team and Contributors", email = "packages@matrix.org" },
 ]
-requires-python = ">=3.11.0,<=3.14"
+requires-python = ">=3.11.0,<3.15"
 license = "AGPL-3.0-or-later OR LicenseRef-Element-Commercial"
 classifiers = [
     "Development Status :: 5 - Production/Stable",
