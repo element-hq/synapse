@@ -147,6 +147,7 @@ class EventHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
+        self.msc4406_enabled = hs.config.experimental.msc4406_enabled
 
     async def get_event(
         self,
@@ -197,18 +198,18 @@ class EventHandler:
             is_peeking=is_peeking,
         )
 
-        ignore_list = await self._storage_controllers.main.ignored_users(
-            user.to_string()
-        )
-
         if not filtered:
-            if event.sender in ignore_list:
-                raise SynapseError(
-                    404,
-                    "The sender of this event is ignored.",
-                    Codes.SENDER_IGNORED,
-                    {"sender": event.sender},
+            if self.msc4406_enabled:
+                ignore_list = await self._storage_controllers.main.ignored_users(
+                    user.to_string()
                 )
+                if event.sender in ignore_list and is_user_in_room:
+                    raise SynapseError(
+                        404,
+                        "The sender of this event is ignored.",
+                        Codes.SENDER_IGNORED,
+                        {"sender": event.sender},
+                    )
 
             raise AuthError(403, "You don't have permission to access that event.")
 
