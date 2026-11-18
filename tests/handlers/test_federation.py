@@ -559,9 +559,12 @@ class EventsDuringRemoteJoinWithWorkersTestCase(
             await self.clock.sleep(Duration(seconds=1))
 
         helper.join(user_id, tok, on_send_join=send_message)
-        # The worker's periodic check for old staged events handles the message,
+        # The worker's periodic check for old staged events picks the message up,
         # at most a minute after the join.
-        self.reactor.advance(61)
+        self.reactor.advance(60)
+        # But it still schedules it on the next tick, so we need to tick 
+        # the reactor a second time
+        self.reactor.advance(1)
         self.replicate()
 
         self.assertIsNotNone(
