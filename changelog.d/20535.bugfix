@@ -1,0 +1,1 @@
+Fix a bug where unread notification counts could increase without new messages when the event stream fell behind.
