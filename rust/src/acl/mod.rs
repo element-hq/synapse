@@ -21,6 +21,7 @@
 
 //! An implementation of Matrix server ACL rules.
 
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
@@ -46,12 +47,82 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     Ok(())
 }
 
+#[derive(Debug, Clone, Default)]
+struct AclList {
+    /// Set if the list contains `*`, which matches every server.
+    all: bool,
+    /// Lowercased entries without any wildcards.
+    exact: HashSet<String>,
+    /// Lowercased suffixes of `*suffix` entries, e.g. `.example.org` for `*.example.org`.
+    suffix: Vec<String>,
+    /// Compiled regexes for all remaining globs.
+    globs: Vec<Regex>,
+}
+
+fn is_plain_ascii(s: &str) -> bool {
+    s.is_ascii() && !s.contains(['*', '?'])
+}
+
+impl AclList {
+    fn new<I>(entries: I) -> Result<Self, Error>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<str>,
+    {
+        let mut list = AclList::default();
+        for entry in entries {
+            let entry = entry.as_ref();
+            if entry == "*" {
+                // `*` matches everything.
+                list.all = true;
+            } else if is_plain_ascii(entry) {
+                // Plain server names are the most common and only need a set lookup.
+                list.exact.insert(entry.to_ascii_lowercase());
+            } else if let Some(rest) = entry.strip_prefix('*').filter(|r| is_plain_ascii(r)) {
+                // `*domain` suffixes are second most common and can be checked with
+                // `ends_with`, as the leading `*` may also match nothing.
+                list.suffix.push(rest.to_ascii_lowercase());
+            } else {
+                // Anything else needs a real regex.
+                list.globs.push(glob_to_regex(entry, GlobMatchType::Whole)?);
+            }
+        }
+
+        Ok(list)
+    }
+
+    fn matches(&self, server_name: &str) -> bool {
+        if self.all {
+            return true;
+        }
+
+        let lowercased = server_name.to_ascii_lowercase();
+        if self.exact.contains(&lowercased) {
+            return true;
+        }
+
+        for suffix in &self.suffix {
+            if lowercased.ends_with(suffix) {
+                return true;
+            }
+        }
+
+        for glob in &self.globs {
+            if glob.is_match(server_name) {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
 #[derive(Debug, Clone)]
 #[pyclass(frozen, skip_from_py_object)]
 pub struct ServerAclEvaluator {
     allow_ip_literals: bool,
-    allow: Vec<Regex>,
-    deny: Vec<Regex>,
+    allow: AclList,
+    deny: AclList,
 }
 
 #[pymethods]
@@ -62,14 +133,8 @@ impl ServerAclEvaluator {
         allow: Vec<PyBackedStr>,
         deny: Vec<PyBackedStr>,
     ) -> Result<Self, Error> {
-        let allow = allow
-            .iter()
-            .map(|s| glob_to_regex(s, GlobMatchType::Whole))
-            .collect::<Result<_, _>>()?;
-        let deny = deny
-            .iter()
-            .map(|s| glob_to_regex(s, GlobMatchType::Whole))
-            .collect::<Result<_, _>>()?;
+        let allow = AclList::new(&allow)?;
+        let deny = AclList::new(&deny)?;
 
         Ok(ServerAclEvaluator {
             allow_ip_literals,
@@ -94,12 +159,12 @@ impl ServerAclEvaluator {
         }
 
         // next, check the deny list
-        if self.deny.iter().any(|e| e.is_match(server_name)) {
+        if self.deny.matches(server_name) {
             return false;
         }
 
         // then the allow list.
-        if self.allow.iter().any(|e| e.is_match(server_name)) {
+        if self.allow.matches(server_name) {
             return true;
         }
 

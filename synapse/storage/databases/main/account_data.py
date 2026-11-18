@@ -575,9 +575,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         data = await self.get_global_account_data_by_type_for_user(
             user_id, AccountDataTypes.INVITE_PERMISSION_CONFIG
         )
-        # If the user has an MSC4380-style config setting, prioritise that
-        # above an MSC4155 one
-        if data is not None:
+        # If the user has an MSC4380-style config setting AND has indicated
+        # a preference within it (no empty dict), prioritise that above an MSC4155 one.
+        if data:
             return MSC4380InviteRulesConfig.from_account_data(data)
 
         if self._msc4155_enabled:

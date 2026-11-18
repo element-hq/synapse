@@ -21,7 +21,7 @@ import attr
 from prometheus_client import Histogram
 from typing_extensions import assert_never
 
-from synapse.api.constants import Direction, EventTypes, Membership
+from synapse.api.constants import Direction, EventTypes, Membership, StickyEvent
 from synapse.events import EventBase
 from synapse.events.utils import FilteredEvent, strip_event
 from synapse.handlers.relations import BundledAggregations
@@ -47,6 +47,7 @@ from synapse.storage.roommember import (
     MemberSummary,
 )
 from synapse.types import (
+    Absent,
     JsonDict,
     MutableStateMap,
     PersistedEventPosition,
@@ -292,6 +293,15 @@ class SlidingSyncHandler:
         relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
 
         # Fetch room data
+        #
+        # This includes the results for all of the rooms we computed, i.e. the rooms
+        # that *probably* have updates (see `_filter_relevant_rooms_to_send(...)`),
+        # including those that turn out not to have any. Whether a room is actually
+        # returned in the response is up to `bool(room_result)`.
+        #
+        # Rooms in scope for the sticky events extension (MSC4480) are among them,
+        # as we fetch their sticky events alongside the rest of the room data. Those
+        # are surfaced via the extension even if the room itself has no updates.
         rooms: dict[str, SlidingSyncResult.RoomResult] = {}
 
         new_connection_state = previous_connection_state.get_mutable()
@@ -315,9 +325,7 @@ class SlidingSyncHandler:
                 is_dm=room_id in interested_rooms.dm_room_ids,
             )
 
-            # Filter out empty room results during incremental sync
-            if room_sync_result or not from_token:
-                rooms[room_id] = room_sync_result
+            rooms[room_id] = room_sync_result
 
         if relevant_rooms_to_send_map:
             with start_active_span("sliding_sync.generate_room_entries"):
@@ -335,7 +343,6 @@ class SlidingSyncHandler:
             # account data, read receipts, typing indicators, to-device messages, etc).
             actual_room_ids=set(relevant_room_map.keys()),
             actual_room_response_map=rooms,
-            newly_joined_room_ids=interested_rooms.newly_joined_rooms,
             from_token=from_token,
             to_token=to_token,
         )
@@ -845,6 +852,21 @@ class SlidingSyncHandler:
                 StreamKeyType.ROOM, new_room_key
             )
 
+        # Fetch the sticky events for the sticky events extension here, alongside the
+        # timeline, as their senders count as timeline senders when lazy-loading room
+        # members (MSC4480).
+        sticky_events: list[FilteredEvent] | None = None
+        if room_sync_config.sticky_events:
+            sticky_events = await self._get_sticky_events_for_room(
+                sync_config=sync_config,
+                previous_connection_state=previous_connection_state,
+                new_connection_state=new_connection_state,
+                room_id=room_id,
+                initial=initial,
+                from_token=from_token,
+                to_token=to_token,
+            )
+
         # Figure out any stripped state events for invite/knocks. This allows the
         # potential joiner to identify the room.
         stripped_state: list[JsonDict] = []
@@ -1118,6 +1140,13 @@ class SlidingSyncHandler:
                                         timeline_membership.add(
                                             timeline_event.event.state_key
                                         )
+
+                            # Sticky event senders also count as timeline
+                            # senders (MSC4480).
+                            timeline_membership.update(
+                                sticky_event.event.sender
+                                for sticky_event in sticky_events or ()
+                            )
 
                             # The client needs to know the membership of everyone in
                             # the timeline we're returning.
@@ -1508,6 +1537,7 @@ class SlidingSyncHandler:
             required_state=list(required_room_state.values()),
             timeline_events=timeline_events,
             bundled_aggregations=bundled_aggregations,
+            sticky_events=sticky_events,
             stripped_state=stripped_state,
             prev_batch=prev_batch_token,
             limited=limited,
@@ -1521,6 +1551,100 @@ class SlidingSyncHandler:
             # (encrypted rooms).
             notification_count=0,
             highlight_count=0,
+        )
+
+    @trace
+    async def _get_sticky_events_for_room(
+        self,
+        sync_config: SlidingSyncConfig,
+        previous_connection_state: "PerConnectionState",
+        new_connection_state: "MutablePerConnectionState",
+        room_id: str,
+        initial: bool,
+        from_token: SlidingSyncStreamToken | None,
+        to_token: StreamToken,
+    ) -> list[FilteredEvent]:
+        """Fetch the sticky events (MSC4354) to return for a room that is in scope
+        for the sticky events extension (MSC4480), and record how far we got in the
+        per-connection state.
+
+        The `limit` of the extension request applies per-room (like `timeline_limit`).
+        If we hit it, the remaining sticky events for the room follow on subsequent
+        requests.
+
+        Args:
+            sync_config: Sync configuration
+            previous_connection_state: The current per-connection state
+            new_connection_state: A mutable copy of the per-connection
+                state, used to record updates to the state.
+            room_id: The room ID to fetch sticky events for. The user must be
+                joined to the room.
+            initial: Whether this is the first time the server is sending down
+                this room on this connection.
+            from_token: The point in the stream to sync from.
+            to_token: The point in the stream to sync up to.
+
+        Returns:
+            The sticky events to return, ordered by the sticky events stream.
+        """
+
+        # The room is only in scope when the extension is enabled with a
+        # non-zero `limit`.
+        assert sync_config.extensions is not None
+        sticky_events_request = sync_config.extensions.sticky_events
+        assert sticky_events_request is not Absent
+
+        if initial:
+            # We're sending down the room from scratch, so we should also send all
+            # of its unexpired sticky events.
+            sticky_from_token = StreamToken.START.sticky_events_key
+        else:
+            assert from_token is not None
+            room_status = previous_connection_state.sticky_events.have_sent_room(
+                room_id
+            )
+            if room_status.status == HaveSentRoomFlag.LIVE:
+                sticky_from_token = from_token.stream_token.sticky_events_key
+            elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
+                assert room_status.last_token is not None
+                sticky_from_token = room_status.last_token
+            elif room_status.status == HaveSentRoomFlag.NEVER:
+                sticky_from_token = StreamToken.START.sticky_events_key
+            else:
+                assert_never(room_status.status)
+
+        limit = min(
+            sticky_events_request.limit,
+            StickyEvent.MAX_EVENTS_PER_ROOM_IN_SLIDING_SYNC,
+        )
+        read_to_token, room_to_event_ids = await self.store.get_sticky_events_in_rooms(
+            [room_id],
+            from_token=sticky_from_token,
+            to_token=to_token.sticky_events_key,
+            now=self.clock.time_msec(),
+            limit=limit,
+        )
+        sticky_event_ids = room_to_event_ids.get(room_id, [])
+
+        if len(sticky_event_ids) >= limit:
+            # We hit the limit, so there may be more sticky events to send. Record
+            # where we got up to so that the next request continues from there.
+            new_connection_state.sticky_events.record_partially_sent_rooms(
+                [room_id], read_to_token
+            )
+        else:
+            # We read everything up to `to_token`.
+            new_connection_state.sticky_events.record_sent_rooms([room_id])
+
+        if not sticky_event_ids:
+            return []
+
+        # `get_events_as_list` preserves the order (by the sticky events stream).
+        unfiltered_events = await self.store.get_events_as_list(sticky_event_ids)
+        return await filter_and_transform_events_for_client(
+            self.storage_controllers,
+            sync_config.user.to_string(),
+            unfiltered_events,
         )
 
     @trace

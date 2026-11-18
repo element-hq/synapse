@@ -18,7 +18,7 @@
 #
 #
 from http import HTTPStatus
-from typing import Collection, ContextManager, cast
+from typing import Collection, ContextManager, Sequence, cast
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
@@ -3319,6 +3319,9 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
 class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
     """Direct tests of the per-device cache of lazy-loaded members sent."""
 
+    # A position after every other position in these tests.
+    _END = RoomStreamToken(stream=1000)
+
     @staticmethod
     def _token(stream: int) -> StreamToken:
         """A token whose room position is `stream`. Only the room position
@@ -3327,63 +3330,217 @@ class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
             StreamKeyType.ROOM, RoomStreamToken(stream=stream)
         )
 
+    def _respond(
+        self,
+        cache: LazyLoadedMembersCache,
+        since: int | None,
+        ends_at: int,
+        sent: Sequence[str] = (),
+    ) -> None:
+        """Build a response from `since` that ends at `ends_at` and sends the
+        membership `$<name>` of each `@<name>:test` in `sent`."""
+        since_token = None if since is None else self._token(since)
+        with cache.building_response(since_token) as handle:
+            handle.next_batch = RoomStreamToken(stream=ends_at)
+            for name in sent:
+                handle.mark_sent(f"@{name}:test", f"${name}")
+
+    def _cached(self, cache: LazyLoadedMembersCache, name: str) -> bool:
+        """Whether the cache holds the membership `$<name>` of `@<name>:test`,
+        at any position."""
+        return cache.was_sent(f"@{name}:test", f"${name}", self._END)
+
     def test_forgets_only_entries_after_since(self) -> None:
         """A request from `since` forgets the entries recorded after it and
         keeps the rest."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@a:test", "$a", self._token(5))
-        cache.mark_sent("@b:test", "$b", self._token(7))
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+        cache.record("@b:test", "$b", RoomStreamToken(stream=7))
 
         # The client synced past both responses.
-        cache.start_request(self._token(7))
-        self.assertTrue(cache.was_sent("@a:test", "$a"))
-        self.assertTrue(cache.was_sent("@b:test", "$b"))
+        self._respond(cache, since=7, ends_at=7)
+        self.assertTrue(self._cached(cache, "a"))
+        self.assertTrue(self._cached(cache, "b"))
 
         # The client lost the response that ended at 7.
-        cache.start_request(self._token(6))
-        self.assertTrue(cache.was_sent("@a:test", "$a"))
-        self.assertFalse(cache.was_sent("@b:test", "$b"))
+        self._respond(cache, since=6, ends_at=7)
+        self.assertTrue(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
 
         # A later request from an even older token forgets the rest.
-        cache.start_request(self._token(4))
-        self.assertFalse(cache.was_sent("@a:test", "$a"))
+        self._respond(cache, since=4, ends_at=7)
+        self.assertFalse(self._cached(cache, "a"))
+
+    def test_only_entries_at_or_before_since_are_trusted(self) -> None:
+        """A response does not trust an entry recorded after its `since`,
+        including one recorded while it is being built."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@old:test", "$old", RoomStreamToken(stream=4))
+
+        with cache.building_response(self._token(4)) as handle:
+            # Another response for the device is built in the meantime.
+            self._respond(cache, since=4, ends_at=5, sent=["a"])
+            self.assertTrue(self._cached(cache, "a"))
+
+            self.assertTrue(handle.was_sent("@old:test", "$old"))
+            self.assertFalse(handle.was_sent("@a:test", "$a"))
+            handle.next_batch = RoomStreamToken(stream=6)
+            handle.mark_sent("@b:test", "$b")
+
+        # Once built, it deleted the other response's entry, and recorded its
+        # own as it ended later.
+        self.assertFalse(self._cached(cache, "a"))
+        self.assertTrue(self._cached(cache, "b"))
+        self.assertTrue(self._cached(cache, "old"))
 
     def test_initial_sync_forgets_everything(self) -> None:
-        """An initial sync has no `since`, and the client starts from nothing."""
+        """An initial sync has no `since`, so it trusts nothing and deletes
+        everything. It still records only if it ends after the newest
+        position. A client that processed the response ending there has not
+        seen it."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@a:test", "$a", self._token(5))
-        cache.start_request(None)
-        self.assertFalse(cache.was_sent("@a:test", "$a"))
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+        with cache.building_response(None) as handle:
+            self.assertFalse(handle.was_sent("@a:test", "$a"))
+            handle.next_batch = RoomStreamToken(stream=5)
+            handle.mark_sent("@b:test", "$b")
+        self.assertFalse(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
+
+        self._respond(cache, since=None, ends_at=6, sent=["c"])
+        self.assertTrue(self._cached(cache, "c"))
 
     def test_different_event_is_not_sent(self) -> None:
         """An entry only covers the membership event it was recorded with, so
         a changed membership counts as not sent."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@a:test", "$a1", self._token(5))
-        self.assertFalse(cache.was_sent("@a:test", "$a2"))
+        cache.record("@a:test", "$a1", RoomStreamToken(stream=5))
+        self.assertFalse(cache.was_sent("@a:test", "$a2", self._END))
 
-    def test_out_of_order_marks_are_still_forgotten(self) -> None:
-        """A response that started earlier can record its entries after a
-        later one. Its entries must still be forgotten by a request from
-        before either response."""
+    def test_out_of_order_records_are_still_forgotten(self) -> None:
+        """Entries need not be recorded in position order. Those after a
+        request's `since` must still be forgotten."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@b:test", "$b", self._token(7))
-        cache.mark_sent("@a:test", "$a", self._token(5))
+        cache.record("@b:test", "$b", RoomStreamToken(stream=7))
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
 
-        cache.start_request(self._token(6))
-        self.assertTrue(cache.was_sent("@a:test", "$a"))
-        self.assertFalse(cache.was_sent("@b:test", "$b"))
+        self._respond(cache, since=6, ends_at=7)
+        self.assertTrue(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
 
     def test_evicts_least_recently_used(self) -> None:
         """The cache holds `LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE` entries and
         evicts the least recently used one. A hit counts as a use."""
         cache = LazyLoadedMembersCache()
         for i in range(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE):
-            cache.mark_sent(f"@u{i}:test", f"$u{i}", self._token(1))
+            cache.record(f"@u{i}:test", f"$u{i}", RoomStreamToken(stream=1))
         # Touch the oldest entry so that it is no longer the eviction candidate.
-        self.assertTrue(cache.was_sent("@u0:test", "$u0"))
+        self.assertTrue(self._cached(cache, "u0"))
 
-        cache.mark_sent("@new:test", "$new", self._token(1))
-        self.assertTrue(cache.was_sent("@u0:test", "$u0"))
-        self.assertFalse(cache.was_sent("@u1:test", "$u1"))
-        self.assertTrue(cache.was_sent("@new:test", "$new"))
+        cache.record("@new:test", "$new", RoomStreamToken(stream=1))
+        self.assertTrue(self._cached(cache, "u0"))
+        self.assertFalse(self._cached(cache, "u1"))
+        self.assertTrue(self._cached(cache, "new"))
+
+    def test_response_ending_at_newest_position_records_nothing(self) -> None:
+        """A response from before the newest entry forgets the newer entries.
+        If it ends at the same position as the response that carried them,
+        it records nothing. The client that processed that response has not
+        seen this one. A response that ends later records."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+
+        self._respond(cache, since=4, ends_at=5, sent=["b"])
+        self.assertFalse(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
+
+        self._respond(cache, since=4, ends_at=6, sent=["c"])
+        self.assertTrue(self._cached(cache, "c"))
+
+    def test_forgetting_keeps_the_newest_position(self) -> None:
+        """Forgetting entries must not forget the position they were recorded
+        at. A later response from the same `since` finds nothing left to
+        forget, and must still record nothing if it ends at that position."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+
+        self._respond(cache, since=4, ends_at=5)
+        self.assertFalse(self._cached(cache, "a"))
+
+        self._respond(cache, since=4, ends_at=5, sent=["b"])
+        self.assertFalse(self._cached(cache, "b"))
+
+    def test_newest_position_survives_eviction(self) -> None:
+        """The newest position is kept even when the entries recorded at it
+        have been evicted, as a response can send more members than the
+        cache holds."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@old:test", "$old", RoomStreamToken(stream=5))
+        for i in range(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE):
+            cache.record(f"@u{i}:test", f"$u{i}", RoomStreamToken(stream=5))
+        self.assertFalse(self._cached(cache, "old"))
+
+        self._respond(cache, since=4, ends_at=5, sent=["b"])
+        self.assertFalse(self._cached(cache, "b"))
+
+    def test_response_sending_no_members_raises_newest(self) -> None:
+        """A response that sent no members still raises the newest position.
+        Otherwise a response built at the same time and ending at the same
+        position would record, and the client that processed the first would
+        trust what only the second sent."""
+        cache = LazyLoadedMembersCache()
+        with cache.building_response(self._token(3)) as handle:
+            self._respond(cache, since=3, ends_at=5)
+
+            handle.next_batch = RoomStreamToken(stream=5)
+            handle.mark_sent("@a:test", "$a")
+        self.assertFalse(self._cached(cache, "a"))
+
+    def test_response_ending_where_a_client_is_records_nothing(self) -> None:
+        """A request from `since` says a client is at `since`, even if no
+        response built on this cache ended there because the cache is new or
+        the response was built elsewhere. A response built at the same time
+        that ends at `since` must not record, as that client has not seen
+        it."""
+        cache = LazyLoadedMembersCache()
+        with cache.building_response(self._token(100)) as handle:
+            self._respond(cache, since=50, ends_at=100, sent=["a"])
+            self.assertFalse(self._cached(cache, "a"))
+            self.assertFalse(handle.was_sent("@a:test", "$a"))
+            handle.next_batch = RoomStreamToken(stream=101)
+            handle.mark_sent("@b:test", "$b")
+        self.assertTrue(self._cached(cache, "b"))
+
+    def test_dropped_response_ending_later_is_forgotten(self) -> None:
+        """Two responses are built at the same time. The client processes the
+        one that ends first, and the other records as it ends later. The
+        client's next request does not trust what the other sent, and
+        deletes it."""
+        cache = LazyLoadedMembersCache()
+        with cache.building_response(self._token(3)) as dropped:
+            self._respond(cache, since=3, ends_at=5, sent=["a"])
+            dropped.next_batch = RoomStreamToken(stream=6)
+            dropped.mark_sent("@b:test", "$b")
+        self.assertTrue(self._cached(cache, "b"))
+
+        with cache.building_response(self._token(5)) as handle:
+            self.assertFalse(handle.was_sent("@b:test", "$b"))
+            handle.next_batch = RoomStreamToken(stream=7)
+        self.assertFalse(self._cached(cache, "b"))
+
+    def test_failed_response_records_nothing(self) -> None:
+        """A response that was not built never reached the client, so it
+        neither records nor raises the newest position."""
+        cache = LazyLoadedMembersCache()
+        with self.assertRaises(RuntimeError):
+            with cache.building_response(None) as handle:
+                handle.next_batch = RoomStreamToken(stream=5)
+                handle.mark_sent("@a:test", "$a")
+                # Conditional only so that mypy does not see the rest of the
+                # block as unreachable.
+                if handle.since is None:
+                    raise RuntimeError("cancelled")
+        self.assertFalse(self._cached(cache, "a"))
+
+        self._respond(cache, since=None, ends_at=5, sent=["b"])
+        self.assertTrue(self._cached(cache, "b"))
