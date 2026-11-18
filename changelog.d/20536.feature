@@ -1,0 +1,1 @@
+Implement MSC4406: Sender ignored error code. Contributed by @1vel.
