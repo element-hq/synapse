@@ -194,6 +194,17 @@ impl PushRuleEvaluator {
 
             let rule_id = &push_rule.rule_id().to_string();
 
+            // A historic version of intentional mentions stored mentions in plaintext:
+            // https://github.com/matrix-org/matrix-spec-proposals/blob/86bf972c2c8ef04dc849ada5bbcb986ac990a7a3/proposals/3952-intentional-mentions.md
+            // MSC4028 fixes mentions-only notifications in encrypted rooms by pushing *all* events
+            // down to clients. However, for clients that still set intentional mentions in plaintext
+            // in addition to adding them in ciphertext, this is not necessary, so we can save
+            // client battery by not pushing everything, if we know `m.mentions` server-side.
+            // If `m.mentions` actually contains the user, the earlier push rules still handle
+            // matching mentions.
+            // In practice, most clients will not send intentional mentions in plaintext for privacy
+            // concerns, but mautrix bridges can be configured to do so:
+            // https://github.com/mautrix/go/blob/bd74d7e5b1f0c7e7f5ec9197530248afe22a47b6/bridgev2/matrix/mxmain/example-config.yaml#L464
             if self.has_mentions && rule_id == "global/override/.org.matrix.msc4028.encrypted_event"
             {
                 continue;
