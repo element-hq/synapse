@@ -17,6 +17,9 @@ on:
           - develop
           - master
 
+env:
+  LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
+
 # Only run this action once per pull request/branch; restart if a new commit arrives.
 # C.f. https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency
 # and https://docs.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#github-context
@@ -50,6 +53,7 @@ jobs:
       # We use `poetry` in `complement.sh`
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           poetry-version: "2.4.1"
       - name: Login to registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0

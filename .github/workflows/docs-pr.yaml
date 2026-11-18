@@ -10,6 +10,9 @@ on:
       # If the docs' python dependencies change, rebuild the book and test links.
       - pyproject.toml
 
+env:
+  LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
+
 jobs:
   pages:
     name: GitHub Pages
@@ -30,6 +33,7 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           install-project: "false"
           groups: "docs"
           poetry-version: "2.4.1"
@@ -66,6 +70,7 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           install-project: "false"
           groups: "docs"
           poetry-version: "2.4.1"
