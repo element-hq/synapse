@@ -704,13 +704,13 @@ class FederationHandler:
 
         # The room's servers may send us events while we join: its resident server
         # typically sends one right after it accepted our join, before we have
-        # persisted it. `room_queues` used to queue them, but it lives in this
-        # process only: a worker that handles inbound federation would drop them, as
-        # we're not in the room yet. So, unless we are in the room already, we hold
-        # the room's inbound event lock until the join is persisted: they wait in the
-        # staging area, and whoever takes the lock next handles them (the next event
-        # we receive in the room, or `_handle_old_staged_events`). `room_queues` is
-        # then only used when we are in the room already.
+        # persisted it. `room_queues` holds such events only when this process
+        # handles them, and a worker that handles inbound federation drops them as we
+        # are not in the room yet. So, unless we are in the room already, we hold the
+        # room's inbound event lock until the join is persisted. Events received
+        # meanwhile wait in the staging area, and the next process to take the lock
+        # handles them: the one that receives the next event in the room, or
+        # `_handle_old_staged_events`, which runs every minute.
         inbound_event_lock: contextlib.AbstractAsyncContextManager[object]
         if is_host_joined:
             inbound_event_lock = contextlib.nullcontext()
