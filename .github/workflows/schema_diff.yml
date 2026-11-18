@@ -1,4 +1,4 @@
-name: Schema Diff  # If this is changed, need to update `schema_diff_comment.yml` as well
+name: Schema Diff # If this is changed, need to update `schema_diff_comment.yml` as well
 
 on:
   pull_request:

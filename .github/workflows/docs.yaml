@@ -6,7 +6,7 @@ on:
       # For bleeding-edge documentation
       - develop
       # For documentation specific to a release
-      - 'release-v*'
+      - "release-v*"
       # stable docs
       - master
 
@@ -43,7 +43,7 @@ jobs:
     outputs:
       branch-version: ${{ steps.vars.outputs.branch-version }}
 
-################################################################################
+  ################################################################################
   pages-docs:
     name: GitHub Pages
     runs-on: ubuntu-latest
@@ -58,7 +58,7 @@ jobs:
       - name: Setup mdbook
         uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
         with:
-          mdbook-version: '0.5.2'
+          mdbook-version: "0.5.2"
 
       - name: Set version of docs
         run: echo 'window.SYNAPSE_VERSION = "${{ needs.pre.outputs.branch-version }}";' > ./docs/website_files/version.js
