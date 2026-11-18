@@ -1299,6 +1299,7 @@ class ModuleApi:
             event_dict,
             ratelimit=False,
             ignore_shadow_ban=True,
+            from_module=True,
         )
 
         return event

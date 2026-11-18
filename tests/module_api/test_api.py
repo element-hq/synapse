@@ -277,6 +277,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
             event_dict,
             ratelimit=False,
             ignore_shadow_ban=True,
+            from_module=True,
         )
 
         # Create and send a state event
@@ -315,6 +316,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
             },
             ratelimit=False,
             ignore_shadow_ban=True,
+            from_module=True,
         )
 
         # Check that we can't send membership events
