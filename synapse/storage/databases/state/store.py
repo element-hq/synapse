@@ -153,7 +153,9 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         the old and the new.
 
         Returns:
-            _GetStateGroupDelta containing prev_group and delta_ids, where both may be None.
+            _GetStateGroupDelta containing prev_group and delta_ids, where both may
+            be None. Both are None if the group has no previous group, or if its
+            delta holds a tombstone (a row with a NULL `event_id`).
         """
 
         def _get_state_group_delta_txn(txn: LoggingTransaction) -> _GetStateGroupDelta:
@@ -169,7 +171,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 return _GetStateGroupDelta(None, None)
 
             delta_ids = cast(
-                list[tuple[str, str, str]],
+                list[tuple[str, str, str | None]],
                 self.db_pool.simple_select_list_txn(
                     txn,
                     table="state_groups_state",
@@ -178,13 +180,20 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 ),
             )
 
-            return _GetStateGroupDelta(
-                prev_group,
-                {
-                    (event_type, state_key): event_id
-                    for event_type, state_key, event_id in delta_ids
-                },
-            )
+            delta: dict[StateKey, str] = {}
+            for event_type, state_key, event_id in delta_ids:
+                if event_id is None:
+                    # Callers don't currently handle tombstones, so we return
+                    # (None, None) to indicate no delta. We do this for now as
+                    # the callers are used to create new state deltas to insert,
+                    # but we currently don't insert any tombstones.
+                    #
+                    # TODO: Handle tombstones properly in the callers once we
+                    # support inserting them.
+                    return _GetStateGroupDelta(None, None)
+                delta[(event_type, state_key)] = event_id
+
+            return _GetStateGroupDelta(prev_group, delta)
 
         return await self.db_pool.runInteraction(
             "get_state_group_delta", _get_state_group_delta_txn

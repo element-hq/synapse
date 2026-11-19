@@ -33,7 +33,7 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.engines import PostgresEngine
-from synapse.types import MutableStateMap, StateMap
+from synapse.types import MutableStateMap, StateKey, StateMap
 from synapse.types.state import StateFilter
 from synapse.util.caches import intern_string
 
@@ -114,6 +114,11 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
 
         Returns:
             Map from state_group to a StateMap at that point.
+
+        A `state_groups_state` row with a NULL `event_id` is a tombstone: it
+        marks its (type, state_key) as absent from the group's state, although
+        an earlier group in the chain has it. Tombstoned keys are left out of
+        the result.
         """
         if state_filter is None:
             state_filter = StateFilter.all()
@@ -215,8 +220,11 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
                 args.extend(overall_select_query_args)
 
                 txn.execute(sql % (overall_select_clause,), args)
-                for row in txn:
-                    typ, state_key, event_id = row
+                for typ, state_key, event_id in txn:
+                    # `DISTINCT ON` returns only the nearest row for each key,
+                    # so a tombstone here has already hidden the older rows.
+                    if event_id is None:
+                        continue
                     key = (intern_string(typ), intern_string(state_key))
                     results[group][key] = event_id
         else:
@@ -233,6 +241,10 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
             #
             # We just haven't put in the time to refactor this.
             for group in groups:
+                state = results[group]
+                # Keys whose nearest row is a tombstone. They stay out of
+                # `state`, but still hide the rows further down the chain.
+                tombstoned: set[StateKey] = set()
                 next_group: int | None = group
 
                 while next_group:
@@ -249,21 +261,24 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
                         " WHERE state_group = ? " + where_clause,
                         args,
                     )
-                    results[group].update(
-                        ((typ, state_key), event_id)
-                        for typ, state_key, event_id in txn
-                        if (typ, state_key) not in results[group]
-                    )
+                    for typ, state_key, event_id in txn:
+                        key = (typ, state_key)
+                        if key in state or key in tombstoned:
+                            continue
+                        if event_id is None:
+                            tombstoned.add(key)
+                        else:
+                            state[key] = event_id
 
                     # If the number of entries in the (type,state_key)->event_id dict
                     # matches the number of (type,state_keys) types we were searching
                     # for, then we must have found them all, so no need to go walk
                     # further down the tree... UNLESS our types filter contained
                     # wildcards (i.e. Nones) in which case we have to do an exhaustive
-                    # search
+                    # search. A tombstone counts as found.
                     if (
                         max_entries_returned is not None
-                        and len(results[group]) == max_entries_returned
+                        and len(state) + len(tombstoned) == max_entries_returned
                     ):
                         break
 
