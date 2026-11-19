@@ -37,6 +37,10 @@ function initializeVersionDropdown(dropdown, dropdownMenu) {
             dropdown.querySelector('span').textContent = this.textContent;
             dropdown.querySelector('input').value = this.getAttribute('id');
 
+            // Don't try and reload the page if the version is the same
+            if (this.textContent === window.SYNAPSE_VERSION) {
+                return;
+            }
             window.location.href = changeVersion(window.location.href, this.textContent);
         });
     });
@@ -59,15 +63,22 @@ function initializeVersionDropdown(dropdown, dropdownMenu) {
 function fetchVersions(dropdown, dropdownMenu) {
     return new Promise((resolve, reject) => {
         window.addEventListener("load", () => {
-            // Pages are served under `/<repo>/<version>/...` (see `changeVersion`),
-            // so `versions.json` lives at `/<repo>/versions.json`.
-            const siteRoot = "/" + window.location.pathname.split('/')[1];
+            // The root of this version's docs, e.g. `/synapse/latest/`.
+            const bookRoot = new URL(path_to_root, document.baseURI);
+            // `versions.json` sits one level up, next to the version directories.
+            const versionUrl = new URL("../versions.json", bookRoot);
 
-            fetch(`${siteRoot}/versions.json`).then(res => {
+            fetch(versionUrl).then(res => {
+
                 if (!res.ok) {
                     throw new Error(`Fetching versions.json returned ${res.status}`);
                 }
                 return res.json();
+            }).catch(ex => {
+                // `versions.json` only exists on the deployed website. A local
+                // `mdbook serve` has none, so list only the version being viewed.
+                console.warn("Failed to fetch versions.json, listing only the current version", ex);
+                return [window.SYNAPSE_VERSION];
             }).then(versionList => {
                 const versions = versionList.sort(sortVersions);
 
@@ -151,5 +162,26 @@ function changeVersion(url, newVersion) {
     // Reconstruct the URL
     parsedURL.pathname = pathSegments.join('/');
   
+    return parsedURL.href;
+}
+
+function changeVersion(url, newVersion) {
+    // No-op if the new version is the same as the current version. This handles
+    // deployments without multiple versions in the URL path, such as when using
+    // `mdbook serve` locally.
+    if (newVersion === window.SYNAPSE_VERSION) {
+        return url;
+    }
+    const parsedURL = new URL(url);
+    const pathSegments = parsedURL.pathname.split('/');
+    // Find the index of the current version in the URL path, so it can be
+    // replaced with the new version.
+    const versionIndex = pathSegments.indexOf(window.SYNAPSE_VERSION);
+    if (versionIndex === -1) {
+        throw new Error("Current version segment not found in URL path");
+    }
+    pathSegments[versionIndex] = newVersion;
+    // Reconstruct the URL
+    parsedURL.pathname = pathSegments.join('/');
     return parsedURL.href;
 }

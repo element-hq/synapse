@@ -105,6 +105,7 @@ jobs:
       # reads it, so it doesn't need the rate-limited GitHub API.
       - name: Generate versions.json
         run: |
+          set -o pipefail
           # Re-fetch gh-pages so that it includes the deployment above.
           git fetch origin gh-pages
           mkdir -p versions-out
