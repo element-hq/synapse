@@ -760,8 +760,9 @@ jobs:
       # a new GitHub runner image with a new Python version).
       #
       # The value is just an opaque string that uniquely identifies this Python
-      # interpreter. Used to trigger rebuilds for `pyo3` when the Python interpreter
-      # changes. We're just basing it on what `maturin` (good reference) does,
+      # interpreter's version and ABI. Used to trigger rebuilds for `pyo3` when the
+      # Python interpreter changes. We're just basing it on what `maturin` (good
+      # reference) does,
       # https://github.com/PyO3/maturin/blob/c909db16c9f0838d42d79e0058b82379d47f2986/src/compile.rs#L903-L908
       # https://github.com/PyO3/maturin/blob/c909db16c9f0838d42d79e0058b82379d47f2986/src/python_interpreter/mod.rs#L509-L517
       #
