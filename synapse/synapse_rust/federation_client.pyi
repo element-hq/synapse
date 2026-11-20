@@ -31,3 +31,6 @@ class RequestSigner:
                 not ASCII, or the header would hold a byte that is not printable
                 ASCII.
         """
+
+def _ip_blocked(cidrs: list[str], ip: str) -> bool:
+    """Test-only: whether `ip` is in the blocklist built from `cidrs`."""

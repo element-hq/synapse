@@ -16,12 +16,16 @@
 
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyBytes};
 
-use crate::federation_client::signing::{RequestSigner, SigningInput};
+use crate::federation_client::{
+    ip_policy::IpBlocklist,
+    signing::{RequestSigner, SigningInput},
+};
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "federation_client")?;
     child_module.add_class::<PyRequestSigner>()?;
+    child_module.add_function(wrap_pyfunction!(ip_blocked, &child_module)?)?;
     m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
@@ -79,4 +83,15 @@ fn to_ascii<'a>(name: &str, bytes: &'a [u8]) -> PyResult<&'a str> {
         .ok()
         .filter(|s| s.is_ascii())
         .ok_or_else(|| PyValueError::new_err(format!("{name} is not ASCII")))
+}
+
+/// For tests: whether `ip` is in the blocklist built from `cidrs`.
+#[pyfunction(name = "_ip_blocked")]
+fn ip_blocked(cidrs: Vec<String>, ip: &str) -> PyResult<bool> {
+    let blocklist = IpBlocklist::from_cidrs(cidrs.iter().map(String::as_str))
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let ip = ip
+        .parse()
+        .map_err(|_| PyValueError::new_err(format!("not an IP address: {ip}")))?;
+    Ok(blocklist.blocks(ip))
 }

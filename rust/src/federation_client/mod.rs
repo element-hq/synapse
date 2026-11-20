@@ -16,6 +16,7 @@
 //!
 //! Only [`python`] touches pyo3; every other module is plain Rust.
 
+pub mod ip_policy;
 pub mod python;
 pub mod signing;
 
