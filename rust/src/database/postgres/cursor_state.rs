@@ -139,30 +139,34 @@ pub enum CursorQueryState<S = PgRowStream> {
 }
 
 impl<S: CursorRowStream> CursorQueryState<S> {
-    /// Reset to [`Self::Idle`], discarding any previous result set. Called at
-    /// the start of every `execute`.
-    pub fn reset(&mut self) {
-        // We discard any previous query state and start fresh with the new
-        // query. This is fine as `tokio_postgres` correctly handles dropping an
-        // active query stream.
-        *self = Self::Idle;
-    }
-
     /// Record the stream and column names of a newly started query.
+    ///
+    /// The cursor must not have an active query. If it does, an error is
+    /// returned. Callers should ensure the previous query is finished or call
+    /// [`CursorQueryState::close`] before starting a new one.
     ///
     /// `description` holds the column names as plain strings, empty for a
     /// statement that returns no rows. Plain strings keep this module free of
     /// the driver's column type, so the tests need no driver. `handle` is the
     /// runtime the blocking `fetch_*` calls drive the stream on.
-    pub fn on_query_start(&mut self, stream: S, description: Vec<String>, handle: Handle) {
-        // We discard any previous query state and start fresh with the new
-        // query. This is fine as `tokio_postgres` correctly handles dropping an
-        // active query stream.
+    pub fn on_query_start(
+        &mut self,
+        stream: S,
+        description: Vec<String>,
+        handle: Handle,
+    ) -> PyResult<()> {
+        if let Self::Active { .. } = self {
+            return Err(PyRuntimeError::new_err(
+                "on_query_start called with an active stream: call finish first",
+            ));
+        }
+
         *self = Self::Active {
             stream,
             handle,
             description,
         };
+        Ok(())
     }
 
     /// Pull the next row from the stream, or [`None`] once it's exhausted.
@@ -289,8 +293,8 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     ///
     /// Returns the number of rows affected if available. If the cursor is
     /// already closed, returns the previously captured row count. If the cursor
-    /// is idle, an error is returned.
-    fn close(&mut self, py: Python<'_>) -> PyResult<Option<u64>> {
+    /// is idle, returns None.
+    pub fn close(&mut self, py: Python<'_>) -> PyResult<Option<u64>> {
         self.with_reset_on_err(|slf| match slf {
             Self::Active {
                 stream,
@@ -311,7 +315,7 @@ impl<S: CursorRowStream> CursorQueryState<S> {
                 Ok(rows_affected)
             }
             Self::Closed { rowcount, .. } => Ok(*rowcount),
-            Self::Idle => Err(PyRuntimeError::new_err("cannot close: no active query")),
+            Self::Idle => Ok(None),
         })
     }
 
@@ -520,14 +524,16 @@ mod tests {
         rows_affected: Option<u64>,
     ) -> CursorQueryState<FakeStream> {
         let mut state = CursorQueryState::default();
-        state.on_query_start(
-            FakeStream {
-                steps: steps.iter().copied().collect(),
-                rows_affected,
-            },
-            vec!["col".to_string()],
-            runtime_handle(),
-        );
+        state
+            .on_query_start(
+                FakeStream {
+                    steps: steps.iter().copied().collect(),
+                    rows_affected,
+                },
+                vec!["col".to_string()],
+                runtime_handle(),
+            )
+            .unwrap();
         state
     }
 
@@ -809,14 +815,25 @@ mod tests {
         });
     }
 
-    /// [`CursorQueryState::reset`] discards an [`CursorQueryState::Active`]
-    /// result set, so a fetch afterwards raises "no active query".
+    /// [`CursorQueryState::close`] drains the rest of a partly read stream,
+    /// including rows that are not buffered yet, and raises the error at its
+    /// end. A dropped stream would lose the error.
     #[test]
-    fn reset_discards_an_active_cursor() {
+    fn close_drains_and_surfaces_an_unread_error() {
         Python::initialize();
         Python::attach(|py| {
-            let mut state = active_with(&[&[1]], Some(0));
-            state.reset();
+            let mut state = active_with_steps(
+                &[
+                    Step::Row(&[1]),
+                    Step::Pending,
+                    Step::Row(&[2]),
+                    Step::Err("late"),
+                ],
+                None,
+            );
+            assert_tuple_opt(state.fetch_one(py).unwrap(), &[1]);
+            let err = state.close(py).unwrap_err();
+            assert!(err.to_string().contains("late"), "{err}");
             assert!(matches!(state, CursorQueryState::Idle));
             assert!(state
                 .fetch_one(py)
