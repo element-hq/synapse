@@ -85,7 +85,8 @@ SERVER_NAMES = [
 
 
 def python_parse(name: str) -> tuple[str, int | None, str] | None:
-    """What the federation client accepts: Synapse's validation plus R28."""
+    """What the federation client accepts: Synapse's validation plus the port
+    grammar `_send_request` enforces."""
     try:
         host, port = parse_and_validate_server_name(name)
     except ValueError:

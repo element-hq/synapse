@@ -25,7 +25,7 @@ use crate::federation_client::{
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "federation_client")?;
     child_module.add_class::<PyRequestSigner>()?;
-    child_module.add_function(wrap_pyfunction!(_parse_server_name, &child_module)?)?;
+    child_module.add_function(wrap_pyfunction!(parse_server_name, &child_module)?)?;
     m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
@@ -85,9 +85,9 @@ fn to_ascii<'a>(name: &str, bytes: &'a [u8]) -> PyResult<&'a str> {
         .ok_or_else(|| PyValueError::new_err(format!("{name} is not ASCII")))
 }
 
-/// Test-only (D27): `(host as written, port, "dns" | "ipv4" | "ipv6")`.
-#[pyfunction]
-fn _parse_server_name(name: &str) -> PyResult<(String, Option<u16>, &'static str)> {
+/// For tests: `(host as written, port, "dns" | "ipv4" | "ipv6")`.
+#[pyfunction(name = "_parse_server_name")]
+fn parse_server_name(name: &str) -> PyResult<(String, Option<u16>, &'static str)> {
     let parsed = ServerName::parse(name).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let kind = match parsed.host() {
         Host::Dns => "dns",

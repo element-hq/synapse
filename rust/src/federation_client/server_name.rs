@@ -28,7 +28,8 @@ pub enum Host {
 }
 
 /// A server name that Synapse's `parse_and_validate_server_name` accepts and
-/// whose port, if any, is 1–5 ASCII digits up to 65535 (R28).
+/// whose port, if any, is 1–5 ASCII digits up to 65535, as `_send_request`
+/// requires.
 ///
 /// Kept as written: the destination goes into headers unchanged, and
 /// `Ipv6Addr`'s display form can differ from what was written.
@@ -188,7 +189,7 @@ mod tests {
         }
     }
 
-    /// R28: only 1–5 ASCII digits, at most 65535.
+    /// Only 1–5 ASCII digits, at most 65535.
     #[test]
     fn ports() {
         for (name, port) in [("h:0", 0), ("h:08448", 8448), ("h:65535", 65535)] {
