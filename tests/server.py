@@ -358,10 +358,10 @@ class FakeChannel:
                 # exactly the `timeout` amount and we don't want to get stuck in an
                 # infinite loop
                 self._reactor.seconds() >= start_time_seconds + timeout.as_secs()
-                # 100 loops is arbitrary. This also makes the assumption that any work
-                # on other threads will finish before we give up after sleeping ~0.1s of
-                # real-time (100 * 0.001).
-                and loop_count > 100
+                # 5000 loops is arbitrary. This also makes the assumption that any work
+                # on other threads will finish before we give up after sleeping ~5s of
+                # real-time (5000 * 0.001).
+                and loop_count > 5000
             ):
                 raise TimedOutException("Timed out waiting for request to finish.")
 
