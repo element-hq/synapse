@@ -514,3 +514,40 @@ class RetentionConfigurationEndpointTestCase(unittest.HomeserverTestCase):
             body["limits"]["max_lifetime"],
             {"min": one_day_ms, "max": one_day_ms * 7},
         )
+
+    @override_config(
+        {
+            "retention": {"enabled": True},
+            "experimental_features": {"msc1763_enabled": True},
+        }
+    )
+    def test_default_cache_control(self) -> None:
+        """Responses are cacheable by the client for six hours by default."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(
+            channel.headers.getRawHeaders(b"Cache-Control"),
+            [b"private, max-age=21600"],
+        )
+
+    @override_config(
+        {
+            "retention": {"enabled": True},
+            "experimental_features": {
+                "msc1763_enabled": True,
+                "msc1763_configuration_cache_ttl": "5m",
+            },
+        }
+    )
+    def test_configured_cache_control(self) -> None:
+        """The advertised cache lifetime follows `msc1763_configuration_cache_ttl`."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(
+            channel.headers.getRawHeaders(b"Cache-Control"),
+            [b"private, max-age=300"],
+        )

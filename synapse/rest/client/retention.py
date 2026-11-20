@@ -60,11 +60,17 @@ class RetentionConfigurationServlet(RestServlet):
         super().__init__()
         self.auth = hs.get_auth()
         self._retention_config = hs.config.retention
+        # The response only depends on server config, so let clients cache it.
+        # `private` because the endpoint is authenticated, so shared caches
+        # shouldn't store it.
+        max_age_s = hs.config.experimental.msc1763_configuration_cache_ttl_ms // 1000
+        self._cache_control = f"private, max-age={max_age_s}".encode("ascii")
 
     async def on_GET(
         self, request: SynapseRequest
     ) -> tuple[int, RetentionConfigurationResponse]:
         await self.auth.get_user_by_req(request)
+        request.setHeader(b"Cache-Control", self._cache_control)
 
         default_policy: RetentionPolicyDict = {}
         if self._retention_config.retention_default_min_lifetime is not None:
