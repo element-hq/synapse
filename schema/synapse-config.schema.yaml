@@ -4336,7 +4336,11 @@ properties:
           type: boolean
           description: >-
             Set to false to disable the use of the OIDC discovery mechanism to
-            discover endpoints. Defaults to true.
+            discover endpoints. Defaults to true. Note that the endpoints you
+            configure are still checked unless `skip_verification` is set: in
+            particular, `issuer`, `authorization_endpoint` and `token_endpoint`
+            must use `https`: an internal address like `http://keycloak:8080`
+            is rejected.
         issuer:
           type: string
           description: >-
@@ -4473,7 +4477,12 @@ properties:
           description: >-
             Set to `true` to skip metadata verification. Use this if you are
             connecting to a provider that is not OpenID Connect compliant.
-            Defaults to false. Avoid this in production.
+            Defaults to false. Avoid this in production. If the provider is only
+            reachable over a private network with a certificate from a local
+            certificate authority, prefer keeping verification enabled and
+            starting Synapse with the `SSL_CERT_FILE` environment variable set
+            to that authority's certificate, which must be readable by the user
+            Synapse runs as.
         user_profile_method:
           type: ["string", "null"]
           enum:
