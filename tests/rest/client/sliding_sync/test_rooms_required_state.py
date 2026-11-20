@@ -1729,7 +1729,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         # The list should include both rooms now because we don't need full state
         for list_key in response_body["lists"].keys():
             self.assertIncludes(
-                set(response_body["lists"][list_key]["ops"][0]["room_ids"]),
+                self.get_list_room_ids(response_body, list_key),
                 {room_id2, room_id1},
                 exact=True,
                 message=f"Expected all rooms to show up for list_key={list_key}. Response "
@@ -1820,7 +1820,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         # partially-stated
         for list_key in response_body["lists"].keys():
             self.assertIncludes(
-                set(response_body["lists"][list_key]["ops"][0]["room_ids"]),
+                self.get_list_room_ids(response_body, list_key),
                 {room_id1},
                 exact=True,
                 message=f"Expected only fully-stated rooms to show up for list_key={list_key}. Response "

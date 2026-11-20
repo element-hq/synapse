@@ -35,6 +35,7 @@ from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import account_data, devices, login, receipts, room, sync
+from synapse.rest.client.sync import SlidingSyncRestServlet
 from synapse.server import HomeServer
 from synapse.types import (
     JsonDict,
@@ -76,6 +77,15 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         hs.get_datastores().main.have_finished_sliding_sync_background_jobs = AsyncMock(  # type: ignore[method-assign]
             return_value=self.use_new_tables
         )
+
+        # Responses only carry each list's `count`. Have them include the rooms too,
+        # for `get_list_room_ids`.
+        self.patch(SlidingSyncRestServlet, "test_include_list_room_ids", True)
+
+    def get_list_room_ids(self, response_body: JsonDict, list_key: str) -> set[str]:
+        """The rooms the server put in a list for a sliding sync response."""
+        self.assertIn(list_key, response_body["lists"])
+        return set(response_body["lists"][list_key]["test_room_ids"])
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
@@ -511,16 +521,8 @@ class SlidingSyncTestCase(SlidingSyncBase):
         )
 
         # Make sure the list includes the room we are joined to
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [room_id],
-                }
-            ],
-            response_body["lists"]["foo-list"],
+        self.assertIncludes(
+            self.get_list_room_ids(response_body, "foo-list"), {room_id}, exact=True
         )
 
     def test_wait_for_sync_token(self) -> None:
@@ -714,7 +716,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         }
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -731,7 +733,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # We should no longer see the forgotten room
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             set(),
             exact=True,
         )
@@ -763,7 +765,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
         # We should see the room (like normal)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -785,7 +787,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # We should see the room again after re-joining
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -814,7 +816,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
         # We should see the room (like normal)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -837,7 +839,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # We should see the room again after re-joining
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -865,7 +867,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(sync_body, tok=user_tok)
         # We should see the room (like normal)
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id},
             exact=True,
         )
@@ -881,7 +883,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         if self.use_new_tables:
             # We should see the newly_left room
             self.assertIncludes(
-                set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+                self.get_list_room_ids(response_body, "foo-list"),
                 {room_id},
                 exact=True,
             )
@@ -932,7 +934,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         # room_id2 shows up because we haven't ignored the user yet
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id1, room_id2},
             exact=True,
         )
@@ -950,7 +952,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         # The invite for room_id2 should no longer show up because user2 is ignored
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id1},
             exact=True,
         )
@@ -993,7 +995,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
         # User1 only has membership in room_id1 at this point
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id1},
             exact=True,
         )
@@ -1005,7 +1007,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
         # The invite for room_id2 doesn't show up because user2 is ignored
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id1},
             exact=True,
         )
@@ -1043,18 +1045,12 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["lists"].keys(),
             {"foo-list"},
         )
-        # Make sure the list is sorted in the way we expect (we only sort when the range
-        # doesn't include all of the room)
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 1],
-                    "room_ids": [room_id2, room_id1],
-                }
-            ],
-            response_body["lists"]["foo-list"],
+        # Make sure the list is sorted in the way we expect, i.e. that room_id3
+        # is not included.
+        self.assertIncludes(
+            self.get_list_room_ids(response_body, "foo-list"),
+            {room_id2, room_id1},
+            exact=True,
         )
 
         # Make the Sliding Sync request where the range includes *all* of the rooms
@@ -1074,19 +1070,11 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["lists"].keys(),
             {"foo-list"},
         )
-        # Since the range includes all of the rooms, we don't sort the list
-        self.assertEqual(
-            len(response_body["lists"]["foo-list"]["ops"]),
-            1,
-            response_body["lists"]["foo-list"],
-        )
-        op = response_body["lists"]["foo-list"]["ops"][0]
-        self.assertEqual(op["op"], "SYNC")
-        self.assertEqual(op["range"], [0, 99])
-        # Note that we don't sort the rooms when the range includes all of the rooms, so
-        # we just assert that the rooms are included
+        # The list should include all the rooms.
         self.assertIncludes(
-            set(op["room_ids"]), {room_id1, room_id2, room_id3}, exact=True
+            self.get_list_room_ids(response_body, "foo-list"),
+            {room_id1, room_id2, room_id3},
+            exact=True,
         )
 
     def test_sliced_windows(self) -> None:
@@ -1119,17 +1107,9 @@ class SlidingSyncTestCase(SlidingSyncBase):
             ["foo-list"],
             response_body["lists"].keys(),
         )
-        # Make sure the list is sorted in the way we expect
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 0],
-                    "room_ids": [room_id3],
-                }
-            ],
-            response_body["lists"]["foo-list"],
+        # Make sure the range picks the most recent room
+        self.assertIncludes(
+            self.get_list_room_ids(response_body, "foo-list"), {room_id3}, exact=True
         )
 
         # Make the Sliding Sync request for the first two rooms
@@ -1150,17 +1130,11 @@ class SlidingSyncTestCase(SlidingSyncBase):
             ["foo-list"],
             response_body["lists"].keys(),
         )
-        # Make sure the list is sorted in the way we expect
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 1],
-                    "room_ids": [room_id3, room_id2],
-                }
-            ],
-            response_body["lists"]["foo-list"],
+        # Make sure the range picks the two most recent rooms
+        self.assertIncludes(
+            self.get_list_room_ids(response_body, "foo-list"),
+            {room_id3, room_id2},
+            exact=True,
         )
 
     def test_rooms_with_no_updates_do_not_come_down_incremental_sync(self) -> None:
@@ -1713,10 +1687,9 @@ class SlidingSyncTestCase(SlidingSyncBase):
             exact=True,
         )
 
-        # Test that the excluded room is not in the list ops
-        # Make sure the list is sorted in the way we expect
+        # The excluded room is not in the list either
         self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            self.get_list_room_ids(response_body, "foo-list"),
             {room_id_to_include},
             exact=True,
         )
