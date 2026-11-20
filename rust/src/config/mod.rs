@@ -76,4 +76,5 @@ pub struct ExperimentalConfig {
     pub msc4446_enabled: bool,
     pub msc4502_enabled: bool,
     pub msc4457_enabled: bool,
+    pub msc4536_enabled: bool,
 }

@@ -1,1 +1,0 @@
-Fix logging breaking after a `SIGHUP` reload when stdout and stderr are redirected to the logs.

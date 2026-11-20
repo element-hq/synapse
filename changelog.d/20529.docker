@@ -1,0 +1,1 @@
+Fix the `amd64` Docker image shipping an unusable copy of the `arm64` system libraries, including a second copy of glibc that was never updated by `apt`. Contributed by @FrenchgGithubUser @Famedly.

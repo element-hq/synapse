@@ -383,3 +383,6 @@ class ExperimentalConfig(Config):
 
         # MSC4457: Generic reporting API
         self.msc4457_enabled: bool = experimental.get("msc4457_enabled", False)
+        # MSC4536: Additional endpoints for fetching user profiles
+        # Tracked in: https://github.com/element-hq/synapse/issues/20471
+        self.msc4536_enabled: bool = experimental.get("msc4536_enabled", False)

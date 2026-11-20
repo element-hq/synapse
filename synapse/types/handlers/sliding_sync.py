@@ -111,7 +111,10 @@ class SlidingSyncResult:
     Attributes:
         next_pos: The next position token in the sliding window to request (next_batch).
         lists: Sliding window API. A map of list key to list results.
-        rooms: Room subscription API. A map of room ID to room results.
+        rooms: Room subscription API. A map of room ID to room results for the rooms we
+            fetched data for. Since this may include rooms with no actual updates, when
+            serializing rooms for the client, we filter this down with
+            `RoomResult.__bool__`.
         extensions: Extensions API. A map of extension key to extension results.
     """
 
@@ -139,6 +142,9 @@ class SlidingSyncResult:
                 the timeline events above. This allows clients to show accurate reaction
                 counts (or edits, threads), even if some of the reaction events were skipped
                 over in a gappy sync.
+            sticky_events: The sticky events (MSC4354) to return in the sticky events
+                extension (MSC4480), in stream order, or `None` if the room is not in
+                scope for the extension.
             stripped_state: Stripped state events (for rooms where the usre is
                 invited/knocked). Same as `rooms.invite.$room_id.invite_state` in sync v2,
                 absent on joined/left rooms
@@ -188,6 +194,7 @@ class SlidingSyncResult:
         # Should be empty for invite/knock rooms with `stripped_state`
         timeline_events: list[FilteredEvent]
         bundled_aggregations: dict[str, "BundledAggregations"] | None
+        sticky_events: list[FilteredEvent] | None
         # Optional because it's only relevant to invite/knock rooms
         stripped_state: list[JsonDict]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
@@ -205,6 +212,13 @@ class SlidingSyncResult:
         def __bool__(self) -> bool:
             """Are there any updates that should be returned immediately to
             the client?
+
+            `sticky_events` is deliberately not considered. Sticky events are
+            returned in the sticky events extension (MSC4480) rather than as part
+            of the room, so they alone shouldn't cause the room to be sent down.
+            The extension collects them from the room results regardless of
+            whether the room itself is returned (see
+            `SlidingSyncExtensionHandler.get_sticky_events_extension_response(...)`).
             """
             return (
                 # If this is the first time the client is seeing the room, we should not filter it out
@@ -496,7 +510,7 @@ class SlidingSyncResult:
         # there are no changes, and b) since we're sorting rooms by `stream_ordering` of
         # the latest activity, anything that would cause the order to change would end
         # up in `self.rooms` and cause us to send down the change.
-        return bool(self.rooms or self.extensions)
+        return any(self.rooms.values()) or bool(self.extensions)
 
     @staticmethod
     def empty(next_pos: SlidingSyncStreamToken) -> "SlidingSyncResult":
@@ -538,21 +552,47 @@ class RoomSyncConfig:
         required_state_map: Map from state event type to state_keys requested for the
             room. The values are close to `StateKey` but actually use a syntax where you
             can provide `*` wildcard and `$LAZY` for lazy-loading room members.
+
+        sticky_events: Whether to fetch sticky events for the room, i.e. the room is
+            in scope for the sticky events extension (MSC4480), as per its
+            `lists`/`rooms` for this request, and the user is joined to it. As with
+            sync v2, we only send sticky events for rooms the user is joined to. If
+            they (re)join, the room will be `initial` and we'll send all of the
+            unexpired sticky events then.
+
+            Should not be persisted in the per-connection state or considered in
+            comparisons to check whether the config was expanded (see
+            `RoomSyncConfig.requests_more_than(...)`).
+
+            We shouldn't consider `sticky_events` in expanded comparison checks because
+            "expanded" means the client is asking for more timeline or state than it has
+            received. Whether this request asked for sticky events for a particular room
+            says nothing about what the client has already received. That is already
+            tracked separately via `PerConnectionState.sticky_events`.
+
+            For the same reason, we don't persist it. This only says what the request
+            asks for, and provides no information on what the client previously
+            received.
     """
 
     timeline_limit: int
     required_state_map: Mapping[str, AbstractSet[str]]
+    sticky_events: bool = False
 
     @classmethod
     def from_room_config(
         cls,
         room_params: SlidingSyncConfig.CommonRoomParameters,
+        *,
+        sticky_events: bool = False,
     ) -> "RoomSyncConfig":
         """
         Create a `RoomSyncConfig` from a `SlidingSyncList`/`RoomSubscription` config.
 
         Args:
             room_params: `SlidingSyncConfig.SlidingSyncList` or `SlidingSyncConfig.RoomSubscription`
+            sticky_events: Whether to fetch sticky events for the room (see
+                `RoomSyncConfig.sticky_events`).
         """
         required_state_map: dict[str, set[str]] = {}
         for (
@@ -611,6 +651,7 @@ class RoomSyncConfig:
         return cls(
             timeline_limit=room_params.timeline_limit,
             required_state_map=required_state_map,
+            sticky_events=sticky_events,
         )
 
     def combine_room_sync_config(
@@ -695,7 +736,31 @@ class RoomSyncConfig:
                     else:
                         required_state_map[state_type].add(state_key)
 
-        return RoomSyncConfig(timeline_limit, required_state_map)
+        return RoomSyncConfig(
+            timeline_limit,
+            required_state_map,
+            sticky_events=self.sticky_events or other_room_sync_config.sticky_events,
+        )
+
+    def requests_more_than(self, other_room_sync_config: "RoomSyncConfig") -> bool:
+        """
+        Check whether this config asks for anything more than `other_room_sync_config`
+        already covered, i.e. whether this config is a "superset" of `other_room_sync_config`.
+
+        For example, we check for a higher `timeline_limit`, or `required_state`
+        additions which would return `True`.
+
+        `sticky_events` is deliberately not considered because this check is about
+        whether the client is asking for more timeline or state than it has already
+        received. Whether this request asked for sticky events for a particular room
+        says nothing about what the client has already received. That is tracked
+        separately via `PerConnectionState.sticky_events`.
+        """
+        combined = other_room_sync_config.combine_room_sync_config(self)
+        return (
+            combined.timeline_limit != other_room_sync_config.timeline_limit
+            or combined.required_state_map != other_room_sync_config.required_state_map
+        )
 
     def must_await_full_state(
         self,

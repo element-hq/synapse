@@ -130,6 +130,8 @@ RUN dpkg --add-architecture amd64
 # Fetch the runtime dependencies debs for both architectures
 # We do that by building a recursive list of packages we need to download with `apt-cache depends`
 # and then downloading them with `apt-get download`.
+# Strip any `:arch` qualifier `apt-cache depends` emits: an explicit qualifier wins
+# over APT::Architecture, which would fetch that package for the wrong arch.
 RUN \
   --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -142,7 +144,7 @@ RUN \
       libwebp7 \
       xmlsec1 \
       libjemalloc2 \
-    | grep '^\w' > /tmp/pkg-list && \
+    | grep '^\w' | sed 's/:.*//' | sort -u > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
     chown _apt:root /tmp/debs-${arch} && \
