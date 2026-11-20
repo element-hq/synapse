@@ -15,71 +15,48 @@
 //! Block-set membership for IP-literal destinations. Resolved addresses are
 //! checked by Python's blocklisting resolver.
 
-use std::{
-    fmt,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-};
+use std::{fmt, net::IpAddr};
 
 /// IP ranges to refuse. An address only matches ranges of its own version,
 /// as in `netaddr`.
 pub struct IpBlocklist {
-    v4: Vec<(u32, u32)>,
+    v4: Vec<(u128, u128)>,
     v6: Vec<(u128, u128)>,
 }
 
 impl IpBlocklist {
     /// Ranges as `netaddr`'s `IPSet.iter_cidrs()` gives them, such as
-    /// `127.0.0.0/8` or `::1/128`; Synapse's `generate_ip_set` has already
-    /// added the IPv4-mapped, IPv4-compatible and 6to4 ranges. `0.0.0.0` and
-    /// `::` are always blocked.
+    /// `127.0.0.0/8` or `::1/128`. Synapse's `generate_ip_set` has already
+    /// added `0.0.0.0` and `::` and the IPv4-mapped, IPv4-compatible and 6to4
+    /// ranges.
     pub fn from_cidrs<'a>(cidrs: impl IntoIterator<Item = &'a str>) -> Result<Self, CidrError> {
         let mut blocklist = IpBlocklist {
-            v4: vec![(0, u32::MAX)],
-            v6: vec![(0, u128::MAX)],
+            v4: Vec::new(),
+            v6: Vec::new(),
         };
         for cidr in cidrs {
             let invalid = || CidrError(cidr.to_owned());
-            let (addr, len) = match cidr.split_once('/') {
-                Some((addr, len)) => (addr, Some(len.parse::<u32>().map_err(|_| invalid())?)),
-                None => (cidr, None),
+            let (addr, len) = cidr.split_once('/').ok_or_else(invalid)?;
+            let len: u32 = len.parse().map_err(|_| invalid())?;
+            let (bits, width, ranges) = match addr.parse().map_err(|_| invalid())? {
+                IpAddr::V4(addr) => (u128::from(u32::from(addr)), 32, &mut blocklist.v4),
+                IpAddr::V6(addr) => (u128::from(addr), 128, &mut blocklist.v6),
             };
-            match addr.parse::<IpAddr>().map_err(|_| invalid())? {
-                IpAddr::V4(addr) => {
-                    let len = len.unwrap_or(32);
-                    if len > 32 {
-                        return Err(invalid());
-                    }
-                    let mask = u32::MAX.checked_shl(32 - len).unwrap_or(0);
-                    blocklist.v4.push((u32::from(addr) & mask, mask));
-                }
-                IpAddr::V6(addr) => {
-                    let len = len.unwrap_or(128);
-                    if len > 128 {
-                        return Err(invalid());
-                    }
-                    let mask = u128::MAX.checked_shl(128 - len).unwrap_or(0);
-                    blocklist.v6.push((u128::from(addr) & mask, mask));
-                }
+            if len > width {
+                return Err(invalid());
             }
+            let mask = u128::MAX.checked_shl(width - len).unwrap_or(0);
+            ranges.push((bits & mask, mask));
         }
         Ok(blocklist)
     }
 
     pub fn blocks(&self, ip: IpAddr) -> bool {
-        match ip {
-            IpAddr::V4(ip) => self.blocks_v4(ip),
-            IpAddr::V6(ip) => self.blocks_v6(ip),
-        }
-    }
-
-    fn blocks_v4(&self, ip: Ipv4Addr) -> bool {
-        let ip = u32::from(ip);
-        self.v4.iter().any(|&(net, mask)| ip & mask == net)
-    }
-
-    fn blocks_v6(&self, ip: Ipv6Addr) -> bool {
-        let ip = u128::from(ip);
-        self.v6.iter().any(|&(net, mask)| ip & mask == net)
+        let (bits, ranges) = match ip {
+            IpAddr::V4(ip) => (u128::from(u32::from(ip)), &self.v4),
+            IpAddr::V6(ip) => (u128::from(ip), &self.v6),
+        };
+        ranges.iter().any(|&(net, mask)| bits & mask == net)
     }
 }
 
@@ -88,7 +65,7 @@ pub struct CidrError(String);
 
 impl fmt::Display for CidrError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Invalid IP range provided: {}.", self.0)
+        write!(f, "not a CIDR range from IPSet.iter_cidrs(): {}", self.0)
     }
 }
 
@@ -104,7 +81,7 @@ mod tests {
 
     #[test]
     fn ranges() {
-        let list = blocklist(&["10.0.0.0/8", "192.168.1.7", "fc00::/7", "::1/128"]);
+        let list = blocklist(&["10.0.0.0/8", "192.168.1.7/32", "fc00::/7", "::1/128"]);
         for (ip, blocked) in [
             ("10.255.0.1", true),
             ("11.0.0.1", false),
@@ -119,9 +96,14 @@ mod tests {
         }
     }
 
+    /// Nothing is built in: `0.0.0.0` and `::` are blocked when the config
+    /// says so, as Synapse's always does.
     #[test]
-    fn unspecified_always_blocked() {
-        let list = blocklist(&[]);
+    fn unspecified_blocked_only_when_listed() {
+        let empty = blocklist(&[]);
+        assert!(!empty.blocks("0.0.0.0".parse().unwrap()));
+        assert!(!empty.blocks("::".parse().unwrap()));
+        let list = blocklist(&["0.0.0.0/32", "::/128"]);
         assert!(list.blocks("0.0.0.0".parse().unwrap()));
         assert!(list.blocks("::".parse().unwrap()));
         assert!(!list.blocks("0.0.0.1".parse().unwrap()));
@@ -133,6 +115,7 @@ mod tests {
         let list = blocklist(&["127.0.0.0/8"]);
         assert!(!list.blocks("::ffff:127.0.0.1".parse().unwrap()));
         assert!(blocklist(&["::ffff:127.0.0.0/104"]).blocks("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(!blocklist(&["::/96"]).blocks("0.0.0.1".parse().unwrap()));
     }
 
     #[test]
@@ -147,7 +130,8 @@ mod tests {
             "10.0.0.0/33",
             "::/129",
             "10.0.0.0/x",
-            "nope",
+            "10.0.0.0",
+            "nope/8",
             "10.0.0.0/8/8",
         ] {
             assert!(IpBlocklist::from_cidrs([cidr]).is_err(), "{cidr}");

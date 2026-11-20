@@ -15,17 +15,17 @@ import random
 
 from netaddr import IPAddress
 
-from synapse.config.server import DEFAULT_IP_RANGE_BLOCKLIST, generate_ip_set
 from synapse.synapse_rust.federation_client import _ip_blocked
 
-from tests import unittest
+from tests.unittest import HomeserverTestCase, override_config
 
 
-class IpBlocklistTestCase(unittest.TestCase):
-    def test_matches_netaddr(self) -> None:
-        """Synapse's default blocklist, as the config builds it, against
-        netaddr's membership test."""
-        blocklist = generate_ip_set(DEFAULT_IP_RANGE_BLOCKLIST, ["0.0.0.0", "::"])
+class IpBlocklistTestCase(HomeserverTestCase):
+    """The federation blocklist the homeserver's config builds, against
+    netaddr's membership test."""
+
+    def assert_matches_netaddr(self) -> None:
+        blocklist = self.hs.config.server.federation_ip_range_blocklist
         cidrs = [str(cidr) for cidr in blocklist.iter_cidrs()]
         rng = random.Random(2026)
         addresses = [
@@ -41,6 +41,8 @@ class IpBlocklistTestCase(unittest.TestCase):
             "fe80::1",
             "100.64.0.1",
             "169.254.1.1",
+            "10.1.2.3",
+            "fd00::1",
         ]
         addresses += [str(IPAddress(rng.getrandbits(32), 4)) for _ in range(2000)]
         addresses += [
@@ -50,3 +52,10 @@ class IpBlocklistTestCase(unittest.TestCase):
         for ip in addresses:
             with self.subTest(ip=ip):
                 self.assertEqual(_ip_blocked(cidrs, ip), IPAddress(ip) in blocklist)
+
+    def test_default_blocklist(self) -> None:
+        self.assert_matches_netaddr()
+
+    @override_config({"federation_ip_range_blacklist": ["10.0.0.0/8", "fc00::/7"]})
+    def test_federation_blacklist(self) -> None:
+        self.assert_matches_netaddr()
