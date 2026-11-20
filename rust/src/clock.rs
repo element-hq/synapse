@@ -147,6 +147,12 @@ impl Clock {
             (Clock::Process, Some(virtual_time)) => virtual_time.now(),
             (Clock::Internal(virtual_time), None) => virtual_time.now(),
             (Clock::Internal(_), Some(_)) => {
+                // We should never be combining a Clock::Internal with Python
+                // virtual time. Clock::Internal is used by Rust unit tests,
+                // while Python virtual time is used by Python unit tests.
+                //
+                // If we have both then something has gotten very confused
+                // somewhere.
                 panic!("Internal clock should not be used with Python virtual time")
             }
         }
