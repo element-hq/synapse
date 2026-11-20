@@ -185,7 +185,7 @@ impl Clock {
         match (self, PYTHON_VIRTUAL_TIME.get()) {
             (Clock::Process, None) =>
             {
-                #[allow(clippy::disallowed_methods)]
+                #[expect(clippy::disallowed_methods, reason = "…")]
                 tokio::time::sleep(duration).await
             }
             (Clock::Process, Some(virtual_time)) => virtual_time.sleep(duration).await,
