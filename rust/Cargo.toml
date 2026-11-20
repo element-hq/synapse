@@ -44,6 +44,7 @@ pyo3 = { version = "0.29.0", features = [
 pyo3-log = "0.13.4"
 pythonize = { version = "0.29.0", features = ["arbitrary_precision"] }
 regex = "1.6.0"
+ring = "0.17.14"
 sha2 = "0.11.0"
 serde = { version = "1.0.144", features = ["derive", "rc"] }
 serde_json = { version = "1.0.85", features = [

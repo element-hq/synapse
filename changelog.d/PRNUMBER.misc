@@ -1,0 +1,1 @@
+Build the federation `Authorization` header in Rust, signing the same encoded body that is sent.
