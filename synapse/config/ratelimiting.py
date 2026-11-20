@@ -253,6 +253,12 @@ class RatelimitConfig(Config):
             defaults={"per_second": 1, "burst_count": 5},
         )
 
+        self.rc_reports_failed = RatelimitSettings.parse(
+            config,
+            "rc_reports_failed",
+            defaults={"per_second": 0.1, "burst_count": 10},
+        )
+
         self.rc_user_directory = RatelimitSettings.parse(
             config,
             "rc_user_directory",
