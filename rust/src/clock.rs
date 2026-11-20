@@ -46,14 +46,14 @@ use tokio::sync::watch;
 pub struct VirtualTime {
     /// The time in milliseconds since the Unix epoch. This is a channel so
     /// that [`Clock::sleep`] can wait for the time to change.
-    millis: watch::Sender<u64>,
+    millis: watch::Sender<SystemTime>,
 }
 
 impl VirtualTime {
     /// A virtual time that starts at `millis` since the Unix epoch.
     pub fn new(millis: u64) -> Self {
         VirtualTime {
-            millis: watch::Sender::new(millis),
+            millis: watch::Sender::new(UNIX_EPOCH + Duration::from_millis(millis)),
         }
     }
 
@@ -62,12 +62,13 @@ impl VirtualTime {
     pub fn set_millis(&self, millis: u64) {
         // Only wake the sleepers if the time has changed. Python's unit
         // tests advance the reactor by zero seconds a lot.
+        let instant = UNIX_EPOCH + Duration::from_millis(millis);
         self.millis
-            .send_if_modified(|now| std::mem::replace(now, millis) != millis);
+            .send_if_modified(|now| std::mem::replace(now, instant) != instant);
     }
 
     fn now(&self) -> SystemTime {
-        UNIX_EPOCH + Duration::from_millis(*self.millis.borrow())
+        *self.millis.borrow()
     }
 
     /// Wait until the time has moved on by `duration`.
@@ -78,7 +79,7 @@ impl VirtualTime {
             u64::try_from(duration.as_nanos().div_ceil(1_000_000)).expect("duration is too large");
 
         let mut millis = self.millis.subscribe();
-        let wake_up_time = *millis.borrow() + duration_millis;
+        let wake_up_time = *millis.borrow() + Duration::from_millis(duration_millis);
 
         // Wait for the test to move the time far enough. `wait_for` checks
         // the current time before it waits, so we cannot miss a change that
