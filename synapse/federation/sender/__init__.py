@@ -844,7 +844,7 @@ class FederationSender(AbstractFederationSender):
             )
         )
         if any(prev_state_groups.get(e) is None for e in prev_event_ids):
-            logger.info(
+            logger.debug(
                 "Missing state for some of the prev events of %s; using the state "
                 "after the event to calculate its destinations",
                 event.event_id,
