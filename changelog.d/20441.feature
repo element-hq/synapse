@@ -1,0 +1,1 @@
+Add `experimental_features.msc4509_enabled`, which joins a user to a room as soon as their knock is accepted instead of leaving them an invite to accept by hand. Implements [MSC4509](https://github.com/matrix-org/matrix-spec-proposals/pull/4509).
