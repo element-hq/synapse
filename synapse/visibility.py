@@ -197,13 +197,10 @@ async def filter_and_transform_events_for_client(
         # Filter out call invites in public rooms, as this would potentially
         # ring a lot of users.
         if event.type == EventTypes.CallInvite and not event.is_state():
-            # `state_after_event` should only be None if the event is an outlier,
-            # and earlier code should filter out outliers entirely.
-            #
-            # In addition, we only create outliers locally for out-of-band
-            # invite rejections, invites received over federation, or state
-            # events needed to authorise other events. None of this applies to
-            # call invites.
+            # `state_after_event` is None only when our copy of the event carries
+            # the outlier flag (see below). Synapse only flags state events as
+            # outliers (out-of-band memberships, auth events and MSC4242 state DAG
+            # events), so a non-state call invite always has state here.
             assert state_after_event is not None
 
             room_join_rules = state_after_event.get((EventTypes.JoinRules, ""))
@@ -216,8 +213,9 @@ async def filter_and_transform_events_for_client(
         # Annotate the event with the user's membership after the event.
         #
         # Normally we just look in `state_after_event`, but if the event is an outlier
-        # we won't have such a state. The only outliers that are returned here are the
-        # user's own membership event, so we can just inspect that.
+        # we won't have such a state. An outlier here is either the user's own
+        # membership event, which we inspect directly, or an event in
+        # `always_include_ids`, which we return without a membership.
 
         user_membership_event: EventBase | None
         if event.type == EventTypes.Member and event.state_key == user_id:
@@ -225,8 +223,23 @@ async def filter_and_transform_events_for_client(
         elif state_after_event is not None:
             user_membership_event = state_after_event.get((EventTypes.Member, user_id))
         else:
-            # unreachable!
-            raise Exception("Missing state for event that is not user's own membership")
+            # We have no state for this event: our copy carries the outlier flag,
+            # so the state fetch above skipped it, but `always_include_ids` let it
+            # through anyway. Sync builds `always_include_ids` from an uncached read
+            # of `current_state_events`, so it sees an out-of-band membership event
+            # that has been de-outliered into the current state as soon as the
+            # persister commits, while the event object we were handed still comes
+            # from a cache that has not been invalidated yet. We don't know the
+            # user's membership at this point in the DAG; the spec makes
+            # `unsigned.membership` optional, so return the event unannotated rather
+            # than dropping it or failing the whole request.
+            logger.info(
+                "filter_and_transform_events_for_client: no state for always-included"
+                " event %s in room %s; returning it without a membership annotation",
+                event.event_id,
+                event.room_id,
+            )
+            return FilteredEvent(event=filtered, membership=None)
 
         user_membership = (
             user_membership_event.membership
