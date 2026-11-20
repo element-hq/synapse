@@ -21,8 +21,7 @@ use std::{
 };
 
 /// IP ranges to refuse. An address only matches ranges of its own version,
-/// as in `netaddr`, so an IPv4-mapped IPv6 address needs its own range;
-/// Synapse's config adds those.
+/// as in `netaddr`.
 pub struct IpBlocklist {
     v4: Vec<(u32, u32)>,
     v6: Vec<(u128, u128)>,
@@ -46,11 +45,19 @@ impl IpBlocklist {
             };
             match addr.parse::<IpAddr>().map_err(|_| invalid())? {
                 IpAddr::V4(addr) => {
-                    let mask = mask(len.unwrap_or(32), 32).ok_or_else(invalid)? as u32;
+                    let len = len.unwrap_or(32);
+                    if len > 32 {
+                        return Err(invalid());
+                    }
+                    let mask = u32::MAX.checked_shl(32 - len).unwrap_or(0);
                     blocklist.v4.push((u32::from(addr) & mask, mask));
                 }
                 IpAddr::V6(addr) => {
-                    let mask = mask(len.unwrap_or(128), 128).ok_or_else(invalid)?;
+                    let len = len.unwrap_or(128);
+                    if len > 128 {
+                        return Err(invalid());
+                    }
+                    let mask = u128::MAX.checked_shl(128 - len).unwrap_or(0);
                     blocklist.v6.push((u128::from(addr) & mask, mask));
                 }
             }
@@ -74,15 +81,6 @@ impl IpBlocklist {
         let ip = u128::from(ip);
         self.v6.iter().any(|&(net, mask)| ip & mask == net)
     }
-}
-
-/// The netmask for a prefix of `len` bits in a `bits`-bit address, in the
-/// low `bits` bits.
-fn mask(len: u32, bits: u32) -> Option<u128> {
-    (len <= bits).then(|| match len {
-        0 => 0,
-        len => (u128::MAX << (128 - len)) >> (128 - bits),
-    })
 }
 
 #[derive(Debug)]
