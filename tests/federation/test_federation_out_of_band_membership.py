@@ -24,7 +24,7 @@ import time
 import urllib.parse
 from http import HTTPStatus
 from typing import Any, Callable, TypeVar
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import attr
 from parameterized import parameterized
@@ -43,7 +43,7 @@ from synapse.http.types import QueryParams
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, MutableStateMap, StateMap
+from synapse.types import JsonDict, MutableStateMap, RoomStreamToken, StateMap
 from synapse.types.handlers.sliding_sync import (
     StateValues,
 )
@@ -466,10 +466,18 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self._invite_local_user_to_remote_room_and_join()
 
     @parameterized.expand(
-        [("accept invite", Membership.JOIN), ("reject invite", Membership.LEAVE)]
+        [
+            ("accept invite", Membership.JOIN, False),
+            ("reject invite", Membership.LEAVE, False),
+            ("accept invite (cold state group cache)", Membership.JOIN, True),
+            ("reject invite (cold state group cache)", Membership.LEAVE, True),
+        ]
     )
     def test_can_x_from_out_of_band_invite_after_we_are_already_participating_in_the_room(
-        self, _test_description: str, membership_action: str
+        self,
+        _test_description: str,
+        membership_action: str,
+        cold_state_group_cache: bool,
     ) -> None:
         """
         Test to make sure that we can do either a) join the room (accept the invite) or
@@ -482,6 +490,14 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         a federation `/send` transaction) and we have de-outliered the invite event.
         Previously, we would mistakenly throw an error saying the user wasn't in the
         room when they tried to join or reject the invite.
+
+        With `cold_state_group_cache`, we also make sure that the new membership is
+        sent to the remote server when the federation sender doesn't have the state
+        groups of the event's prev events cached (as is usually the case when it runs
+        on its own worker). The out-of-band invite is one of the prev events of the
+        new membership, and has no state group as it is still an outlier, so the
+        federation sender can't work out which servers are in the room from the state
+        at the prev events alone.
         """
         remote_room_join_result = self._invite_local_user_to_remote_room_and_join()
         remote_room_id = remote_room_join_result.remote_room_id
@@ -601,26 +617,37 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 # Prevent tight-looping to allow the `test_timeout` to work
                 time.sleep(0.1)
 
-        if membership_action == Membership.JOIN:
-            # User2 joins the room
-            join_event = self.helper.join(
-                remote_room_join_result.remote_room_id,
-                local_user2_id,
-                tok=local_user2_tok,
-            )
-            expected_pdu_event_id = join_event["event_id"]
-        elif membership_action == Membership.LEAVE:
-            # User2 rejects the invite
-            leave_event = self.helper.leave(
-                remote_room_join_result.remote_room_id,
-                local_user2_id,
-                tok=local_user2_tok,
-            )
-            expected_pdu_event_id = leave_event["event_id"]
-        else:
-            raise NotImplementedError(
-                "This test does not support this membership action yet"
-            )
+        federation_sender = self.hs.get_federation_sender()
+        original_notify_new_events = federation_sender.notify_new_events
+
+        def notify_new_events(max_token: RoomStreamToken) -> None:
+            if cold_state_group_cache:
+                self.store._get_state_group_for_event.invalidate_all()
+            original_notify_new_events(max_token)
+
+        with patch.object(
+            federation_sender, "notify_new_events", side_effect=notify_new_events
+        ):
+            if membership_action == Membership.JOIN:
+                # User2 joins the room
+                join_event = self.helper.join(
+                    remote_room_join_result.remote_room_id,
+                    local_user2_id,
+                    tok=local_user2_tok,
+                )
+                expected_pdu_event_id = join_event["event_id"]
+            elif membership_action == Membership.LEAVE:
+                # User2 rejects the invite
+                leave_event = self.helper.leave(
+                    remote_room_join_result.remote_room_id,
+                    local_user2_id,
+                    tok=local_user2_tok,
+                )
+                expected_pdu_event_id = leave_event["event_id"]
+            else:
+                raise NotImplementedError(
+                    "This test does not support this membership action yet"
+                )
 
         # Sync until the local user2 can see their new membership in the room
         with test_timeout(
