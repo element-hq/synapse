@@ -23,7 +23,11 @@ import logging
 import string
 from typing import TYPE_CHECKING, Iterable, Literal, Sequence
 
-from synapse.api.constants import MAX_ALIAS_LENGTH, EventTypes
+from synapse.api.constants import (
+    MAX_ALIAS_LENGTH,
+    EventContentFields,
+    EventTypes,
+)
 from synapse.api.errors import (
     AuthError,
     CodeMessageException,
@@ -35,9 +39,16 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.appservice import ApplicationService
+from synapse.event_auth import (
+    get_named_level,
+    get_power_level_event,
+    get_user_power_level,
+)
+from synapse.handlers.room_member import get_servers_from_users
 from synapse.module_api import NOT_SPAM
 from synapse.storage.databases.main.directory import RoomAliasMapping
 from synapse.types import JsonDict, Requester, RoomAlias
+from synapse.types.state import StateFilter
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -52,6 +63,7 @@ class DirectoryHandler:
         self.state = hs.get_state_handler()
         self.appservice_handler = hs.get_application_service_handler()
         self.event_creation_handler = hs.get_event_creation_handler()
+        self.event_auth_handler = hs.get_event_auth_handler()
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.config = hs.config
@@ -310,6 +322,15 @@ class DirectoryHandler:
         )
         servers_set = set(extra_servers) | set(servers)
 
+        # If the room has restricted join rules, only include servers that can actually
+        # authorise joins. Otherwise the remote may have to try a bunch of random servers
+        # first, and might fail entirely if it limits the number of attempts.
+        servers_that_can_issue_invite = await self._get_servers_that_can_issue_invite(
+            room_id
+        )
+        if servers_that_can_issue_invite is not None:
+            servers_set &= servers_that_can_issue_invite
+
         # If this server is in the list of servers, return it first.
         if self.server_name in servers_set:
             servers = [self.server_name] + [
@@ -319,6 +340,58 @@ class DirectoryHandler:
             servers = list(servers_set)
 
         return {"room_id": room_id, "servers": servers}
+
+    async def _get_servers_that_can_issue_invite(self, room_id: str) -> set[str] | None:
+        if await self.store.is_partial_state_room(room_id):
+            return None
+
+        auth_state_ids = await self._storage_controllers.state.get_current_state_ids(
+            room_id,
+            StateFilter.from_types(
+                [
+                    (EventTypes.Create, ""),
+                    (EventTypes.JoinRules, ""),
+                    (EventTypes.PowerLevels, ""),
+                ]
+            ),
+        )
+        if not auth_state_ids:
+            return None
+
+        room_version = await self.store.get_room_version(room_id)
+        if not await self.event_auth_handler.has_restricted_join_rules(
+            auth_state_ids, room_version
+        ):
+            return None
+
+        auth_events = await self.store.get_events(auth_state_ids.values())
+        current_state = {
+            state_key: event
+            for state_key, event_id in auth_state_ids.items()
+            if (event := auth_events.get(event_id)) is not None
+        }
+
+        invite_level = get_named_level(current_state, "invite", 0)
+        if get_named_level(current_state, "users_default", 0) >= invite_level:
+            return None
+
+        power_level_event = get_power_level_event(current_state)
+        assert power_level_event is not None
+        create_event = current_state[(EventTypes.Create, "")]
+        candidates = set(power_level_event.content.get("users", {}))
+        candidates.add(create_event.sender)
+        if room_version.msc4289_creator_power_enabled:
+            candidates.update(
+                create_event.content.get(EventContentFields.ADDITIONAL_CREATORS, [])
+            )
+
+        return get_servers_from_users(
+            [
+                user_id
+                for user_id in candidates
+                if get_user_power_level(user_id, current_state) >= invite_level
+            ]
+        )
 
     async def on_directory_query(self, args: JsonDict) -> JsonDict:
         room_alias = RoomAlias.from_string(args["room_alias"])
