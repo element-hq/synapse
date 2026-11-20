@@ -101,7 +101,6 @@ class ClientIpStoreTestCase(unittest.HomeserverTestCase):
             )
         )
         self.reactor.advance(200)
-        self.pump(0)
 
         result = cast(
             list[tuple[str, str, str, str | None, int]],
@@ -132,7 +131,6 @@ class ClientIpStoreTestCase(unittest.HomeserverTestCase):
             )
         )
         self.reactor.advance(10)
-        self.pump(0)
 
         result = cast(
             list[tuple[str, str, str, str | None, int]],
