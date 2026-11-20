@@ -1,0 +1,1 @@
+Fix a bug where appservices could stay down indefinitely if a failed send had already started a recoverer for one of them before the scheduler started.
