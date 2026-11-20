@@ -1,0 +1,1 @@
+Skip pushing all encrypted events to clients when [MSC4028](https://github.com/matrix-org/matrix-spec-proposals/pull/4028) is enabled but mentions are already available in plaintext from the sender (e.g. from accordingly configured mautrix bridges). Contributed by @SpiritCroc.
