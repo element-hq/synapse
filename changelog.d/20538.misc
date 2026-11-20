@@ -1,0 +1,1 @@
+Remove `requires-python` upper bound from `pyproject.toml` (Python packaging best practice).
