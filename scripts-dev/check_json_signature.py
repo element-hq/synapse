@@ -94,8 +94,8 @@ See also sign_json.py.
         print("Input json was not an object", file=sys.stderr)
         sys.exit(1)
 
-    del obj["signatures"]
-    del obj["unsigned"]
+    obj.pop("signatures", None)
+    obj.pop("unsigned", None)
     canonical = encode_canonical_json(obj)
 
     try:
@@ -105,6 +105,7 @@ See also sign_json.py.
         sys.exit(1)
 
     print("ok")
+
 
 if __name__ == "__main__":
     main()
