@@ -1,0 +1,1 @@
+Temporarily disable consistently timing-out Dependabot runs for non-security python dependency updates to save CI resources. They will be resumed after manually bumping dependencies.

@@ -3,47 +3,64 @@
 version: 2
 
 updates:
-  - # "pip" is the correct setting for poetry, per
-    # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
-    package-ecosystem: "pip"
-    directory: "/"
-    # Only bump the minimum and maximum versions of dependencies in our
-    # lockfile. The maximum version in `pyproject.toml` may be bumped, but the
-    # minimum may not be.
-    #
-    # We want to avoid bumping the minimum version in `pyproject.toml` unless
-    # necessary, as it requires our supported Linux distributions to have
-    # those versions in their repos first.
-    versioning-strategy: "increase-if-necessary"
-    # Group together all updates for this ecosystem into a single, big PR.
-    #
-    # Doing this prevents us from needing to review a PR per dependency upgrade
-    # (which can become burdensome).
-    # 
-    # Splitting up each ecosystem into their own PR (rather than putting ALL
-    # upgrades into a single PR) allows us to more quicker determine the culprit
-    # when CI fails.
-    groups:
-      all-python-dependencies:
-        applies-to: version-updates
-        patterns:
-          # Update all non-transitive dependencies.
-          - "*"
-    open-pull-requests-limit: 1
-    # Prevent pulling packages that were recently updated to help mitigate
-    # supply chain attacks. 14 days was taken from the recommendation at
-    # https://blog.yossarian.net/2025/11/21/We-should-all-be-using-dependency-cooldowns
-    # where the author noted that 9/10 attacks would have been mitigated by a
-    # two week cooldown.
-    #
-    # The cooldown only applies to general updates; security updates will still
-    # be pulled in as soon as possible.
-    cooldown:
-      default-days: 14
-    schedule:
-      interval: "monthly"
-      time: "08:00"
-      timezone: "Europe/London"
+# NOTE: Temporarily disabled as the job is consistently timing out after 55
+# minutes (nonconfigurable hard limit), due to too many dependencies to update.
+#
+# We've decided to do a manual bump of all python dependencies in
+# https://github.com/element-hq/synapse/pull/20330 in the hopes that Dependabot
+# will be able to complete a run once there are less required bumps.
+# 
+# However, merging that PR (and bumping all of our dependencies) is blocked
+# until after the ESS 26.10 LTS release (to ensure we don't bake any unexpected
+# bugs into it). 
+#
+# Once that PR is merged, try uncommenting this section again and see if
+# Dependabot can finish a full pip upgrade run.
+#
+# NOTE: Dependabot will continue to issue security updates for python
+# dependencies regardless of this configuration.
+#
+# - # "pip" is the correct setting for poetry, per
+#   # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
+#   package-ecosystem: "pip"
+#   directory: "/"
+#   # Only bump the minimum and maximum versions of dependencies in our
+#   # lockfile. The maximum version in `pyproject.toml` may be bumped, but the
+#   # minimum may not be.
+#   #
+#   # We want to avoid bumping the minimum version in `pyproject.toml` unless
+#   # necessary, as it requires our supported Linux distributions to have
+#   # those versions in their repos first.
+#   versioning-strategy: "increase-if-necessary"
+#   # Group together all updates for this ecosystem into a single, big PR.
+#   #
+#   # Doing this prevents us from needing to review a PR per dependency upgrade
+#   # (which can become burdensome).
+#   # 
+#   # Splitting up each ecosystem into their own PR (rather than putting ALL
+#   # upgrades into a single PR) allows us to more quicker determine the culprit
+#   # when CI fails.
+#   groups:
+#     all-python-dependencies:
+#       applies-to: version-updates
+#       patterns:
+#         # Update all non-transitive dependencies.
+#         - "*"
+#   open-pull-requests-limit: 1
+#   # Prevent pulling packages that were recently updated to help mitigate
+#   # supply chain attacks. 14 days was taken from the recommendation at
+#   # https://blog.yossarian.net/2025/11/21/We-should-all-be-using-dependency-cooldowns
+#   # where the author noted that 9/10 attacks would have been mitigated by a
+#   # two week cooldown.
+#   #
+#   # The cooldown only applies to general updates; security updates will still
+#   # be pulled in as soon as possible.
+#   cooldown:
+#     default-days: 14
+#   schedule:
+#     interval: "monthly"
+#     time: "08:00"
+#     timezone: "Europe/London"
 
   - package-ecosystem: "cargo"
     directory: "/"
