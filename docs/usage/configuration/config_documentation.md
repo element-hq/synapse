@@ -856,6 +856,30 @@ Example configuration:
 max_event_delay_duration: 24h
 ```
 ---
+### `delayed_events`
+
+*(object)* Options for delayed events, as per [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140).
+
+This setting has the following sub-options:
+
+* `max_delayed_events_per_user` (integer): The maximum number of delayed events a user may have scheduled at a time. Must be a non-negative integer. If 0, sending of delayed events is disallowed. Defaults to `100`.
+
+* `finalised_retention_period` (duration): How long a delayed event is retained for lookup after it has been finalised, i.e. sent, cancelled, or failed to be sent. Must be a non-negative duration. If 0, finalised delayed events are not retained.
+
+  Finalised delayed events past their retention are pruned every 5 minutes.
+
+  Defaults to `"7d"`.
+
+* `finalised_retention_limit_per_user` (integer): The maximum number of finalised delayed events retained per user, keeping the most recently finalised ones. Must be a non-negative integer. If 0, finalised delayed events are not retained. Defaults to `1000`.
+
+Example configuration:
+```yaml
+delayed_events:
+  max_delayed_events_per_user: 100
+  finalised_retention_period: 7d
+  finalised_retention_limit_per_user: 1000
+```
+---
 ### `user_types`
 
 *(object)* Configuration settings related to the user types feature.
