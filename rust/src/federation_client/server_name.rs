@@ -25,7 +25,7 @@ use std::{
 ///
 /// Kept as written: the destination goes into headers unchanged, and
 /// `Ipv6Addr`'s display form can differ from what was written.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug)]
 pub struct ServerName {
     name: String,
     ip: Option<IpAddr>,
@@ -108,13 +108,7 @@ fn is_dns_name(host: &str) -> bool {
     })
 }
 
-impl fmt::Display for ServerName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.name)
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct ServerNameError(String);
 
 impl fmt::Display for ServerNameError {
@@ -182,7 +176,7 @@ mod tests {
     #[test]
     fn written_form_is_kept() {
         let name = ServerName::parse("[1234:5678:0::ABCD]:08448").unwrap();
-        assert_eq!(name.to_string(), "[1234:5678:0::ABCD]:08448");
+        assert_eq!(name.as_str(), "[1234:5678:0::ABCD]:08448");
         assert_eq!(name.host_str(), "[1234:5678:0::ABCD]");
         assert_eq!(name.ip(), Some("1234:5678::abcd".parse().unwrap()));
     }
