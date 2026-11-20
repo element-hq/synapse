@@ -717,6 +717,7 @@ class PerDestinationQueue:
                     # kick should send it out if its online).
                     new_pdus = await filter_events_for_server(
                         self._storage_controllers,
+                        self._clock,
                         self._destination,
                         self.server_name,
                         new_pdus,
@@ -1111,6 +1112,8 @@ class StickyEventBacklogTracker:
 
         self._own_server_name = hs.hostname
 
+        self._clock = hs.get_clock()
+
         self._storage_controllers = hs.get_storage_controllers()
 
         self._store = hs.get_datastores().main
@@ -1174,6 +1177,7 @@ class StickyEventBacklogTracker:
         # Filter the sticky events
         sticky_events = await filter_events_for_server(
             self._storage_controllers,
+            self._clock,
             target_server_name=self._destination,
             local_server_name=self._own_server_name,
             events=sticky_events,

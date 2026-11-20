@@ -468,6 +468,7 @@ class FederationHandler:
             # positives from users having been erased.
             filtered_extremities = await filter_events_for_server(
                 self._storage_controllers,
+                self.clock,
                 self.server_name,
                 self.server_name,
                 events_to_check,
@@ -1869,6 +1870,7 @@ class FederationHandler:
 
         events = await filter_events_for_server(
             self._storage_controllers,
+            self.clock,
             origin,
             self.server_name,
             events,
@@ -1904,6 +1906,7 @@ class FederationHandler:
 
         events = await filter_events_for_server(
             self._storage_controllers,
+            self.clock,
             origin,
             self.server_name,
             [event],
@@ -1938,6 +1941,7 @@ class FederationHandler:
 
         missing_events = await filter_events_for_server(
             self._storage_controllers,
+            self.clock,
             origin,
             self.server_name,
             missing_events,

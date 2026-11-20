@@ -456,8 +456,8 @@ def _check_client_allowed_to_see_event(
         # > — https://github.com/matrix-org/matrix-spec-proposals/blob/3635b765267452eb452cd2ced963aee52d1fd185/proposals/4354-sticky-events.md#L101-L102
         #
         # > [^hisvis]: This ensures that newly joined servers can see sticky events sent from before they were joined to the room, regardless
-        # > of the history visibility setting. This matches the behaviour of state events.
-        # > — https://github.com/matrix-org/matrix-spec-proposals/blob/3635b765267452eb452cd2ced963aee52d1fd185/proposals/4354-sticky-events.md#L501-L502
+        # > of the history visibility setting.
+        # > — https://github.com/matrix-org/matrix-spec-proposals/blob/eec798a3ea2f37fb3ea3fb9fcd85954b7486fc0f/proposals/4354-sticky-events.md#L638
         sticky_until_ts = event.locally_sticky_until_ts()
         if (
             sticky_until_ts is not None
@@ -690,6 +690,7 @@ def get_effective_room_visibility_from_state(state: StateMap[EventBase]) -> str:
 
 async def filter_events_for_server(
     storage: StorageControllers,
+    clock: Clock,
     target_server_name: str,
     local_server_name: str,
     events: Sequence[EventBase],
@@ -703,6 +704,7 @@ async def filter_events_for_server(
 
     Args:
         storage
+        clock
         target_server_name
         local_server_name
         events
@@ -759,12 +761,32 @@ async def filter_events_for_server(
         target_server_name,
     )
 
+    now_ms = clock.time_msec()
+
     to_return = []
     for e in events:
+        # For sticky events, apply an exemption from the membership test part of history visibility rules,
+        # as long as the target server is currently joined to the room.
+        # Essentially, this alters `invited`/`joined` history visibility rules to `shared` for sticky events.
+        #
+        # > History visibility **checks** MUST NOT be applied to sticky events. This applies to all endpoints where the sticky events could be returned.
+        # > Any joined user or server is authorised to see sticky events for the duration they remain sticky.[^hisvis]
+        # > — https://github.com/matrix-org/matrix-spec-proposals/blob/3635b765267452eb452cd2ced963aee52d1fd185/proposals/4354-sticky-events.md#L101-L102
+        #
+        # > [^hisvis]: This ensures that newly joined servers can see sticky events sent from before they were joined to the room, regardless
+        # > of the history visibility setting.
+        # > — https://github.com/matrix-org/matrix-spec-proposals/blob/eec798a3ea2f37fb3ea3fb9fcd85954b7486fc0f/proposals/4354-sticky-events.md#L638
+        sticky_until_ts = e.locally_sticky_until_ts()
+        is_sticky = (
+            storage.main.hs.config.experimental.msc4354_enabled
+            and sticky_until_ts is not None
+            and now_ms < sticky_until_ts
+        )
         if event_visible_to_server(
             sender=e.sender,
             target_server_name=target_server_name,
             history_visibility=event_to_history_vis[e.event_id],
+            sticky=is_sticky,
             erased_senders=erased_senders,
             partial_state_invisible=e.event_id in partial_state_invisible_event_ids,
             memberships=list(event_to_memberships.get(e.event_id, {}).values()),
