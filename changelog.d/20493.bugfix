@@ -1,0 +1,1 @@
+Fix deleting not existing expiring events permanently blocking the deletion of all the subsequent expiring events
