@@ -1,0 +1,1 @@
+Fix a long-standing bug where a malformed `m.receipt` federation EDU from a remote server could cause well-formed receipts bundled in the same EDU to be silently dropped, logged as an unhandled exception instead of the usual "ignoring malformed input" info log.

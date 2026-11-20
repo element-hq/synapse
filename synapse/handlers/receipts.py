@@ -21,6 +21,8 @@
 import logging
 from typing import TYPE_CHECKING, AbstractSet, Callable, Iterable, Sequence
 
+from pydantic import BaseModel, ConfigDict, StrictStr, ValidationError
+
 from synapse.api.constants import Direction, EduTypes, ReceiptTypes
 from synapse.appservice import ApplicationService
 from synapse.streams import EventSource
@@ -39,6 +41,18 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class _RemoteReceiptContent(BaseModel):
+    """The expected shape of `content[room_id][receipt_type][user_id]` in an
+    incoming `m.receipt` federation EDU."""
+
+    event_ids: list[StrictStr]
+    data: JsonDict = {}
+
+    # Ignore fields we don't recognise, rather than rejecting the whole
+    # receipt: remote servers may send unstable/future fields here.
+    model_config = ConfigDict(extra="ignore")
 
 
 class ReceiptsHandler:
@@ -107,7 +121,26 @@ class ReceiptsHandler:
                 )
                 continue
 
+            if not isinstance(room_values, dict):
+                logger.info(
+                    "Ignoring malformed receipt content for room %r from server %s: expected an object, got %r",
+                    room_id,
+                    origin,
+                    room_values,
+                )
+                continue
+
             for receipt_type, users in room_values.items():
+                if not isinstance(users, dict):
+                    logger.info(
+                        "Ignoring malformed receipt content for room %r, receipt type %r from server %s: expected an object, got %r",
+                        room_id,
+                        receipt_type,
+                        origin,
+                        users,
+                    )
+                    continue
+
                 for user_id, user_values in users.items():
                     if get_domain_from_id(user_id) != origin:
                         logger.info(
@@ -125,9 +158,22 @@ class ReceiptsHandler:
                         )
                         continue
 
+                    try:
+                        receipt_content = _RemoteReceiptContent.model_validate(
+                            user_values
+                        )
+                    except ValidationError as e:
+                        logger.info(
+                            "Ignoring malformed receipt content for room %r, user %r from server %s: %s",
+                            room_id,
+                            user_id,
+                            origin,
+                            e,
+                        )
+                        continue
+
                     # Check if these receipts apply to a thread.
-                    data = user_values.get("data", {})
-                    thread_id = data.get("thread_id")
+                    thread_id = receipt_content.data.get("thread_id")
                     # If the thread ID is invalid, consider it missing.
                     if not isinstance(thread_id, str):
                         thread_id = None
@@ -137,9 +183,9 @@ class ReceiptsHandler:
                             room_id=room_id,
                             receipt_type=receipt_type,
                             user_id=user_id,
-                            event_ids=user_values["event_ids"],
+                            event_ids=receipt_content.event_ids,
                             thread_id=thread_id,
-                            data=data,
+                            data=receipt_content.data,
                         )
                     )
 
