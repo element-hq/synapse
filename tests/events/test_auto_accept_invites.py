@@ -32,11 +32,14 @@ from synapse.api.constants import EventTypes
 from synapse.api.errors import SynapseError
 from synapse.config._base import RootConfig
 from synapse.config.auto_accept_invites import AutoAcceptInvitesConfig
-from synapse.events.auto_accept_invites import InviteAutoAccepter
+from synapse.events.auto_accept_invites import (
+    UNSTABLE_KEY_BUNDLE_CLAIM_TYPE,
+    InviteAutoAccepter,
+)
 from synapse.handlers.sync import JoinedSyncResult, SyncRequestKey
 from synapse.module_api import ModuleApi
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.types import StreamToken, UserID, UserInfo, create_requester
 from synapse.util.clock import Clock
@@ -58,9 +61,141 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
 
     servlets = [
         admin.register_servlets,
+        knock.register_servlets,
         login.register_servlets,
         room.register_servlets,
     ]
+
+    def _create_knockable_room_with_pending_knock(
+        self,
+    ) -> tuple[str, str, str, str]:
+        """Create a knockable room and have a second local user knock on it.
+
+        Returns a tuple of (room_id, creator_id, creator_tok, knocker_id).
+        """
+        creator_id = self.register_user("creator", "pass")
+        creator_tok = self.login("creator", "pass")
+
+        knocker_id = self.register_user("knocker", "pass")
+        knocker_tok = self.login("knocker", "pass")
+
+        room_id = self.helper.create_room_as(
+            creator_id,
+            is_public=False,
+            tok=creator_tok,
+        )
+        self.helper.send_state(
+            room_id,
+            EventTypes.JoinRules,
+            {"join_rule": "knock"},
+            tok=creator_tok,
+        )
+
+        self.helper.knock(room=room_id, user=knocker_id, tok=knocker_tok)
+
+        return room_id, creator_id, creator_tok, knocker_id
+
+    @override_config(
+        {
+            "auto_accept_invites": {
+                "enabled_for_accepted_knocks": True,
+            },
+        }
+    )
+    def test_auto_join_on_accepted_knock(self) -> None:
+        """With `enabled_for_accepted_knocks` on, a user whose knock is
+        accepted (invited by a room member) is automatically joined to the
+        room."""
+        (
+            room_id,
+            creator_id,
+            creator_tok,
+            knocker_id,
+        ) = self._create_knockable_room_with_pending_knock()
+
+        # The creator accepts the knock by inviting the knocker.
+        self.helper.invite(
+            room_id,
+            creator_id,
+            knocker_id,
+            tok=creator_tok,
+        )
+
+        # The knocker is automatically joined to the room.
+        join_updates, _ = sync_join(self, knocker_id)
+        self.assertEqual(len(join_updates), 1)
+        self.assertEqual(join_updates[0].room_id, room_id)
+
+        # The join was server-initiated, so the knocker's device should have
+        # been designated (via a to-device message) to eagerly claim any
+        # MSC4268 room key bundle for the room.
+        devices = self.get_success(
+            self.hs.get_datastores().main.get_devices_by_user(knocker_id)
+        )
+        self.assertEqual(len(devices), 1, devices)
+        device_id = next(iter(devices))
+        to_stream_id = self.hs.get_datastores().main.get_to_device_stream_token()
+        messages, _ = self.get_success(
+            self.hs.get_datastores().main.get_messages_for_device(
+                knocker_id, device_id, 0, to_stream_id
+            )
+        )
+        claim_messages = [
+            m for m in messages if m["type"] == UNSTABLE_KEY_BUNDLE_CLAIM_TYPE
+        ]
+        self.assertEqual(len(claim_messages), 1, messages)
+        self.assertEqual(claim_messages[0]["content"], {"room_id": room_id})
+        self.assertEqual(claim_messages[0]["sender"], knocker_id)
+
+    def test_no_auto_join_on_accepted_knock_by_default(self) -> None:
+        """With `enabled_for_accepted_knocks` off (the default), an accepted
+        knock stays an ordinary invite."""
+        (
+            room_id,
+            creator_id,
+            creator_tok,
+            knocker_id,
+        ) = self._create_knockable_room_with_pending_knock()
+
+        self.helper.invite(
+            room_id,
+            creator_id,
+            knocker_id,
+            tok=creator_tok,
+        )
+
+        join_updates, _ = sync_join(self, knocker_id)
+        self.assertEqual(len(join_updates), 0)
+
+    @override_config(
+        {
+            "auto_accept_invites": {
+                "enabled_for_accepted_knocks": True,
+            },
+        }
+    )
+    def test_plain_invite_not_auto_accepted(self) -> None:
+        """A plain invite (no prior knock) is not auto-accepted just because
+        the accepted-knocks logic is enabled."""
+        inviting_user_id = self.register_user("inviter2", "pass")
+        inviting_user_tok = self.login("inviter2", "pass")
+
+        invited_user_id = self.register_user("invitee2", "pass")
+        self.login("invitee2", "pass")
+
+        room_id = self.helper.create_room_as(
+            inviting_user_id, is_public=False, tok=inviting_user_tok
+        )
+
+        self.helper.invite(
+            room_id,
+            inviting_user_id,
+            invited_user_id,
+            tok=inviting_user_tok,
+        )
+
+        join_updates, _ = sync_join(self, invited_user_id)
+        self.assertEqual(len(join_updates), 0)
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         hs = self.setup_test_homeserver()
@@ -561,7 +696,12 @@ class InviteAutoAccepterInternalTestCase(TestCase):
     """
 
     def setUp(self) -> None:
-        self.module = create_module()
+        # These tests exercise the plain-invite acceptance path, which is
+        # gated on `enabled` in `on_new_event` (the accepted-knock path is
+        # what's on by default).
+        self.module = create_module(
+            config_override={"auto_accept_invites": {"enabled": True}}
+        )
         self.user_id = "@peter:test"
         self.invitee = "@lesley:test"
         self.remote_invitee = "@thomas:remote"
@@ -772,6 +912,11 @@ class MockEvent:
         """Checks if the event is a state event by checking if it has a state key."""
         return self.state_key is not None
 
+    def auth_event_ids(self) -> list[str]:
+        """The module walks the auth events when checking whether an invite
+        accepts a knock; a mocked event has none."""
+        return []
+
     @property
     def membership(self) -> str:
         """Extracts the membership from the event. Should only be called on an event
@@ -800,6 +945,12 @@ def create_module(
     module_api = Mock(spec=ModuleApi)
     module_api.is_mine.side_effect = lambda a: a.split(":")[1] == "test"
     module_api.worker_name = worker_name
+    # The module reaches into the datastore to walk an invite's auth events;
+    # none of the mocked events have any.
+    module_api._store = Mock()
+    module_api._store.get_event.side_effect = lambda *_args, **_kwargs: (
+        make_awaitable(None)
+    )
     module_api.sleep.return_value = lambda *_args, **_kwargs: make_awaitable(None)
     module_api.get_userinfo_by_id.return_value = UserInfo(
         user_id=UserID.from_string("@user:test"),
