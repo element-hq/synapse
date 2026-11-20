@@ -1,0 +1,1 @@
+Fix a bug where a server notice could re-invite a user to a room they had left, or fail with a `403 Unknown room` error, after the previous server notice room was deleted.
