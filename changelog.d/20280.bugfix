@@ -1,0 +1,1 @@
+Fix a failed query to an application service for third-party protocol metadata being cached for an hour, hiding the bridge from third-party lookups.
