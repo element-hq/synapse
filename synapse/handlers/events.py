@@ -24,7 +24,7 @@ import random
 from typing import TYPE_CHECKING, Iterable
 
 from synapse.api.constants import EduTypes, EventTypes, Membership, PresenceState
-from synapse.api.errors import AuthError, SynapseError
+from synapse.api.errors import AuthError, Codes, SynapseError
 from synapse.events.utils import FilteredEvent
 from synapse.handlers.presence import format_user_presence_state
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
@@ -147,6 +147,7 @@ class EventHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
+        self.msc4406_enabled = hs.config.experimental.msc4406_enabled
 
     async def get_event(
         self,
@@ -168,6 +169,7 @@ class EventHandler:
         Returns:
             An event, or None if there is no event matching this ID.
         Raises:
+            SynapseError: if the sender of the event is ignored by the user
             AuthError: if the user does not have the rights to inspect this event.
         """
         redact_behaviour = (
@@ -197,6 +199,18 @@ class EventHandler:
         )
 
         if not filtered:
+            if self.msc4406_enabled:
+                ignore_list = await self._storage_controllers.main.ignored_users(
+                    user.to_string()
+                )
+                if event.sender in ignore_list and is_user_in_room:
+                    raise SynapseError(
+                        404,
+                        "The sender of this event is ignored.",
+                        Codes.SENDER_IGNORED,
+                        {"sender": event.sender},
+                    )
+
             raise AuthError(403, "You don't have permission to access that event.")
 
         return filtered[0]
