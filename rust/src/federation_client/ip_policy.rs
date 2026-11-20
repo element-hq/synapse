@@ -29,8 +29,10 @@ pub struct IpBlocklist {
 }
 
 impl IpBlocklist {
-    /// Ranges such as `127.0.0.0/8` or `::1`. `0.0.0.0` and `::` are always
-    /// blocked.
+    /// Ranges as `netaddr`'s `IPSet.iter_cidrs()` gives them, such as
+    /// `127.0.0.0/8` or `::1/128`; Synapse's `generate_ip_set` has already
+    /// added the IPv4-mapped, IPv4-compatible and 6to4 ranges. `0.0.0.0` and
+    /// `::` are always blocked.
     pub fn from_cidrs<'a>(cidrs: impl IntoIterator<Item = &'a str>) -> Result<Self, CidrError> {
         let mut blocklist = IpBlocklist {
             v4: vec![(0, u32::MAX)],
