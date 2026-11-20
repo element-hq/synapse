@@ -65,7 +65,7 @@ pub struct CidrError(String);
 
 impl fmt::Display for CidrError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "not a CIDR range from IPSet.iter_cidrs(): {}", self.0)
+        write!(f, "invalid CIDR range: {}", self.0)
     }
 }
 
@@ -96,8 +96,6 @@ mod tests {
         }
     }
 
-    /// Nothing is built in: `0.0.0.0` and `::` are blocked when the config
-    /// says so, as Synapse's always does.
     #[test]
     fn unspecified_blocked_only_when_listed() {
         let empty = blocklist(&[]);
