@@ -35,7 +35,6 @@ from typing import (
     Callable,
     Final,
     Iterable,
-    Iterator,
     Pattern,
     Protocol,
     cast,
@@ -78,7 +77,6 @@ from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
-from synapse.util.iterutils import chunk_seq
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -741,22 +739,21 @@ class RootOptionsRedirectResource(OptionsResource, RootRedirect):
 
 
 @implementer(interfaces.IPushProducer)
-class _ByteProducer:
+class _FinishOnFlushProducer:
     """
-    Iteratively write bytes to the request.
+    Writes the whole response body to the request in one go, and then finishes
+    the request once the transport has flushed it.
+
+    We only register as a producer so that the transport tells us (via
+    `resumeProducing`) when it has drained its send buffer. Calling
+    `Request.finish` while the body is still buffered starts Twisted's idle
+    connection timeout, which can then close the connection before a slow
+    client has received the whole response.
+    c.f. https://github.com/twisted/twisted/issues/12498
     """
 
-    # The minimum number of bytes for each chunk. Note that the last chunk will
-    # usually be smaller than this.
-    min_chunk_size = 1024
-
-    def __init__(
-        self,
-        request: Request,
-        iterator: Iterator[bytes],
-    ):
+    def __init__(self, request: Request, body: bytes):
         self._request: Request | None = request
-        self._iterator = iterator
         self._paused = False
 
         # Start a span for writing bytes to the request. We manually manage its
@@ -775,20 +772,18 @@ class _ByteProducer:
             # the underlying Twisted code calls self._request.channel.registerProducer,
             # however self._request.channel will be None if the connection was lost.
             logger.info("Connection disconnected before response was written: %r", e)
-
-            # We drop our references to data we'll not use.
             self.stopProducing()
-        else:
-            # Start producing if `registerProducer` was successful
-            self.resumeProducing()
-
-    def _send_data(self, data: list[bytes]) -> None:
-        """
-        Send a list of bytes as a chunk of a response.
-        """
-        if not data or not self._request:
             return
-        self._request.write(b"".join(data))
+
+        # Hand the whole body to the transport, rather than drip-feeding it: the
+        # transport only asks for more once its (small) buffer is completely
+        # empty, which limits throughput to one buffer's worth per reactor tick.
+        self._request.write(body)
+
+        # If the transport had to buffer the body it will have paused us, and
+        # will resume us once it has drained. Otherwise we can finish now.
+        if not self._paused:
+            self.resumeProducing()
 
     def pauseProducing(self) -> None:
         if self._span is not None:
@@ -796,50 +791,18 @@ class _ByteProducer:
         self._paused = True
 
     def resumeProducing(self) -> None:
-        # We've stopped producing in the meantime (note that this might be
-        # re-entrant after calling write).
         if not self._request:
             return
-
-        self._paused = False
 
         if self._span is not None:
             self._span.log_kv({"event": "producer_resumed"})
 
-        # Write until there's backpressure telling us to stop.
-        while not self._paused:
-            # Get the next chunk and write it to the request.
-            #
-            # The output of the JSON encoder is buffered and coalesced until
-            # min_chunk_size is reached. This is because JSON encoders produce
-            # very small output per iteration and the Request object converts
-            # each call to write() to a separate chunk. Without this there would
-            # be an explosion in bytes written (e.g. b"{" becoming "1\r\n{\r\n").
-            #
-            # Note that buffer stores a list of bytes (instead of appending to
-            # bytes) to hopefully avoid many allocations.
-            buffer = []
-            buffered_bytes = 0
-            while buffered_bytes < self.min_chunk_size:
-                try:
-                    data = next(self._iterator)
-                    buffer.append(data)
-                    buffered_bytes += len(data)
-                except StopIteration:
-                    # The entire JSON object has been serialized, write any
-                    # remaining data, finalize the producer and the request, and
-                    # clean-up any references.
-                    self._send_data(buffer)
-                    self._request.unregisterProducer()
-                    self._request.finish()
-                    self.stopProducing()
-                    return
-
-            self._send_data(buffer)
+        self._request.unregisterProducer()
+        self._request.finish()
+        self.stopProducing()
 
     def stopProducing(self) -> None:
-        # Clear a circular reference and drop references to the data.
-        self._iterator = iter(())
+        # Clear a circular reference.
         self._request = None
 
         if self._span is not None:
@@ -999,29 +962,12 @@ async def _async_write_json_to_request_in_thread(
 
 
 def _write_bytes_to_request(request: Request, bytes_to_write: bytes) -> None:
-    """Writes the bytes to the request using an appropriate producer.
+    """Writes the bytes to the request and finishes it once they've been flushed.
 
     Note: This should be used instead of `Request.write` to correctly handle
     large response bodies.
     """
-
-    # The problem with dumping all of the response into the `Request` object at
-    # once (via `Request.write`) is that doing so starts the timeout for the
-    # next request to be received: so if it takes longer than 60s to stream back
-    # the response to the client, the client never gets it.
-    # c.f https://github.com/twisted/twisted/issues/12498
-    #
-    # One workaround is to use a `Producer`; then the timeout is only
-    # started once all of the content is sent over the TCP connection.
-
-    # To make sure we don't write all of the bytes at once we split it up into
-    # chunks.
-    chunk_size = 4096
-    bytes_generator = chunk_seq(bytes_to_write, chunk_size)
-
-    # We use a `_ByteProducer` here rather than `NoRangeStaticProducer` as the
-    # unit tests can't cope with being given a pull producer.
-    _ByteProducer(request, bytes_generator)
+    _FinishOnFlushProducer(request, bytes_to_write)
 
 
 def set_cors_headers(request: "SynapseRequest") -> None:
