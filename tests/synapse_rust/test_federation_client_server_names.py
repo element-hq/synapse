@@ -15,9 +15,8 @@ import random
 import string
 
 from synapse.http.federation.matrix_federation_agent import _is_ip_literal
-from synapse.http.matrixfederationclient import _PORT
+from synapse.http.matrixfederationclient import _parse_destination_strict
 from synapse.synapse_rust.federation_client import _parse_server_name
-from synapse.util.stringutils import parse_and_validate_server_name
 
 from tests import unittest
 
@@ -85,15 +84,10 @@ SERVER_NAMES = [
 
 
 def python_parse(name: str) -> tuple[str, int | None, str] | None:
-    """What the federation client accepts: Synapse's validation plus the port
-    grammar `_send_request` enforces."""
+    """What the federation client accepts, classified as its agent does."""
     try:
-        host, port = parse_and_validate_server_name(name)
+        host, port = _parse_destination_strict(name)
     except ValueError:
-        return None
-    if port is not None and (
-        not _PORT.fullmatch(name.rsplit(":", 1)[1]) or port > 65535
-    ):
         return None
     if host.startswith("["):
         kind = "ipv6"
@@ -112,15 +106,20 @@ def rust_parse(name: str) -> tuple[str, int | None, str] | None:
 
 
 class ServerNameTestCase(unittest.TestCase):
-    def test_corpus_matches_python(self) -> None:
-        for name in SERVER_NAMES:
+    def assert_match_python(self, names: list[str]) -> None:
+        for name in names:
             with self.subTest(name=name):
                 self.assertEqual(rust_parse(name), python_parse(name))
+
+    def test_corpus_matches_python(self) -> None:
+        self.assert_match_python(SERVER_NAMES)
 
     def test_random_names_match_python(self) -> None:
         rng = random.Random(2026)
         alphabet = string.ascii_letters + string.digits + ".-:[]_+ %\u00e9\n"
-        for _ in range(5000):
-            name = "".join(rng.choice(alphabet) for _ in range(rng.randrange(12)))
-            with self.subTest(name=name):
-                self.assertEqual(rust_parse(name), python_parse(name))
+        self.assert_match_python(
+            [
+                "".join(rng.choice(alphabet) for _ in range(rng.randrange(12)))
+                for _ in range(5000)
+            ]
+        )

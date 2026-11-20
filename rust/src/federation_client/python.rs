@@ -14,10 +14,12 @@
 
 //! The Python bindings
 
+use std::net::IpAddr;
+
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyBytes};
 
 use crate::federation_client::{
-    server_name::{Host, ServerName},
+    server_name::ServerName,
     signing::{RequestSigner, SigningInput},
 };
 
@@ -89,10 +91,10 @@ fn to_ascii<'a>(name: &str, bytes: &'a [u8]) -> PyResult<&'a str> {
 #[pyfunction(name = "_parse_server_name")]
 fn parse_server_name(name: &str) -> PyResult<(String, Option<u16>, &'static str)> {
     let parsed = ServerName::parse(name).map_err(|e| PyValueError::new_err(e.to_string()))?;
-    let kind = match parsed.host() {
-        Host::Dns => "dns",
-        Host::Ipv4(_) => "ipv4",
-        Host::Ipv6(_) => "ipv6",
+    let kind = match parsed.ip() {
+        None => "dns",
+        Some(IpAddr::V4(_)) => "ipv4",
+        Some(IpAddr::V6(_)) => "ipv6",
     };
     Ok((parsed.host_str().to_owned(), parsed.port(), kind))
 }

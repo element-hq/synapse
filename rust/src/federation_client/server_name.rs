@@ -16,16 +16,8 @@
 
 use std::{
     fmt,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv6Addr},
 };
-
-/// The hostname part of a [`ServerName`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Host {
-    Dns,
-    Ipv4(Ipv4Addr),
-    Ipv6(Ipv6Addr),
-}
 
 /// A server name that Synapse's `parse_and_validate_server_name` accepts and
 /// whose port, if any, is 1–5 ASCII digits up to 65535, as `_send_request`
@@ -36,7 +28,7 @@ pub enum Host {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ServerName {
     name: String,
-    host: Host,
+    ip: Option<IpAddr>,
     port: Option<u16>,
 }
 
@@ -51,20 +43,22 @@ impl ServerName {
             _ => (name, None),
         };
 
-        let host = if let Some(inner) = host_str.strip_prefix('[') {
+        let ip = if let Some(inner) = host_str.strip_prefix('[') {
             let inner = inner.strip_suffix(']').ok_or_else(invalid)?;
-            Host::Ipv6(inner.parse().map_err(|_| invalid())?)
-        } else if !is_dns_name(host_str) {
-            return Err(invalid());
+            Some(IpAddr::V6(
+                inner.parse::<Ipv6Addr>().map_err(|_| invalid())?,
+            ))
         } else if let Ok(ip) = host_str.parse() {
-            Host::Ipv4(ip)
+            Some(IpAddr::V4(ip))
+        } else if is_dns_name(host_str) {
+            None
         } else {
-            Host::Dns
+            return Err(invalid());
         };
 
         Ok(ServerName {
             name: name.to_owned(),
-            host,
+            ip,
             port,
         })
     }
@@ -84,27 +78,19 @@ impl ServerName {
         }
     }
 
-    pub fn host(&self) -> Host {
-        self.host
-    }
-
     pub fn port(&self) -> Option<u16> {
         self.port
     }
 
     /// The address, if the host is an IP literal.
     pub fn ip(&self) -> Option<IpAddr> {
-        match self.host {
-            Host::Dns => None,
-            Host::Ipv4(ip) => Some(ip.into()),
-            Host::Ipv6(ip) => Some(ip.into()),
-        }
+        self.ip
     }
 }
 
 /// 1–5 ASCII digits, at most 65535.
 fn parse_port(port: &str) -> Option<u16> {
-    if (1..=5).contains(&port.len()) && port.bytes().all(|b| b.is_ascii_digit()) {
+    if port.len() <= 5 && port.bytes().all(|b| b.is_ascii_digit()) {
         port.parse().ok()
     } else {
         None
@@ -146,44 +132,31 @@ mod tests {
     /// Spec: [server name](https://spec.matrix.org/latest/appendices/#server-name) examples.
     #[test]
     fn spec_examples() {
-        let cases: [(&str, &str, Host, Option<u16>); 6] = [
-            ("matrix.org", "matrix.org", Host::Dns, None),
-            ("matrix.org:8888", "matrix.org", Host::Dns, Some(8888)),
-            (
-                "1.2.3.4",
-                "1.2.3.4",
-                Host::Ipv4(Ipv4Addr::new(1, 2, 3, 4)),
-                None,
-            ),
-            (
-                "1.2.3.4:1234",
-                "1.2.3.4",
-                Host::Ipv4(Ipv4Addr::new(1, 2, 3, 4)),
-                Some(1234),
-            ),
-            (
-                "[1234:5678::abcd]",
-                "[1234:5678::abcd]",
-                Host::Ipv6("1234:5678::abcd".parse().unwrap()),
-                None,
-            ),
+        let v4: Option<IpAddr> = Some("1.2.3.4".parse().unwrap());
+        let v6: Option<IpAddr> = Some("1234:5678::abcd".parse().unwrap());
+        let cases = [
+            ("matrix.org", "matrix.org", None, None),
+            ("matrix.org:8888", "matrix.org", None, Some(8888)),
+            ("1.2.3.4", "1.2.3.4", v4, None),
+            ("1.2.3.4:1234", "1.2.3.4", v4, Some(1234)),
+            ("[1234:5678::abcd]", "[1234:5678::abcd]", v6, None),
             (
                 "[1234:5678::abcd]:5678",
                 "[1234:5678::abcd]",
-                Host::Ipv6("1234:5678::abcd".parse().unwrap()),
+                v6,
                 Some(5678),
             ),
         ];
-        for (name, host_str, host, port) in cases {
+        for (name, host_str, ip, port) in cases {
             let parsed = ServerName::parse(name).unwrap();
             assert_eq!(
                 (
                     parsed.as_str(),
                     parsed.host_str(),
-                    parsed.host(),
+                    parsed.ip(),
                     parsed.port()
                 ),
-                (name, host_str, host, port),
+                (name, host_str, ip, port),
                 "{name}"
             );
         }
