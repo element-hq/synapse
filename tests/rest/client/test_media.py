@@ -30,6 +30,7 @@ from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
+import PIL.features
 from matrix_common.types.mxc_uri import MXCUri
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
@@ -73,6 +74,7 @@ from tests.media.test_media_storage import (
     SVG,
     TestImage,
     empty_file,
+    small_avif,
     small_cmyk_jpeg,
     small_lossless_webp,
     small_png,
@@ -2051,6 +2053,11 @@ test_images = [
     small_lossless_webp,
     empty_file,
     SVG,
+    # FIXME: conditionally test AVIF because Debian trixie ships
+    # Pillow 11.1.0, lower then the 11.2.1 required for AVIF support.
+    # Remove conditional test when supported distros starts shipping
+    # Pillow newer than 11.2.1
+    *([small_avif] if PIL.features.check("avif") else []),
 ]
 input_values = [(x,) for x in test_images]
 
@@ -2544,7 +2551,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_UNKNOWN",
-                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/client/v1/media/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
+                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/client/v1/media/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png, image/avif) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
                 },
             )
         else:
