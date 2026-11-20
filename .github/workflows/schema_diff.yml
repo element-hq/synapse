@@ -1,4 +1,4 @@
-name: Schema Diff  # If this is changed, need to update `schema_diff_comment.yml` as well
+name: Schema Diff # If this is changed, need to update `schema_diff_comment.yml` as well
 
 on:
   pull_request:
@@ -6,6 +6,9 @@ on:
       - synapse/storage/schema/*/delta/**
       - synapse/storage/schema/*/full_schemas/**
       - .github/workflows/schema_diff.yml
+
+env:
+  LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -82,9 +85,9 @@ jobs:
 
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           poetry-version: "2.4.1"
           extras: "postgres"
-          python-version: "3.x"
 
       - name: Wait for Postgres to be up
         run: |
