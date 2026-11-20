@@ -31,3 +31,13 @@ class RequestSigner:
                 not ASCII, or the header would hold a byte that is not printable
                 ASCII.
         """
+
+def _parse_server_name(name: str) -> tuple[str, int | None, str]:
+    """Test-only: parse `name` as the federation client does.
+
+    Returns:
+        The host as written, the port, and "dns", "ipv4" or "ipv6".
+
+    Raises:
+        ValueError: if the federation client would refuse `name`.
+    """

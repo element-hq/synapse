@@ -17,6 +17,7 @@
 //! Only [`python`] touches pyo3; every other module is plain Rust.
 
 pub mod python;
+pub mod server_name;
 pub mod signing;
 
 pub use python::register_module;

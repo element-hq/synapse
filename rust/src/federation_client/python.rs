@@ -16,12 +16,16 @@
 
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyBytes};
 
-use crate::federation_client::signing::{RequestSigner, SigningInput};
+use crate::federation_client::{
+    server_name::{Host, ServerName},
+    signing::{RequestSigner, SigningInput},
+};
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "federation_client")?;
     child_module.add_class::<PyRequestSigner>()?;
+    child_module.add_function(wrap_pyfunction!(_parse_server_name, &child_module)?)?;
     m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
@@ -79,4 +83,16 @@ fn to_ascii<'a>(name: &str, bytes: &'a [u8]) -> PyResult<&'a str> {
         .ok()
         .filter(|s| s.is_ascii())
         .ok_or_else(|| PyValueError::new_err(format!("{name} is not ASCII")))
+}
+
+/// Test-only (D27): `(host as written, port, "dns" | "ipv4" | "ipv6")`.
+#[pyfunction]
+fn _parse_server_name(name: &str) -> PyResult<(String, Option<u16>, &'static str)> {
+    let parsed = ServerName::parse(name).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let kind = match parsed.host() {
+        Host::Dns => "dns",
+        Host::Ipv4(_) => "ipv4",
+        Host::Ipv6(_) => "ipv6",
+    };
+    Ok((parsed.host_str().to_owned(), parsed.port(), kind))
 }
