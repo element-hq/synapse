@@ -1,0 +1,1 @@
+Return a `M_NOT_FOUND` error response, rather than an empty body, when a remote server requests an unknown event over federation (`GET /_matrix/federation/v1/event/<event_id>`).
