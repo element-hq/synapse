@@ -422,3 +422,21 @@ class KeyChangesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
         self.assertEqual(channel.json_body["changed"], [bob_id])
         self.assertEqual(channel.json_body["left"], [])
+
+    def test_missing_to_param(self) -> None:
+        """The `to` query parameter is required by the spec."""
+        alice_id = self.register_user("alice", "wonderland")
+        alice_token = self.login("alice", "wonderland")
+        self.helper.create_room_as(alice_id, tok=alice_token)
+
+        channel = self.make_request("GET", "/sync", access_token=alice_token)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        next_batch = channel.json_body["next_batch"]
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/keys/changes?from={next_batch}",
+            access_token=alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], "M_MISSING_PARAM")
