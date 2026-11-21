@@ -775,9 +775,7 @@ class FederationServer(FederationBase):
             [*pdus, *auth_chain],
         )
 
-    async def on_pdu_request(
-        self, origin: str, event_id: str
-    ) -> tuple[int, JsonDict]:
+    async def on_pdu_request(self, origin: str, event_id: str) -> tuple[int, JsonDict]:
         pdu = await self.handler.get_persisted_pdu(origin, event_id)
 
         if pdu:
