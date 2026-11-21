@@ -1,1 +1,1 @@
-Fix the documentation of the `allowed_lifetime_min` retention option, which bounds `max_lifetime` rather than `min_lifetime`.
+Fix the documentation of the `allowed_lifetime_min` and `allowed_lifetime_max` retention options, and remove the `min_lifetime` retention option, which Synapse doesn't act on, from the documentation.
