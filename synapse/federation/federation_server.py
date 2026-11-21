@@ -775,9 +775,7 @@ class FederationServer(FederationBase):
             [*pdus, *auth_chain],
         )
 
-    async def on_pdu_request(
-        self, origin: str, event_id: str
-    ) -> tuple[int, JsonDict | str]:
+    async def on_pdu_request(self, origin: str, event_id: str) -> tuple[int, JsonDict]:
         pdu = await self.handler.get_persisted_pdu(origin, event_id)
 
         if pdu:
@@ -786,7 +784,7 @@ class FederationServer(FederationBase):
             )
             return 200, self._transaction_dict_from_pdus([pdu])
         else:
-            return 404, ""
+            raise NotFoundError("Event not found")
 
     async def on_query_request(
         self, query_type: str, args: dict[str, str]

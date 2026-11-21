@@ -156,7 +156,7 @@ class FederationEventServlet(BaseFederationServerServlet):
         content: Literal[None],
         query: dict[bytes, list[bytes]],
         event_id: str,
-    ) -> tuple[int, JsonDict | str]:
+    ) -> tuple[int, JsonDict]:
         return await self.handler.on_pdu_request(origin, event_id)
 
 
