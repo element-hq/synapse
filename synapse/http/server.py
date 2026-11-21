@@ -1045,7 +1045,7 @@ def set_cors_headers(request: "SynapseRequest") -> None:
         )
         request.setHeader(
             b"Access-Control-Expose-Headers",
-            b"Synapse-Trace-Id, Server, ETag",
+            b"Synapse-Trace-Id, Server, ETag, Retry-After",
         )
     else:
         request.setHeader(
@@ -1054,7 +1054,7 @@ def set_cors_headers(request: "SynapseRequest") -> None:
         )
         request.setHeader(
             b"Access-Control-Expose-Headers",
-            b"Synapse-Trace-Id, Server",
+            b"Synapse-Trace-Id, Server, Retry-After",
         )
 
 
