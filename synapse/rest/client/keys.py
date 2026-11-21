@@ -543,7 +543,10 @@ class SigningKeyUploadServlet(RestServlet):
             # With auth delegation, UIA is not possible. Instead, the auth service has to
             # explicitly mark the master key as replaceable.
             if self.hs.config.mas.enabled:
-                if not master_key_updatable_without_uia:
+                if (
+                    not master_key_updatable_without_uia
+                    and not await self._can_reset_without_approval(user_id)
+                ):
                     assert isinstance(self.auth, MasDelegatedAuth)
                     url = await self.auth.account_management_url()
                     url = f"{url}?action=org.matrix.cross_signing_reset"
@@ -586,6 +589,21 @@ class SigningKeyUploadServlet(RestServlet):
 
         result = await self.e2e_keys_handler.upload_signing_keys_for_user(user_id, body)
         return 200, result
+
+    async def _can_reset_without_approval(self, user_id: str) -> bool:
+        """Whether the user may replace their cross-signing keys without approving it
+        in MAS, because they have no way to verify their device anyway."""
+        if not self.hs.config.mas.skip_cross_signing_reset_approval_without_verification_methods:
+            return False
+
+        if await self.e2e_keys_handler.has_verification_methods(user_id):
+            return False
+
+        logger.info(
+            "Allowing %s to reset cross-signing without approval: no verification methods",
+            user_id,
+        )
+        return True
 
 
 class SignaturesUploadServlet(RestServlet):

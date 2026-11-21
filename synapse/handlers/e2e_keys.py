@@ -81,6 +81,7 @@ class E2eKeysHandler:
         self.store = hs.get_datastores().main
         self.federation = hs.get_federation_client()
         self.device_handler = hs.get_device_handler()
+        self._account_data_handler = hs.get_account_data_handler()
         self._appservice_handler = hs.get_application_service_handler()
         self.is_mine = hs.is_mine
         self.clock = hs.get_clock()
@@ -1602,6 +1603,30 @@ class E2eKeysHandler:
             return exists, False
         else:
             return exists, self.clock.time_msec() < ts_replacable_without_uia_before
+
+    async def has_verification_methods(self, user_id: str) -> bool:
+        """Checks if the user has a way to verify a device with their current identity.
+
+        That is either a device signed by their self-signing key, or their master
+        cross-signing key in secret storage (recovery). As clients wipe secret storage
+        before resetting their identity, having had the master key in secret storage
+        counts too.
+
+        Args:
+            user_id: The user to check
+        """
+        self_signing_key = await self.store.get_e2e_cross_signing_key(
+            user_id, "self_signing"
+        )
+        if self_signing_key is not None:
+            for key_id in self_signing_key.get("keys", {}):
+                if await self.store.has_device_signed_by_key(user_id, key_id):
+                    return True
+
+        if await self._account_data_handler.has_master_key_in_secret_storage(user_id):
+            return True
+
+        return await self.store.was_master_cross_signing_key_in_recovery(user_id)
 
     async def has_different_keys(self, user_id: str, body: JsonDict) -> bool:
         """

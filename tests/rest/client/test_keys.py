@@ -19,6 +19,7 @@
 #
 #
 from http import HTTPStatus
+from unittest.mock import AsyncMock
 
 from signedjson.key import (
     encode_verify_key_base64,
@@ -26,14 +27,20 @@ from signedjson.key import (
     get_verify_key,
 )
 from signedjson.sign import sign_json
+from signedjson.types import SigningKey
+
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import keys, login, room, sync
-from synapse.types import JsonDict
+from synapse.server import HomeServer
+from synapse.types import JsonDict, create_requester
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.http.server._base import make_request_with_cancellation_test
+from tests.server import FakeChannel
 
 
 class KeyUploadTestCase(unittest.HomeserverTestCase):
@@ -380,7 +387,17 @@ class KeyQueryTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], Codes.BAD_JSON)
 
 
+MAS_CONFIG: JsonDict = {
+    "enabled": True,
+    "endpoint": "http://localhost:8080/",
+    "secret": "shared_secret",
+    "skip_cross_signing_reset_approval_without_verification_methods": True,
+}
+
+
 class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
+    """Tests replacing cross-signing keys with MAS, which normally needs approval."""
+
     servlets = [
         admin.register_servlets,
         keys.register_servlets,
@@ -388,6 +405,305 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
 
     OIDC_ADMIN_TOKEN = "_oidc_admin_token"
     ACCOUNT_MANAGEMENT_URL = "https://my-account.issuer"
+
+    USER_ID = "@alice:test"
+    DEVICE_ID = "ALICE1"
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["enable_registration"] = False
+        # Keep any `override_config`, which the base class has applied already.
+        config.setdefault("matrix_authentication_service", MAS_CONFIG)
+        return config
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+        self.e2e_keys_handler = homeserver.get_e2e_keys_handler()
+        self.device_handler = homeserver.get_device_handler()
+        self.account_data_handler = homeserver.get_account_data_handler()
+
+        self.get_success(self.store.register_user(self.USER_ID))
+        self.get_success(
+            self.device_handler.check_device_registered(self.USER_ID, self.DEVICE_ID)
+        )
+
+        auth = homeserver.get_auth()
+        auth.get_user_by_req = AsyncMock(  # type: ignore[method-assign]
+            return_value=create_requester(self.USER_ID, device_id=self.DEVICE_ID)
+        )
+        auth.account_management_url = AsyncMock(  # type: ignore[attr-defined]
+            return_value=self.ACCOUNT_MANAGEMENT_URL
+        )
+
+    def test_reset_without_verification_methods(self) -> None:
+        """Without a verified device or recovery, the keys can be replaced without approval."""
+        self._upload_cross_signing_keys()
+        self._add_device("ALICE2")
+
+        channel = self._reset()
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+    def test_reset_with_verified_device(self) -> None:
+        """A device signed by the current identity means the reset needs approval."""
+        self_signing_key = self._upload_cross_signing_keys()
+        self._add_device("ALICE2", self_signing_key)
+
+        channel = self._reset()
+
+        self._assert_needs_approval(channel)
+
+    def test_reset_from_verified_device(self) -> None:
+        """The device asking for the reset counts as a way to verify too."""
+        self_signing_key = self._upload_cross_signing_keys()
+        self._add_device(self.DEVICE_ID, self_signing_key)
+
+        channel = self._reset()
+
+        self._assert_needs_approval(channel)
+
+    def test_reset_with_deleted_verified_device(self) -> None:
+        """A verified device that was signed out doesn't count."""
+        self_signing_key = self._upload_cross_signing_keys()
+        self._add_device("ALICE2", self_signing_key)
+        self.get_success(self.device_handler.delete_devices(self.USER_ID, ["ALICE2"]))
+
+        channel = self._reset()
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+    def test_reset_with_device_verified_by_previous_identity(self) -> None:
+        """A device signed by a previous identity doesn't count."""
+        old_self_signing_key = self._upload_cross_signing_keys()
+        self._add_device("ALICE2", old_self_signing_key)
+        self.get_success(
+            self.store.allow_master_cross_signing_key_replacement_without_uia(
+                self.USER_ID, 60_000
+            )
+        )
+        self._upload_cross_signing_keys()
+
+        channel = self._reset()
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+    def test_reset_with_recovery(self) -> None:
+        """The master key in secret storage means the reset needs approval."""
+        self._upload_cross_signing_keys()
+        self._set_up_recovery()
+
+        channel = self._reset()
+
+        self._assert_needs_approval(channel)
+
+    def test_reset_after_default_key_wiped(self) -> None:
+        """Wiping the default key before the reset, as the Rust SDK does, still needs approval."""
+        self._upload_cross_signing_keys()
+        self._set_up_recovery()
+        self._set_account_data("m.secret_storage.default_key", {})
+
+        channel = self._reset()
+
+        self._assert_needs_approval(channel)
+
+    def test_reset_after_master_key_secret_wiped(self) -> None:
+        """Wiping the stored master key before the reset still needs approval."""
+        self._upload_cross_signing_keys()
+        self._set_up_recovery()
+        self._set_account_data("m.cross_signing.master", {"encrypted": {}})
+
+        channel = self._reset()
+
+        self._assert_needs_approval(channel)
+
+    def test_reset_after_default_key_deleted(self) -> None:
+        """Deleting the default key, rather than replacing it, still needs approval."""
+        self._upload_cross_signing_keys()
+        self._set_up_recovery()
+        self.get_success(
+            self.account_data_handler.remove_account_data_for_user(
+                self.USER_ID, "m.secret_storage.default_key"
+            )
+        )
+
+        channel = self._reset()
+
+        self._assert_needs_approval(channel)
+
+    def test_reset_after_previous_identity_was_in_recovery(self) -> None:
+        """Recovery of a previous identity doesn't count."""
+        self._upload_cross_signing_keys()
+        self._set_up_recovery()
+        self._set_account_data("m.secret_storage.default_key", {})
+        self.get_success(
+            self.store.allow_master_cross_signing_key_replacement_without_uia(
+                self.USER_ID, 60_000
+            )
+        )
+        self._upload_cross_signing_keys()
+
+        channel = self._reset()
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+    def test_reset_with_disabled_recovery(self) -> None:
+        """Recovery that was turned off, leaving empty account data, doesn't count."""
+        self._upload_cross_signing_keys()
+        self._set_secret_storage(default_key={}, master_key_secret={"encrypted": {}})
+
+        channel = self._reset()
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+    def test_reset_with_master_key_stored_with_other_key(self) -> None:
+        """A master key stored with a key other than the default one doesn't count."""
+        self._upload_cross_signing_keys()
+        self._set_secret_storage(
+            default_key={"key": "recovery_key_id"},
+            master_key_secret={"encrypted": {"old_key_id": {"ciphertext": "x"}}},
+        )
+
+        channel = self._reset()
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+    @unittest.override_config(
+        {
+            "matrix_authentication_service": {
+                **MAS_CONFIG,
+                "skip_cross_signing_reset_approval_without_verification_methods": False,
+            }
+        }
+    )
+    def test_reset_without_verification_methods_when_disabled(self) -> None:
+        """Without the option, the reset always needs approval."""
+        self._upload_cross_signing_keys()
+
+        channel = self._reset()
+
+        self._assert_needs_approval(channel)
+
+    def _upload_cross_signing_keys(self) -> SigningKey:
+        """Sets up a new identity and returns its self-signing key."""
+        master_key = self._generate_cross_signing_key()
+        self_signing_key = self._generate_cross_signing_key()
+
+        self.get_success(
+            self.e2e_keys_handler.upload_signing_keys_for_user(
+                self.USER_ID,
+                {
+                    "master_key": self._make_cross_signing_key(master_key, "master"),
+                    "self_signing_key": sign_json(
+                        self._make_cross_signing_key(self_signing_key, "self_signing"),
+                        self.USER_ID,
+                        master_key,
+                    ),
+                },
+            )
+        )
+        return self_signing_key
+
+    def _add_device(
+        self, device_id: str, self_signing_key: SigningKey | None = None
+    ) -> None:
+        """Adds a device with keys, signed by the self-signing key if given."""
+        self.get_success(
+            self.device_handler.check_device_registered(self.USER_ID, device_id)
+        )
+        device_key = generate_signing_key(device_id)
+        device_keys = sign_json(
+            {
+                "user_id": self.USER_ID,
+                "device_id": device_id,
+                "algorithms": ["m.olm.v1.curve25519-aes-sha2"],
+                "keys": {
+                    f"ed25519:{device_id}": encode_verify_key_base64(
+                        get_verify_key(device_key)
+                    )
+                },
+            },
+            self.USER_ID,
+            device_key,
+        )
+        self.get_success(
+            self.e2e_keys_handler.upload_keys_for_user(
+                self.USER_ID, device_id, {"device_keys": device_keys}
+            )
+        )
+
+        if self_signing_key is None:
+            return
+
+        result = self.get_success(
+            self.e2e_keys_handler.upload_signatures_for_device_keys(
+                self.USER_ID,
+                {
+                    self.USER_ID: {
+                        device_id: sign_json(
+                            device_keys, self.USER_ID, self_signing_key
+                        )
+                    }
+                },
+            )
+        )
+        self.assertEqual(result["failures"], {})
+
+    def _set_secret_storage(
+        self, default_key: JsonDict, master_key_secret: JsonDict
+    ) -> None:
+        self._set_account_data("m.secret_storage.default_key", default_key)
+        self._set_account_data("m.cross_signing.master", master_key_secret)
+
+    def _set_up_recovery(self) -> None:
+        self._set_secret_storage(
+            default_key={"key": "recovery_key_id"},
+            master_key_secret={"encrypted": {"recovery_key_id": {"ciphertext": "x"}}},
+        )
+
+    def _set_account_data(self, account_data_type: str, content: JsonDict) -> None:
+        # Through the handler, like client requests, which remembers recovery
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                self.USER_ID, account_data_type, content
+            )
+        )
+
+    def _reset(self) -> FakeChannel:
+        """Tries to replace the identity with a new master key."""
+        return self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/device_signing/upload",
+            {
+                "master_key": self._make_cross_signing_key(
+                    self._generate_cross_signing_key(), "master"
+                )
+            },
+            access_token="token",
+        )
+
+    def _generate_cross_signing_key(self) -> SigningKey:
+        # Cross-signing keys are identified by their public key.
+        signing_key = generate_signing_key("")
+        signing_key.version = encode_verify_key_base64(get_verify_key(signing_key))
+        return signing_key
+
+    def _make_cross_signing_key(self, signing_key: SigningKey, usage: str) -> JsonDict:
+        public_key = signing_key.version
+        return {
+            "user_id": self.USER_ID,
+            "usage": [usage],
+            "keys": {f"ed25519:{public_key}": public_key},
+        }
+
+    def _assert_needs_approval(self, channel: FakeChannel) -> None:
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
+        self.assertIn({"stages": ["m.oauth"]}, channel.json_body["flows"])
+        self.assertEqual(
+            channel.json_body["params"]["m.oauth"]["url"],
+            f"{self.ACCOUNT_MANAGEMENT_URL}?action=org.matrix.cross_signing_reset",
+        )
 
 
 class KeyChangesTestCase(unittest.HomeserverTestCase):

@@ -1684,6 +1684,87 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             impl,
         )
 
+    async def mark_master_cross_signing_key_as_in_recovery(self, user_id: str) -> None:
+        """Records that the user's latest master key has been in secret storage."""
+
+        def impl(txn: LoggingTransaction) -> None:
+            txn.execute(
+                """
+                UPDATE e2e_cross_signing_keys
+                SET was_in_recovery = TRUE
+                WHERE stream_id = (
+                    SELECT stream_id
+                    FROM e2e_cross_signing_keys
+                    WHERE user_id = ? AND keytype = 'master'
+                    ORDER BY stream_id DESC
+                    LIMIT 1
+                )
+                """,
+                (user_id,),
+            )
+
+        await self.db_pool.runInteraction(
+            "mark_master_cross_signing_key_as_in_recovery", impl
+        )
+
+    async def was_master_cross_signing_key_in_recovery(self, user_id: str) -> bool:
+        """Checks whether the user's latest master key has been in secret storage.
+
+        See `mark_master_cross_signing_key_as_in_recovery`.
+        """
+
+        def impl(txn: LoggingTransaction) -> bool:
+            txn.execute(
+                """
+                SELECT was_in_recovery
+                FROM e2e_cross_signing_keys
+                WHERE user_id = ? AND keytype = 'master'
+                ORDER BY stream_id DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            row = txn.fetchone()
+            return row is not None and bool(row[0])
+
+        return await self.db_pool.runInteraction(
+            "was_master_cross_signing_key_in_recovery", impl
+        )
+
+    async def has_device_signed_by_key(self, user_id: str, key_id: str) -> bool:
+        """Checks whether any of the user's devices is signed by the given key.
+
+        Args:
+            user_id: the user whose devices to check, and who made the signature
+            key_id: the ID of the signing key, e.g. "ed25519:<public key>"
+
+        Returns:
+            True if at least one existing, non-hidden device has a signature from
+            the key.
+        """
+
+        def impl(txn: LoggingTransaction) -> bool:
+            # Signatures can outlive the devices they were made on, so only count
+            # those of devices that still exist.
+            txn.execute(
+                """
+                SELECT 1
+                FROM e2e_cross_signing_signatures AS s
+                INNER JOIN devices AS d
+                    ON d.user_id = s.target_user_id
+                    AND d.device_id = s.target_device_id
+                WHERE s.user_id = ?
+                    AND s.target_user_id = ?
+                    AND s.key_id = ?
+                    AND NOT d.hidden
+                LIMIT 1
+                """,
+                (user_id, user_id, key_id),
+            )
+            return txn.fetchone() is not None
+
+        return await self.db_pool.runInteraction("has_device_signed_by_key", impl)
+
     async def delete_e2e_keys_by_device(self, user_id: str, device_id: str) -> None:
         def delete_e2e_keys_by_device_txn(txn: LoggingTransaction) -> None:
             log_kv(
