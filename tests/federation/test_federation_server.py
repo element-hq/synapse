@@ -210,6 +210,18 @@ class GetMissingEventsRoomCheckTests(unittest.FederatingHomeserverTestCase):
             {self.room_allowed_event_ids[2]},
         )
 
+    def test_get_event_unknown_event_returns_not_found(self) -> None:
+        """
+        Requesting an event that does not exist over federation should return a
+        404 with a proper `M_NOT_FOUND` error, rather than an empty body.
+        """
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/v1/event/$nonexistent_event_id",
+        )
+        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
     def test_get_missing_events_with_empty_earliest_events(self) -> None:
         """
         Tests that `/get_missing_events`, when given no `earliest_events`,
