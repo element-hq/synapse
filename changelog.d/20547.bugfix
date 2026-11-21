@@ -1,0 +1,1 @@
+Make the `to` query parameter of `GET /_matrix/client/v3/keys/changes` required, as mandated by the Matrix specification.

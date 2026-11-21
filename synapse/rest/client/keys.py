@@ -383,11 +383,9 @@ class KeyChangesServlet(RestServlet):
         from_token_string = parse_string(request, "from", required=True)
         set_tag("from", from_token_string)
 
-        # We want to enforce they do pass us one, but we ignore it and return
-        # changes after the "to" as well as before.
-        #
-        # XXX This does not enforce that "to" is passed.
-        set_tag("to", str(parse_string(request, "to")))
+        # The spec requires `to` to be passed. We enforce that, but otherwise
+        # ignore it and return changes after the "to" as well as before.
+        set_tag("to", parse_string(request, "to", required=True))
 
         from_token = await StreamToken.from_string(self.store, from_token_string)
 
