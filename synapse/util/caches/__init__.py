@@ -30,7 +30,7 @@ import attr
 from prometheus_client import REGISTRY
 from prometheus_client.core import Gauge
 
-from synapse.config.cache import add_resizable_cache
+from synapse.config.cache import ResizableCache, add_resizable_cache
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.metrics import DynamicCollectorRegistry
 
@@ -209,8 +209,7 @@ def register_cache(
     cache: Sized,
     server_name: str,
     collect_callback: Callable | None = None,
-    resizable: bool = True,
-    resize_callback: Callable | None = None,
+    resizable_cache: ResizableCache | None,
 ) -> CacheMetric:
     """Register a cache object for metric collection and resizing.
 
@@ -224,17 +223,14 @@ def register_cache(
             (used to label the metric) (`hs.hostname`).
         collect_callback: If given, a function which is called during metric
             collection to update additional metrics.
-        resizable: Whether this cache supports being resized, in which case either
-            resize_callback must be provided, or the cache must support set_max_size().
-        resize_callback: A function which can be called to resize the cache.
+        resizable_cache: Whether the cache supports being resized, and the
+            object to resize.
 
     Returns:
         an object which provides inc_{hits,misses,evictions} methods
     """
-    if resizable:
-        if not resize_callback:
-            resize_callback = cache.set_cache_factor  # type: ignore
-        add_resizable_cache(cache_name, resize_callback)
+    if resizable_cache is not None:
+        add_resizable_cache(cache_name, resizable_cache)
 
     metric = CacheMetric(
         cache=cache,

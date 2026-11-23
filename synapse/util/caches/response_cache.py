@@ -160,7 +160,7 @@ class ResponseCache(Generic[KV]):
             cache_name=name,
             cache=self,
             server_name=server_name,
-            resizable=False,
+            resizable_cache=None,
         )
         self._enable_logging = enable_logging
 

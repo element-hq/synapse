@@ -116,6 +116,7 @@ class ExpiringCache(Generic[KT, VT]):
             cache_name=cache_name,
             cache=self,
             server_name=server_name,
+            resizable_cache=self,
         )
 
         if not self._expiry_ms:
