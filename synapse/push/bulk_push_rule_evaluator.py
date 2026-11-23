@@ -143,7 +143,7 @@ class BulkPushRuleEvaluator:
             cache_type="cache",
             cache_name="room_push_rule_cache",
             cache=[],  # Meaningless size, as this isn't a cache that stores values,
-            resizable=False,
+            resizable_cache=None,
             server_name=self.server_name,
         )
 

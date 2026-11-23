@@ -24,7 +24,7 @@ import logging
 from collections import Counter
 from enum import Enum, auto
 from sys import intern
-from typing import Any, Callable, Sized, TypeVar, cast
+from typing import Any, Callable, Sized, TypeVar
 
 import attr
 from prometheus_client import REGISTRY
@@ -209,8 +209,7 @@ def register_cache(
     cache: Sized,
     server_name: str,
     collect_callback: Callable | None = None,
-    resizable: bool = True,
-    resizable_cache: ResizableCache | None = None,
+    resizable_cache: ResizableCache | None,
 ) -> CacheMetric:
     """Register a cache object for metric collection and resizing.
 
@@ -224,17 +223,13 @@ def register_cache(
             (used to label the metric) (`hs.hostname`).
         collect_callback: If given, a function which is called during metric
             collection to update additional metrics.
-        resizable: Whether this cache supports being resized, in which case either
-            resizable_cache must be provided, or the cache must support
-            set_cache_factor().
-        resizable_cache: The object to resize, if not `cache` itself.
+        resizable_cache: Whether the cache supports being resized, and the
+            object to resize.
 
     Returns:
         an object which provides inc_{hits,misses,evictions} methods
     """
-    if resizable:
-        if resizable_cache is None:
-            resizable_cache = cast(ResizableCache, cache)
+    if resizable_cache is not None:
         add_resizable_cache(cache_name, resizable_cache)
 
     metric = CacheMetric(
