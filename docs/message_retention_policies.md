@@ -18,13 +18,6 @@ it was sent to the room. If a room doesn't have a message retention
 policy, and there's no default one for a given server, then no message
 sent in that room is ever purged on that server.
 
-MSC1763 also specifies semantics for a `min_lifetime` parameter which
-defines the amount of time after which an event _can_ get purged (after
-it was sent to the room), but Synapse doesn't currently support it
-beyond registering it.
-
-Both `max_lifetime` and `min_lifetime` are optional parameters.
-
 Note that message retention policies don't apply to state events.
 
 Once an event reaches its expiry date (defined as the time it was sent
@@ -72,14 +65,13 @@ the configuration file and adding these sub-options:
 
 ```yaml
 default_policy:
-  min_lifetime: 1d
   max_lifetime: 1y
 ```
 
-Here, `min_lifetime` and `max_lifetime` have the same meaning and level
-of support as previously described. They can be expressed either as a
-duration (using the units `s` (seconds), `m` (minutes), `h` (hours),
-`d` (days), `w` (weeks) and `y` (years)) or as a number of milliseconds.
+Here, `max_lifetime` has the same meaning as previously described. It
+can be expressed either as a duration (using the units `s` (seconds),
+`m` (minutes), `h` (hours), `d` (days), `w` (weeks) and `y` (years)) or
+as a number of milliseconds.
 
 
 ### Purge jobs
@@ -185,9 +177,7 @@ moderator needs to send a state event in that room with the type
 
 In this event's content, the `max_lifetime` parameter has the same
 meaning as previously described, and needs to be expressed in
-milliseconds. The event's content can also include a `min_lifetime`
-parameter, which has the same meaning and limited support as previously
-described.
+milliseconds.
 
 Note that over every server in the room, only the ones with support for
 message retention policies will actually remove expired events. This
