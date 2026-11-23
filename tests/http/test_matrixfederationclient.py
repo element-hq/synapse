@@ -33,7 +33,11 @@ from twisted.web.client import Agent, ResponseNeverReceived
 from twisted.web.http import HTTPChannel
 from twisted.web.http_headers import Headers
 
-from synapse.api.errors import HttpResponseException, RequestSendFailed
+from synapse.api.errors import (
+    FederationDeniedError,
+    HttpResponseException,
+    RequestSendFailed,
+)
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config._base import ConfigError
 from synapse.config.ratelimiting import RatelimitSettings
@@ -639,6 +643,28 @@ class FederationClientTests(HomeserverTestCase):
         request = server.requests[0]
         content = request.content.read()
         self.assertEqual(content, b'{"a":"b"}')
+
+    @parameterized.expand(
+        [
+            ("8008\x0b",),
+            ("8008\t",),
+            (" 8008",),
+            ("+8008",),
+            ("8_008",),
+            ("-1",),
+            ("65536",),
+            ("008008",),
+        ]
+    )
+    def test_invalid_port_is_denied(self, port: str) -> None:
+        """A port that is not 1-5 ASCII digits up to 65535 passes server-name
+        validation, but the request is denied before anything is sent."""
+        d = defer.ensureDeferred(
+            self.cl.get_json(f"testserv:{port}", "/foo/bar", timeout=10000)
+        )
+        self.pump()
+        self.failureResultOf(d, FederationDeniedError)
+        self.assertEqual(self.reactor.tcpClients, [])
 
     def test_closes_connection(self) -> None:
         """Check that the client closes unused HTTP connections"""

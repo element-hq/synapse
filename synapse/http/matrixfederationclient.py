@@ -111,6 +111,29 @@ incoming_responses_counter = Counter(
 MAXINT = sys.maxsize
 
 
+def _parse_destination(destination: str) -> tuple[str, int | None]:
+    """`parse_and_validate_server_name`, except that a port must be 1-5 ASCII
+    digits up to 65535, as https://spec.matrix.org/latest/appendices/#server-name
+    requires.
+
+    Raises:
+        ValueError if the destination is invalid.
+    """
+    host, port = parse_and_validate_server_name(destination)
+    if port is not None:
+        # The port as written. `port` itself came through `int()`, which also
+        # accepts signs, underscores, whitespace and non-ASCII digits.
+        written_port = destination.rsplit(":", 1)[1]
+        if not (
+            written_port.isascii()
+            and written_port.isdigit()
+            and len(written_port) <= 5
+            and port <= 65535
+        ):
+            raise ValueError("Invalid port in destination '%s'" % (destination,))
+    return host, port
+
+
 _next_id = 1
 
 T = TypeVar("T")
@@ -616,7 +639,7 @@ class MatrixFederationHttpClient:
         # Validate server name and log if it is an invalid destination, this is
         # partially to help track down code paths where we haven't validated before here
         try:
-            parse_and_validate_server_name(request.destination)
+            _parse_destination(request.destination)
         except ValueError:
             logger.exception("Invalid destination: %s.", request.destination)
             raise FederationDeniedError(request.destination)
