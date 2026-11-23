@@ -761,8 +761,11 @@ jobs:
       #
       # The value is just an opaque string that uniquely identifies this Python
       # interpreter's version and ABI. Used to trigger rebuilds for `pyo3` when the
-      # Python interpreter changes. We're just basing it on what `maturin` (good
-      # reference) does,
+      # Python interpreter changes. We're just basing it on the `SOABI` value (ABI
+      # version used for `.so` files defined by PEP 3149) which encapsulates the same
+      # information without us needing to re-invent the wheel.
+      #
+      # Another good reference is what `maturin` does,
       # https://github.com/PyO3/maturin/blob/c909db16c9f0838d42d79e0058b82379d47f2986/src/compile.rs#L903-L908
       # https://github.com/PyO3/maturin/blob/c909db16c9f0838d42d79e0058b82379d47f2986/src/python_interpreter/mod.rs#L509-L517
       #
@@ -776,7 +779,7 @@ jobs:
       - name: Set PYO3_ENVIRONMENT_SIGNATURE for cache busting Cargo builds
         run: |
           echo "PYO3_PYTHON=python3" >> "$GITHUB_ENV"
-          echo "PYO3_ENVIRONMENT_SIGNATURE=$(python3 -c 'import sys, struct; print(f"{sys.implementation.name}-{sys.version_info[0]}.{sys.version_info[1]}{sys.abiflags}-{struct.calcsize("P")*8}bit")')" >> "$GITHUB_ENV"
+          echo "PYO3_ENVIRONMENT_SIGNATURE=$(python3 -c 'import sysconfig; print(sysconfig.get_config_var("SOABI"))')" >> "$GITHUB_ENV"
 
       - run: cargo test
 
@@ -803,7 +806,7 @@ jobs:
       - name: Set PYO3_ENVIRONMENT_SIGNATURE for cache busting Cargo builds
         run: |
           echo "PYO3_PYTHON=python3" >> "$GITHUB_ENV"
-          echo "PYO3_ENVIRONMENT_SIGNATURE=$(python3 -c 'import sys, struct; print(f"{sys.implementation.name}-{sys.version_info[0]}.{sys.version_info[1]}{sys.abiflags}-{struct.calcsize("P")*8}bit")')" >> "$GITHUB_ENV"
+          echo "PYO3_ENVIRONMENT_SIGNATURE=$(python3 -c 'import sysconfig; print(sysconfig.get_config_var("SOABI"))')" >> "$GITHUB_ENV"
 
       - run: cargo bench --no-run
 
