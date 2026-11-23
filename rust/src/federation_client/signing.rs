@@ -17,15 +17,15 @@
 use std::fmt;
 
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
+use ed25519_dalek::{Signer as _, SigningKey};
 use http::HeaderValue;
-use ring::signature::Ed25519KeyPair;
 use serde::Serialize;
 
-use crate::canonical_json::CanonicalFormatter;
+use crate::canonical_json::{to_vec_canonical, CanonicalizationOptions};
 
 /// Signs federation requests as one server with one key.
 pub struct RequestSigner {
-    key: Ed25519KeyPair,
+    key: SigningKey,
     origin: String,
     key_id: String,
 }
@@ -42,9 +42,7 @@ pub struct SigningInput<'a> {
 }
 
 /// The signed request object apart from `content`, which sorts before every
-/// other key and so is spliced in at the front. The fields are declared in
-/// sorted order, so serializing them in order with [`CanonicalFormatter`] gives
-/// canonical JSON.
+/// other key and so is spliced in at the front.
 #[derive(Serialize)]
 struct SignedFields<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -60,7 +58,7 @@ impl RequestSigner {
     /// `origin` is our server name; `seed` is the 32-byte Ed25519 seed of the
     /// key named `key_id`.
     pub fn new(origin: String, key_id: String, seed: &[u8]) -> Result<Self, SigningKeyError> {
-        let key = Ed25519KeyPair::from_seed_unchecked(seed).map_err(|_| SigningKeyError)?;
+        let key = SigningKey::from_bytes(seed.try_into().map_err(|_| SigningKeyError)?);
         Ok(RequestSigner {
             key,
             origin,
@@ -68,29 +66,28 @@ impl RequestSigner {
         })
     }
 
-    /// The `Authorization` header value. It names `destination` if that is
-    /// non-empty, otherwise `destination_is`.
+    /// The `Authorization` header value. Exactly one of `destination` and
+    /// `destination_is` must be set and non-empty; the header names it.
     pub fn authorization(&self, input: &SigningInput<'_>) -> Result<HeaderValue, SigningError> {
-        let header_destination = [input.destination, input.destination_is]
-            .into_iter()
-            .flatten()
-            .find(|d| !d.is_empty())
-            .ok_or(SigningError::NoDestination)?;
+        let header_destination = match (input.destination, input.destination_is) {
+            (Some(d), None) if !d.is_empty() => d,
+            (None, Some(d)) if !d.is_empty() => d,
+            _ => return Err(SigningError::NoDestination),
+        };
 
-        let mut fields = Vec::new();
-        SignedFields {
-            destination: input.destination,
-            destination_is: input.destination_is,
-            method: input.method,
-            origin: &self.origin,
-            uri: input.uri,
-        }
-        .serialize(&mut serde_json::Serializer::with_formatter(
-            &mut fields,
-            CanonicalFormatter,
-        ))
+        let fields = to_vec_canonical(
+            &SignedFields {
+                destination: input.destination,
+                destination_is: input.destination_is,
+                method: input.method,
+                origin: &self.origin,
+                uri: input.uri,
+            },
+            CanonicalizationOptions::strict(),
+        )
         .expect("a struct of strings always serializes");
 
+        // Temporary, until request bodies are canonicalized in Rust.
         let message = match input.content {
             Some(content) => [b"{\"content\":".as_slice(), content, b",", &fields[1..]].concat(),
             None => fields,
@@ -112,7 +109,7 @@ impl RequestSigner {
     }
 
     fn sign(&self, message: &[u8]) -> String {
-        STANDARD_NO_PAD.encode(self.key.sign(message))
+        STANDARD_NO_PAD.encode(self.key.sign(message).to_bytes())
     }
 }
 
@@ -122,7 +119,8 @@ pub struct SigningKeyError;
 /// Why a request could not be signed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SigningError {
-    /// Neither `destination` nor `destination_is` is set and non-empty.
+    /// Not exactly one of `destination` and `destination_is` is set and
+    /// non-empty.
     NoDestination,
     /// A field holds a byte that is not printable ASCII.
     InvalidHeader,
@@ -140,7 +138,7 @@ impl fmt::Display for SigningError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SigningError::NoDestination => f.write_str(
-                "At least one of the arguments destination and destination_is must be a nonempty bytestring.",
+                "Exactly one of the arguments destination and destination_is must be a nonempty string.",
             ),
             SigningError::InvalidHeader => f.write_str("not a valid header value"),
         }
@@ -210,34 +208,33 @@ mod tests {
         );
     }
 
-    /// An identity server is named by `destination_is`. An empty `destination`
-    /// is still signed, as `sign_json` signs it, but the header names
-    /// `destination_is`.
+    /// An identity server is named by `destination_is`.
     #[test]
-    fn destination_is_named_when_destination_is_absent_or_empty() {
+    fn destination_is_named() {
         let signer = spec_signer();
-        for (destination, sig) in [
-            (None, "SRa3wUd9qsrDCqI3zoYKh7wk6GLRDOsFg82BmurUBYZGMyWU8GjfPMl9Tt/tKijURGqqWEY5jS/wa8Ajn3gODQ"),
-            (Some(""), "dTjVlpqpBGjqzyGuwRoJfem+gxMYPV/3PLLx9aKMEUZC6QAFtrHk0h/NXBTB+HjBQ0MTiimRnJVMD/qgblP6Bw"),
-        ] {
-            let header = signer
-                .authorization(&SigningInput {
-                    destination,
-                    destination_is: Some("id.example"),
-                    ..input(None)
-                })
-                .unwrap();
-            assert_eq!(
-                header,
-                format!(r#"X-Matrix origin="domain",key="ed25519:1",sig="{sig}",destination="id.example""#)
-            );
-        }
+        let header = signer
+            .authorization(&SigningInput {
+                destination: None,
+                destination_is: Some("id.example"),
+                ..input(None)
+            })
+            .unwrap();
+        assert_eq!(
+            header,
+            r#"X-Matrix origin="domain",key="ed25519:1",sig="SRa3wUd9qsrDCqI3zoYKh7wk6GLRDOsFg82BmurUBYZGMyWU8GjfPMl9Tt/tKijURGqqWEY5jS/wa8Ajn3gODQ",destination="id.example""#
+        );
     }
 
     #[test]
-    fn no_destination() {
+    fn not_exactly_one_destination() {
         let signer = spec_signer();
-        for (destination, destination_is) in [(None, None), (Some(""), None), (None, Some(""))] {
+        for (destination, destination_is) in [
+            (None, None),
+            (Some(""), None),
+            (None, Some("")),
+            (Some("remote"), Some("id.example")),
+            (Some(""), Some("id.example")),
+        ] {
             let result = signer.authorization(&SigningInput {
                 destination,
                 destination_is,

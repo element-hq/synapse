@@ -134,8 +134,6 @@ class RequestSignerTestCase(unittest.TestCase):
             ("remote.example:8448", None),
             ("[::1]:8448", None),
             (None, "id.example"),
-            ("remote.example", "id.example"),
-            ("", "id.example"),
         ]
         for i in range(500):
             destination, destination_is = rng.choice(destinations)
@@ -153,8 +151,14 @@ class RequestSignerTestCase(unittest.TestCase):
                     content,
                 )
 
-    def test_no_destination(self) -> None:
-        for destination, destination_is in [(None, None), ("", None), (None, "")]:
+    def test_not_exactly_one_destination(self) -> None:
+        for destination, destination_is in [
+            (None, None),
+            ("", None),
+            (None, ""),
+            ("remote.example", "id.example"),
+            ("", "id.example"),
+        ]:
             with self.assertRaises(ValueError):
                 self.signer.authorization(
                     b"GET", b"/x", destination, destination_is, None

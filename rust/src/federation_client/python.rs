@@ -12,8 +12,7 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-//! The Python edge: every pyclass, and every conversion between Python and
-//! the plain-Rust modules.
+//! The Python bindings
 
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyBytes};
 
@@ -34,6 +33,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     Ok(())
 }
 
+/// Python wrapper for [`RequestSigner`].
 #[pyclass(frozen, name = "RequestSigner")]
 struct PyRequestSigner {
     signer: RequestSigner,
@@ -41,6 +41,7 @@ struct PyRequestSigner {
 
 #[pymethods]
 impl PyRequestSigner {
+    /// See [`RequestSigner::new`].
     #[new]
     fn py_new(server_name: String, key_id: String, seed: &[u8]) -> PyResult<Self> {
         let signer = RequestSigner::new(server_name, key_id, seed)
@@ -48,6 +49,7 @@ impl PyRequestSigner {
         Ok(Self { signer })
     }
 
+    /// See [`RequestSigner::authorization`].
     fn authorization<'py>(
         &self,
         py: Python<'py>,
@@ -58,8 +60,8 @@ impl PyRequestSigner {
         content: Option<&[u8]>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let input = SigningInput {
-            method: ascii("method", method)?,
-            uri: ascii("uri", uri)?,
+            method: to_ascii("method", method)?,
+            uri: to_ascii("uri", uri)?,
             destination,
             destination_is,
             content,
@@ -72,7 +74,7 @@ impl PyRequestSigner {
     }
 }
 
-fn ascii<'a>(name: &str, bytes: &'a [u8]) -> PyResult<&'a str> {
+fn to_ascii<'a>(name: &str, bytes: &'a [u8]) -> PyResult<&'a str> {
     std::str::from_utf8(bytes)
         .ok()
         .filter(|s| s.is_ascii())
