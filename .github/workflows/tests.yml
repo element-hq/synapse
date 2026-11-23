@@ -801,7 +801,9 @@ jobs:
 
       # See comment above for the same step above for more context
       - name: Set PYO3_ENVIRONMENT_SIGNATURE for cache busting Cargo builds
-        run: echo "PYO3_ENVIRONMENT_SIGNATURE=$(python3 -c 'import sys, struct; print(f"{sys.implementation.name}-{sys.version_info[0]}.{sys.version_info[1]}{sys.abiflags}-{struct.calcsize("P")*8}bit")')" >> "$GITHUB_ENV"
+        run: |
+          echo "PYO3_PYTHON=python3" >> "$GITHUB_ENV"
+          echo "PYO3_ENVIRONMENT_SIGNATURE=$(python3 -c 'import sys, struct; print(f"{sys.implementation.name}-{sys.version_info[0]}.{sys.version_info[1]}{sys.abiflags}-{struct.calcsize("P")*8}bit")')" >> "$GITHUB_ENV"
 
       - run: cargo bench --no-run
 
