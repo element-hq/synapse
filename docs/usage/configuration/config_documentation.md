@@ -1169,13 +1169,11 @@ This setting has the following sub-options:
 
   This setting has the following sub-options:
 
-  * `min_lifetime`: Minimum message retention time of the default message retention policy. Synapse doesn't take this option into account yet. Defaults to `null`.
-
   * `max_lifetime`: Maximum message retention time of the default message retention policy. Defaults to `null`.
 
-* `allowed_lifetime_min`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `min_lifetime` that's beyond this bound, Synapse will cap the room's policy to these limits when running purge jobs. Defaults to `null`.
+* `allowed_lifetime_min`: Retention policy limit: the minimum allowed value for `max_lifetime`. If set, and the `max_lifetime` that applies to a room is below this bound, Synapse will use this value instead when running purge jobs. This applies both to a room's explicit retention policy (its `m.room.retention` state event) and to the default policy used when the room has none. Defaults to `null`.
 
-* `allowed_lifetime_max`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `max_lifetime` that's beyond this bound, Synapse will cap the room's policy to these limits when running purge jobs. Defaults to `null`.
+* `allowed_lifetime_max`: Retention policy limit: the maximum allowed value for `max_lifetime`. If set, and the `max_lifetime` that applies to a room is above this bound, Synapse will use this value instead when running purge jobs. This applies both to a room's explicit retention policy (its `m.room.retention` state event) and to the default policy used when the room has none. Defaults to `null`.
 
 * `purge_jobs` (array|null): Server admins can define the settings of the background jobs purging the events whose lifetime has expired under the `purge_jobs` section.
 
@@ -1202,7 +1200,6 @@ Example configuration:
 retention:
   enabled: true
   default_policy:
-    min_lifetime: 1d
     max_lifetime: 1y
   allowed_lifetime_min: 1d
   allowed_lifetime_max: 1y
