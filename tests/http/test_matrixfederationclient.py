@@ -657,14 +657,22 @@ class FederationClientTests(HomeserverTestCase):
         ]
     )
     def test_invalid_port_is_denied(self, port: str) -> None:
-        """A port that is not 1-5 ASCII digits up to 65535 passes server-name
-        validation, but the request is denied before anything is sent."""
+        """A port that is not 1-5 ASCII digits up to 65535 is denied before
+        anything is sent and without backing off the destination."""
+        destination = f"testserv:{port}"
+        # A backoff recorded at time 0 reads back as none.
+        self.reactor.advance(1)
         d = defer.ensureDeferred(
-            self.cl.get_json(f"testserv:{port}", "/foo/bar", timeout=10000)
+            self.cl.get_json(destination, "/foo/bar", timeout=10000)
         )
         self.pump()
         self.failureResultOf(d, FederationDeniedError)
         self.assertEqual(self.reactor.tcpClients, [])
+        self.assertIsNone(
+            self.get_success(
+                self.hs.get_datastores().main.get_destination_retry_timings(destination)
+            )
+        )
 
     def test_closes_connection(self) -> None:
         """Check that the client closes unused HTTP connections"""
