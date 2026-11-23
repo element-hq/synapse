@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bd8d3b91.js";
+            window.path_to_searchindex_js = "searchindex-ce1e952c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8fc16911.js"></script>
@@ -214,11 +214,6 @@ parameter, which defines how long a message can be kept around after
 it was sent to the room. If a room doesn’t have a message retention
 policy, and there’s no default one for a given server, then no message
 sent in that room is ever purged on that server.</p>
-<p>MSC1763 also specifies semantics for a <code>min_lifetime</code> parameter which
-defines the amount of time after which an event <em>can</em> get purged (after
-it was sent to the room), but Synapse doesn’t currently support it
-beyond registering it.</p>
-<p>Both <code>max_lifetime</code> and <code>min_lifetime</code> are optional parameters.</p>
 <p>Note that message retention policies don’t apply to state events.</p>
 <p>Once an event reaches its expiry date (defined as the time it was sent
 plus the value for <code>max_lifetime</code> in the room), two things happen:</p>
@@ -253,13 +248,12 @@ database.</p>
 <p>A default policy can be defined as such, by adding the <code>retention</code> option in
 the configuration file and adding these sub-options:</p>
 <pre><code class="language-yaml">default_policy:
-  min_lifetime: 1d
   max_lifetime: 1y
 </code></pre>
-<p>Here, <code>min_lifetime</code> and <code>max_lifetime</code> have the same meaning and level
-of support as previously described. They can be expressed either as a
-duration (using the units <code>s</code> (seconds), <code>m</code> (minutes), <code>h</code> (hours),
-<code>d</code> (days), <code>w</code> (weeks) and <code>y</code> (years)) or as a number of milliseconds.</p>
+<p>Here, <code>max_lifetime</code> has the same meaning as previously described. It
+can be expressed either as a duration (using the units <code>s</code> (seconds),
+<code>m</code> (minutes), <code>h</code> (hours), <code>d</code> (days), <code>w</code> (weeks) and <code>y</code> (years)) or
+as a number of milliseconds.</p>
 <h3 id="purge-jobs"><a class="header" href="#purge-jobs">Purge jobs</a></h3>
 <p>Purge jobs are the jobs that Synapse runs in the background to purge
 expired events from the database. They are only run if support for
@@ -340,9 +334,7 @@ moderator needs to send a state event in that room with the type
 </code></pre>
 <p>In this event’s content, the <code>max_lifetime</code> parameter has the same
 meaning as previously described, and needs to be expressed in
-milliseconds. The event’s content can also include a <code>min_lifetime</code>
-parameter, which has the same meaning and limited support as previously
-described.</p>
+milliseconds.</p>
 <p>Note that over every server in the room, only the ones with support for
 message retention policies will actually remove expired events. This
 support is currently not enabled by default in Synapse.</p>

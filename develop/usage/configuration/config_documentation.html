@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-bd8d3b91.js";
+            window.path_to_searchindex_js = "../../searchindex-ce1e952c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-8fc16911.js"></script>
@@ -1164,19 +1164,14 @@ For more details, see the <a href="../../setup/forward_proxy.html">forward proxy
 <p><code>default_policy</code> (object): Default message retention policy. If set, Synapse will apply it to rooms that lack the <code>m.room.retention</code> state event.</p>
 <p>This setting has the following sub-options:</p>
 <ul>
-<li>
-<p><code>min_lifetime</code>: Minimum message retention time of the default message retention policy. Synapse doesn’t take this option into account yet. Defaults to <code>null</code>.</p>
-</li>
-<li>
-<p><code>max_lifetime</code>: Maximum message retention time of the default message retention policy. Defaults to <code>null</code>.</p>
-</li>
+<li><code>max_lifetime</code>: Maximum message retention time of the default message retention policy. Defaults to <code>null</code>.</li>
 </ul>
 </li>
 <li>
-<p><code>allowed_lifetime_min</code>: Retention policy limit. If set, and the state of a room contains a <code>m.room.retention</code> event in its state which contains a <code>min_lifetime</code> that’s beyond this bound, Synapse will cap the room’s policy to these limits when running purge jobs. Defaults to <code>null</code>.</p>
+<p><code>allowed_lifetime_min</code>: Retention policy limit: the minimum allowed value for <code>max_lifetime</code>. If set, and the <code>max_lifetime</code> that applies to a room is below this bound, Synapse will use this value instead when running purge jobs. This applies both to a room’s explicit retention policy (its <code>m.room.retention</code> state event) and to the default policy used when the room has none. Defaults to <code>null</code>.</p>
 </li>
 <li>
-<p><code>allowed_lifetime_max</code>: Retention policy limit. If set, and the state of a room contains a <code>m.room.retention</code> event in its state which contains a <code>max_lifetime</code> that’s beyond this bound, Synapse will cap the room’s policy to these limits when running purge jobs. Defaults to <code>null</code>.</p>
+<p><code>allowed_lifetime_max</code>: Retention policy limit: the maximum allowed value for <code>max_lifetime</code>. If set, and the <code>max_lifetime</code> that applies to a room is above this bound, Synapse will use this value instead when running purge jobs. This applies both to a room’s explicit retention policy (its <code>m.room.retention</code> state event) and to the default policy used when the room has none. Defaults to <code>null</code>.</p>
 </li>
 <li>
 <p><code>purge_jobs</code> (array|null): Server admins can define the settings of the background jobs purging the events whose lifetime has expired under the <code>purge_jobs</code> section.</p>
@@ -1203,7 +1198,6 @@ For more details, see the <a href="../../setup/forward_proxy.html">forward proxy
 <pre><code class="language-yaml">retention:
   enabled: true
   default_policy:
-    min_lifetime: 1d
     max_lifetime: 1y
   allowed_lifetime_min: 1d
   allowed_lifetime_max: 1y
