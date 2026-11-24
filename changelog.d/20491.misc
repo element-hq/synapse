@@ -1,1 +1,0 @@
-Reload the TLS certificate on SIGHUP by rebuilding the server TLS context in place rather than replacing each listener's TLS factory.
