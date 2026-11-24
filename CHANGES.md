@@ -1,3 +1,10 @@
+# Synapse 1.166.0 (2026-11-24)
+
+No significant changes since 1.166.0rc1.
+
+
+
+
 # Synapse 1.166.0rc1 (2026-11-17)
 
 ## Features
