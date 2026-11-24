@@ -750,6 +750,37 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
+      # Make the Python version an explicit input to the PyO3 build so a restored Rust
+      # cache built against a different Python gets rebuilt rather than failing to link.
+      # https://github.com/PyO3/pyo3/issues/2724
+      #
+      # This is necessary because PyO3 records which Python it found (and so which
+      # libpython to link) in `target/`, but only re-detects it if `PATH`/`PYO3_*` env
+      # vars change, not when the underlying interpreter on `PATH` changes version (e.g.
+      # a new GitHub runner image with a new Python version).
+      #
+      # The value is just an opaque string that uniquely identifies this Python
+      # interpreter's version and ABI. Used to trigger rebuilds for `pyo3` when the
+      # Python interpreter changes. We're just basing it on the `SOABI` value (ABI
+      # version used for `.so` files defined by PEP 3149) which encapsulates the same
+      # information without us needing to re-invent the wheel.
+      #
+      # Another good reference is what `maturin` does,
+      # https://github.com/PyO3/maturin/blob/c909db16c9f0838d42d79e0058b82379d47f2986/src/compile.rs#L903-L908
+      # https://github.com/PyO3/maturin/blob/c909db16c9f0838d42d79e0058b82379d47f2986/src/python_interpreter/mod.rs#L509-L517
+      #
+      # We only need this in spots where we're building using plain Cargo. If we're
+      # going through `maturin`, our Python build backend, it already sets
+      # `PYO3_ENVIRONMENT_SIGNATURE` for us.
+      #
+      # We're simply setting `PYO3_PYTHON` so that we have an explicit connection
+      # between the Python being used in PyO3 builds and the Python used in our
+      # `PYO3_ENVIRONMENT_SIGNATURE` snippet.
+      - name: Set PYO3_ENVIRONMENT_SIGNATURE for cache busting Cargo builds
+        run: |
+          echo "PYO3_PYTHON=python3" >> "$GITHUB_ENV"
+          echo "PYO3_ENVIRONMENT_SIGNATURE=$(python3 -c 'import sysconfig; print(sysconfig.get_config_var("SOABI"))')" >> "$GITHUB_ENV"
+
       - run: cargo test
 
   # We want to ensure that the cargo benchmarks still compile, which requires a
@@ -770,6 +801,12 @@ jobs:
         with:
           toolchain: ${{ env.RUST_NIGHTLY_VERSION }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # See comment above for the same step above for more context
+      - name: Set PYO3_ENVIRONMENT_SIGNATURE for cache busting Cargo builds
+        run: |
+          echo "PYO3_PYTHON=python3" >> "$GITHUB_ENV"
+          echo "PYO3_ENVIRONMENT_SIGNATURE=$(python3 -c 'import sysconfig; print(sysconfig.get_config_var("SOABI"))')" >> "$GITHUB_ENV"
 
       - run: cargo bench --no-run
 
