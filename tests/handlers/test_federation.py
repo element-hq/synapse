@@ -562,7 +562,7 @@ class EventsDuringRemoteJoinWithWorkersTestCase(
         # The worker's periodic check for old staged events picks the message up,
         # at most a minute after the join.
         self.reactor.advance(60)
-        # But it still schedules it on the next tick, so we need to tick 
+        # But it still schedules it on the next tick, so we need to tick
         # the reactor a second time
         self.reactor.advance(1)
         self.replicate()
