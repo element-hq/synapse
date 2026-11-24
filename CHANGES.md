@@ -9,7 +9,7 @@ No significant changes since 1.166.0rc1.
 
 ## Features
 
-- Allow guest user access to `/rtc/transports` and `/rtc/livekit/*`. ([\#20299](https://github.com/element-hq/synapse/issues/20299))
+- Allow guest user access for application service proxying to `/rtc/transports` and `/rtc/livekit/*`. ([\#20299](https://github.com/element-hq/synapse/issues/20299))
 - Add experimental support for [MSC4536](https://github.com/matrix-org/matrix-spec-proposals/pull/4536) profiles query endpoint. ([\#20332](https://github.com/element-hq/synapse/issues/20332))
 - Update experimental [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388) (sign-in with QR code) implementation to add rate limiting, configurable session TTL, and correct auth responses. ([\#20404](https://github.com/element-hq/synapse/issues/20404))
 - Add a `synapse_thread_cpu_seconds_total` metric that reports CPU time per thread type, e.g. the main thread, each threadpool and the Rust tokio runtime. ([\#20405](https://github.com/element-hq/synapse/issues/20405))
