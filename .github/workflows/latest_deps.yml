@@ -23,6 +23,7 @@ concurrency:
 
 env:
   RUST_VERSION: 1.87.0
+  LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
 
 jobs:
   check_repo:
@@ -53,7 +54,7 @@ jobs:
       # poetry-core versions), so we install with poetry.
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
           poetry-version: "2.4.1"
           extras: "all"
       # Dump installed versions for debugging.
@@ -95,7 +96,7 @@ jobs:
             postgres:${{ matrix.postgres-version }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
       - run: pip install .[all,test]
       - name: Await PostgreSQL
         if: ${{ matrix.postgres-version }}

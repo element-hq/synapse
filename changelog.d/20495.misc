@@ -1,1 +1,0 @@
-Mitigate potential database performance issues with Postgres 18 by updating the statistics for `device_lists_changes_in_room`.

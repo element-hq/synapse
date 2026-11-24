@@ -1,3 +1,46 @@
+# Synapse 1.166.0rc1 (2026-11-17)
+
+## Features
+
+- Allow guest user access to `/rtc/transports` and `/rtc/livekit/*`. ([\#20299](https://github.com/element-hq/synapse/issues/20299))
+- Add experimental support for [MSC4536](https://github.com/matrix-org/matrix-spec-proposals/pull/4536) profiles query endpoint. ([\#20332](https://github.com/element-hq/synapse/issues/20332))
+- Update experimental [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388) (sign-in with QR code) implementation to add rate limiting, configurable session TTL, and correct auth responses. ([\#20404](https://github.com/element-hq/synapse/issues/20404))
+- Add a `synapse_thread_cpu_seconds_total` metric that reports CPU time per thread type, e.g. the main thread, each threadpool and the Rust tokio runtime. ([\#20405](https://github.com/element-hq/synapse/issues/20405))
+
+## Bugfixes
+
+- Fix a bug where downloading remote media over federation could fail when the multipart response was split across network chunks, for example with a long redirect URL. Contributed by @ankit373. ([\#20282](https://github.com/element-hq/synapse/issues/20282))
+- Fix a bug introduced in Synapse v1.30.0 where `synapse.logging.RemoteHandler` stopped sending logs shortly after connecting. Thanks to @haarp for the diagnosis. ([\#20389](https://github.com/element-hq/synapse/issues/20389))
+- Fix the `/_synapse/admin/v1/statistics/database/rooms` Admin API failing with a 500 error when Postgres has no statistics, or no most common `room_id` values, for one of the tables it checks. ([\#20390](https://github.com/element-hq/synapse/issues/20390))
+- Fix logging breaking after a `SIGHUP` reload when stdout and stderr are redirected to the logs. ([\#20402](https://github.com/element-hq/synapse/issues/20402))
+- Fix a bug introduced in Synapse v1.146.0 where failed remote media downloads and URL previews would leave behind empty files in the media store. ([\#20429](https://github.com/element-hq/synapse/issues/20429))
+- Fix race where a sync from an older token, built while another sync for the device was still running, did not return some memberships in rooms. Introduced in v1.163.0. ([\#20435](https://github.com/element-hq/synapse/issues/20435))
+- Ignore events from other rooms in `latest_events` when handling experimental [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242) state DAG `/get_missing_events` requests. ([\#20436](https://github.com/element-hq/synapse/issues/20436))
+- Fix a bug introduced in Synapse 1.149.0 where an empty `m.invite_permission_config` account data event would take precedence over [MSC4155](https://github.com/matrix-org/matrix-spec-proposals/pull/4155) invite filtering rules. ([\#20476](https://github.com/element-hq/synapse/issues/20476))
+- Fix notary key queries without a `minimum_valid_until_ts` being rejected since the switch to Pydantic v2. ([\#20477](https://github.com/element-hq/synapse/issues/20477))
+- Fix sliding sync and `/keys/changes` not reporting a user in `device_lists.changed` when they join a room after being invited. ([\#20487](https://github.com/element-hq/synapse/issues/20487))
+- Fix `/leave`, `/invite`, `/ban` and `/kick` returning a 500 error in some rooms the server is not in, such as when leaving a room again after rejecting an invite or rescinding a knock that could not be sent over federation. ([\#20499](https://github.com/element-hq/synapse/issues/20499))
+
+## Improved Documentation
+
+- Clarify in the admin API docs that per-user ratelimit overrides only apply to message sending, and what deleting an override does. Contributed by @chiliec. ([\#20245](https://github.com/element-hq/synapse/issues/20245))
+- Document that the [MSC4143](https://github.com/matrix-org/matrix-spec-proposals/pull/4143) transports endpoint can be run on a worker process. ([\#20482](https://github.com/element-hq/synapse/issues/20482))
+
+## Internal Changes
+
+- Add "ESS" to the bug report template. ([\#20475](https://github.com/element-hq/synapse/issues/20475))
+- Note that the `experimental_features.server_announcements.room_avatar_path` option is not currently functional. ([\#20490](https://github.com/element-hq/synapse/issues/20490))
+- Reload the TLS certificate on SIGHUP by rebuilding the server TLS context in place rather than replacing each listener's TLS factory. ([\#20491](https://github.com/element-hq/synapse/issues/20491))
+- Mitigate potential database performance issues with Postgres 18 by updating the statistics for `device_lists_changes_in_room`. ([\#20495](https://github.com/element-hq/synapse/issues/20495))
+- Remove useless "is the tag checked out?" check in the upload stage of the release process. ([\#20505](https://github.com/element-hq/synapse/issues/20505))
+- Fix running homeserver shutdown handlers at the end of each test. ([\#20509](https://github.com/element-hq/synapse/issues/20509))
+- Avoid using apt-key in CI as it was removed in Ubuntu 26.04. ([\#20511](https://github.com/element-hq/synapse/issues/20511))
+- Reduce memory usage of running the unit tests. ([\#20513](https://github.com/element-hq/synapse/issues/20513))
+- Fix the `portdb` CI test job by upgrading the PostgreSQL client that the runner image preinstalls. ([\#20522](https://github.com/element-hq/synapse/issues/20522))
+
+
+
+
 # Synapse 1.165.0 (2026-11-10)
 
 Please check the [relevant section in the upgrade

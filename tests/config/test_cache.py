@@ -19,6 +19,9 @@
 #
 #
 
+import gc
+import weakref
+
 from synapse.config._base import RootConfig
 from synapse.config.cache import CacheConfig, add_resizable_cache
 from synapse.types import JsonDict
@@ -81,7 +84,7 @@ class CacheConfigTests(TestCase):
             max_size=100, clock=self.clock, server_name="test_server"
         )
 
-        add_resizable_cache("foo", cache_resize_callback=cache.set_cache_factor)
+        add_resizable_cache("foo", cache)
         self.assertEqual(cache.max_size, 50)
 
         config: JsonDict = {"caches": {"per_cache_factors": {"foo": 3}}}
@@ -103,7 +106,7 @@ class CacheConfigTests(TestCase):
         cache: LruCache = LruCache(
             max_size=100, clock=self.clock, server_name="test_server"
         )
-        add_resizable_cache("foo", cache_resize_callback=cache.set_cache_factor)
+        add_resizable_cache("foo", cache)
         self.assertEqual(cache.max_size, 200)
 
     def test_global_instantiated_before_config_load(self) -> None:
@@ -115,7 +118,7 @@ class CacheConfigTests(TestCase):
         cache: LruCache = LruCache(
             max_size=100, clock=self.clock, server_name="test_server"
         )
-        add_resizable_cache("foo", cache_resize_callback=cache.set_cache_factor)
+        add_resizable_cache("foo", cache)
         self.assertEqual(cache.max_size, 50)
 
         config: JsonDict = {"caches": {"global_factor": 4}}
@@ -137,7 +140,7 @@ class CacheConfigTests(TestCase):
         cache: LruCache = LruCache(
             max_size=100, clock=self.clock, server_name="test_server"
         )
-        add_resizable_cache("foo", cache_resize_callback=cache.set_cache_factor)
+        add_resizable_cache("foo", cache)
         self.assertEqual(cache.max_size, 150)
 
     def test_cache_with_asterisk_in_name(self) -> None:
@@ -158,19 +161,19 @@ class CacheConfigTests(TestCase):
         cache_a: LruCache = LruCache(
             max_size=100, clock=self.clock, server_name="test_server"
         )
-        add_resizable_cache("*cache_a*", cache_resize_callback=cache_a.set_cache_factor)
+        add_resizable_cache("*cache_a*", cache_a)
         self.assertEqual(cache_a.max_size, 200)
 
         cache_b: LruCache = LruCache(
             max_size=100, clock=self.clock, server_name="test_server"
         )
-        add_resizable_cache("*Cache_b*", cache_resize_callback=cache_b.set_cache_factor)
+        add_resizable_cache("*Cache_b*", cache_b)
         self.assertEqual(cache_b.max_size, 300)
 
         cache_c: LruCache = LruCache(
             max_size=100, clock=self.clock, server_name="test_server"
         )
-        add_resizable_cache("*cache_c*", cache_resize_callback=cache_c.set_cache_factor)
+        add_resizable_cache("*cache_c*", cache_c)
         self.assertEqual(cache_c.max_size, 200)
 
     def test_apply_cache_factor_from_config(self) -> None:
@@ -188,6 +191,45 @@ class CacheConfigTests(TestCase):
             apply_cache_factor_from_config=False,
             server_name="test_server",
         )
-        add_resizable_cache("event_cache", cache_resize_callback=cache.set_cache_factor)
+        add_resizable_cache("event_cache", cache)
 
         self.assertEqual(cache.max_size, 10240)
+
+    def test_caches_sharing_a_name_are_all_resized(self) -> None:
+        """Several caches can share a name, for example when a process runs more
+        than one homeserver. Resizing reaches every one of them.
+        """
+        config: JsonDict = {"caches": {"per_cache_factors": {"foo": 2}}}
+        self.config.read_config(config, config_dir_path="", data_dir_path="")
+        self.config.resize_all_caches()
+
+        cache_1: LruCache = LruCache(
+            max_size=100, clock=self.clock, server_name="test_server_1"
+        )
+        add_resizable_cache("foo", cache_1)
+        cache_2: LruCache = LruCache(
+            max_size=100, clock=self.clock, server_name="test_server_2"
+        )
+        add_resizable_cache("foo", cache_2)
+        self.assertEqual(cache_1.max_size, 200)
+        self.assertEqual(cache_2.max_size, 200)
+
+        config = {"caches": {"per_cache_factors": {"foo": 3}}}
+        self.config.read_config(config, config_dir_path="", data_dir_path="")
+        self.config.resize_all_caches()
+
+        self.assertEqual(cache_1.max_size, 300)
+        self.assertEqual(cache_2.max_size, 300)
+
+    def test_registration_does_not_keep_cache_alive(self) -> None:
+        """Registering a cache only holds a weak reference to it."""
+        cache: LruCache = LruCache(
+            max_size=100, clock=self.clock, server_name="test_server"
+        )
+        add_resizable_cache("foo", cache)
+        cache_ref = weakref.ref(cache)
+
+        del cache
+        gc.collect()
+
+        self.assertIsNone(cache_ref())

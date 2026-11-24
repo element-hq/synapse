@@ -7,4 +7,14 @@ disallowed-methods = [
     { path = "tokio::runtime::Runtime::spawn_blocking", reason = "leaks past RustRuntime shutdown; see rust/src/runtime.rs" },
     { path = "tokio::runtime::Handle::spawn_blocking", reason = "leaks past RustRuntime shutdown; see rust/src/runtime.rs" },
     { path = "tokio::task::block_in_place", reason = "blocks a tokio worker thread; see rust/src/runtime.rs" },
+    { path = "crate::clock::set_virtual_time_msec", reason = "should only be called from Python unit tests; see rust/src/clock.rs" },
+    # Tokio's timers wait on the real time, so they do not follow the virtual
+    # clock that Synapse's unit tests run on. `Clock::sleep` (see
+    # `rust/src/clock.rs`) does.
+    { path = "tokio::time::sleep", reason = "ignores the virtual clock in tests, use `Clock::sleep` in rust/src/clock.rs" },
+    { path = "tokio::time::sleep_until", reason = "ignores the virtual clock in tests, use `Clock::sleep` in rust/src/clock.rs" },
+    { path = "tokio::time::timeout", reason = "ignores the virtual clock in tests, race the future against `Clock::sleep` in rust/src/clock.rs" },
+    { path = "tokio::time::timeout_at", reason = "ignores the virtual clock in tests, race the future against `Clock::sleep` in rust/src/clock.rs" },
+    { path = "tokio::time::interval", reason = "ignores the virtual clock in tests, loop on `Clock::sleep` in rust/src/clock.rs" },
+    { path = "tokio::time::interval_at", reason = "ignores the virtual clock in tests, loop on `Clock::sleep` in rust/src/clock.rs" },
 ]

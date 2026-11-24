@@ -41,6 +41,8 @@ Example usage:
 
     $ scripts-dev/sign_json.py -N test -k localhost.signing.key "{}"
     {"signatures":{"test":{"ed25519:a_ZnZh":"LmPnml6iM0iR..."}}}
+
+See also check_json_signature.py.
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
