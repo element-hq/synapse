@@ -23,7 +23,6 @@ env:
   # at which time of day they cut the release and when the nightly is built.
   # It's safer for future releases to just do the day before.
   RUST_NIGHTLY_VERSION: nightly-2025-03-27 # last nightly before 1.88.0
-  MINIMUM_SUPPORTED_PYTHON_VERSION: "3.11"
   LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
 
 jobs:
@@ -475,7 +474,7 @@ jobs:
       - changes
     runs-on: ubuntu-latest
     # Debian oldstable, to test against our minimum supported SQLite version
-    container: docker.io/python:${{ env.MINIMUM_SUPPORTED_PYTHON_VERSION }}-bookworm
+    container: docker.io/python:3.11-bookworm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
