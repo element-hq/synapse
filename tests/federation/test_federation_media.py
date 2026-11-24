@@ -21,6 +21,7 @@ import io
 import os
 import shutil
 import tempfile
+from unittest.mock import patch
 
 from twisted.internet.testing import MemoryReactor
 
@@ -147,6 +148,34 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
         # check that the png file exists and matches what was uploaded
         found_file = any(SMALL_PNG in field for field in stripped_bytes)
         self.assertTrue(found_file)
+
+    def test_head_file_download_does_not_read_file(self) -> None:
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_upload",
+                io.BytesIO(SMALL_PNG),
+                67,
+                UserID.from_string("@user_id:whatever.org"),
+            )
+        )
+
+        with patch(
+            "synapse.media._base.ThreadedFileSender.beginFileTransfer"
+        ) as begin_file_transfer:
+            channel = self.make_signed_federation_request(
+                "HEAD",
+                f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
+            )
+            self.pump()
+
+        self.assertEqual(200, channel.code)
+        content_type = channel.headers.getRawHeaders("content-type")
+        assert content_type is not None
+        self.assertIn("multipart/mixed", content_type[0])
+        self.assertEqual(channel.is_finished(), True)
+        self.assertEqual(channel.result.get("body", b""), b"")
+        begin_file_transfer.assert_not_called()
 
     def test_federation_etag(self) -> None:
         """Test that federation ETags work"""

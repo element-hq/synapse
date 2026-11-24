@@ -16,6 +16,7 @@ from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.config.server_announcements import ServerAnnouncementRoom
 from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.server_announcements import ServerAnnouncementsStore
@@ -125,4 +126,58 @@ class ServerAnnouncementsStoreTestCase(HomeserverTestCase):
         )
         self.assertIsNone(
             self.get_success(reader.get_server_announcement_avatar(self.config_id))
+        )
+
+    def test_room_ids_for_user_leave_out_excluded_rooms(self) -> None:
+        """A user listed in one room's `excluded_user_ids` gets every other
+        configured room, and a newly stored room shows up for both users.
+        """
+        excluded_user_id = "@bot:test"
+        self.hs.config.serverannouncements.rooms = [
+            ServerAnnouncementRoom(
+                config_id=config_id,
+                room_name=config_id,
+                room_topic=None,
+                room_avatar_url=None,
+                room_avatar_path=None,
+                allowed_user_ids=[],
+                excluded_user_ids=excluded_user_ids,
+            )
+            for config_id, excluded_user_ids in (
+                ("news", [excluded_user_id]),
+                ("maintenance", []),
+                ("incidents", []),
+            )
+        ]
+        self.get_success(
+            self.store.store_server_announcement_room("news", "!news:test")
+        )
+        self.get_success(
+            self.store.store_server_announcement_room(
+                "maintenance", "!maintenance:test"
+            )
+        )
+
+        self.assertEqual(
+            self.get_success(
+                self.store.get_server_announcement_room_ids_for_user(excluded_user_id)
+            ),
+            {"!maintenance:test"},
+        )
+        self.assertEqual(
+            self.get_success(
+                self.store.get_server_announcement_room_ids_for_user(self.user_id)
+            ),
+            {"!news:test", "!maintenance:test"},
+        )
+
+        self.get_success(
+            self.store.store_server_announcement_room("incidents", "!incidents:test")
+        )
+
+        self.assertEqual(
+            self.get_success(
+                self.store.get_server_announcement_room_ids_for_user(excluded_user_id)
+            ),
+            {"!maintenance:test", "!incidents:test"},
         )

@@ -2611,6 +2611,13 @@ class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
             columns=["creation_ts"],
         )
 
+        self.db_pool.updates.register_background_index_update(
+            "users_lower_name",
+            index_name="users_lower_name",
+            table="users",
+            columns=["lower(name)"],
+        )
+
         self.db_pool.updates.register_background_update_handler(
             "users_set_deactivated_flag", self._background_update_set_deactivated_flag
         )

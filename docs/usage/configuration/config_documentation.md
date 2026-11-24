@@ -613,7 +613,7 @@ listeners:
 ---
 ### `manhole`
 
-*(integer|null)* Turn on the Twisted telnet manhole service on the given port.
+*(integer|null)* Turn on the Twisted manhole service on the given port.
 
 This can also be set by the `--manhole` argument when starting Synapse.
 
@@ -1169,13 +1169,11 @@ This setting has the following sub-options:
 
   This setting has the following sub-options:
 
-  * `min_lifetime`: Minimum message retention time of the default message retention policy. Synapse doesn't take this option into account yet. Defaults to `null`.
-
   * `max_lifetime`: Maximum message retention time of the default message retention policy. Defaults to `null`.
 
-* `allowed_lifetime_min`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `min_lifetime` that's beyond this bound, Synapse will cap the room's policy to these limits when running purge jobs. Defaults to `null`.
+* `allowed_lifetime_min`: Retention policy limit: the minimum allowed value for `max_lifetime`. If set, and the `max_lifetime` that applies to a room is below this bound, Synapse will use this value instead when running purge jobs. This applies both to a room's explicit retention policy (its `m.room.retention` state event) and to the default policy used when the room has none. Defaults to `null`.
 
-* `allowed_lifetime_max`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `max_lifetime` that's beyond this bound, Synapse will cap the room's policy to these limits when running purge jobs. Defaults to `null`.
+* `allowed_lifetime_max`: Retention policy limit: the maximum allowed value for `max_lifetime`. If set, and the `max_lifetime` that applies to a room is above this bound, Synapse will use this value instead when running purge jobs. This applies both to a room's explicit retention policy (its `m.room.retention` state event) and to the default policy used when the room has none. Defaults to `null`.
 
 * `purge_jobs` (array|null): Server admins can define the settings of the background jobs purging the events whose lifetime has expired under the `purge_jobs` section.
 
@@ -1202,7 +1200,6 @@ Example configuration:
 retention:
   enabled: true
   default_policy:
-    min_lifetime: 1d
     max_lifetime: 1y
   allowed_lifetime_min: 1d
   allowed_lifetime_max: 1y
@@ -2700,17 +2697,24 @@ turn_allow_guests: false
 
 This setting has the following sub-options:
 
-* `transports` (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to `[]`.
+* `transports` (array): A list of MatrixRTC transports advertised to clients on `/_matrix/client/v1/rtc/transports` and, if it is enabled via `experimental_features.msc4143_enabled`, the unstable `/_matrix/client/unstable/org.matrix.msc4143/rtc/transports` endpoint. Defaults to `[]`.
 
   Options for each entry include:
 
-  * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
+  * `type` (string): The type of transport to advertise to clients.
 
-  * `url` (string): The WebSocket URL of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is required.
+    - Transports of type `m.livekit` advertise the stable transport based on LiveKit's selective
+      forwarding unit (SFU).
+
+    - Transports of type `livekit` advertise the unstable version of the LiveKit-based transport.
+      This type is deprecated and should only be used when backwards compatibility for clients
+      that don't yet support the stable transport is required.
+
+  * `url` (string): The WebSocket URL of the LiveKit SFU. If `type` is "m.livekit", this is required. If `type` is "livekit", either this or `livekit_service_url` is required.
 
     Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
 
-  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
+  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If `type` is "livekit", either this or `url` is required.
 
     Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
@@ -2718,6 +2722,8 @@ Example configuration:
 ```yaml
 matrix_rtc:
   transports:
+  - type: m.livekit
+    url: wss://livekit.example.com
   - type: livekit
     url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt

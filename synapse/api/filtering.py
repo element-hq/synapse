@@ -292,6 +292,9 @@ class FilterCollection:
             await self._room_filter.filter(events)
         )
 
+    def filter_rooms(self, room_ids: Iterable[str]) -> set[str]:
+        return self._room_filter.filter_rooms(room_ids)
+
     def blocks_all_rooms(self) -> bool:
         return self._room_filter.filters_all_rooms()
 

@@ -7,6 +7,9 @@ on:
     paths:
       - poetry.lock
 
+env:
+  LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -19,5 +22,5 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.x'
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
       - run: ./scripts-dev/check_locked_deps_have_sdists.py
