@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fb2cc3aa.js";
+            window.path_to_searchindex_js = "searchindex-ef2f1c30.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8fc16911.js"></script>
@@ -426,6 +426,7 @@ information.</p>
 ^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$
 ^/_matrix/client/(r0|v3|unstable)/capabilities$
 ^/_matrix/client/(r0|v3|unstable)/notifications$
+^/_matrix/client/(v1|unstable/org.matrix.msc4143)/rtc/transports$
 
 # Admin API requests
 ^/_synapse/admin/v1/rooms/[^/]+$
@@ -461,6 +462,9 @@ information.</p>
 # Unstable MSC4140 support (delayed event scheduling &amp; management)
 ^/_matrix/client/unstable/org.matrix.msc4140/rooms/.*/delayed_event/
 ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/[^/]+(/restart)?)?$
+
+# Unstable MSC4536 support (profile query)
+^/_matrix/client/unstable/org.matrix.msc4536/profile/query$
 
 # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
 ^/_synapse/mas/
