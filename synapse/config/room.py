@@ -86,3 +86,19 @@ class RoomConfig(Config):
         # When enabled, users will forget rooms when they leave them, either via a
         # leave, kick or ban.
         self.forget_on_leave: bool = config.get("forget_rooms_on_leave", False)
+
+        # Prevents local users from newly setting up encryption in new or existing rooms.
+        # (publicly undocumented option, but documented in the config schema)
+        # See https://github.com/element-hq/customer-success/issues/290
+        self.prevent_room_encryption_setup: bool = config.get(
+            "prevent_room_encryption_setup", False
+        )
+
+        if (
+            self.prevent_room_encryption_setup
+            and self.encryption_enabled_by_default_for_room_presets
+        ):
+            raise ConfigError(
+                "`prevent_room_encryption_setup` and `encryption_enabled_by_default_for_room_type` can't be enabled together "
+                "as it would cause every new room to fail to be created."
+            )
