@@ -1,9 +1,11 @@
+from http import HTTPStatus
 from unittest.mock import patch
 
 import synapse
 from synapse.api.constants import EventTypes, RoomEncryptionAlgorithms
+from synapse.api.errors import Codes
 from synapse.rest.client import login, room
-from synapse.types import create_requester
+from synapse.types import JsonDict, create_requester
 
 from tests import unittest
 from tests.unittest import override_config
@@ -218,6 +220,89 @@ class EncryptedByDefaultTestCase(unittest.HomeserverTestCase):
             tok=user_token,
         )
         self.assertEqual(event_content, {"algorithm": RoomEncryptionAlgorithms.DEFAULT})
+
+
+class PreventEncryptionTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        login.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["prevent_room_encryption_setup"] = True
+        return config
+
+    def test_can_create_room_without_encryption(self) -> None:
+        """
+        Tests that a room can be created with no encryption,
+        when the `prevent_room_encryption_setup` option is set.
+        (Just to ensure that enabling the option doesn't break the creation of a room.)
+        """
+
+        # Create a user
+        user = self.register_user("user", "pass")
+        user_token = self.login(user, "pass")
+
+        # Create a room, with initial state to set up encryption
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/createRoom",
+            {},
+            access_token=user_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK)
+
+    # FAILS
+    def test_cannot_create_room_with_encryption_when_prevented(self) -> None:
+        """
+        Tests that a room can't be created with end-to-end encryption enabled
+        when the `prevent_room_encryption_setup` option is set.
+        """
+
+        # Create a user
+        user = self.register_user("user", "pass")
+        user_token = self.login(user, "pass")
+
+        # Create a room, with initial state to set up encryption
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/createRoom",
+            {
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomEncryption,
+                        "state_key": "",
+                        "content": {"algorithm": "io.element.example"},
+                    }
+                ]
+            },
+            access_token=user_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.FORBIDDEN)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+    # FAILS
+    def test_cannot_enable_encryption_after_room_creation(self) -> None:
+        """
+        Tests that encryption can't be enabled in an existing room.
+        """
+
+        # Create a user
+        user = self.register_user("user", "pass")
+        user_token = self.login(user, "pass")
+
+        # Create a room
+        room_id = self.helper.create_room_as(tok=user_token)
+        body = self.helper.send_state(
+            room_id,
+            EventTypes.RoomEncryption,
+            {"algorithm": "io.element.example"},
+            tok=user_token,
+            expect_code=HTTPStatus.FORBIDDEN,
+        )
+        self.assertEqual(body["errcode"], Codes.FORBIDDEN)
 
 
 class RoomIDCollisionTestCase(unittest.HomeserverTestCase):
