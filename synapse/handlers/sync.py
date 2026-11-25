@@ -873,7 +873,7 @@ class SyncHandler:
             since_token
             potential_recents: If non-empty, the events between the since token
                 and current token to send down to clients. On an initial sync, it
-                is only ever an out of band leave, which goes after the room's
+                is only ever an out of band membership, which goes after the room's
                 history. `test_initial_sync_only_passes_out_of_band_leaves`
                 enforces this.
             newly_joined_room
@@ -1610,14 +1610,18 @@ class SyncHandler:
             await_full_state=await_full_state,
         )
 
-        # A timeline that starts with an outlier is just an out of band leave, which
-        # has no state to look up. The state before it is `state_at_timeline_end`.
-        if batch and not batch.events[0].event.internal_metadata.is_outlier():
+        # A timeline that starts with an outlier is just an out of band membership,
+        # which has no state to look up. The state before it is `state_at_timeline_end`.
+        first_event = next(iter(batch.events), None)
+        if (
+            first_event is not None
+            and not first_event.event.internal_metadata.is_outlier()
+        ):
             # Strictly speaking, this returns the state *after* the first event in the
             # timeline, but that is good enough here.
             state_at_timeline_start = (
                 await self._state_storage_controller.get_state_ids_for_event(
-                    batch.events[0].event.event_id,
+                    first_event.event.event_id,
                     state_filter=state_filter,
                     await_full_state=await_full_state,
                 )
@@ -3380,13 +3384,8 @@ class SyncHandler:
 
                 left_or_banned.append(event)
 
-        # Of these leaves and bans, only leaves can be out of band.
-        leave_events = await self.store.get_events(
-            [
-                event.event_id
-                for event in left_or_banned
-                if event.membership == Membership.LEAVE
-            ]
+        membership_events = await self.store.get_events(
+            [event.event_id for event in left_or_banned]
         )
 
         for event in left_or_banned:
@@ -3398,15 +3397,18 @@ class SyncHandler:
             # user may have been in the room before, and the client has nothing
             # yet, so unlike incremental sync we don't set `out_of_band`, which
             # would skip the room's state.
-            leave_event = leave_events.get(event.event_id)
+            membership_event = membership_events.get(event.event_id)
             room_entries.append(
                 RoomSyncResultBuilder(
                     room_id=event.room_id,
                     rtype="archived",
-                    events=[leave_event]
-                    if leave_event is not None
-                    and leave_event.internal_metadata.is_out_of_band_membership()
-                    else None,
+                    events=(
+                        [membership_event]
+                        if membership_event is not None
+                        and membership_event.internal_metadata.is_outlier()
+                        and membership_event.internal_metadata.is_out_of_band_membership()
+                        else None
+                    ),
                     newly_joined=False,
                     full_state=True,
                     since_token=since_token,

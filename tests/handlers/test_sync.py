@@ -3492,9 +3492,59 @@ class SyncOutOfBandMembershipTestCase(tests.unittest.FederatingHomeserverTestCas
             [reject_event_id],
         )
 
+    def test_de_outliered_rescission_initial_sync(self) -> None:
+        """A rescinding leave that is later persisted with state, so it is no
+        longer an outlier, is returned once in an initial sync's timeline."""
+        user = self.register_user("user", "password")
+        room_id = "!room:" + self.OTHER_SERVER_NAME
+
+        invite_event_id = self._receive_invite(room_id, user)
+        leave_event = self._receive_rescission(room_id, user, invite_event_id)
+
+        state_group = self.get_success(
+            self.hs.get_datastores().state.store_state_group(
+                leave_event.event_id,
+                room_id,
+                prev_group=None,
+                delta_ids=None,
+                current_state_ids={(EventTypes.Member, user): leave_event.event_id},
+            )
+        )
+        de_outliered = make_event_from_dict(
+            leave_event.get_pdu_json(), self.room_version
+        )
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.get_success(
+            persistence.persist_event(
+                de_outliered,
+                EventContext.with_state(
+                    self.hs.get_storage_controllers(),
+                    state_group=state_group,
+                    state_group_before_event=state_group,
+                    state_delta_due_to_event={},
+                    partial_state=False,
+                    state_group_deltas={},
+                ),
+            )
+        )
+        stored = self.get_success(
+            self.hs.get_datastores().main.get_event(leave_event.event_id)
+        )
+        self.assertFalse(stored.internal_metadata.is_outlier())
+        self.assertTrue(stored.internal_metadata.is_out_of_band_membership())
+
+        sync_result = self._sync(user, {"room": {"include_leave": True}})
+
+        self.assertEqual([r.room_id for r in sync_result.archived], [room_id])
+        self.assertEqual(
+            [e.event.event_id for e in sync_result.archived[0].timeline.events],
+            [leave_event.event_id],
+        )
+
     def test_initial_sync_only_passes_out_of_band_leaves(self) -> None:
         """`_load_filtered_recents` relies on an initial sync passing no
-        `potential_recents` other than an out of band leave. Check every kind of
+        `potential_recents` other than an out of band membership. Check every kind of
         room membership an initial sync handles."""
         user = self.register_user("user", "password")
         tok = self.login("user", "password")
