@@ -365,10 +365,6 @@ def properties(values: dict) -> str:
 
 def sub_section(prop: str, values: dict) -> str:
     """Formats a bullet point about the given sub-property."""
-    sep = lambda: globals()["sep"](values)
-    type_str = lambda: globals()["type_str"](values)
-    items = lambda: globals()["items"](values)
-    properties = lambda: globals()["properties"](values)
 
     def default() -> str:
         try:
@@ -382,22 +378,18 @@ def sub_section(prop: str, values: dict) -> str:
             error(f"missing description for {prop}")
             return "MISSING DESCRIPTION\n"
 
-        return f"{description}{p(default(), sep())}\n"
+        return f"{description}{p(default(), sep(values))}\n"
 
     return (
-        f"* `{prop}`{p(type_str())}: "
+        f"* `{prop}`{p(type_str(values))}: "
         + f"{indent(description(), first_line=False)}"
-        + indent(items())
-        + indent(properties())
+        + indent(items(values))
+        + indent(properties(values))
     )
 
 
 def section(prop: str, values: dict) -> str:
     """Formats a section about the given property."""
-    sep = lambda: globals()["sep"](values)
-    type_str = lambda: globals()["type_str"](values)
-    items = lambda: globals()["items"](values)
-    properties = lambda: globals()["properties"](values)
 
     def is_simple_default() -> bool:
         """Whether the given default is simple enough for a one-liner."""
@@ -435,7 +427,9 @@ def section(prop: str, values: dict) -> str:
         if not (description := values.get("description")):
             error(f"missing description for {prop}")
             return "MISSING DESCRIPTION\n"
-        return f"\n{a(em(type_str()))}{description}{p(default_str(), sep())}\n"
+        return (
+            f"\n{a(em(type_str(values)))}{description}{p(default_str(), sep(values))}\n"
+        )
 
     def example_str(example: Any) -> str:
         return "```yaml\n" + f"{yaml.dump({prop: example}, sort_keys=False)}" + "```\n"
@@ -470,8 +464,8 @@ def section(prop: str, values: dict) -> str:
         + header()
         + title()
         + description()
-        + items()
-        + properties()
+        + items(values)
+        + properties(values)
         + default_example()
         + examples()
         + post_description()
