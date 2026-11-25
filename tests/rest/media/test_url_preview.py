@@ -34,7 +34,7 @@ from twisted.internet.testing import AccumulatingProtocol, MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.config.oembed import OEmbedEndpointConfig
-from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
+from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS, ONE_HOUR
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
@@ -740,6 +740,28 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         # The image should be in the result.
         self.assertEqual(channel.code, 200)
         self._assert_small_png(channel.json_body)
+        store = self.hs.get_datastores().main
+        url = "http://matrix.org"
+        html_id = self.get_success(
+            store.db_pool.simple_select_one_onecol(
+                "local_media_repository_url_cache", {"url": url}, "media_id"
+            )
+        )
+        filepaths = self.media_repo.filepaths
+        html_path = filepaths.url_cache_filepath(html_id)
+        image_id = channel.json_body["og:image"].rsplit("/", 1)[1]
+        self.assertTrue(os.path.isfile(html_path))
+
+        # An orphaned preview must still expire along with its cached file.
+        self.get_success(store.delete_url_cache_media([html_id]))
+
+        self.reactor.advance(ONE_HOUR / 1000 + 1)
+        self.get_success(self.url_previewer._expire_url_cache_data())
+        self.assertFalse(os.path.exists(html_path))
+        self.assertIsNone(
+            self.get_success(store.get_url_cache(url, self.hs.get_clock().time_msec()))
+        )
+        self.assertTrue(os.path.isfile(filepaths.url_cache_filepath(image_id)))
 
     def test_nonexistent_image(self) -> None:
         """If the preview image doesn't exist, ensure some data is returned."""
@@ -1521,9 +1543,10 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             "URL cache thumbnail was unexpectedly retrieved from a storage provider",
         )
 
+    @override_config({"enable_authenticated_media": False})
     def test_cache_expiry(self) -> None:
         """Test that URL cache files and thumbnails are cleaned up properly on expiry."""
-        _host, media_id = self._download_image()
+        host, media_id = self._download_image()
 
         file_path = self.media_repo.filepaths.url_cache_filepath(media_id)
         file_dirs = self.media_repo.filepaths.url_cache_filepath_dirs_to_delete(
@@ -1539,9 +1562,29 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertTrue(os.path.isfile(file_path))
         self.assertTrue(os.path.isdir(thumbnail_dir))
 
-        self.reactor.advance(IMAGE_CACHE_EXPIRY_MS * 1000 + 1)
+        download_url = f"/_matrix/media/v3/download/{host}/{media_id}"
+        self.reactor.advance(ONE_HOUR / 1000 + 1)
+        self.get_success(self.url_previewer._expire_url_cache_data())
+        self.assertIsNone(
+            self.get_success(
+                self.hs.get_datastores().main.get_url_cache(
+                    "http://cdn.twitter.com/matrixdotorg",
+                    self.hs.get_clock().time_msec(),
+                )
+            )
+        )
+        self.assertTrue(os.path.isfile(file_path))
+        self.assertTrue(os.path.isdir(thumbnail_dir))
+        self.assertEqual(
+            self.make_request("GET", download_url, shorthand=False).code, 200
+        )
+
+        self.reactor.advance((IMAGE_CACHE_EXPIRY_MS - ONE_HOUR) / 1000)
         self.get_success(self.url_previewer._expire_url_cache_data())
 
+        self.assertEqual(
+            self.make_request("GET", download_url, shorthand=False).code, 404
+        )
         for path in [file_path] + file_dirs + [thumbnail_dir] + thumbnail_dirs:
             self.assertFalse(
                 os.path.exists(path),

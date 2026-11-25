@@ -815,10 +815,15 @@ class UrlPreviewer:
         logger.debug("Running url preview cache expiry")
 
         # First we delete expired url cache entries
-        media_ids = await self.store.get_expired_url_cache(now)
+        expired_media = await self.store.get_expired_url_cache(now)
 
         removed_media = []
-        for media_id in media_ids:
+        for media_id, media_type in expired_media:
+            if media_type is not None and _is_media(media_type):
+                # Expire the preview metadata now and keep the image until the second pass.
+                removed_media.append(media_id)
+                continue
+
             fname = self.filepaths.url_cache_filepath(media_id)
             try:
                 os.remove(fname)
