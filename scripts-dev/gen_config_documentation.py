@@ -10,7 +10,7 @@ Usage:
 import json
 import re
 import sys
-from typing import Any, TypedDict
+from typing import Any, Iterable, TypedDict
 
 import yaml
 
@@ -327,6 +327,21 @@ def p(s: str | None, prefix: str = " ") -> str:
     return prefix + s if s else ""
 
 
+def filter_out_undocumented_options(
+    items: Iterable[tuple[str, PropertySchema]],
+) -> Iterable[tuple[str, PropertySchema]]:
+    """
+    Filters out undocumented items (options or sub-options).
+
+    Undocumented items have the `io.element.undocumented` flag set on them.
+    """
+    return (
+        (key, option_schema)
+        for key, option_schema in items
+        if not option_schema.get("io.element.undocumented", False)
+    )
+
+
 def resolve_local_refs(schema: dict) -> dict:
     """Returns the given schema with local $ref properties replaced by their keywords.
 
@@ -418,7 +433,8 @@ def items(option_schema: PropertySchema) -> str:
     if not (item_props := items.get("properties")):
         return ""
     return "\nOptions for each entry include:\n\n" + "\n".join(
-        sub_section(k, v) for k, v in item_props.items()
+        sub_section(k, v)
+        for k, v in filter_out_undocumented_options(item_props.items())
     )
 
 
@@ -434,7 +450,8 @@ def properties(option_schema: PropertySchema) -> str:
     if not (properties := option_schema.get("properties")):
         return ""
     return "\nThis setting has the following sub-options:\n\n" + "\n".join(
-        sub_section(k, v) for k, v in properties.items()
+        sub_section(k, v)
+        for k, v in filter_out_undocumented_options(properties.items())
     )
 
 
@@ -584,7 +601,10 @@ def main() -> None:
     schema = read_json_file_arg()
     schema = resolve_local_refs(schema)
 
-    sections = (section(k, v) for k, v in schema["properties"].items())
+    sections = (
+        section(k, v)
+        for k, v in filter_out_undocumented_options(schema["properties"].items())
+    )
     print(HEADER + "".join(sections), end="")
 
     if has_error:
