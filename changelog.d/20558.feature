@@ -1,0 +1,1 @@
+Add undocumented option to prevent local users setting up end-to-end encryption in rooms.
