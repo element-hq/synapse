@@ -1,1 +1,1 @@
-Enforce valid spec port numbers for outbound federation requests.
+Refuse outbound federation requests to a destination whose port is not 1-5 ASCII digits up to 65535, as the spec requires.
