@@ -4936,3 +4936,17 @@ auto_accept_invites:
   only_from_local_users: true
   worker_to_run_on: worker_1
 ```
+---
+### `experimental_features`
+
+*(object)* Experimental features are undocumented features, that are often subject to change or removal without notice. See <https://element-hq.github.io/synapse/latest/development/experimental_features.html>.
+
+This setting has the following sub-options:
+
+* `msc4388_mode` (string): MSC4388: Secure out-of-band channel for sign in with QR:
+
+  - `off` (default): The feature is disabled
+  - `open`: The feature is enabled and does NOT require authentication.
+  - `authenticated`: The feature is enabled and requires authentication.
+
+  Defaults to `"off"`.
