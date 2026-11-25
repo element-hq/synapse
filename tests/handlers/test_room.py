@@ -254,7 +254,6 @@ class PreventEncryptionTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK)
 
-    # FAILS
     def test_cannot_create_room_with_encryption_when_prevented(self) -> None:
         """
         Tests that a room can't be created with end-to-end encryption enabled
@@ -283,7 +282,6 @@ class PreventEncryptionTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.FORBIDDEN)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
-    # FAILS
     def test_cannot_enable_encryption_after_room_creation(self) -> None:
         """
         Tests that encryption can't be enabled in an existing room.
