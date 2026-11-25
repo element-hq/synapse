@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Generate Synapse documentation from JSON Schema file."""
+"""Generate Synapse documentation from JSON Schema file.
+
+Usage:
+    scripts-dev/gen_config_documentation.py \
+      schema/synapse-config.schema.yaml \
+    > docs/usage/configuration/config_documentation.md
+"""
 
 import json
 import re
