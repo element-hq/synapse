@@ -760,16 +760,6 @@ properties:
           this natively, but a reverse proxy between Synapse and MAS may not.
         default: false
 
-      skip_cross_signing_reset_approval_without_verification_methods:
-        type: boolean
-        description: >-
-          Whether users can reset their cross-signing identity without approving
-          it in MAS first, if they have no way to verify their device: none of
-          their devices is signed by their current identity, and their master
-          cross-signing key is not in secret storage (recovery). Users with a
-          way to verify always need to approve the reset in MAS.
-        default: false
-
       secret:
         type: ["string", "null"]
         description: >-

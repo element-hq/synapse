@@ -315,6 +315,7 @@ class KeyQueryTestCase(unittest.HomeserverTestCase):
             alice_token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self._set_up_recovery(alice_id)
 
         keys2 = self.make_device_keys(alice_id, device_id)
 
@@ -364,6 +365,7 @@ class KeyQueryTestCase(unittest.HomeserverTestCase):
             alice_token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self._set_up_recovery(alice_id)
 
         keys = self.make_device_keys(alice_id, device_id)
         keys["auth"] = None
@@ -386,22 +388,39 @@ class KeyQueryTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.BAD_JSON)
 
+    def _set_up_recovery(self, user_id: str) -> None:
+        """Gives the user a way to verify, so that replacing their keys needs UIA."""
+        account_data_handler = self.hs.get_account_data_handler()
+        self.get_success(
+            account_data_handler.add_account_data_for_user(
+                user_id, "m.secret_storage.default_key", {"key": "recovery_key_id"}
+            )
+        )
+        self.get_success(
+            account_data_handler.add_account_data_for_user(
+                user_id,
+                "m.cross_signing.master",
+                {"encrypted": {"recovery_key_id": {"ciphertext": "x"}}},
+            )
+        )
+
 
 MAS_CONFIG: JsonDict = {
     "enabled": True,
     "endpoint": "http://localhost:8080/",
     "secret": "shared_secret",
-    "skip_cross_signing_reset_approval_without_verification_methods": True,
 }
 
 
 class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
-    """Tests replacing cross-signing keys with MAS, which normally needs approval."""
+    """Tests replacing cross-signing keys with MAS, where it normally needs approval in MAS."""
 
     servlets = [
         admin.register_servlets,
         keys.register_servlets,
     ]
+
+    WITH_MAS = True
 
     OIDC_ADMIN_TOKEN = "_oidc_admin_token"
     ACCOUNT_MANAGEMENT_URL = "https://my-account.issuer"
@@ -411,9 +430,9 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        config["enable_registration"] = False
-        # Keep any `override_config`, which the base class has applied already.
-        config.setdefault("matrix_authentication_service", MAS_CONFIG)
+        if self.WITH_MAS:
+            config["enable_registration"] = False
+            config["matrix_authentication_service"] = MAS_CONFIG
         return config
 
     def prepare(
@@ -423,22 +442,27 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
         self.e2e_keys_handler = homeserver.get_e2e_keys_handler()
         self.device_handler = homeserver.get_device_handler()
         self.account_data_handler = homeserver.get_account_data_handler()
+        self.access_token = self._sign_in()
 
+    def _sign_in(self) -> str:
+        """Registers the user on `DEVICE_ID` and returns their access token."""
         self.get_success(self.store.register_user(self.USER_ID))
         self.get_success(
             self.device_handler.check_device_registered(self.USER_ID, self.DEVICE_ID)
         )
 
-        auth = homeserver.get_auth()
+        # MAS isn't running, so fake what Synapse asks it
+        auth = self.hs.get_auth()
         auth.get_user_by_req = AsyncMock(  # type: ignore[method-assign]
             return_value=create_requester(self.USER_ID, device_id=self.DEVICE_ID)
         )
         auth.account_management_url = AsyncMock(  # type: ignore[attr-defined]
             return_value=self.ACCOUNT_MANAGEMENT_URL
         )
+        return "token"
 
     def test_reset_without_verification_methods(self) -> None:
-        """Without a verified device or recovery, the keys can be replaced without approval."""
+        """Without a verified device or recovery, the keys can be replaced without re-authentication."""
         self._upload_cross_signing_keys()
         self._add_device("ALICE2")
 
@@ -447,13 +471,13 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
 
     def test_reset_with_verified_device(self) -> None:
-        """A device signed by the current identity means the reset needs approval."""
+        """A device signed by the current identity means the reset needs re-authentication."""
         self_signing_key = self._upload_cross_signing_keys()
         self._add_device("ALICE2", self_signing_key)
 
         channel = self._reset()
 
-        self._assert_needs_approval(channel)
+        self._assert_needs_reauthentication(channel)
 
     def test_reset_from_verified_device(self) -> None:
         """The device asking for the reset counts as a way to verify too."""
@@ -462,7 +486,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
 
         channel = self._reset()
 
-        self._assert_needs_approval(channel)
+        self._assert_needs_reauthentication(channel)
 
     def test_reset_with_deleted_verified_device(self) -> None:
         """A verified device that was signed out doesn't count."""
@@ -490,36 +514,36 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
 
     def test_reset_with_recovery(self) -> None:
-        """The master key in secret storage means the reset needs approval."""
+        """The master key in secret storage means the reset needs re-authentication."""
         self._upload_cross_signing_keys()
         self._set_up_recovery()
 
         channel = self._reset()
 
-        self._assert_needs_approval(channel)
+        self._assert_needs_reauthentication(channel)
 
     def test_reset_after_default_key_wiped(self) -> None:
-        """Wiping the default key before the reset, as the Rust SDK does, still needs approval."""
+        """Wiping the default key before the reset, as the Rust SDK does, still needs re-authentication."""
         self._upload_cross_signing_keys()
         self._set_up_recovery()
         self._set_account_data("m.secret_storage.default_key", {})
 
         channel = self._reset()
 
-        self._assert_needs_approval(channel)
+        self._assert_needs_reauthentication(channel)
 
     def test_reset_after_master_key_secret_wiped(self) -> None:
-        """Wiping the stored master key before the reset still needs approval."""
+        """Wiping the stored master key before the reset still needs re-authentication."""
         self._upload_cross_signing_keys()
         self._set_up_recovery()
         self._set_account_data("m.cross_signing.master", {"encrypted": {}})
 
         channel = self._reset()
 
-        self._assert_needs_approval(channel)
+        self._assert_needs_reauthentication(channel)
 
     def test_reset_after_default_key_deleted(self) -> None:
-        """Deleting the default key, rather than replacing it, still needs approval."""
+        """Deleting the default key, rather than replacing it, still needs re-authentication."""
         self._upload_cross_signing_keys()
         self._set_up_recovery()
         self.get_success(
@@ -530,7 +554,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
 
         channel = self._reset()
 
-        self._assert_needs_approval(channel)
+        self._assert_needs_reauthentication(channel)
 
     def test_reset_after_previous_identity_was_in_recovery(self) -> None:
         """Recovery of a previous identity doesn't count."""
@@ -548,8 +572,8 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
 
-    def test_reset_with_disabled_recovery(self) -> None:
-        """Recovery that was turned off, leaving empty account data, doesn't count."""
+    def test_reset_with_empty_secret_storage(self) -> None:
+        """Empty secret storage account data doesn't count."""
         self._upload_cross_signing_keys()
         self._set_secret_storage(default_key={}, master_key_secret={"encrypted": {}})
 
@@ -568,22 +592,6 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
         channel = self._reset()
 
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
-
-    @unittest.override_config(
-        {
-            "matrix_authentication_service": {
-                **MAS_CONFIG,
-                "skip_cross_signing_reset_approval_without_verification_methods": False,
-            }
-        }
-    )
-    def test_reset_without_verification_methods_when_disabled(self) -> None:
-        """Without the option, the reset always needs approval."""
-        self._upload_cross_signing_keys()
-
-        channel = self._reset()
-
-        self._assert_needs_approval(channel)
 
     def _upload_cross_signing_keys(self) -> SigningKey:
         """Sets up a new identity and returns its self-signing key."""
@@ -680,7 +688,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                     self._generate_cross_signing_key(), "master"
                 )
             },
-            access_token="token",
+            access_token=self.access_token,
         )
 
     def _generate_cross_signing_key(self) -> SigningKey:
@@ -697,13 +705,35 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
             "keys": {f"ed25519:{public_key}": public_key},
         }
 
-    def _assert_needs_approval(self, channel: FakeChannel) -> None:
+    def _assert_needs_reauthentication(self, channel: FakeChannel) -> None:
+        """Checks that the user is sent to MAS to approve the reset."""
         self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
         self.assertIn({"stages": ["m.oauth"]}, channel.json_body["flows"])
         self.assertEqual(
             channel.json_body["params"]["m.oauth"]["url"],
             f"{self.ACCOUNT_MANAGEMENT_URL}?action=org.matrix.cross_signing_reset",
         )
+
+
+class SigningKeyUploadServletWithoutMasTestCase(SigningKeyUploadServletTestCase):
+    """The same tests without MAS, where replacing the keys normally needs UIA."""
+
+    servlets = [
+        admin.register_servlets,
+        keys.register_servlets,
+        login.register_servlets,
+    ]
+
+    WITH_MAS = False
+
+    def _sign_in(self) -> str:
+        self.register_user("alice", "password")
+        return self.login("alice", "password", device_id=self.DEVICE_ID)
+
+    def _assert_needs_reauthentication(self, channel: FakeChannel) -> None:
+        """Checks that the user is asked for their password."""
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
+        self.assertIn({"stages": ["m.login.password"]}, channel.json_body["flows"])
 
 
 class KeyChangesTestCase(unittest.HomeserverTestCase):

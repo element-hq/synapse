@@ -1,1 +1,1 @@
-Add the `matrix_authentication_service.skip_cross_signing_reset_approval_without_verification_methods` option, which lets users reset their cross-signing identity without approving it in MAS if they have no way to verify their device.
+Allow users to reset their cross-signing identity without re-authenticating if they have no way to verify their device: no verified device and no recovery.

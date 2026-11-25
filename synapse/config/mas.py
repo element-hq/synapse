@@ -37,7 +37,6 @@ class MasConfigModel(ParseModel):
     enabled: StrictBool = False
     endpoint: AnyHttpUrl = AnyHttpUrl("http://localhost:8080")
     force_http2: StrictBool = False
-    skip_cross_signing_reset_approval_without_verification_methods: StrictBool = False
     secret: StrictStr | None = Field(default=None)
     # We set `strict=False` to allow `str` instances.
     secret_path: FilePath | None = Field(default=None, strict=False)
@@ -85,9 +84,6 @@ class MasConfig(Config):
         self.enabled = parsed.enabled
         self.endpoint = parsed.endpoint
         self.force_http2 = parsed.force_http2
-        self.skip_cross_signing_reset_approval_without_verification_methods = (
-            parsed.skip_cross_signing_reset_approval_without_verification_methods
-        )
         self._secret = parsed.secret
         self._secret_path = parsed.secret_path
 

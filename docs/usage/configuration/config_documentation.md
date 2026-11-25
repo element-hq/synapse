@@ -692,8 +692,6 @@ This setting has the following sub-options:
 
 * `force_http2` (boolean): Force HTTP/2 over plaintext (H2C) when connecting to MAS. MAS supports this natively, but a reverse proxy between Synapse and MAS may not. Defaults to `false`.
 
-* `skip_cross_signing_reset_approval_without_verification_methods` (boolean): Whether users can reset their cross-signing identity without approving it in MAS first, if they have no way to verify their device: none of their devices is signed by their current identity, and their master cross-signing key is not in secret storage (recovery). Users with a way to verify always need to approve the reset in MAS. Defaults to `false`.
-
 * `secret` (string|null): A shared secret that will be used to authenticate requests from and to MAS.
 
 * `secret_path` (string|null): Alternative to `secret`, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
