@@ -12,35 +12,23 @@
 # <https://www.gnu.org/licenses/agpl_3.0.html>.
 #
 import logging
+from typing import Any
+from unittest.mock import patch
 
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-
 import synapse.rest.client.account_data
-
 from synapse.api.constants import EventTypes, EventUnsignedContentFields, Membership
-
 from synapse.rest.client import account_data, login, register, room, sync
-
 from synapse.server import HomeServer
-
 from synapse.types import JsonDict, StreamKeyType, UserID, create_requester
-
 from synapse.types.handlers.sliding_sync import StateValues
-
 from synapse.util.clock import Clock
-
 from synapse.util.duration import Duration
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
-
 from tests.server import TimedOutException
-
-from typing import Any
-
-from unittest.mock import patch
-
 from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
