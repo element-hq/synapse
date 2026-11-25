@@ -66,8 +66,10 @@ impl RequestSigner {
         })
     }
 
-    /// The `Authorization` header value. Exactly one of `destination` and
-    /// `destination_is` must be set and non-empty; the header names it.
+    /// The `Authorization` header value.
+    ///
+    /// Exactly one of `destination` and `destination_is` must be set and
+    /// non-empty. Its value goes in the header's `destination` parameter.
     pub fn authorization(&self, input: &SigningInput<'_>) -> Result<HeaderValue, SigningError> {
         let header_destination = match (input.destination, input.destination_is) {
             (Some(d), None) if !d.is_empty() => d,
