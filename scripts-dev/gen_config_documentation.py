@@ -10,7 +10,7 @@ Usage:
 import json
 import re
 import sys
-from typing import Any
+from typing import Any, TypedDict
 
 import yaml
 
@@ -246,6 +246,31 @@ SECTION_HEADERS = {
 }
 INDENT = "  "
 
+PropertySchema = TypedDict(
+    "PropertySchema",
+    {
+        "type": str | list[str],
+        "description": str,
+        "default": object,
+        "examples": list[object],
+        # Schema of each entry, for options of type `array`.
+        "items": "PropertySchema",
+        # Schemas of each sub-option, for options of type `object`.
+        "properties": dict[str, "PropertySchema"],
+        # Overrides the type shown in the documentation.
+        "io.element.type_name": str,
+        # Text shown after the sub-options and default configuration.
+        "io.element.post_description": str,
+        # Flag that this option should not be documented.
+        "io.element.undocumented": bool,
+    },
+    total=False,
+)
+"""
+The JSON Schema of a single config option (or sub-option), after the resolution of any `$ref`s.
+(Only includes fields used by this script.)
+"""
+
 
 has_error = False
 
@@ -323,18 +348,18 @@ def resolve_local_refs(schema: dict) -> dict:
     return replace_ref(schema)
 
 
-def sep(values: dict) -> str:
+def sep(values: PropertySchema) -> str:
     """Separator between parts of the description."""
     # If description is multiple paragraphs already, add new ones. Otherwise
     # append to same paragraph.
     return "\n\n" if "\n\n" in values.get("description", "") else " "
 
 
-def type_str(values: dict) -> str:
+def type_str(values: PropertySchema) -> str:
     """Type of the current value."""
-    if t := values.get("io.element.type_name"):
+    if type_name := values.get("io.element.type_name"):
         # Allow custom overrides for the type name, for documentation clarity
-        return f"({t})"
+        return f"({type_name})"
     if not (t := values.get("type")):
         return ""
     if not isinstance(t, list):
@@ -343,7 +368,7 @@ def type_str(values: dict) -> str:
     return f"({joined})"
 
 
-def items(values: dict) -> str:
+def items(values: PropertySchema) -> str:
     """A block listing properties of array items."""
     if not (items := values.get("items")):
         return ""
@@ -354,7 +379,7 @@ def items(values: dict) -> str:
     )
 
 
-def properties(values: dict) -> str:
+def properties(values: PropertySchema) -> str:
     """A block listing object properties."""
     if not (properties := values.get("properties")):
         return ""
@@ -363,7 +388,7 @@ def properties(values: dict) -> str:
     )
 
 
-def sub_section(prop: str, values: dict) -> str:
+def sub_section(prop: str, values: PropertySchema) -> str:
     """Formats a bullet point about the given sub-property."""
 
     def default() -> str:
@@ -388,7 +413,7 @@ def sub_section(prop: str, values: dict) -> str:
     )
 
 
-def section(prop: str, values: dict) -> str:
+def section(prop: str, values: PropertySchema) -> str:
     """Formats a section about the given property."""
 
     def is_simple_default() -> bool:
