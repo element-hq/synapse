@@ -36,10 +36,6 @@ cat << EOF > ${STREAM_WRITERS[$i]}_stream_writer.yaml
 worker_app: synapse.app.generic_worker
 worker_name: ${STREAM_WRITERS[$i]}_stream_writer
 
-# The replication listener on the main synapse process.
-worker_replication_host: 127.0.0.1
-worker_replication_http_port: 9093
-
 worker_listeners:
   - type: http
     port: $(expr $REP_START_PORT + $i)
