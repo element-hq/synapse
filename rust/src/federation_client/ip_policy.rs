@@ -12,8 +12,7 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-//! Block-set membership for IP-literal destinations. Resolved addresses are
-//! checked by Python's blocklisting resolver.
+//! Block-set membership for IP-literal destinations.
 
 use std::{fmt, net::IpAddr};
 
