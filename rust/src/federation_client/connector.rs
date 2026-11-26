@@ -31,20 +31,16 @@ const ATTEMPT_DELAY: Duration = Duration::from_millis(300);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Connects to the first of `addrs` to answer: one attempt every 0.3 s in the
-/// given order, each given 30 s. If all fail, the last failure is returned,
-/// and no sooner than 0.3 s after the last attempt started.
+/// given order, each given 30 s. If all fail, the last failure is returned.
 ///
-/// These are the timings of Twisted's `HostnameEndpoint`, which this replaces:
-/// its default attempt delay and timeout, and its loop, which only notices
-/// that every attempt failed at the tick after the last one started.
-/// Staggering the attempts means an unresponsive address delays the next by
-/// 0.3 s, not 30 s.
+/// The delay and timeout are the defaults of Twisted's `HostnameEndpoint`,
+/// which this replaces. Staggering the attempts means an unresponsive address
+/// delays the next by 0.3 s, not 30 s.
 pub async fn connect(
     transport: &dyn Transport,
     addrs: &[SocketAddr],
     clock: &Clock,
 ) -> io::Result<BoxedIo> {
-    let start = clock.now();
     // Runs every attempt concurrently, polling only the ones that woke, and
     // yields each result as it finishes.
     let mut attempts: FuturesUnordered<_> = addrs
@@ -73,9 +69,6 @@ pub async fn connect(
             Err(error) => last_error = error,
         }
     }
-    let all_started = ATTEMPT_DELAY * u32::try_from(addrs.len()).unwrap_or(u32::MAX);
-    let elapsed = clock.now().duration_since(start).unwrap_or_default();
-    clock.sleep(all_started.saturating_sub(elapsed)).await;
     Err(last_error)
 }
 
@@ -173,14 +166,14 @@ mod tests {
     }
 
     /// The first address fails last, at 500 ms, so its error is the one
-    /// returned, at 600 ms: 0.3 s after the second attempt started.
+    /// returned.
     #[test]
     fn the_last_failure_is_returned() {
         let outcomes = vec![
             (500, Outcome::Fail(io::ErrorKind::ConnectionRefused)),
             (100, Outcome::Fail(io::ErrorKind::ConnectionReset)),
         ];
-        let (result, _) = run(outcomes, &[0, 300, 400, 500, 599, 600]);
+        let (result, _) = run(outcomes, &[0, 300, 400, 499, 500]);
         assert_eq!(
             result.err().unwrap().kind(),
             io::ErrorKind::ConnectionRefused
