@@ -16,7 +16,11 @@
 
 use std::{io, net::SocketAddr, pin::pin, time::Duration};
 
-use futures::future::{select, select_ok, Either};
+use futures::{
+    future::{select, Either},
+    stream::FuturesUnordered,
+    StreamExt,
+};
 
 use crate::{
     clock::Clock,
@@ -26,19 +30,19 @@ use crate::{
 const ATTEMPT_DELAY: Duration = Duration::from_millis(300);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Connects to the first of `addrs` to answer, as Twisted's
-/// `HostnameEndpoint` does: one attempt every 0.3 s in the given order, each
-/// given 30 s. If all fail, the last failure is returned.
+/// Connects to the first of `addrs` to answer: one attempt every 0.3 s in the
+/// given order, each given 30 s. If all fail, the last failure is returned,
+/// and no sooner than 0.3 s after the last attempt started.
 pub async fn connect(
     transport: &dyn Transport,
     addrs: &[SocketAddr],
     clock: &Clock,
 ) -> io::Result<BoxedIo> {
-    if addrs.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "no addresses"));
-    }
-    let attempts = addrs.iter().zip(0..).map(|(&addr, n)| {
-        Box::pin(async move {
+    let start = clock.now();
+    let mut attempts: FuturesUnordered<_> = addrs
+        .iter()
+        .zip(0..)
+        .map(|(&addr, n)| async move {
             if n > 0 {
                 clock.sleep(ATTEMPT_DELAY * n).await;
             }
@@ -50,8 +54,19 @@ pub async fn connect(
                 )),
             }
         })
-    });
-    Ok(select_ok(attempts).await?.0)
+        .collect();
+
+    let mut last_error = io::Error::new(io::ErrorKind::NotFound, "no addresses");
+    while let Some(result) = attempts.next().await {
+        match result {
+            Ok(io) => return Ok(io),
+            Err(error) => last_error = error,
+        }
+    }
+    let all_started = ATTEMPT_DELAY * u32::try_from(addrs.len()).unwrap_or(u32::MAX);
+    let elapsed = clock.now().duration_since(start).unwrap_or_default();
+    clock.sleep(all_started.saturating_sub(elapsed)).await;
+    Err(last_error)
 }
 
 #[cfg(test)]
@@ -147,14 +162,15 @@ mod tests {
         assert_eq!(started, [(addr(1), 0), (addr(2), 300), (addr(3), 600)]);
     }
 
-    /// The first address fails last, so its error is the one returned.
+    /// The first address fails last, at 500 ms, so its error is the one
+    /// returned, at 600 ms: 0.3 s after the second attempt started.
     #[test]
     fn the_last_failure_is_returned() {
         let outcomes = vec![
             (500, Outcome::Fail(io::ErrorKind::ConnectionRefused)),
             (100, Outcome::Fail(io::ErrorKind::ConnectionReset)),
         ];
-        let (result, _) = run(outcomes, &[0, 300, 400, 500]);
+        let (result, _) = run(outcomes, &[0, 300, 400, 500, 599, 600]);
         assert_eq!(
             result.err().unwrap().kind(),
             io::ErrorKind::ConnectionRefused

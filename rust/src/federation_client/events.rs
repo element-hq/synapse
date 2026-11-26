@@ -12,7 +12,7 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-//! What happened during an attempt that Python logs, in today's words.
+//! What happened during an attempt, for Python to log.
 
 use std::{net::IpAddr, sync::Mutex};
 

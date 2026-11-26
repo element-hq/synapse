@@ -19,12 +19,14 @@ use tokio::net::TcpStream;
 
 use super::{BoxedIo, Transport};
 
-/// TCP with `TCP_NODELAY`, as Twisted's HTTP client sets it.
+/// TCP with `TCP_NODELAY` set where the socket allows it.
 pub struct TcpTransport;
 
 async fn connect_tcp(addr: SocketAddr) -> io::Result<TcpStream> {
     let stream = TcpStream::connect(addr).await?;
-    stream.set_nodelay(true)?;
+    if let Err(error) = stream.set_nodelay(true) {
+        log::debug!("Couldn't set TCP_NODELAY on {addr}: {error}");
+    }
     Ok(stream)
 }
 

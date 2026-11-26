@@ -41,7 +41,7 @@ impl IpSet {
 }
 
 /// The rule for resolved addresses: refused if in the block set and not in
-/// the allow set, as `_is_ip_blocked` does.
+/// the allow set.
 pub struct IpPolicy {
     pub blocklist: IpBlocklist,
     pub allowlist: IpBlocklist,

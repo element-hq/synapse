@@ -23,11 +23,10 @@ use tokio::sync::Semaphore;
 
 use super::AddrLookup;
 
-/// The size of today's `gai_resolver` threadpool.
 const MAX_LOOKUPS: usize = 20;
 
-/// `getaddrinfo` with `SOCK_STREAM`, `AF_UNSPEC` and no flags, as
-/// `GAIResolver` calls it.
+/// `getaddrinfo` with `SOCK_STREAM`, `AF_UNSPEC` and no flags, at most
+/// [`MAX_LOOKUPS`] at once.
 pub struct GaiLookup {
     permits: Arc<Semaphore>,
 }
@@ -54,14 +53,18 @@ impl GaiLookup {
         #[expect(
             clippy::disallowed_methods,
             reason = "getaddrinfo can't be cancelled, so a lookup running at shutdown \
-                      keeps its thread until the system resolver times out, as \
-                      today's gai_resolver threadpool does"
+                      keeps its thread until the system resolver gives up; it touches \
+                      no Python or runtime state"
         )]
         let task = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             f()
         });
-        task.await.map_err(io::Error::other)
+        match task.await {
+            Ok(value) => Ok(value),
+            Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+            Err(error) => Err(io::Error::other(error)),
+        }
     }
 }
 
@@ -89,7 +92,8 @@ mod tests {
         assert_eq!(addrs.unwrap(), [SocketAddr::from(([127, 0, 0, 1], 8448))]);
     }
 
-    /// A lookup keeps its permit until it returns, even once its caller is gone.
+    /// A 21st lookup waits, and a lookup keeps its permit until it returns,
+    /// even once its caller is gone.
     #[test]
     fn permits_outlive_dropped_callers() {
         let gai = Arc::new(GaiLookup::default());
@@ -103,9 +107,19 @@ mod tests {
                     tokio::spawn(async move { gai.blocking(move || drop(gate.read())).await })
                 })
                 .collect();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             while gai.permits.available_permits() > 0 {
+                assert!(std::time::Instant::now() < deadline, "permits not taken");
                 tokio::task::yield_now().await;
             }
+
+            let waiting = {
+                let gai = Arc::clone(&gai);
+                tokio::spawn(async move { gai.blocking(|| panic!("a 21st lookup ran")).await })
+            };
+            tokio::task::yield_now().await;
+            waiting.abort();
+            assert!(waiting.await.unwrap_err().is_cancelled());
             for lookup in lookups {
                 lookup.abort();
                 assert!(lookup.await.unwrap_err().is_cancelled());

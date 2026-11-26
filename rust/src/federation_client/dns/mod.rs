@@ -14,7 +14,7 @@
 
 //! Name resolution for new connections.
 
-use std::{io, net::SocketAddr, sync::Arc};
+use std::{fmt, io, net::SocketAddr, sync::Arc};
 
 use async_trait::async_trait;
 
@@ -36,6 +36,17 @@ pub enum LookupFailure {
     Blocked,
 }
 
+impl fmt::Display for LookupFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            LookupFailure::NoAddresses => "no addresses",
+            LookupFailure::Blocked => "an address is blocked",
+        })
+    }
+}
+
+impl std::error::Error for LookupFailure {}
+
 pub struct Resolver {
     addr: Arc<dyn AddrLookup>,
     policy: IpPolicy,
@@ -47,8 +58,7 @@ impl Resolver {
     }
 
     /// Addresses for one target, in lookup order. One blocked address refuses
-    /// them all, as `_IPBlockingResolver` does; a failed lookup is no
-    /// addresses, as `GAIResolver` does.
+    /// them all; a failed lookup is no addresses.
     pub async fn addresses(
         &self,
         host: &str,
