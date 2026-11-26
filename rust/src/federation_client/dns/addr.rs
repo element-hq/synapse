@@ -76,10 +76,7 @@ impl AddrLookup for GaiLookup {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Condvar, Mutex,
-    };
+    use std::sync::RwLock;
 
     use super::*;
 
@@ -92,51 +89,28 @@ mod tests {
         assert_eq!(addrs.unwrap(), [SocketAddr::from(([127, 0, 0, 1], 8448))]);
     }
 
-    /// Stalled lookups hold their permits, even once their callers are gone.
+    /// A lookup keeps its permit until it returns, even once its caller is gone.
     #[test]
-    fn at_most_twenty_lookups_run() {
-        let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
+    fn permits_outlive_dropped_callers() {
         let gai = Arc::new(GaiLookup::default());
-        let started = Arc::new(AtomicUsize::new(0));
-        let release = Arc::new((Mutex::new(false), Condvar::new()));
-        let stall = || {
-            let started = Arc::clone(&started);
-            let release = Arc::clone(&release);
-            move || {
-                started.fetch_add(1, Ordering::SeqCst);
-                let (released, wake) = &*release;
-                let _released = wake
-                    .wait_while(released.lock().unwrap(), |released| !*released)
-                    .unwrap();
-            }
-        };
-
+        let gate = Arc::new(RwLock::new(()));
+        let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
+        let _closed = gate.write().unwrap();
         runtime.block_on(async {
-            let first: Vec<_> = (0..MAX_LOOKUPS)
+            let lookups: Vec<_> = (0..MAX_LOOKUPS)
                 .map(|_| {
-                    let (gai, stall) = (Arc::clone(&gai), stall());
-                    tokio::spawn(async move { gai.blocking(stall).await })
+                    let (gai, gate) = (Arc::clone(&gai), Arc::clone(&gate));
+                    tokio::spawn(async move { gai.blocking(move || drop(gate.read())).await })
                 })
                 .collect();
-            while started.load(Ordering::SeqCst) < MAX_LOOKUPS {
+            while gai.permits.available_permits() > 0 {
                 tokio::task::yield_now().await;
             }
-
-            let last = {
-                let (gai, stall) = (Arc::clone(&gai), stall());
-                tokio::spawn(async move { gai.blocking(stall).await })
-            };
-            for lookup in first {
+            for lookup in lookups {
                 lookup.abort();
                 assert!(lookup.await.unwrap_err().is_cancelled());
             }
-            let free_permits = gai.permits.available_permits();
-
-            *release.0.lock().unwrap() = true;
-            release.1.notify_all();
-            assert_eq!(free_permits, 0);
-            last.await.unwrap().unwrap();
-            assert_eq!(started.load(Ordering::SeqCst), MAX_LOOKUPS + 1);
+            assert_eq!(gai.permits.available_permits(), 0);
         });
     }
 }

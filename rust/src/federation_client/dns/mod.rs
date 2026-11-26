@@ -57,14 +57,16 @@ impl Resolver {
     ) -> Result<Vec<SocketAddr>, LookupFailure> {
         let addrs = self.addr.lookup(host, port).await.unwrap_or_default();
         let mut blocked = false;
-        for addr in &addrs {
-            if self.policy.blocks(addr.ip()) {
-                state.record(Event::AddressBlocked {
-                    ip: addr.ip(),
-                    host: host.to_owned(),
-                });
-                blocked = true;
-            }
+        for ip in addrs
+            .iter()
+            .map(SocketAddr::ip)
+            .filter(|&ip| self.policy.blocks(ip))
+        {
+            state.record(Event::AddressBlocked {
+                ip,
+                host: host.to_owned(),
+            });
+            blocked = true;
         }
         if blocked {
             Err(LookupFailure::Blocked)
@@ -113,9 +115,10 @@ mod tests {
         }
     }
 
+    /// `10.1.2.3` is in both sets.
     #[test]
     fn allowed_answers_keep_their_order() {
-        let answer = ["[2001:db8::1]:8448", "1.2.3.4:8448"];
+        let answer = ["[2001:db8::1]:8448", "10.1.2.3:8448", "1.2.3.4:8448"];
         assert_eq!(
             resolve(Some(&answer)),
             (Ok(answer.map(String::from).into()), vec![])
@@ -131,15 +134,6 @@ mod tests {
                 Err(LookupFailure::Blocked),
                 vec![blocked("10.2.3.4"), blocked("fd00::1")]
             )
-        );
-    }
-
-    #[test]
-    fn the_allow_set_overrides_the_block_set() {
-        let answer = ["10.1.2.3:8448"];
-        assert_eq!(
-            resolve(Some(&answer)),
-            (Ok(answer.map(String::from).into()), vec![])
         );
     }
 

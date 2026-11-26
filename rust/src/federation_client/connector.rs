@@ -16,11 +16,7 @@
 
 use std::{io, net::SocketAddr, pin::pin, time::Duration};
 
-use futures::{
-    future::{select, Either},
-    stream::FuturesUnordered,
-    StreamExt,
-};
+use futures::future::{select, select_ok, Either};
 
 use crate::{
     clock::Clock,
@@ -38,11 +34,14 @@ pub async fn connect(
     addrs: &[SocketAddr],
     clock: &Clock,
 ) -> io::Result<BoxedIo> {
-    let mut attempts: FuturesUnordered<_> = addrs
-        .iter()
-        .zip(0..)
-        .map(|(&addr, n)| async move {
-            clock.sleep(ATTEMPT_DELAY * n).await;
+    if addrs.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "no addresses"));
+    }
+    let attempts = addrs.iter().zip(0..).map(|(&addr, n)| {
+        Box::pin(async move {
+            if n > 0 {
+                clock.sleep(ATTEMPT_DELAY * n).await;
+            }
             match select(transport.connect(addr), pin!(clock.sleep(CONNECT_TIMEOUT))).await {
                 Either::Left((result, _)) => result,
                 Either::Right(_) => Err(io::Error::new(
@@ -51,16 +50,8 @@ pub async fn connect(
                 )),
             }
         })
-        .collect();
-
-    let mut last_error = io::Error::new(io::ErrorKind::NotFound, "no addresses");
-    while let Some(result) = attempts.next().await {
-        match result {
-            Ok(io) => return Ok(io),
-            Err(error) => last_error = error,
-        }
-    }
-    Err(last_error)
+    });
+    Ok(select_ok(attempts).await?.0)
 }
 
 #[cfg(test)]
@@ -128,22 +119,20 @@ mod tests {
         let clock = Clock::Internal(time.clone());
         let mut cx = Context::from_waker(Waker::noop());
         let (last, pending) = steps.split_last().unwrap();
-        let result = {
-            let mut connecting = pin!(connect(&transport, &addrs, &clock));
-            for &millis in pending {
-                time.set_millis(millis);
-                assert!(
-                    connecting.as_mut().poll(&mut cx).is_pending(),
-                    "at {millis}"
-                );
-            }
-            time.set_millis(*last);
-            let Poll::Ready(result) = connecting.as_mut().poll(&mut cx) else {
-                panic!("pending at {last}");
-            };
-            result
+        let mut connecting = pin!(connect(&transport, &addrs, &clock));
+        for &millis in pending {
+            time.set_millis(millis);
+            assert!(
+                connecting.as_mut().poll(&mut cx).is_pending(),
+                "at {millis}"
+            );
+        }
+        time.set_millis(*last);
+        let Poll::Ready(result) = connecting.as_mut().poll(&mut cx) else {
+            panic!("pending at {last}");
         };
-        (result, transport.started.into_inner().unwrap())
+        let started = transport.started.lock().unwrap().clone();
+        (result, started)
     }
 
     #[test]
