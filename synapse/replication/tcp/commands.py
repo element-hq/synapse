@@ -144,6 +144,9 @@ class RdataCommand(Command):
         self.token = token
         self.row = row
 
+    def __repr__(self) -> str:
+        return f"RdataCommand(stream={self.stream_name!r}, instance={self.instance_name!r}, position={self.token!r}, row=...)"
+
     @classmethod
     def from_line(cls: type["RdataCommand"], line: str) -> "RdataCommand":
         stream_name, instance_name, token, row_json = line.split(" ", 3)
