@@ -188,7 +188,6 @@ class KeyringTestCase(unittest.HomeserverTestCase):
 
         d2 = ensureDeferred(second_lookup())
 
-        self.pump()
         # the second request should be pending, but the fetcher should not yet have been
         # called
         self.assertEqual(second_lookup_state[0], 1)

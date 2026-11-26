@@ -57,7 +57,6 @@ class FilterTestCase(unittest.HomeserverTestCase):
                 user_id=UserID.from_string(FilterTestCase.user_id), filter_id=0
             )
         )
-        self.pump()
         self.assertEqual(filter, self.EXAMPLE_FILTER)
 
     def test_add_filter_for_other_user(self) -> None:
