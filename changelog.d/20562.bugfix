@@ -1,0 +1,1 @@
+Fix direct-image URL previews returning a 404 for the full-size image about an hour after the preview was generated, by keeping the image file until the existing two-day image cache expiry. Contributed by @mvanhorn.
