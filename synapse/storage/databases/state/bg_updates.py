@@ -107,6 +107,11 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
         """
         Given a number of state groups, fetch the latest state for each group.
 
+        A `state_groups_state` row with a NULL `event_id` is a tombstone: it
+        marks its (type, state_key) as absent from the group's state, although
+        an earlier group in the chain has it. Tombstoned keys are left out of
+        the result.
+
         Args:
             txn: The transaction object.
             groups: The given state groups that you want to fetch the latest state for.
@@ -114,11 +119,6 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
 
         Returns:
             Map from state_group to a StateMap at that point.
-
-        A `state_groups_state` row with a NULL `event_id` is a tombstone: it
-        marks its (type, state_key) as absent from the group's state, although
-        an earlier group in the chain has it. Tombstoned keys are left out of
-        the result.
         """
         if state_filter is None:
             state_filter = StateFilter.all()
@@ -243,7 +243,7 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
             for group in groups:
                 state = results[group]
                 # Keys whose nearest row is a tombstone. They stay out of
-                # `state`, but still hide the rows further down the chain.
+                # `state`, but still hide the rows earlier in the chain.
                 tombstoned: set[StateKey] = set()
                 next_group: int | None = group
 

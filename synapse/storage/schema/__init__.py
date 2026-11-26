@@ -19,7 +19,7 @@
 #
 #
 
-SCHEMA_VERSION = 95  # remember to update the list below when updating
+SCHEMA_VERSION = 96  # remember to update the list below when updating
 """Represents the expectations made by the codebase about the database schema
 
 This should be incremented whenever the codebase changes its requirements on the
@@ -184,6 +184,11 @@ Changes in SCHEMA_VERSION = 95
       sent from a different user.
     - `event_edges.is_state` is no longer read from (it has not been written to since SCHEMA_VERSION 72).
     - Add `server_announcement_rooms` table.
+
+Changes in SCHEMA_VERSION = 96
+    - Readers of `state_groups_state` treat a row with a NULL `event_id` as a
+      tombstone: the key is absent from the group's state. Nothing writes such
+      rows yet.
 """
 
 

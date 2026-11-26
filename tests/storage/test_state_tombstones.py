@@ -95,11 +95,26 @@ class StateTombstoneReadTestCase(HomeserverTestCase):
     def _make_event_id_nullable_txn(self, txn: LoggingTransaction) -> None:
         """Drop `NOT NULL` from `state_groups_state.event_id`, as a later schema
         change will."""
+        # TODO: Remove this helper once a schema delta makes the column
+        # nullable. The asserts below fail then, as a reminder.
         if isinstance(txn.database_engine, PostgresEngine):
+            txn.execute(
+                "SELECT is_nullable FROM information_schema.columns"
+                " WHERE table_name = 'state_groups_state'"
+                " AND column_name = 'event_id'"
+            )
+            assert txn.fetchall() == [("NO",)], "event_id is already nullable"
+
             txn.execute(
                 "ALTER TABLE state_groups_state ALTER COLUMN event_id DROP NOT NULL"
             )
             return
+
+        txn.execute(
+            "SELECT \"notnull\" FROM pragma_table_info('state_groups_state')"
+            " WHERE name = 'event_id'"
+        )
+        assert txn.fetchall() == [(1,)], "event_id is already nullable"
 
         # SQLite cannot drop a constraint, so rebuild the table.
         txn.execute(
@@ -172,7 +187,7 @@ class StateTombstoneReadTestCase(HomeserverTestCase):
 
     def test_database_reads(self) -> None:
         """Reads leave out tombstoned keys, and do not pick up rows for them
-        from further down the chain."""
+        from earlier in the chain."""
         for name, state_filter in FILTERS.items():
             with self.subTest(filter=name):
                 result = self.get_success(
@@ -207,12 +222,10 @@ class StateTombstoneReadTestCase(HomeserverTestCase):
         self.get_success(
             self.state_deletion_store.mark_state_groups_as_pending_deletion([deleted])
         )
-        # The deletion loop runs every minute and purges groups that have been
-        # pending for longer than the delay.
-        for _ in range(
-            self.state_deletion_store.DELAY_BEFORE_DELETION_MS // 60_000 + 2
-        ):
-            self.reactor.advance(60)
+        # Advance so that the background job to delete the state group runs.
+        self.reactor.advance(
+            1 + self.state_deletion_store.DELAY_BEFORE_DELETION_MS / 1000
+        )
 
         # The child is now a full copy: no edge, and no tombstone rows. `BOB`
         # stays absent.
