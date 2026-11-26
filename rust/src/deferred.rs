@@ -95,9 +95,7 @@ where
     let task = handle.spawn(logcontext.scope(fut));
 
     let abort = task.abort_handle();
-    let canceller = PyCFunction::new_closure(py, None, None, move |_args, _kwargs| {
-        abort.abort();
-    })?;
+    let canceller = PyCFunction::new_closure(py, None, None, move |_, _| abort.abort())?;
     let deferred = defer(py)?.call_method1("Deferred", (canceller,))?;
     let unbound_deferred = deferred.clone().unbind();
 
@@ -109,9 +107,7 @@ where
 
         // Once done pass the result to the Twisted reactor thread for handling.
         runtime.dispatch_to_twisted(move |py| {
-            // A cancelled deferred has already failed with `CancelledError`,
-            // and with a canceller set, firing it again would raise
-            // `AlreadyCalledError`.
+            // With a canceller set, firing a cancelled deferred raises `AlreadyCalledError`.
             let deferred = unbound_deferred.bind(py);
             if deferred
                 .getattr(intern!(py, "called"))
@@ -157,7 +153,9 @@ where
 ///
 /// Despite returning a future, the awaitable is kicked off in the background running in
 /// the Twisted reactor and runs to completion regardless of whether the returned Rust
-/// future is ever polled; awaiting it only observes the result.
+/// future is ever polled; awaiting it only observes the result. If the calling task is
+/// aborted after the awaitable was dispatched, it still runs, in the task's logcontext,
+/// which may have finished by then.
 pub(crate) async fn run_python_awaitable<F>(
     runtime: &RustRuntime,
     make_awaitable: F,

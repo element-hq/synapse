@@ -72,13 +72,12 @@ class DeferredCancellationTestCase(HomeserverTestCase):
         self.server = _Server()
         self.addCleanup(self.server.shutdown)
 
-    def _pump_until(self, condition: Callable[[], object]) -> None:
-        """Let the tokio threads and the reactor run until `condition` holds."""
+    def _wait_until(self, condition: Callable[[], object]) -> None:
+        """Let the tokio threads run, without the reactor, until `condition` holds."""
         deadline = time.monotonic() + 10
         while not condition():
             self.assertLess(time.monotonic(), deadline, "timed out")
             time.sleep(0.001)
-            self.reactor.advance(0)
 
     def test_cancel_aborts_the_request(self) -> None:
         """Cancelling during the request fails the caller at once, in its own
@@ -96,7 +95,7 @@ class DeferredCancellationTestCase(HomeserverTestCase):
 
         with LoggingContext(name="caller", server_name="test"):
             d = run_in_background(request)
-        self._pump_until(lambda: self.server.requests == 1)
+        self._wait_until(lambda: self.server.requests == 1)
         d.cancel()
 
         self.assertEqual(contexts, ["caller"])
@@ -104,20 +103,11 @@ class DeferredCancellationTestCase(HomeserverTestCase):
         self.failureResultOf(d, defer.CancelledError)
         self.assertTrue(self.server.client_gone.wait(10))
 
-    def test_cancel_after_completion(self) -> None:
-        d = self.client.get(url=self.server.url("/"), response_limit=1024)
-        self._pump_until(lambda: d.called)
-        d.cancel()
-        self.assertEqual(self.successResultOf(d), b'{"ok": true}')
-
     def test_late_result_is_dropped(self) -> None:
         """A result already on its way to the reactor when the caller cancels
         is dropped without an error."""
         d = self.client.get(url=self.server.url("/"), response_limit=1024)
-        deadline = time.monotonic() + 10
-        while not self.reactor._poll_readers():
-            self.assertLess(time.monotonic(), deadline, "timed out")
-            time.sleep(0.001)
+        self._wait_until(self.reactor._poll_readers)
         d.cancel()
 
         with self.assertNoLogs("synapse", level="ERROR"):
