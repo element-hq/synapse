@@ -1,0 +1,1 @@
+Reject non-HTTP(S) URLs in the URL preview API with a 400 error instead of returning a 500.

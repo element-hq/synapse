@@ -1021,7 +1021,36 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         )
         self.pump()
 
-        self.assertEqual(channel.code, 500)
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
+
+    def test_unsupported_url_scheme(self) -> None:
+        """
+        URLs with a scheme other than http or https are rejected with a 400
+        instead of failing deep in the HTTP client with a 500.
+        """
+        data = base64.b64encode(SMALL_PNG).decode()
+
+        for url in (
+            "mailto:someone@example.com",
+            "tel:+3112345678",
+            "ontvangen:",
+            f"data:image/png;base64,{data}",
+        ):
+            query_params = urlencode({"url": url})
+
+            channel = self.make_request(
+                "GET",
+                f"/_matrix/media/v3/preview_url?{query_params}",
+                shorthand=False,
+            )
+            self.pump()
+
+            self.assertEqual(channel.code, 400, url)
+            self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM", url)
+
+        # Nothing was fetched for any of them.
+        self.assertEqual(len(self.reactor.tcpClients), 0)
 
     def test_inline_data_url(self) -> None:
         """

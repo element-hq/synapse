@@ -242,6 +242,16 @@ class UrlPreviewer:
             )
 
     async def preview(self, url: str, user: UserID, ts: int) -> bytes:
+        # Only http(s) URLs can be previewed. Anything else (mailto:, tel:,
+        # a bare word with a colon, data:, ...) would fail deep inside the
+        # HTTP client with a 500, so reject it up front with a 400.
+        if urlsplit(url).scheme not in ("http", "https"):
+            raise SynapseError(
+                400,
+                "URL preview only supports http and https URLs",
+                Codes.INVALID_PARAM,
+            )
+
         # the in-memory cache:
         # * ensures that only one request to a URL is active at a time
         # * takes load off the DB for the thundering herds
