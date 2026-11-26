@@ -33,16 +33,26 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Connects to the first of `addrs` to answer: one attempt every 0.3 s in the
 /// given order, each given 30 s. If all fail, the last failure is returned,
 /// and no sooner than 0.3 s after the last attempt started.
+///
+/// These are the timings of Twisted's `HostnameEndpoint`, which this replaces:
+/// its default attempt delay and timeout, and its loop, which only notices
+/// that every attempt failed at the tick after the last one started.
+/// Staggering the attempts means an unresponsive address delays the next by
+/// 0.3 s, not 30 s.
 pub async fn connect(
     transport: &dyn Transport,
     addrs: &[SocketAddr],
     clock: &Clock,
 ) -> io::Result<BoxedIo> {
     let start = clock.now();
+    // Runs every attempt concurrently, polling only the ones that woke, and
+    // yields each result as it finishes.
     let mut attempts: FuturesUnordered<_> = addrs
         .iter()
         .zip(0..)
         .map(|(&addr, n)| async move {
+            // Attempt n starts at n × 0.3 s, whether or not earlier ones have
+            // finished.
             if n > 0 {
                 clock.sleep(ATTEMPT_DELAY * n).await;
             }
