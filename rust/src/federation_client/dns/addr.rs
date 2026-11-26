@@ -60,11 +60,7 @@ impl GaiLookup {
             let _permit = permit;
             f()
         });
-        match task.await {
-            Ok(value) => Ok(value),
-            Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
-            Err(error) => Err(io::Error::other(error)),
-        }
+        task.await.map_err(io::Error::other)
     }
 }
 
