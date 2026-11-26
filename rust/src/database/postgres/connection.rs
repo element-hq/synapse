@@ -207,6 +207,10 @@ impl Connection {
             if commit {
                 drained?;
             }
+
+            // This will raise an error if the connection was already closed.
+            inner.client()?;
+
             return Ok(());
         }
 
