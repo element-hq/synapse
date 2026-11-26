@@ -1,0 +1,1 @@
+Cancelling a Deferred backed by a Rust future now aborts the Rust task.

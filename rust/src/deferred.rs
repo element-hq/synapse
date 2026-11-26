@@ -74,11 +74,8 @@ fn logging_context_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 ///
 /// Does not handle contextvars.
 ///
-/// TODO: propagate deferred cancellation to the tokio task (via
-/// `JoinHandle::abort`). Until then a cancelled request leaves its task
-/// running, so the task can outlive the request's logcontext —
-/// `run_python_awaitable` defends against the resulting finished-context case,
-/// but the work itself is wasted.
+/// Cancelling the deferred aborts the task. A result that arrives after
+/// cancellation is dropped.
 pub fn create_deferred<'py, F, O>(
     py: Python<'py>,
     runtime: &RustRuntime,
@@ -88,10 +85,6 @@ where
     F: Future<Output = PyResult<O>> + Send + 'static,
     for<'a> O: IntoPyObject<'a> + Send + 'static,
 {
-    let deferred = defer(py)?.call_method0("Deferred")?;
-    let deferred_callback = deferred.getattr("callback")?.unbind();
-    let deferred_errback = deferred.getattr("errback")?.unbind();
-
     // Capture the caller's logcontext here (on the reactor thread) and record
     // it in the spawned task. Log records emitted while the future is polled
     // (on the tokio threads) are then attributed to the context that was
@@ -101,6 +94,13 @@ where
     let handle = runtime.tokio_handle()?;
     let task = handle.spawn(logcontext.scope(fut));
 
+    let abort = task.abort_handle();
+    let canceller = PyCFunction::new_closure(py, None, None, move |_args, _kwargs| {
+        abort.abort();
+    })?;
+    let deferred = defer(py)?.call_method1("Deferred", (canceller,))?;
+    let unbound_deferred = deferred.clone().unbind();
+
     // Keep the runtime state (and, through it, the reactor) alive while the
     // task is in flight.
     let runtime = runtime.clone();
@@ -109,6 +109,18 @@ where
 
         // Once done pass the result to the Twisted reactor thread for handling.
         runtime.dispatch_to_twisted(move |py| {
+            // A cancelled deferred has already failed with `CancelledError`,
+            // and with a canceller set, firing it again would raise
+            // `AlreadyCalledError`.
+            let deferred = unbound_deferred.bind(py);
+            if deferred
+                .getattr(intern!(py, "called"))
+                .and_then(|called| called.is_truthy())
+                .unwrap_or(false)
+            {
+                return;
+            }
+
             // Flatten the panic into standard python error
             let res = match res {
                 Ok(r) => r,
@@ -120,8 +132,8 @@ where
 
             // Send the result to the deferred, via `.callback(..)` or `.errback(..)`
             let fired = match res {
-                Ok(obj) => deferred_callback.call1(py, (obj,)),
-                Err(err) => deferred_errback.call1(py, (err,)),
+                Ok(obj) => deferred.call_method1(intern!(py, "callback"), (obj,)),
+                Err(err) => deferred.call_method1(intern!(py, "errback"), (err,)),
             };
 
             if let Err(err) = fired {
