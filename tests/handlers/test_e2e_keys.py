@@ -149,6 +149,48 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             SynapseError,
         )
 
+    def test_change_device_keys(self) -> None:
+        """uploading different device keys should fail"""
+
+        local_user = "@boris:" + self.hs.hostname
+        device_id = "xyz"
+
+        keys1 = {
+            "user_id": local_user,
+            "device_id": device_id,
+            "algorithms": ["m.olm.curve25519-aes-sha2"],
+            "keys": {"ed25519:" + device_id: "key1"},
+        }
+
+        keys2 = {
+            "user_id": local_user,
+            "device_id": device_id,
+            "algorithms": ["m.olm.curve25519-aes-sha2"],
+            "keys": {"ed25519:" + device_id: "key2"},
+        }
+
+        # initial upload succeeds
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                local_user, device_id, {"device_keys": keys1}
+            )
+        )
+
+        # uploading the same keys again should be fine
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                local_user, device_id, {"device_keys": keys1}
+            )
+        )
+
+        # uploading different keys should fail
+        self.get_failure(
+            self.handler.upload_keys_for_user(
+                local_user, device_id, {"device_keys": keys2}
+            ),
+            SynapseError,
+        )
+
     def test_claim_one_time_key(self) -> None:
         local_user = "@boris:" + self.hs.hostname
         device_id = "xyz"
