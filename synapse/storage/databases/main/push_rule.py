@@ -128,6 +128,7 @@ def filter_push_rules(
         msc4075_enabled=experimental_config.msc4075_enabled,
         msc4210_enabled=experimental_config.msc4210_enabled,
         msc4306_enabled=experimental_config.msc4306_enabled,
+        msc4505_enabled=experimental_config.msc4505_enabled,
     )
 
 
