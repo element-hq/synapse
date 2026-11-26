@@ -95,8 +95,9 @@ where
     let task = handle.spawn(logcontext.scope(fut));
 
     let abort = task.abort_handle();
-    let canceller = PyCFunction::new_closure(py, None, None, move |_, _| abort.abort())?;
-    let deferred = defer(py)?.call_method1("Deferred", (canceller,))?;
+    let deferred = PyCFunction::new_closure(py, None, None, move |_, _| abort.abort())
+        .and_then(|canceller| defer(py)?.call_method1("Deferred", (canceller,)))
+        .inspect_err(|_| task.abort())?;
     let unbound_deferred = deferred.clone().unbind();
 
     // Keep the runtime state (and, through it, the reactor) alive while the

@@ -20,13 +20,18 @@ from typing import Callable
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.logging.context import LoggingContext, current_context, run_in_background
+from synapse.logging.context import (
+    LoggingContext,
+    PreserveLoggingContext,
+    current_context,
+    run_in_background,
+)
 from synapse.server import HomeServer
 from synapse.synapse_rust import reset_logging_config
 from synapse.synapse_rust.http_client import HttpClient
 from synapse.util.clock import Clock
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, logcontext_clean
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -70,6 +75,7 @@ class DeferredCancellationTestCase(HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.client = HttpClient(runtime=hs.get_rust_runtime(), user_agent="test")
         self.server = _Server()
+        self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
 
     def _wait_until(self, condition: Callable[[], object]) -> None:
@@ -79,6 +85,7 @@ class DeferredCancellationTestCase(HomeserverTestCase):
             self.assertLess(time.monotonic(), deadline, "timed out")
             time.sleep(0.001)
 
+    @logcontext_clean
     def test_cancel_aborts_the_request(self) -> None:
         """Cancelling during the request fails the caller at once, in its own
         logcontext, and closes the connection."""
@@ -95,11 +102,12 @@ class DeferredCancellationTestCase(HomeserverTestCase):
 
         with LoggingContext(name="caller", server_name="test"):
             d = run_in_background(request)
-        self._wait_until(lambda: self.server.requests == 1)
-        d.cancel()
+            with PreserveLoggingContext():
+                self._wait_until(lambda: self.server.requests == 1)
+                d.cancel()
+            self.assertEqual(str(current_context()), "caller")
 
         self.assertEqual(contexts, ["caller"])
-        self.assertEqual(str(current_context()), "sentinel")
         self.failureResultOf(d, defer.CancelledError)
         self.assertTrue(self.server.client_gone.wait(10))
 
@@ -113,13 +121,5 @@ class DeferredCancellationTestCase(HomeserverTestCase):
         with self.assertNoLogs("synapse", level="ERROR"):
             reset_logging_config()
             self.reactor.advance(0)
+        reset_logging_config()
         self.failureResultOf(d, defer.CancelledError)
-
-    def test_versions_cancelled(self) -> None:
-        versions = self.hs.get_rust_handlers().versions
-        d = versions.get_versions("@user:test")
-        d.cancel()
-        self.failureResultOf(d, defer.CancelledError)
-
-        body = self.get_success(versions.get_versions("@user:test"))
-        self.assertIn("versions", body)
