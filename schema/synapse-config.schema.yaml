@@ -6137,7 +6137,7 @@ properties:
   experimental_features:
     type: ["object", "null"]
     description: >-
-      Experimental features are undocumented features, that are often subject to change or removal without notice.
+      Experimental features are undocumented features that are often subject to change or removal without notice.
       See <https://element-hq.github.io/synapse/latest/development/experimental_features.html>.
     io.element.undocumented: true
     properties:
@@ -6147,11 +6147,16 @@ properties:
         enum: ["off", "open", "authenticated"]
         default: "off"
         description: |-
-          MSC4388: Secure out-of-band channel for sign in with QR:
+          MSC4388: Secure out-of-band channel for sign in with QR.
 
-          - `off` (default): The feature is disabled
+          Determines whether creating a rendezvous session is allowed and whether it requires authentication.
+
+          - `off` (default): The feature is disabled.
           - `open`: The feature is enabled and does NOT require authentication.
           - `authenticated`: The feature is enabled and requires authentication.
+
+          Enabling rendezvous sessions (with the `open` or `authenticated` options) requires
+          Matrix Authentication Service integration to be enabled (`matrix_authentication_service.enabled: true`).
 
 
 $defs:
