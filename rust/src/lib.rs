@@ -16,6 +16,7 @@ pub mod deferred;
 pub mod duration;
 pub mod errors;
 pub mod events;
+pub mod federation_client;
 pub mod handlers;
 pub mod homeserver;
 pub mod http;
@@ -94,6 +95,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     events::register_module(py, m)?;
     handlers::register_module(py, m)?;
     http_client::register_module(py, m)?;
+    federation_client::register_module(py, m)?;
     rendezvous::register_module(py, m)?;
     runtime::register_module(py, m)?;
     msc4388_rendezvous::register_module(py, m)?;

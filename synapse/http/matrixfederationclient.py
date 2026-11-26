@@ -44,7 +44,6 @@ import attr
 import treq
 from canonicaljson import encode_canonical_json
 from prometheus_client import Counter
-from signedjson.sign import sign_json
 
 from twisted.internet import defer
 from twisted.internet.error import DNSLookupError
@@ -84,6 +83,7 @@ from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.synapse_rust.federation_client import RequestSigner
 from synapse.types import JsonDict
 from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
 from synapse.util.clock import Clock
@@ -432,8 +432,12 @@ class MatrixFederationHttpClient:
         tls_client_options_factory: FederationPolicyForHTTPS | None,
     ):
         self.hs = hs
-        self.signing_key = hs.signing_key
         self.server_name = hs.hostname
+        self._request_signer = RequestSigner(
+            self.server_name,
+            f"{hs.signing_key.alg}:{hs.signing_key.version}",
+            bytes(hs.signing_key),
+        )
 
         self.reactor = hs.get_reactor()
         self.clock = hs.get_clock()
@@ -670,7 +674,6 @@ class MatrixFederationHttpClient:
         )
 
         method_bytes = request.method.encode("ascii")
-        destination_bytes = request.destination.encode("ascii")
         path_bytes = request.path.encode("ascii")
         query_bytes = encode_query_args(request.query)
 
@@ -709,22 +712,25 @@ class MatrixFederationHttpClient:
             while not self._is_shutdown:
                 try:
                     json = request.get_json()
+                    data: bytes | None = None
                     if json:
                         headers_dict[b"Content-Type"] = [b"application/json"]
-                        auth_headers = self.build_auth_headers(
-                            destination_bytes, method_bytes, url_to_sign_bytes, json
-                        )
                         data = encode_canonical_json(json)
                         producer: Optional[IBodyProducer] = QuieterFileBodyProducer(
                             BytesIO(data), cooperator=self._cooperator
                         )
                     else:
                         producer = None
-                        auth_headers = self.build_auth_headers(
-                            destination_bytes, method_bytes, url_to_sign_bytes
-                        )
 
-                    headers_dict[b"Authorization"] = auth_headers
+                    headers_dict[b"Authorization"] = [
+                        self._request_signer.authorization(
+                            method_bytes,
+                            url_to_sign_bytes,
+                            request.destination,
+                            None,
+                            data,
+                        )
+                    ]
 
                     logger.debug(
                         "{%s} [%s] Sending request: %s %s; timeout %fs",
@@ -948,44 +954,15 @@ class MatrixFederationHttpClient:
         Returns:
             A list of headers to be added as "Authorization:" headers
         """
-        if not destination and not destination_is:
-            raise ValueError(
-                "At least one of the arguments destination and destination_is "
-                "must be a nonempty bytestring."
+        return [
+            self._request_signer.authorization(
+                method,
+                url_bytes,
+                None if destination is None else destination.decode("ascii"),
+                None if destination_is is None else destination_is.decode("ascii"),
+                None if content is None else encode_canonical_json(content),
             )
-
-        request: JsonDict = {
-            "method": method.decode("ascii"),
-            "uri": url_bytes.decode("ascii"),
-            "origin": self.server_name,
-        }
-
-        if destination is not None:
-            request["destination"] = destination.decode("ascii")
-
-        if destination_is is not None:
-            request["destination_is"] = destination_is.decode("ascii")
-
-        if content is not None:
-            request["content"] = content
-
-        request = sign_json(request, self.server_name, self.signing_key)
-
-        auth_headers = []
-
-        for key, sig in request["signatures"][self.server_name].items():
-            auth_headers.append(
-                (
-                    'X-Matrix origin="%s",key="%s",sig="%s",destination="%s"'
-                    % (
-                        self.server_name,
-                        key,
-                        sig,
-                        request.get("destination") or request["destination_is"],
-                    )
-                ).encode("ascii")
-            )
-        return auth_headers
+        ]
 
     @overload
     async def put_json(
