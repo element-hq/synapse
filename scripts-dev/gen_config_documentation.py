@@ -269,6 +269,8 @@ PropertySchema = TypedDict(
 """
 The JSON Schema of a single config option (or sub-option), after the resolution of any `$ref`s.
 (Only includes fields used by this script.)
+
+Custom fields should also be added to `meta.schema.json`.
 """
 
 
