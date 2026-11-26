@@ -34,8 +34,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// given order, each given 30 s. If all fail, the last failure is returned.
 ///
 /// The delay and timeout are the defaults of Twisted's `HostnameEndpoint`,
-/// which this replaces. Staggering the attempts means an unresponsive address
-/// delays the next by 0.3 s, not 30 s.
+/// which this replaces.
 pub async fn connect(
     transport: &dyn Transport,
     addrs: &[SocketAddr],
@@ -47,8 +46,12 @@ pub async fn connect(
         .iter()
         .zip(0..)
         .map(|(&addr, n)| async move {
-            // Attempt n starts at n × 0.3 s, whether or not earlier ones have
-            // finished.
+            // Attempt n starts at n × 0.3 s unless an earlier one has
+            // connected, even if earlier ones are still pending or have
+            // failed. An address that never answers (dropped packets, a
+            // broken IPv6 route) then delays the next by 0.3 s rather than
+            // the 30 s timeout, and an address that answers within 0.3 s, as
+            // most do, is the only connection opened.
             if n > 0 {
                 clock.sleep(ATTEMPT_DELAY * n).await;
             }
