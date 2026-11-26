@@ -10,7 +10,7 @@ Usage:
 import json
 import re
 import sys
-from typing import Any, Iterable, TypedDict
+from typing import Any, Collection, Iterable, TypedDict
 
 import yaml
 
@@ -329,17 +329,17 @@ def p(s: str | None, prefix: str = " ") -> str:
 
 def filter_out_undocumented_options(
     items: Iterable[tuple[str, PropertySchema]],
-) -> Iterable[tuple[str, PropertySchema]]:
+) -> Collection[tuple[str, PropertySchema]]:
     """
     Filters out undocumented items (options or sub-options).
 
     Undocumented items have the `io.element.undocumented` flag set on them.
     """
-    return (
+    return [
         (key, option_schema)
         for key, option_schema in items
         if not option_schema.get("io.element.undocumented", False)
-    )
+    ]
 
 
 def resolve_local_refs(schema: dict) -> dict:
@@ -432,9 +432,10 @@ def items(option_schema: PropertySchema) -> str:
         return ""
     if not (item_props := items.get("properties")):
         return ""
+    if not (filtered_item_props := filter_out_undocumented_options(item_props.items())):
+        return ""
     return "\nOptions for each entry include:\n\n" + "\n".join(
-        sub_section(k, v)
-        for k, v in filter_out_undocumented_options(item_props.items())
+        sub_section(k, v) for k, v in filtered_item_props
     )
 
 
@@ -449,9 +450,10 @@ def properties(option_schema: PropertySchema) -> str:
     """
     if not (properties := option_schema.get("properties")):
         return ""
+    if not (filtered_properties := filter_out_undocumented_options(properties.items())):
+        return ""
     return "\nThis setting has the following sub-options:\n\n" + "\n".join(
-        sub_section(k, v)
-        for k, v in filter_out_undocumented_options(properties.items())
+        sub_section(k, v) for k, v in filtered_properties
     )
 
 
