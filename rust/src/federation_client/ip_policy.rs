@@ -12,7 +12,7 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-//! Block-set membership for IP-literal destinations.
+//! IP-set membership for IP-literal destinations. Useful for blocklist or allowlist functionality.
 
 use std::{fmt, net::IpAddr};
 
