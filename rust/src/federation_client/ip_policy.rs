@@ -16,20 +16,20 @@
 
 use std::{fmt, net::IpAddr};
 
-/// IP ranges to refuse. An address only matches ranges of its own version,
+/// A set of IP ranges. An address only matches ranges of its own version,
 /// as in `netaddr`.
-pub struct IpBlocklist {
+pub struct IpSet {
     v4: Vec<(u128, u128)>,
     v6: Vec<(u128, u128)>,
 }
 
-impl IpBlocklist {
+impl IpSet {
     /// Ranges as `netaddr`'s `IPSet.iter_cidrs()` gives them, such as
     /// `127.0.0.0/8` or `::1/128`. Synapse's `generate_ip_set` has already
     /// added `0.0.0.0` and `::` and the IPv4-mapped, IPv4-compatible and 6to4
     /// ranges.
     pub fn from_cidrs<'a>(cidrs: impl IntoIterator<Item = &'a str>) -> Result<Self, CidrError> {
-        let mut blocklist = IpBlocklist {
+        let mut set = IpSet {
             v4: Vec::new(),
             v6: Vec::new(),
         };
@@ -38,8 +38,8 @@ impl IpBlocklist {
             let (addr, len) = cidr.split_once('/').ok_or_else(invalid)?;
             let len: u32 = len.parse().map_err(|_| invalid())?;
             let (bits, width, ranges) = match addr.parse().map_err(|_| invalid())? {
-                IpAddr::V4(addr) => (u128::from(u32::from(addr)), 32, &mut blocklist.v4),
-                IpAddr::V6(addr) => (u128::from(addr), 128, &mut blocklist.v6),
+                IpAddr::V4(addr) => (u128::from(u32::from(addr)), 32, &mut set.v4),
+                IpAddr::V6(addr) => (u128::from(addr), 128, &mut set.v6),
             };
             if len > width {
                 return Err(invalid());
@@ -47,10 +47,10 @@ impl IpBlocklist {
             let mask = u128::MAX.checked_shl(width - len).unwrap_or(0);
             ranges.push((bits & mask, mask));
         }
-        Ok(blocklist)
+        Ok(set)
     }
 
-    pub fn blocks(&self, ip: IpAddr) -> bool {
+    pub fn contains(&self, ip: IpAddr) -> bool {
         let (bits, ranges) = match ip {
             IpAddr::V4(ip) => (u128::from(u32::from(ip)), &self.v4),
             IpAddr::V6(ip) => (u128::from(ip), &self.v6),
@@ -74,14 +74,14 @@ impl std::error::Error for CidrError {}
 mod tests {
     use super::*;
 
-    fn blocklist(cidrs: &[&str]) -> IpBlocklist {
-        IpBlocklist::from_cidrs(cidrs.iter().copied()).unwrap()
+    fn ip_set(cidrs: &[&str]) -> IpSet {
+        IpSet::from_cidrs(cidrs.iter().copied()).unwrap()
     }
 
     #[test]
     fn ranges() {
-        let list = blocklist(&["10.0.0.0/8", "192.168.1.7/32", "fc00::/7", "::1/128"]);
-        for (ip, blocked) in [
+        let list = ip_set(&["10.0.0.0/8", "192.168.1.7/32", "fc00::/7", "::1/128"]);
+        for (ip, contained) in [
             ("10.255.0.1", true),
             ("11.0.0.1", false),
             ("192.168.1.7", true),
@@ -91,34 +91,34 @@ mod tests {
             ("::1", true),
             ("::2", false),
         ] {
-            assert_eq!(list.blocks(ip.parse().unwrap()), blocked, "{ip}");
+            assert_eq!(list.contains(ip.parse().unwrap()), contained, "{ip}");
         }
     }
 
     #[test]
     fn unspecified_blocked_only_when_listed() {
-        let empty = blocklist(&[]);
-        assert!(!empty.blocks("0.0.0.0".parse().unwrap()));
-        assert!(!empty.blocks("::".parse().unwrap()));
-        let list = blocklist(&["0.0.0.0/32", "::/128"]);
-        assert!(list.blocks("0.0.0.0".parse().unwrap()));
-        assert!(list.blocks("::".parse().unwrap()));
-        assert!(!list.blocks("0.0.0.1".parse().unwrap()));
+        let empty = ip_set(&[]);
+        assert!(!empty.contains("0.0.0.0".parse().unwrap()));
+        assert!(!empty.contains("::".parse().unwrap()));
+        let list = ip_set(&["0.0.0.0/32", "::/128"]);
+        assert!(list.contains("0.0.0.0".parse().unwrap()));
+        assert!(list.contains("::".parse().unwrap()));
+        assert!(!list.contains("0.0.0.1".parse().unwrap()));
     }
 
     /// As in `netaddr`: an IPv4-mapped address is not in an IPv4 range.
     #[test]
     fn versions_do_not_mix() {
-        let list = blocklist(&["127.0.0.0/8"]);
-        assert!(!list.blocks("::ffff:127.0.0.1".parse().unwrap()));
-        assert!(blocklist(&["::ffff:127.0.0.0/104"]).blocks("::ffff:127.0.0.1".parse().unwrap()));
-        assert!(!blocklist(&["::/96"]).blocks("0.0.0.1".parse().unwrap()));
+        let list = ip_set(&["127.0.0.0/8"]);
+        assert!(!list.contains("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(ip_set(&["::ffff:127.0.0.0/104"]).contains("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(!ip_set(&["::/96"]).contains("0.0.0.1".parse().unwrap()));
     }
 
     #[test]
     fn whole_space() {
-        assert!(blocklist(&["0.0.0.0/0"]).blocks("8.8.8.8".parse().unwrap()));
-        assert!(blocklist(&["::/0"]).blocks("2001:db8::1".parse().unwrap()));
+        assert!(ip_set(&["0.0.0.0/0"]).contains("8.8.8.8".parse().unwrap()));
+        assert!(ip_set(&["::/0"]).contains("2001:db8::1".parse().unwrap()));
     }
 
     #[test]
@@ -131,7 +131,7 @@ mod tests {
             "nope/8",
             "10.0.0.0/8/8",
         ] {
-            assert!(IpBlocklist::from_cidrs([cidr]).is_err(), "{cidr}");
+            assert!(IpSet::from_cidrs([cidr]).is_err(), "{cidr}");
         }
     }
 }
