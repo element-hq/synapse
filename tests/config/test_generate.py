@@ -26,9 +26,12 @@ import tempfile
 from contextlib import redirect_stdout
 from io import StringIO
 
+from signedjson.key import generate_signing_key, read_signing_keys, write_signing_keys
+
 from synapse.config.homeserver import HomeServerConfig
 
 from tests import unittest
+from tests.utils import default_config
 
 
 class ConfigGenerationTestCase(unittest.TestCase):
@@ -39,7 +42,7 @@ class ConfigGenerationTestCase(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.dir)
 
-    def test_generate_config_generates_files(self) -> None:
+    def _generate_config(self) -> None:
         with redirect_stdout(StringIO()):
             HomeServerConfig.load_or_generate_config(
                 "",
@@ -53,6 +56,9 @@ class ConfigGenerationTestCase(unittest.TestCase):
                 ],
             )
 
+    def test_generate_config_generates_files(self) -> None:
+        self._generate_config()
+
         self.assertSetEqual(
             {"homeserver.yaml", "lemurs.win.log.config", "lemurs.win.signing.key"},
             set(os.listdir(self.dir)),
@@ -62,6 +68,92 @@ class ConfigGenerationTestCase(unittest.TestCase):
             os.path.join(self.dir, "lemurs.win.log.config"),
             os.path.join(os.getcwd(), "homeserver.log"),
         )
+
+        with open(os.path.join(self.dir, "lemurs.win.signing.key")) as f:
+            keys = read_signing_keys(f)
+
+        self.assertEqual(1, len(keys))
+        self.assertRegex(keys[0].version, r"^[A-Za-z0-9_]{22}$")
+
+    def test_deprecated_one_column_signing_key_is_migrated(self) -> None:
+        self._generate_config()
+
+        signing_key_path = os.path.join(self.dir, "lemurs.win.signing.key")
+        with open(signing_key_path) as f:
+            signing_key = f.read().split()[2]
+
+        with open(signing_key_path, "w") as f:
+            f.write(signing_key + "\n")
+
+        config = HomeServerConfig.load_or_generate_config("", ["-c", self.file])
+        assert config is not None
+
+        with open(signing_key_path) as f:
+            keys = read_signing_keys(f)
+
+        self.assertEqual(1, len(keys))
+        self.assertRegex(keys[0].version, r"^[A-Za-z0-9_]{22}$")
+        self.assertEqual(keys[0].version, config.key.signing_key[0].version)
+
+    def test_numeric_signing_key_version_warns(self) -> None:
+        self._generate_config()
+
+        signing_key = generate_signing_key("1")
+        signing_key_path = os.path.join(self.dir, "lemurs.win.signing.key")
+        with open(signing_key_path, "w") as f:
+            write_signing_keys(f, (signing_key,))
+
+        with self.assertLogs("synapse.config.key", level="WARNING") as logs:
+            config = HomeServerConfig.load_or_generate_config("", ["-c", self.file])
+
+        assert config is not None
+        self.assertEqual("1", config.key.signing_key[0].version)
+        self.assertIn("uses a numeric key id", "\n".join(logs.output))
+
+    def test_inline_numeric_signing_key_version_warns(self) -> None:
+        signing_key = generate_signing_key("1")
+        signing_key_file = StringIO()
+        write_signing_keys(signing_key_file, (signing_key,))
+
+        config_dict = default_config(server_name="test")
+        config_dict["signing_key"] = signing_key_file.getvalue()
+
+        config = HomeServerConfig()
+        with self.assertLogs("synapse.config.key", level="WARNING") as logs:
+            config.parse_config_dict(config_dict, "", "")
+
+        self.assertEqual("1", config.key.signing_key[0].version)
+        self.assertIn("uses a numeric key id", "\n".join(logs.output))
+
+    def test_inline_invalid_signing_key_version_errors(self) -> None:
+        signing_key = generate_signing_key("foo-bar")
+        signing_key_file = StringIO()
+        write_signing_keys(signing_key_file, (signing_key,))
+
+        config_dict = default_config(server_name="test")
+        config_dict["signing_key"] = signing_key_file.getvalue()
+
+        config = HomeServerConfig()
+        with self.assertLogs("synapse.config.key", level="ERROR") as logs:
+            config.parse_config_dict(config_dict, "", "")
+
+        self.assertEqual("foo-bar", config.key.signing_key[0].version)
+        self.assertIn("non-spec-compliant key id", "\n".join(logs.output))
+
+    def test_inline_non_content_derived_signing_key_version_infos(self) -> None:
+        signing_key = generate_signing_key("manual_key_id")
+        signing_key_file = StringIO()
+        write_signing_keys(signing_key_file, (signing_key,))
+
+        config_dict = default_config(server_name="test")
+        config_dict["signing_key"] = signing_key_file.getvalue()
+
+        config = HomeServerConfig()
+        with self.assertLogs("synapse.config.key", level="INFO") as logs:
+            config.parse_config_dict(config_dict, "", "")
+
+        self.assertEqual("manual_key_id", config.key.signing_key[0].version)
+        self.assertIn("not content-derived", "\n".join(logs.output))
 
     def assert_log_filename_is(self, log_config_file: str, expected: str) -> None:
         with open(log_config_file) as f:
