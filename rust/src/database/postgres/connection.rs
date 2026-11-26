@@ -65,6 +65,17 @@ use crate::database::postgres::{
     value::PgValue,
 };
 
+/// The state of a Postgres transaction for a connection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TransactionState {
+    /// No transaction has been started.
+    Idle,
+    /// A transaction has been started and hasn't been aborted.
+    Open,
+    /// The transaction has been marked as aborted due to an error.
+    Aborted,
+}
+
 /// A single Postgres connection exposed to Python. Cursors hold a clone.
 #[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
@@ -79,13 +90,8 @@ struct ConnInner {
     /// `None` once the connection has been closed, either by `close` or after
     /// a failure that leaves the session state unknown.
     client: Option<Client>,
-    /// Whether a `BEGIN` has been issued and not yet matched by a `COMMIT` or
-    /// `ROLLBACK`.
-    in_txn: bool,
-    /// Whether a statement, or reading its result set, has failed since the
-    /// last `BEGIN`. While a transaction is open, `execute` then raises until
-    /// the transaction is closed
-    aborted: bool,
+    /// The current state of the transaction.
+    txn_state: TransactionState,
     /// If false, runs statements outside of transactions.
     autocommit: bool,
     /// The result set of the most recent statement.
@@ -100,8 +106,7 @@ impl ConnInner {
     fn new(client: Option<Client>) -> Self {
         Self {
             client,
-            in_txn: false,
-            aborted: false,
+            txn_state: TransactionState::Idle,
             autocommit: false,
             state: CursorQueryState::default(),
             owner: None,
@@ -119,7 +124,7 @@ impl ConnInner {
     /// Drop the client, closing the socket, and the result set with it.
     fn close(&mut self) {
         self.client = None;
-        self.in_txn = false;
+        self.txn_state = TransactionState::Idle;
         self.state = CursorQueryState::default();
         self.owner = None;
     }
@@ -134,8 +139,8 @@ impl ConnInner {
     fn on_state<R>(&mut self, f: impl FnOnce(&mut CursorQueryState) -> PyResult<R>) -> PyResult<R> {
         let was_active = matches!(self.state, CursorQueryState::Active { .. });
         let result = f(&mut self.state);
-        if result.is_err() && was_active {
-            self.aborted = true;
+        if result.is_err() && was_active && self.txn_state == TransactionState::Open {
+            self.txn_state = TransactionState::Aborted;
         }
         result
     }
@@ -145,8 +150,8 @@ impl ConnInner {
     /// parameter that fails to encode, happens before anything is sent, so it
     /// leaves the transaction intact.
     fn statement_err(&mut self, err: tokio_postgres::Error) -> PyErr {
-        if err.as_db_error().is_some() {
-            self.aborted = true;
+        if err.as_db_error().is_some() && self.txn_state == TransactionState::Open {
+            self.txn_state = TransactionState::Aborted;
         }
         pg_err_to_py(err)
     }
@@ -195,7 +200,7 @@ impl Connection {
         let drained = inner.state.close(py);
 
         // If there is no active transaction, we can return early.
-        if !inner.in_txn {
+        if inner.txn_state == TransactionState::Idle {
             // Report any errors from closing the cursor if we're committing.
             // This ensures the caller sees any pending errors rather than
             // thinking the queries succeeded.
@@ -205,20 +210,32 @@ impl Connection {
             return Ok(());
         }
 
-        let (stmt, our_err) = match (commit, drained) {
-            // Rollback if the caller requested it, the transaction was aborted,
-            // or the cursor failed to close.
-            (false, _) => ("ROLLBACK", None),
-            (true, _) if inner.aborted => (
-                "ROLLBACK",
-                Some(PyRuntimeError::new_err("the transaction was aborted")),
-            ),
-            (true, Err(err)) => ("ROLLBACK", Some(err)),
-
-            // Only commit if requested, the transaction was not aborted, and
-            // the cursor closed successfully.
-            (true, Ok(_)) => ("COMMIT", None),
-        };
+        // Determine the appropriate statement to execute (`COMMIT` or
+        // `ROLLBACK`), and what error to report if any.
+        let stmt;
+        let our_err;
+        if !commit {
+            // The caller explicitly requested to rollback, so we don't treat it
+            // as an error.
+            stmt = "ROLLBACK";
+            our_err = None;
+        } else if let Err(drain_err) = drained {
+            // The cursor failed to drain, so we must rollback the transaction
+            // and report the error.
+            stmt = "ROLLBACK";
+            our_err = Some(drain_err);
+        } else if inner.txn_state == TransactionState::Aborted {
+            // The transaction is already aborted, so we can't commit it. The
+            // actual error reason should have been previously reported to the
+            // caller.
+            stmt = "ROLLBACK";
+            our_err = Some(PyRuntimeError::new_err("the transaction was aborted"));
+        } else {
+            // There are no errors and the transaction is active, so we can
+            // commit it.
+            stmt = "COMMIT";
+            our_err = None;
+        }
 
         // Use `batch_execute` to run the statement. It uses fewer round trips
         // than `execute`, and immediately returns any errors without requiring
@@ -230,7 +247,7 @@ impl Connection {
 
         match result {
             Ok(()) => {
-                inner.in_txn = false;
+                inner.txn_state = TransactionState::Idle;
                 our_err.map_or(Ok(()), Err)
             }
             Err(err) => {
@@ -241,7 +258,7 @@ impl Connection {
                     .as_db_error()
                     .is_some_and(|e| e.parsed_severity() == Some(Severity::Error));
                 if session_ok {
-                    inner.in_txn = false;
+                    inner.txn_state = TransactionState::Idle;
                 } else {
                     // Close the connection as the connection is in an unknown
                     // state.
@@ -290,7 +307,7 @@ impl Connection {
     /// `set_session(autocommit=...)`. Errors inside a transaction.
     fn set_autocommit(&self, autocommit: bool) -> PyResult<()> {
         let mut inner = self.lock()?;
-        if inner.in_txn {
+        if inner.txn_state != TransactionState::Idle {
             return Err(PyRuntimeError::new_err(
                 "cannot change autocommit mode while a transaction is in progress",
             ));
@@ -363,18 +380,17 @@ impl Cursor {
 
         // If the transaction is aborted, no further statements will
         // successfully execute until the transaction is rolled back.
-        if inner.in_txn && inner.aborted {
+        if TransactionState::Aborted == inner.txn_state {
             return Err(PyRuntimeError::new_err("the transaction was aborted"));
         }
 
         // Start a transaction if necessary.
-        if !inner.autocommit && !inner.in_txn {
+        if !inner.autocommit && inner.txn_state == TransactionState::Idle {
             inner
                 .client()?
                 .batch_execute("BEGIN")
                 .block_on_pg_result(py, handle)?;
-            inner.in_txn = true;
-            inner.aborted = false;
+            inner.txn_state = TransactionState::Open;
         }
 
         // Prepare the statement for execution.
@@ -480,7 +496,7 @@ mod tests {
             inner: Arc::new(Mutex::new(ConnInner::new(None))),
             handle: runtime.handle().clone(),
         };
-        conn.inner.lock().unwrap().in_txn = true;
+        conn.inner.lock().unwrap().txn_state = TransactionState::Open;
         let inner = conn.inner.clone();
         let _ = std::panic::catch_unwind(move || {
             let _guard = inner.lock().unwrap();
@@ -494,7 +510,7 @@ mod tests {
             assert!(err.to_string().contains("mutex poisoned"), "{err}");
 
             let inner = conn.lock().expect("the poison is cleared");
-            assert!(!inner.in_txn);
+            assert_eq!(inner.txn_state, TransactionState::Idle);
             let err = inner.client().unwrap_err();
             assert!(err.to_string().contains("already closed"), "{err}");
         });
