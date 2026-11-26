@@ -1729,6 +1729,21 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
             f"state_after when the since token splits a persist batch: {room}",
         )
 
+    def test_state_change_filtered_out_of_timeline(self) -> None:
+        """A state change is reported in `state_after` when the timeline filter
+        excludes its event and so leaves the timeline empty."""
+        sync_filter = {"room": {"timeline": {"not_types": [EventTypes.Topic]}}}
+        sync_url = f"/sync?filter={json.dumps(sync_filter)}&use_state_after=true"
+        since = self._sync(sync_url)["next_batch"]
+
+        topic_event_id = self.helper.send_state(
+            self.room_id, EventTypes.Topic, {"topic": "a topic"}, tok=self.alice_tok
+        )["event_id"]
+
+        room = self._joined_room(self._sync(sync_url, since=since))
+        self.assertEqual(self._timeline_ids(room), [])
+        self.assertEqual(self._state_after_ids(room), [topic_event_id])
+
 
 class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
     """Tests MSC4222 `state_after` behaviour for rooms the syncing user has
