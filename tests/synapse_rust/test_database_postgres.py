@@ -10,6 +10,8 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+import threading
+import time
 from typing import Any
 
 from twisted.internet.testing import MemoryReactor
@@ -432,3 +434,86 @@ class PostgresConnectionTestCase(HomeserverTestCase):
         cur.execute(FAILING_SELECT)
         with self.assertRaisesRegex(RuntimeError, SERVER_ERROR):
             cur.close()
+
+    def test_concurrent_use_raises(self) -> None:
+        """Using a connection while another thread is in a call on it raises
+        at once, without waiting for that call."""
+        pid = self.backend_pid()
+
+        # The observer holds an advisory lock, so the other thread's `execute`
+        # waits on the server until the observer releases it.
+        self.observer.cursor().execute("SELECT 1 FROM pg_advisory_lock(1)")
+        errors: list[Exception] = []
+
+        def run() -> None:
+            try:
+                self.conn.cursor().execute("SELECT 1 FROM pg_advisory_lock(1)")
+            except Exception as e:
+                errors.append(e)
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        try:
+            # Once the server shows the statement waiting on the lock, the
+            # thread is inside `execute` and holds the connection.
+            self.wait_until(
+                "SELECT 1 FROM pg_stat_activity"
+                " WHERE pid = $1 AND wait_event_type = 'Lock'",
+                pid,
+            )
+            with self.assertRaisesRegex(RuntimeError, "used in another thread"):
+                self.conn.cursor()
+        finally:
+            self.observer.cursor().execute("SELECT pg_advisory_unlock(1)")
+            thread.join(timeout=10)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+
+        # The connection works again once the other thread's call returns.
+        self.conn.cursor().execute("SELECT 1")
+
+    def test_lost_connection_on_commit_closes_it(self) -> None:
+        """If the connection is lost, `commit` raises and closes the
+        connection, as its state is unknown."""
+        pid = self.backend_pid()
+        self.conn.cursor().execute("INSERT INTO t VALUES (1)")
+
+        # End the connection's backend, then wait for it to exit.
+        self.observer.cursor().execute("SELECT pg_terminate_backend($1)", [pid])
+        self.wait_until(
+            "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1)",
+            pid,
+        )
+
+        with self.assertRaises(RuntimeError):
+            self.conn.commit()
+
+        # A connection that stayed open would try to send these statements to
+        # the server and fail with a different error.
+        with self.assertRaisesRegex(RuntimeError, CLOSED):
+            self.conn.cursor().execute("SELECT 1")
+        with self.assertRaisesRegex(RuntimeError, CLOSED):
+            self.conn.commit()
+        self.assertEqual(self.committed_ids(), [])
+
+    def backend_pid(self) -> int:
+        """The process ID of the server backend for `self.conn`."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT pg_backend_pid()")
+        row = cur.fetch_one()
+        assert row is not None
+        return row[0]
+
+    def wait_until(self, query: str, *params: Any) -> None:
+        """Run `query` on the observer until it returns a row, for up to ten
+        seconds."""
+        deadline = time.monotonic() + 10
+        while True:
+            cur = self.observer.cursor()
+            cur.execute(query, list(params))
+            if cur.fetch_all():
+                return
+            if time.monotonic() > deadline:
+                self.fail(f"timed out waiting for: {query}")
+            time.sleep(0.01)
