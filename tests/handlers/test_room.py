@@ -282,6 +282,13 @@ class PreventEncryptionTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.FORBIDDEN)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
+        # Also avoid a half-created room being left behind
+        channel = self.make_request(
+            "GET", "/_matrix/client/v3/joined_rooms", access_token=user_token
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(channel.json_body["joined_rooms"], [])
+
     def test_cannot_enable_encryption_after_room_creation(self) -> None:
         """
         Tests that encryption can't be enabled in an existing room.
