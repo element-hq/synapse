@@ -19,8 +19,8 @@ use std::{fmt, io, net::SocketAddr, sync::Arc};
 use async_trait::async_trait;
 
 use crate::federation_client::{
-    events::{AttemptState, Event},
     ip_policy::IpPolicy,
+    notices::{AttemptState, Notice},
 };
 
 pub mod addr;
@@ -72,7 +72,7 @@ impl Resolver {
             .map(SocketAddr::ip)
             .filter(|&ip| self.policy.blocks(ip))
         {
-            state.record(Event::AddressBlocked {
+            state.record(Notice::AddressBlocked {
                 ip,
                 host: host.to_owned(),
             });
@@ -93,7 +93,7 @@ mod tests {
     use futures::executor::block_on;
 
     use super::*;
-    use crate::federation_client::ip_policy::IpBlocklist;
+    use crate::federation_client::ip_policy::IpSet;
 
     /// Answers with the given addresses, or fails if there are none given.
     struct FakeLookup(Option<Vec<SocketAddr>>);
@@ -105,21 +105,21 @@ mod tests {
         }
     }
 
-    fn resolve(answer: Option<&[&str]>) -> (Result<Vec<String>, LookupFailure>, Vec<Event>) {
+    fn resolve(answer: Option<&[&str]>) -> (Result<Vec<String>, LookupFailure>, Vec<Notice>) {
         let answer = answer.map(|addrs| addrs.iter().map(|addr| addr.parse().unwrap()).collect());
         let policy = IpPolicy {
-            blocklist: IpBlocklist::from_cidrs(["10.0.0.0/8", "fc00::/7"]).unwrap(),
-            allowlist: IpBlocklist::from_cidrs(["10.1.0.0/16"]).unwrap(),
+            blocklist: IpSet::from_cidrs(["10.0.0.0/8", "fc00::/7"]).unwrap(),
+            allowlist: IpSet::from_cidrs(["10.1.0.0/16"]).unwrap(),
         };
         let resolver = Resolver::new(Arc::new(FakeLookup(answer)), policy);
         let state = AttemptState::default();
         let result = block_on(resolver.addresses("example.com", 8448, &state));
         let result = result.map(|addrs| addrs.iter().map(SocketAddr::to_string).collect());
-        (result, state.take_events())
+        (result, state.take_notices())
     }
 
-    fn blocked(ip: &str) -> Event {
-        Event::AddressBlocked {
+    fn blocked(ip: &str) -> Notice {
+        Notice::AddressBlocked {
             ip: ip.parse().unwrap(),
             host: "example.com".to_owned(),
         }

@@ -18,8 +18,8 @@
 
 pub mod connector;
 pub mod dns;
-pub mod events;
 pub mod ip_policy;
+pub mod notices;
 pub mod python;
 pub mod server_name;
 pub mod signing;

@@ -17,7 +17,7 @@
 use std::{net::IpAddr, sync::Mutex};
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Event {
+pub enum Notice {
     /// `Blocked %s from DNS resolution to %s`
     AddressBlocked { ip: IpAddr, host: String },
 }
@@ -25,15 +25,15 @@ pub enum Event {
 /// What Python reads about an attempt besides its result.
 #[derive(Default)]
 pub struct AttemptState {
-    events: Mutex<Vec<Event>>,
+    notices: Mutex<Vec<Notice>>,
 }
 
 impl AttemptState {
-    pub fn record(&self, event: Event) {
-        self.events.lock().expect("events poisoned").push(event);
+    pub fn record(&self, notice: Notice) {
+        self.notices.lock().expect("notices poisoned").push(notice);
     }
 
-    pub fn take_events(&self) -> Vec<Event> {
-        std::mem::take(&mut *self.events.lock().expect("events poisoned"))
+    pub fn take_notices(&self) -> Vec<Notice> {
+        std::mem::take(&mut *self.notices.lock().expect("notices poisoned"))
     }
 }
