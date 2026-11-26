@@ -1878,6 +1878,15 @@ class RoomCreationHandler:
         )
 
         if preset_config["encrypted"] or room_encryption_event:
+            if self.config.room.prevent_room_encryption_setup:
+                # This check also exists in `EventValidator` but raising it here prevents
+                # rooms being half-created.
+                raise SynapseError(
+                    HTTPStatus.FORBIDDEN,
+                    "Enabling end-to-end encryption is not allowed on this homeserver",
+                    errcode=Codes.FORBIDDEN,
+                )
+
             if self._default_power_level_content_override:
                 override = self._default_power_level_content_override.get(preset_name)
                 if override is not None:
