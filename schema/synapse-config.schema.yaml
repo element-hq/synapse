@@ -6135,7 +6135,7 @@ properties:
         only_from_local_users: true
         worker_to_run_on: worker_1
   experimental_features:
-    type: object
+    type: ["object", "null"]
     description: >-
       Experimental features are undocumented features, that are often subject to change or removal without notice.
       See <https://element-hq.github.io/synapse/latest/development/experimental_features.html>.
