@@ -1,0 +1,1 @@
+Prevent an obtuse error masking a more user-friendly error when trying to run Synapse with an outdated rust module in certain cases.
