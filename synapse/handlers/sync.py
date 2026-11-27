@@ -3944,6 +3944,13 @@ class SyncHandler:
                 )
             ]
 
+            # The timeline filter does not apply to `state_after`, so a state change
+            # has to be reported even when its event was filtered out of the batch.
+            # `events` is None when the batch was loaded from the database.
+            state_may_have_changed = sync_config.use_state_after and (
+                events is None or any(event.is_state() for event in events)
+            )
+
             if not (
                 always_include
                 or batch
@@ -3951,6 +3958,7 @@ class SyncHandler:
                 or ephemeral
                 or full_state
                 or sticky_event_ids
+                or state_may_have_changed
             ):
                 return
 

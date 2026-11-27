@@ -1,0 +1,1 @@
+Fix state changes being missing from `state_after` on incremental `/sync` when the timeline filter excludes their events.
