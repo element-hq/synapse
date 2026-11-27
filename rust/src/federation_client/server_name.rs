@@ -17,6 +17,7 @@
 use std::{
     fmt,
     net::{IpAddr, Ipv6Addr},
+    ops::RangeTo,
 };
 
 /// A server name that Synapse's `parse_and_validate_server_name` accepts and
@@ -28,6 +29,7 @@ use std::{
 #[derive(Debug)]
 pub struct ServerName {
     name: String,
+    host: RangeTo<usize>,
     ip: Option<IpAddr>,
     port: Option<u16>,
 }
@@ -58,6 +60,7 @@ impl ServerName {
 
         Ok(ServerName {
             name: name.to_owned(),
+            host: ..host_str.len(),
             ip,
             port,
         })
@@ -69,13 +72,7 @@ impl ServerName {
 
     /// The hostname as written, with brackets around an IPv6 literal.
     pub fn host_str(&self) -> &str {
-        match self.port {
-            Some(_) => self
-                .name
-                .rsplit_once(':')
-                .map_or(&self.name, |(host, _)| host),
-            None => &self.name,
-        }
+        &self.name[self.host]
     }
 
     pub fn port(&self) -> Option<u16> {
