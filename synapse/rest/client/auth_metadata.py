@@ -30,22 +30,11 @@ class AuthMetadataServlet(RestServlet):
     Advertises the OAuth 2.0 server metadata for the homeserver.
     """
 
-    # The unstable path is still requested by matrix-rust-sdk clients that last saw
-    # `/versions` before we advertised Matrix v1.15, and can be removed once those
-    # clients no longer get stuck on it.
-    # See https://github.com/element-hq/synapse/issues/20459
-    PATTERNS = [
-        *client_patterns(
-            "/auth_metadata$",
-            releases=("v1",),
-            unstable=False,
-        ),
-        *client_patterns(
-            "/org.matrix.msc2965/auth_metadata$",
-            releases=(),
-            unstable=True,
-        ),
-    ]
+    PATTERNS = client_patterns(
+        "/auth_metadata$",
+        releases=("v1",),
+        unstable=False,
+    )
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
