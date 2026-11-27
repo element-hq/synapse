@@ -25,7 +25,12 @@ from typing import Awaitable, Callable, NoReturn
 from twisted.internet.defer import Deferred
 from twisted.web.resource import Resource
 
-from synapse.api.errors import Codes, RedirectException, SynapseError
+from synapse.api.errors import (
+    Codes,
+    LimitExceededError,
+    RedirectException,
+    SynapseError,
+)
 from synapse.config.server import parse_listener_def
 from synapse.http.server import (
     DirectServeHtmlResource,
@@ -159,6 +164,26 @@ class JsonResourceTests(unittest.TestCase):
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["error"], "Forbidden!!one!")
         self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+    def test_callback_limit_exceeded_exposes_retry_after(self) -> None:
+        def _callback(request: SynapseRequest, **kwargs: object) -> NoReturn:
+            raise LimitExceededError(limiter_name="test", retry_after_ms=3000)
+
+        res = JsonResource(self.homeserver)
+        res.register_paths(
+            "GET", [re.compile("^/_matrix/foo$")], _callback, "test_servlet"
+        )
+
+        channel = make_request(
+            self.reactor, FakeSite(res, self.reactor), b"GET", b"/_matrix/foo"
+        )
+
+        self.assertEqual(channel.code, 429)
+        self.assertEqual(channel.headers.getRawHeaders(b"Retry-After"), [b"3"])
+        self.assertEqual(
+            channel.headers.getRawHeaders(b"Access-Control-Expose-Headers"),
+            [b"Synapse-Trace-Id, Server, Retry-After"],
+        )
 
     def test_no_handler(self) -> None:
         """
@@ -337,7 +362,15 @@ class OptionsResourceTests(unittest.TestCase):
         )
         self.assertEqual(
             channel.headers.getRawHeaders(b"Access-Control-Expose-Headers"),
-            [b"Synapse-Trace-Id, Server"],
+            [b"Synapse-Trace-Id, Server, Retry-After"],
+        )
+
+    def test_rendezvous_options_request(self) -> None:
+        channel = self._make_request(b"OPTIONS", b"/_synapse/client/rendezvous/foo")
+        self.assertEqual(channel.code, 204)
+        self.assertEqual(
+            channel.headers.getRawHeaders(b"Access-Control-Expose-Headers"),
+            [b"Synapse-Trace-Id, Server, ETag, Retry-After"],
         )
 
     def test_unknown_options_request(self) -> None:
