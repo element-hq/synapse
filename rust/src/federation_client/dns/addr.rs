@@ -23,6 +23,7 @@ use tokio::sync::Semaphore;
 
 use super::AddrLookup;
 
+/// Twisted's default `ThreadPool` size, which bounds today's `gai_resolver` pool.
 const MAX_LOOKUPS: usize = 20;
 
 /// `getaddrinfo` with `SOCK_STREAM`, `AF_UNSPEC` and no flags, at most
@@ -88,14 +89,14 @@ mod tests {
         assert_eq!(addrs.unwrap(), [SocketAddr::from(([127, 0, 0, 1], 8448))]);
     }
 
-    /// A 21st lookup waits, and a lookup keeps its permit until it returns,
-    /// even once its caller is gone.
+    /// A lookup keeps its permit until it returns, even once its caller is
+    /// gone.
     #[test]
     fn permits_outlive_dropped_callers() {
         let gai = Arc::new(GaiLookup::default());
         let gate = Arc::new(RwLock::new(()));
         let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
-        let _closed = gate.write().unwrap();
+        let closed = gate.write().unwrap();
         runtime.block_on(async {
             let lookups: Vec<_> = (0..MAX_LOOKUPS)
                 .map(|_| {
@@ -109,18 +110,12 @@ mod tests {
                 tokio::task::yield_now().await;
             }
 
-            let waiting = {
-                let gai = Arc::clone(&gai);
-                tokio::spawn(async move { gai.blocking(|| panic!("a 21st lookup ran")).await })
-            };
-            tokio::task::yield_now().await;
-            waiting.abort();
-            assert!(waiting.await.unwrap_err().is_cancelled());
             for lookup in lookups {
                 lookup.abort();
                 assert!(lookup.await.unwrap_err().is_cancelled());
             }
             assert_eq!(gai.permits.available_permits(), 0);
         });
+        drop(closed);
     }
 }

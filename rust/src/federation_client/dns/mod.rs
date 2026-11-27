@@ -30,18 +30,20 @@ pub trait AddrLookup: Send + Sync + 'static {
     async fn lookup(&self, host: &str, port: u16) -> io::Result<Vec<SocketAddr>>;
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum LookupFailure {
+    Failed(io::Error),
     NoAddresses,
     Blocked,
 }
 
 impl fmt::Display for LookupFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            LookupFailure::NoAddresses => "no addresses",
-            LookupFailure::Blocked => "an address is blocked",
-        })
+        match self {
+            LookupFailure::Failed(error) => write!(f, "lookup failed: {error}"),
+            LookupFailure::NoAddresses => f.write_str("no addresses"),
+            LookupFailure::Blocked => f.write_str("an address is blocked"),
+        }
     }
 }
 
@@ -58,14 +60,18 @@ impl Resolver {
     }
 
     /// Addresses for one target, in lookup order. One blocked address refuses
-    /// them all; a failed lookup is no addresses.
+    /// them all.
     pub async fn addresses(
         &self,
         host: &str,
         port: u16,
         state: &AttemptState,
     ) -> Result<Vec<SocketAddr>, LookupFailure> {
-        let addrs = self.addr.lookup(host, port).await.unwrap_or_default();
+        let addrs = self
+            .addr
+            .lookup(host, port)
+            .await
+            .map_err(LookupFailure::Failed)?;
         let mut blocked = false;
         for ip in addrs
             .iter()
@@ -129,28 +135,36 @@ mod tests {
     #[test]
     fn allowed_answers_keep_their_order() {
         let answer = ["[2001:db8::1]:8448", "10.1.2.3:8448", "1.2.3.4:8448"];
-        assert_eq!(
-            resolve(Some(&answer)),
-            (Ok(answer.map(String::from).into()), vec![])
-        );
+        let (result, notices) = resolve(Some(&answer));
+        assert_eq!(result.unwrap(), answer);
+        assert_eq!(notices, []);
     }
 
     #[test]
     fn one_blocked_address_refuses_the_answer() {
         let answer = ["10.2.3.4:8448", "1.2.3.4:8448", "[fd00::1]:8448"];
-        assert_eq!(
-            resolve(Some(&answer)),
-            (
-                Err(LookupFailure::Blocked),
-                vec![blocked("10.2.3.4"), blocked("fd00::1")]
-            )
-        );
+        let (result, notices) = resolve(Some(&answer));
+        assert!(matches!(result, Err(LookupFailure::Blocked)), "{result:?}");
+        assert_eq!(notices, [blocked("10.2.3.4"), blocked("fd00::1")]);
     }
 
     #[test]
     fn no_addresses() {
-        for answer in [Some(&[][..]), None] {
-            assert_eq!(resolve(answer), (Err(LookupFailure::NoAddresses), vec![]));
-        }
+        let (result, notices) = resolve(Some(&[]));
+        assert!(
+            matches!(result, Err(LookupFailure::NoAddresses)),
+            "{result:?}"
+        );
+        assert_eq!(notices, []);
+    }
+
+    #[test]
+    fn a_failed_lookup_keeps_its_error() {
+        let (result, notices) = resolve(None);
+        assert!(
+            matches!(&result, Err(LookupFailure::Failed(error)) if error.kind() == io::ErrorKind::NotFound),
+            "{result:?}"
+        );
+        assert_eq!(notices, []);
     }
 }
