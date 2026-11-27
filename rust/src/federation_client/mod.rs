@@ -16,9 +16,13 @@
 //!
 //! Only [`python`] touches pyo3; every other module is plain Rust.
 
+pub mod connector;
+pub mod dns;
 pub mod ip_policy;
+pub mod notices;
 pub mod python;
 pub mod server_name;
 pub mod signing;
+pub mod transport;
 
 pub use python::register_module;

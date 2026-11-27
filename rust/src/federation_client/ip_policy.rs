@@ -40,6 +40,19 @@ impl IpSet {
     }
 }
 
+/// The rule for resolved addresses: refused if in the block set and not in
+/// the allow set.
+pub struct IpPolicy {
+    pub blocklist: IpSet,
+    pub allowlist: IpSet,
+}
+
+impl IpPolicy {
+    pub fn blocks(&self, ip: IpAddr) -> bool {
+        self.blocklist.contains(ip) && !self.allowlist.contains(ip)
+    }
+}
+
 #[derive(Debug)]
 pub struct CidrError(String);
 
