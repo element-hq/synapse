@@ -492,14 +492,37 @@ class TaskScheduler:
                     status = TaskStatus.FAILED
                     error = f.getErrorMessage()
 
-                await self._store.update_scheduled_task(
-                    task.id,
-                    self._clock.time_msec(),
-                    status=status,
-                    result=result,
-                    error=error,
-                )
-                self._running_tasks.pop(task.id)
+                try:
+                    await self._store.update_scheduled_task(
+                        task.id,
+                        self._clock.time_msec(),
+                        status=status,
+                        result=result,
+                        error=error,
+                    )
+                except Exception:
+                    # This can happen e.g. if a concurrent writer (a call to
+                    # `on_cancel_task`, or the task function itself writing a
+                    # checkpoint through `update_task`) updates the same row,
+                    # causing a serialization error under REPEATABLE READ
+                    # once the database layer has exhausted its retries. This
+                    # is not fatal: the task keeps its previous state in the
+                    # database and will be launched again by the
+                    # reconciliation loop.
+                    #
+                    # Note that this deliberately also catches
+                    # `defer.CancelledError`, which is raised if the task is
+                    # cancelled while we're writing its final status, so that
+                    # the cleanup below still runs.
+                    logger.exception(
+                        "Failed to persist final status %s of scheduled task %s",
+                        status.value,
+                        task.id,
+                    )
+                finally:
+                    # `on_cancel_task` might have already removed the task from
+                    # the dict, so provide a default to avoid a KeyError.
+                    self._running_tasks.pop(task.id, None)
 
                 current_time = self._clock.time()
                 usage = log_context.get_resource_usage()

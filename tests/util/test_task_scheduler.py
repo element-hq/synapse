@@ -19,6 +19,8 @@
 #
 #
 
+import logging
+
 from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
@@ -356,6 +358,92 @@ class TestTaskScheduler(HomeserverTestCase):
         )
 
         self._test_cancel_task(task_id)
+
+    def test_final_update_failure_releases_slot(self) -> None:
+        """Check that a failure to persist the final status of a task doesn't
+        leak its running slot, so that the scheduler can keep launching tasks.
+
+        Such a failure can happen e.g. with a serialization error under
+        REPEATABLE READ if a concurrent writer updates the same row and the
+        database layer exhausts its retries.
+        """
+        # Make the write of the final status of the task fail once.
+        real_update_scheduled_task = self.task_scheduler._store.update_scheduled_task
+        failed = False
+
+        async def flaky_update_scheduled_task(
+            id: str,
+            timestamp: int,
+            *,
+            status: TaskStatus | None = None,
+            result: JsonMapping | None = None,
+            error: str | None = None,
+        ) -> bool:
+            nonlocal failed
+            if status == TaskStatus.COMPLETE and not failed:
+                failed = True
+                # Suspend before failing, as a real database error would: the
+                # write is issued on the database connection pool and the
+                # error comes back on a later reactor iteration.
+                await self.hs.get_clock().sleep(Duration(milliseconds=1))
+                raise Exception("could not serialize access due to concurrent update")
+            return await real_update_scheduled_task(
+                id, timestamp, status=status, result=result, error=error
+            )
+
+        self.task_scheduler._store.update_scheduled_task = flaky_update_scheduled_task  # type: ignore[method-assign]
+
+        with self.assertNoLogs(
+            "synapse.metrics.background_process_metrics", level=logging.ERROR
+        ):
+            task_id = self.get_success(self.task_scheduler.schedule_task("_test_task"))
+
+            # The task function has completed, and the wrapper is suspended
+            # in the write of the final status, which is about to fail.
+            self.reactor.advance(0.05)
+
+            # The write of the final status failed. The running slot must
+            # nevertheless be released, otherwise the pool of running tasks
+            # would progressively leak and eventually prevent any new task
+            # from being launched.
+            self.assertNotIn(task_id, self.task_scheduler._running_tasks)
+
+            # The task keeps its previous state in the database and gets
+            # launched again — the call to launch new tasks scheduled at the
+            # end of the wrapper runs 100ms after it — at which point
+            # persisting its final status succeeds.
+            self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
+
+            task = self.get_success(self.task_scheduler.get_task(task_id))
+            assert task is not None
+            self.assertEqual(task.status, TaskStatus.COMPLETE)
+
+    def test_cancel_running_task_does_not_log_error(self) -> None:
+        """Check that cancelling a running task doesn't log an error.
+
+        Cancelling a running task makes the task function see
+        `defer.CancelledError`, after which both `on_cancel_task` and the
+        wrapper try to remove the task from the dict of running tasks; the
+        wrapper must not fail with a `KeyError` because `on_cancel_task` got
+        there first.
+        """
+        with self.assertNoLogs(
+            "synapse.metrics.background_process_metrics", level=logging.ERROR
+        ):
+            task_id = self.get_success(
+                self.task_scheduler.schedule_task("_incrementing_running_task")
+            )
+
+            self.reactor.advance(1)
+
+            self.get_success(self.task_scheduler.cancel_task(task_id))
+
+            self.reactor.advance(1)
+
+            task = self.get_success(self.task_scheduler.get_task(task_id))
+            assert task is not None
+            self.assertEqual(task.status, TaskStatus.CANCELLED)
+            self.assertNotIn(task_id, self.task_scheduler._running_tasks)
 
 
 class TestTaskSchedulerWithBackgroundWorker(BaseMultiWorkerStreamTestCase):
