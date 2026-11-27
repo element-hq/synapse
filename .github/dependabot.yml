@@ -47,6 +47,13 @@ updates:
 
   - package-ecosystem: "cargo"
     directory: "/"
+    # Only bump the minimum version of a dependency in `rust/Cargo.toml` when the
+    # new version is outside the current requirement (a semver-incompatible
+    # release). Otherwise only `Cargo.lock` is updated.
+    #
+    # The minimums are what downstream packagers that do not vendor crates build
+    # against; the `trial-olddeps` CI job tests them.
+    versioning-strategy: "increase-if-necessary"
     open-pull-requests-limit: 1
     groups:
       all-rust-dependencies:
