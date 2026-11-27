@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/matrix-org/complement v0.0.0-20251120181401-44111a2a8a9d
 	github.com/matrix-org/gomatrixserverlib v0.0.0-20250813150445-9f5070a65744
-	github.com/tidwall/gjson v1.19.0
+	github.com/tidwall/gjson v1.20.2
 )
 
 require (
@@ -39,7 +39,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
-	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/pretty v1.3.0 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
