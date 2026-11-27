@@ -19,7 +19,7 @@
 #
 #
 from typing import Sequence
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from typing_extensions import TypeAlias
 
@@ -40,7 +40,7 @@ from synapse.appservice.scheduler import (
 from synapse.events import EventBase
 from synapse.logging.context import make_deferred_yieldable
 from synapse.server import HomeServer
-from synapse.types import DeviceListUpdates, JsonDict
+from synapse.types import DeviceListUpdates, JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -128,6 +128,16 @@ class ApplicationServiceSchedulerTransactionCtrlTestCase(unittest.TestCase):
         )
         self.assertEqual(0, txn.send.call_count)  # txn not sent though
         self.assertEqual(0, txn.complete.call_count)  # or completed
+
+    def test_start_recoverer_twice_for_one_service(self) -> None:
+        service = Mock(id="a")
+
+        self.txnctrl.start_recoverer(service)
+        self.txnctrl.start_recoverer(service)
+
+        self.assertEqual(1, self.recoverer_fn.call_count)
+        self.assertEqual(1, self.recoverer.recover.call_count)
+        self.assertEqual({"a": self.recoverer}, self.txnctrl.recoverers)
 
     def test_single_service_up_txn_not_sent(self) -> None:
         # Test: The AS is up and the txn is not sent. A Recoverer is made and
@@ -293,6 +303,42 @@ defer.Deferred[
     ]
 ]
 """
+
+
+class ApplicationServiceSchedulerStartTestCase(unittest.HomeserverTestCase):
+    def prepare(self, reactor: "MemoryReactor", clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.services = [
+            ApplicationService(
+                token=f"token_{name}",
+                id=name,
+                sender=UserID.from_string("@as:test"),
+                rate_limited=False,
+                namespaces={},
+                hs_token="hs_token",
+                url="some_url",
+            )
+            for name in ("a", "b", "c")
+        ]
+        self.store.services_cache.extend(self.services)
+        self.scheduler = ApplicationServiceScheduler(hs)
+        self.txn_ctrl = self.scheduler.txn_ctrl
+        self.txn_ctrl.as_api = Mock(push_bulk=AsyncMock(return_value=False))
+
+    def test_start_after_send_failure_started_a_recoverer(self) -> None:
+        service_a = self.services[0]
+        self.get_success(self.txn_ctrl.send(service_a, [], ephemeral=[Mock()]))
+        self.pump()
+        self.assertEqual({"a"}, set(self.txn_ctrl.recoverers))
+
+        with patch.object(
+            self.store,
+            "get_appservices_by_state",
+            AsyncMock(return_value=self.services),
+        ):
+            self.get_success(self.scheduler.start())
+
+        self.assertEqual({"a", "b", "c"}, set(self.txn_ctrl.recoverers))
 
 
 class ApplicationServiceSchedulerQueuerTestCase(unittest.HomeserverTestCase):
