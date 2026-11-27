@@ -1,0 +1,1 @@
+Fix a bug where an initial `/sync` would not return the leave when a remote invite was rescinded by the inviter or, with `include_leave`, rejected by the user.

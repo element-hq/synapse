@@ -131,6 +131,10 @@ pub enum CursorQueryState<S = PgRowStream> {
     Closed {
         /// Column names of the result set, carried over from
         /// [`CursorQueryState::Active`]. See the TODO there.
+        #[expect(
+            dead_code,
+            reason = "for PEP-249's `Cursor.description`, which isn't exposed yet"
+        )]
         description: Vec<String>,
         /// The affected-row count for PEP-249's `rowcount`, if Postgres
         /// reported one.
