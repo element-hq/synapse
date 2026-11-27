@@ -489,6 +489,18 @@ jobs:
           # xmlsec1 is needed for the SAML tests
           apt-get -qq install xmlsec1
 
+      # Resolve our direct Rust dependencies to the minimum versions that
+      # `rust/Cargo.toml` allows, so that the build below tests those minimums.
+      # Indirect dependencies resolve as normal, preferring versions that support
+      # our `rust-version`. `-Zdirect-minimal-versions` needs a nightly `cargo`;
+      # the build still uses `RUST_VERSION`.
+      - name: Use the minimum versions of direct Rust dependencies
+        env:
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+        run: |
+          rustup toolchain install ${{ env.RUST_NIGHTLY_VERSION }} --profile minimal --no-self-update
+          cargo +${{ env.RUST_NIGHTLY_VERSION }} update -Zdirect-minimal-versions
+
       - name: Prepare old deps
         # Note: we install using `uv` here, not poetry or pip to allow us to test with the
         # minimum version of all dependencies, both those explicitly specified and those
