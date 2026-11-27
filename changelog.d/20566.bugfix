@@ -1,0 +1,1 @@
+Fix URL previews returning a 500 error for non-HTTP(S) URLs by rejecting them with a 400 error instead.
