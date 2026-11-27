@@ -106,7 +106,17 @@ class BaseAuth(ABC):
             if allow_departed_users and membership == Membership.LEAVE:
                 forgot = await self.store.did_forget(user_id, room_id)
                 if not forgot:
-                    return membership, member_event_id
+                    assert member_event_id is not None
+                    leave_event = await self.store.get_event(member_event_id)
+                    # An out-of-band leave (a rejected remote invite or a rescinded
+                    # knock) is stored while this server is not in the room: it is an
+                    # outlier with no state, and the user was never in the room as far
+                    # as this server knows.
+                    if not (
+                        leave_event.internal_metadata.is_outlier()
+                        and leave_event.internal_metadata.is_out_of_band_membership()
+                    ):
+                        return membership, member_event_id
         raise UnstableSpecAuthError(
             403,
             "User %s not in room %s" % (user_id, room_id),

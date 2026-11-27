@@ -257,6 +257,7 @@ information.
     ^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$
     ^/_matrix/client/(r0|v3|unstable)/capabilities$
     ^/_matrix/client/(r0|v3|unstable)/notifications$
+    ^/_matrix/client/(v1|unstable/org.matrix.msc4143)/rtc/transports$
 
     # Admin API requests
     ^/_synapse/admin/v1/rooms/[^/]+$
@@ -292,6 +293,9 @@ information.
     # Unstable MSC4140 support (delayed event scheduling & management)
     ^/_matrix/client/unstable/org.matrix.msc4140/rooms/.*/delayed_event/
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/[^/]+(/restart)?)?$
+
+    # Unstable MSC4536 support (profile query)
+    ^/_matrix/client/unstable/org.matrix.msc4536/profile/query$
 
     # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
     ^/_synapse/mas/

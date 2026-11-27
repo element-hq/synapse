@@ -36,16 +36,6 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         versions.register_servlets,
     ]
 
-    def tearDown(self) -> None:
-        # MemoryReactor doesn't trigger the shutdown phases, and we want the
-        # Tokio thread pool to be stopped
-        # XXX: This logic should probably get moved somewhere else
-        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
-        for phase in ["before", "during", "after"]:
-            triggers = shutdown_triggers.get(phase, [])
-            for callbable, args, kwargs in triggers:
-                callbable(*args, **kwargs)
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.admin_user = self.register_user("admin", "pass", admin=True)
         self.admin_user_tok = self.login("admin", "pass")

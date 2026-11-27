@@ -965,7 +965,7 @@ class SyncHandler:
                 from_token=from_token,
                 to_token=now_token.sticky_events_key,
                 now=now,
-                limit=StickyEvent.MAX_EVENTS_IN_SYNC,
+                limit=StickyEvent.MAX_STICKY_EVENTS_IN_SYNC,
             )
             now_token = now_token.copy_and_replace(
                 StreamKeyType.STICKY_EVENTS, to_token
@@ -1025,7 +1025,10 @@ class SyncHandler:
                 the the list.
             since_token
             potential_recents: If non-empty, the events between the since token
-                and current token to send down to clients.
+                and current token to send down to clients. On an initial sync, it
+                is only ever an out of band membership, which goes after the room's
+                history. `test_initial_sync_only_passes_out_of_band_leaves`
+                enforces this.
             newly_joined_room
         """
         with Measure(
@@ -1039,6 +1042,9 @@ class SyncHandler:
             if (
                 potential_recents is None
                 or newly_joined_room
+                # An initial sync starts the client from nothing, so it also needs
+                # the room's history before `potential_recents`.
+                or since_token is None
                 or timeline_limit < len(potential_recents)
             ):
                 limited = True
@@ -1054,9 +1060,12 @@ class SyncHandler:
             )
             if gap_token:
                 # There's a gap, so we need to ignore the passed in
-                # `potential_recents`, and reset `upto_token` to match.
-                potential_recents = None
-                upto_token = sync_result_builder.now_token
+                # `potential_recents`, and reset `upto_token` to match. On an initial
+                # sync, `potential_recents` is an out of band leave, which pagination
+                # can't find, so we keep it and paginate back from it.
+                if since_token is not None or potential_recents is None:
+                    potential_recents = None
+                    upto_token = sync_result_builder.now_token
                 limited = True
 
             log_kv({"limited": limited})
@@ -1759,12 +1768,18 @@ class SyncHandler:
             await_full_state=await_full_state,
         )
 
-        if batch:
+        # A timeline that starts with an outlier is just an out of band membership,
+        # which has no state to look up. The state before it is `state_at_timeline_end`.
+        first_event = next(iter(batch.events), None)
+        if (
+            first_event is not None
+            and not first_event.event.internal_metadata.is_outlier()
+        ):
             # Strictly speaking, this returns the state *after* the first event in the
             # timeline, but that is good enough here.
             state_at_timeline_start = (
                 await self._state_storage_controller.get_state_ids_for_event(
-                    batch.events[0].event.event_id,
+                    first_event.event.event_id,
                     state_filter=state_filter,
                     await_full_state=await_full_state,
                 )
@@ -2721,7 +2736,10 @@ class SyncHandler:
         if not user_ids:
             return
 
-        profile_data_by_user = await self.store.get_profile_data_for_users(user_ids)
+        profile_data_by_user = await self.store.get_profile_data_for_users(
+            user_ids=user_ids,
+            field_names=profile_fields,
+        )
 
         # Serialise the profile updates into the sync response format.
         profile_updates: dict[
@@ -2734,13 +2752,7 @@ class SyncHandler:
                 # in initial sync.
                 continue
 
-            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
-            for field_name in profile_fields:
-                if field_name in profile_data.keys():
-                    per_user_updates[field_name] = profile_data[field_name]
-
-            if per_user_updates:
-                profile_updates[other_user_id] = per_user_updates
+            profile_updates[other_user_id] = profile_data
 
         if profile_updates:
             sync_result_builder.profile_updates = profile_updates
@@ -2870,20 +2882,17 @@ class SyncHandler:
             # profile update will come down a second time.
             #
             # Hopefully clients can just filter these out.
-            profile_data_by_user = await self.store.get_profile_data_for_users(users)
+            profile_data_by_user = await self.store.get_profile_data_for_users(
+                user_ids=users,
+                field_names=profile_fields,
+            )
 
             # Note, we've already collected field updates above via `updates`,
             # outside of events in the timeline when lazy loading. When lazy loading,
             # we're already always sending the fields that have changed, regardless
             # of the lazy loading cache.
             for other_user_id in users:
-                profile_data = profile_data_by_user.get(other_user_id)
-                if profile_data is None:
-                    # No profile data for this user, just return a blank dictionary
-                    # in incremental sync, telling the clients to remove all profile
-                    # information for this user.
-                    profile_updates[other_user_id] = None
-                    continue
+                profile_data = profile_data_by_user.get(other_user_id, {})
 
                 per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
                 if include_users and other_user_id in include_users:
@@ -3697,6 +3706,7 @@ class SyncHandler:
         room_entries = []
         invited = []
         knocked = []
+        left_or_banned = []
 
         for event in room_list:
             if event.room_version_id not in KNOWN_ROOM_VERSIONS:
@@ -3740,21 +3750,40 @@ class SyncHandler:
                         if user_id == event.sender:
                             continue
 
-                leave_token = now_token.copy_and_replace(
-                    StreamKeyType.ROOM, RoomStreamToken(stream=event.event_pos.stream)
+                left_or_banned.append(event)
+
+        membership_events = await self.store.get_events(
+            [event.event_id for event in left_or_banned]
+        )
+
+        for event in left_or_banned:
+            leave_token = now_token.copy_and_replace(
+                StreamKeyType.ROOM, RoomStreamToken(stream=event.event_pos.stream)
+            )
+            # An out of band leave, like a rescinded remote invite, is not in
+            # the room's timeline, so we send it after the room's history. The
+            # user may have been in the room before, and the client has nothing
+            # yet, so unlike incremental sync we don't set `out_of_band`, which
+            # would skip the room's state.
+            membership_event = membership_events.get(event.event_id)
+            room_entries.append(
+                RoomSyncResultBuilder(
+                    room_id=event.room_id,
+                    rtype="archived",
+                    events=(
+                        [membership_event]
+                        if membership_event is not None
+                        and membership_event.internal_metadata.is_outlier()
+                        and membership_event.internal_metadata.is_out_of_band_membership()
+                        else None
+                    ),
+                    newly_joined=False,
+                    full_state=True,
+                    since_token=since_token,
+                    upto_token=leave_token,
+                    end_token=leave_token,
                 )
-                room_entries.append(
-                    RoomSyncResultBuilder(
-                        room_id=event.room_id,
-                        rtype="archived",
-                        events=None,
-                        newly_joined=False,
-                        full_state=True,
-                        since_token=since_token,
-                        upto_token=leave_token,
-                        end_token=leave_token,
-                    )
-                )
+            )
 
         room_ids_in_response = (
             {entry.room_id for entry in room_entries}

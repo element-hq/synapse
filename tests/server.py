@@ -613,11 +613,13 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # on newer Twisted versions to use the test reactor's clock.
         #
         # This is *super* dirty since it is never undone and relies on the next
-        # test to overwrite it.
+        # test to overwrite it. The patch only holds a weak reference to this
+        # reactor, so that it doesn't keep the reactor (and through its
+        # shutdown triggers, the whole homeserver) alive until the next test.
         if twisted.version > Version("Twisted", 23, 8, 0):
             from twisted.protocols import tls
 
-            tls._get_default_clock = lambda: self
+            tls._get_default_clock = weakref.ref(self)  # type: ignore[assignment]
 
         super().__init__()
 
@@ -638,6 +640,37 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # `MemoryReactorClock` never clears the hooks that have already been called.
         # So manually clear the hooks here after they have been run.
         self.whenRunningHooks.clear()
+
+    @override
+    def addSystemEventTrigger(
+        self,
+        phase: str,
+        eventType: str,
+        callable: Callable[P, object],
+        *args: P.args,
+        **kw: P.kwargs,
+    ) -> Any:
+        """
+        Override the call from `MemoryReactor` to return an ID that
+        `removeSystemEventTrigger` accepts. `MemoryReactor` returns `None`.
+        """
+        super().addSystemEventTrigger(phase, eventType, callable, *args, **kw)
+        return (phase, eventType, self.triggers[phase][eventType][-1])
+
+    @override
+    def removeSystemEventTrigger(self, triggerID: Any) -> None:
+        """
+        Override the call from `MemoryReactor`, which raises
+        `NotImplementedError`.
+
+        `HomeServer.shutdown()` removes each shutdown handler's trigger before it
+        calls the handler, and skips the handler if the removal fails. Without
+        this, no shutdown handler would ever run in a test. One of them stops
+        the homeserver's Tokio runtime, which would otherwise carry on running
+        its tasks during later tests.
+        """
+        phase, eventType, trigger = triggerID
+        self.triggers[phase][eventType].remove(trigger)
 
     def installNameResolver(self, resolver: IHostnameResolver) -> IHostnameResolver:
         raise NotImplementedError()
@@ -790,19 +823,6 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         for fileno in readers:
             poller.register(fileno, select.POLLIN)
         return [readers[fileno] for fileno, _event in poller.poll(0)]
-
-
-def cleanup_test_reactor_system_event_triggers(
-    reactor: ThreadedMemoryReactorClock,
-) -> None:
-    """Cleanup any registered system event triggers.
-    The `twisted.internet.test.ThreadedMemoryReactor` does not implement
-    `removeSystemEventTrigger` so won't clean these triggers up on it's own properly.
-    When trying to override `removeSystemEventTrigger` in `ThreadedMemoryReactorClock`
-    in order to implement this functionality, twisted complains about the reactor being
-    unclean and fails some tests.
-    """
-    reactor.triggers.clear()
 
 
 def validate_connector(connector: tcp.Connector, expected_ip: str) -> None:
@@ -1410,6 +1430,22 @@ def setup_test_homeserver(
         if cleanup_hs is not None:
             deferred = defer.ensureDeferred(cleanup_hs.shutdown())
         return deferred
+
+    # Tests always run on the fake reactor, which has the hooks cleared below.
+    assert isinstance(reactor, MemoryReactorClock)
+
+    def forget_reactor_hooks() -> None:
+        # The fake reactor never runs, so its `callWhenRunning` hooks and
+        # system event triggers never fire. Any still registered after the
+        # homeserver has shut down point at its handlers. The Rust runtime
+        # holds the reactor through a reference the garbage collector can't
+        # see, so with them in place the whole homeserver would leak. Drop
+        # them once the homeserver has shut down (cleanups run in reverse
+        # order).
+        reactor.whenRunningHooks.clear()
+        reactor.triggers.clear()
+
+    cleanup_func(forget_reactor_hooks)
 
     # Register the cleanup hook for the homeserver.
     # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
