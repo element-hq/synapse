@@ -118,12 +118,15 @@ class ApplicationService:
     # values.
     NS_LIST = [NS_USERS, NS_ALIASES, NS_ROOMS]
 
+    # The proxy prefix of LiveKit-related endpoints.
+    LIVEKIT_PROXY_PREFIX = "rtc/livekit"
+
     # API prefixes that an application service may claim for proxying. Prefixes
     # are applied after the version segment(s) (either /vX/ or /unstable/foo/):
     # - /_matrix/client/(unstable/[^/]+|v[^/]+)/{prefix}/.*
     # - /_matrix/federation/(unstable/[^/]+|v[^/]+)/{prefix}/.*
     ALLOWED_PROXY_PREFIXES = (
-        ProxyPrefix(path_prefix="rtc/livekit", allow_guests=True),
+        ProxyPrefix(path_prefix=LIVEKIT_PROXY_PREFIX, allow_guests=True),
     )
 
     def __init__(

@@ -36,6 +36,11 @@ from synapse.federation.transport.server._base import (
     Authenticator,
     BaseFederationServlet,
 )
+from synapse.handlers.matrixrtc_livekit import (
+    FEDERATION_MSC4195_UNSTABLE_PREFIX,
+    GET_TOKEN_PATH,
+    no_local_sfu_error,
+)
 from synapse.http.servlet import (
     parse_boolean,
     parse_boolean_from_args,
@@ -909,6 +914,30 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         self.media_repo.mark_recently_accessed(None, media_id)
 
 
+class FederationMatrixRtcLiveKitGetTokenServlet(BaseFederationServlet):
+    """Default implementation of `POST /_matrix/federation/v1/rtc/livekit/get_token`
+    from MSC4195. Used when no application service proxies the LiveKit endpoints.
+    By default, a server has no SFU of its own, so every request is rejected.
+    """
+
+    PATH = GET_TOKEN_PATH
+    CATEGORY = "Federation requests"
+
+    async def on_POST(
+        self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
+        raise no_local_sfu_error()
+
+
+class FederationUnstableMatrixRtcLiveKitGetTokenServlet(
+    FederationMatrixRtcLiveKitGetTokenServlet
+):
+    """The unstable variant of `FederationMatrixRtcLiveKitGetTokenServlet`, retained
+    for servers that don't yet request the stable endpoint."""
+
+    PREFIX = FEDERATION_MSC4195_UNSTABLE_PREFIX
+
+
 FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationSendServlet,
     FederationEventServlet,
@@ -941,4 +970,6 @@ FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
+    FederationMatrixRtcLiveKitGetTokenServlet,
+    FederationUnstableMatrixRtcLiveKitGetTokenServlet,
 )

@@ -17,8 +17,11 @@
 
 """Tests REST events for /rtc/transports and RTC config parsing and /versions setup."""
 
+import os
+import tempfile
 import unittest as stdlib_unittest
 
+import yaml
 from pydantic import ValidationError
 
 from twisted.internet.testing import MemoryReactor
@@ -291,6 +294,77 @@ class MatrixRtcVersionsTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
         self.assertTrue(
             channel.json_body["unstable_features"]["org.matrix.msc4143.stable"]
+        )
+
+    def test_msc4195_stable_true_by_default(self) -> None:
+        """The default implementation includes all the stable endpoints."""
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertTrue(
+            channel.json_body["unstable_features"]["org.matrix.msc4195.stable"]
+        )
+
+    @unittest.override_config({"matrix_rtc": {"msc4195_stable_endpoints": False}})
+    def test_msc4195_stable_option_ignored_without_appservice(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertTrue(
+            channel.json_body["unstable_features"]["org.matrix.msc4195.stable"]
+        )
+
+
+class MatrixRtcAppserviceVersionsTestCase(HomeserverTestCase):
+    """Tests that org.matrix.msc4195.stable is advertised as configured when an
+    application service proxies the LiveKit endpoints."""
+
+    servlets = [versions.register_servlets]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        with tempfile.NamedTemporaryFile(
+            mode="w", prefix="as_livekit_config", delete=False
+        ) as f:
+            self.addCleanup(os.remove, f.name)
+            yaml.dump(
+                {
+                    "id": "livekit",
+                    "url": None,
+                    "as_token": "as_token",
+                    "hs_token": "hs_token",
+                    "sender_localpart": "livekit",
+                    "namespaces": {},
+                    "io.element.msc4512.proxy_prefix": "rtc/livekit",
+                    "io.element.msc4512.proxy_url": "http://lk-jwt-service.example.com",
+                },
+                f,
+            )
+            config["app_service_config_files"] = [f.name]
+        config.setdefault("experimental_features", {}).setdefault(
+            "msc4512_enabled", True
+        )
+        return config
+
+    def test_msc4195_stable_false_by_default(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertFalse(
+            channel.json_body["unstable_features"]["org.matrix.msc4195.stable"]
+        )
+
+    @unittest.override_config({"matrix_rtc": {"msc4195_stable_endpoints": True}})
+    def test_msc4195_stable_true_if_enabled(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertTrue(
+            channel.json_body["unstable_features"]["org.matrix.msc4195.stable"]
+        )
+
+    @unittest.override_config({"experimental_features": {"msc4512_enabled": False}})
+    def test_msc4195_stable_true_if_proxying_disabled(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertTrue(
+            channel.json_body["unstable_features"]["org.matrix.msc4195.stable"]
         )
 
 

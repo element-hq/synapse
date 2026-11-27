@@ -99,6 +99,7 @@ from synapse.handlers.federation import FederationHandler
 from synapse.handlers.federation_event import FederationEventHandler
 from synapse.handlers.identity import IdentityHandler
 from synapse.handlers.initial_sync import InitialSyncHandler
+from synapse.handlers.matrixrtc_livekit import MatrixRtcLiveKitHandler
 from synapse.handlers.message import EventCreationHandler, MessageHandler
 from synapse.handlers.pagination import PaginationHandler
 from synapse.handlers.password_policy import PasswordPolicyHandler
@@ -1322,3 +1323,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_delayed_events_handler(self) -> DelayedEventsHandler:
         return DelayedEventsHandler(self)
+
+    @cache_in_self
+    def get_matrixrtc_livekit_handler(self) -> MatrixRtcLiveKitHandler:
+        return MatrixRtcLiveKitHandler(self)

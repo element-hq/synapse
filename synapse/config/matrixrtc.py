@@ -15,15 +15,25 @@
 #
 #
 
+from functools import cached_property
 from typing import Any
 
-from pydantic import Field, StrictStr, ValidationError, field_validator, model_validator
+from pydantic import (
+    Field,
+    StrictBool,
+    StrictStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from typing_extensions import Self
 
+from synapse.appservice import ApplicationService
 from synapse.types import JsonDict
 from synapse.util.pydantic_models import ParseModel
 
 from ._base import Config, ConfigError
+from .appservice import load_appservices
 
 
 class TransportConfigModel(ParseModel):
@@ -51,6 +61,13 @@ class TransportConfigModel(ParseModel):
 
 class MatrixRtcConfigModel(ParseModel):
     transports: list[dict[str, Any]] = []
+
+    msc4195_stable_endpoints: StrictBool = False
+    """
+    Whether to advertise the `org.matrix.msc4195.stable` feature flag in `/versions`,
+    telling clients that the stable MSC4195 endpoints are served by this server, when
+    an application service proxies these endpoints.
+    """
 
     @field_validator("transports")
     @classmethod
@@ -83,3 +100,32 @@ class MatrixRtcConfig(Config):
             ) from e
 
         self.transports = parsed.transports
+        self.msc4195_stable_endpoints = parsed.msc4195_stable_endpoints
+
+    @cached_property
+    def livekit_proxied_to_appservice(self) -> bool:
+        """Whether an application service proxies the MSC4195 LiveKit endpoints
+        (MSC4512), in which case Synapse's default implementation is not used."""
+        if not self.root.experimental.msc4512_enabled:
+            return False
+        return any(
+            appservice.proxy_prefix is not None
+            and appservice.proxy_prefix.path_prefix
+            == ApplicationService.LIVEKIT_PROXY_PREFIX
+            for appservice in load_appservices(
+                self.root.server.server_name,
+                self.root.appservice.app_service_config_files,
+            )
+        )
+
+    @cached_property
+    def advertise_msc4195_stable(self) -> bool:
+        """Whether to advertise `org.matrix.msc4195.stable` in `/versions`.
+
+        Synapse's default implementation includes all the stable endpoints. If an
+        application service proxies the endpoints instead, whether they are
+        supported depends on the service, which the admin has to tell us.
+        """
+        if self.livekit_proxied_to_appservice:
+            return self.msc4195_stable_endpoints
+        return True
