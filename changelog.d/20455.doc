@@ -1,0 +1,1 @@
+Document that OIDC provider endpoints must use `https` when discovery is disabled. Contributed by Djamel Kevin Boudo.
