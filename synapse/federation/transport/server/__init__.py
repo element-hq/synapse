@@ -32,6 +32,7 @@ from synapse.federation.transport.server._base import (
 from synapse.federation.transport.server.federation import (
     FEDERATION_SERVLET_CLASSES,
     FederationAccountStatusServlet,
+    FederationMatrixRtcLiveKitGetTokenServlet,
     FederationMediaDownloadServlet,
     FederationMediaThumbnailServlet,
     FederationUnstableClientKeysClaimServlet,
@@ -332,6 +333,14 @@ def register_servlets(
             if (
                 servletclass == FederationUnstableGetExtremitiesServlet
                 and not hs.config.experimental.msc4370_enabled
+            ):
+                continue
+
+            # An application service that proxies the LiveKit endpoints takes
+            # precedence over the default implementation.
+            if (
+                issubclass(servletclass, FederationMatrixRtcLiveKitGetTokenServlet)
+                and hs.config.matrix_rtc.livekit_proxied_to_appservice
             ):
                 continue
 

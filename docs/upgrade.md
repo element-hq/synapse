@@ -117,6 +117,34 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.167.0
+
+## Default MatrixRTC LiveKit endpoints and `org.matrix.msc4195.stable`
+
+Synapse now serves the LiveKit endpoints from
+[MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195) itself
+when no application service is configured for proxying them. By default, Synapse
+has no LiveKit SFU of its own, so this only allows users to obtain tokens for the
+SFUs of other homeservers via `/rtc/livekit/get_token`. All other token requests
+and all requests to `/rtc/livekit/delegate_delayed_leave` are rejected. In this mode,
+Synapse also advertises the `org.matrix.msc4195.stable` feature flag in
+`/_matrix/client/versions`, which lets clients know that they can use the stable
+endpoints.
+
+Admins that are running [lk-jwt-service](https://github.com/element-hq/lk-jwt-service)
+as an application service are not affected by this change as the application
+service continues to take precedence. However, in this case, the feature flag is
+not advertised by default because versions of lk-jwt-service before 0.10.0 don't
+include the stable endpoints. Admins that are running at least version 0.10.0
+should enable the feature flag via the new
+[`matrix_rtc.msc4195_stable_endpoints`](usage/configuration/config_documentation.md#matrix_rtc)
+config option:
+
+```yaml
+matrix_rtc:
+  msc4195_stable_endpoints: true
+```
+
 # Upgrading to v1.165.0
 
 ## Python 3.11+ is now required

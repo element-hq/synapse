@@ -1,0 +1,1 @@
+Serve the LiveKit endpoints from [MSC4195](https://github.com/matrix-org/matrix-spec-proposals/pull/4195) by default when no application service proxies them and add the `matrix_rtc.msc4195_stable_endpoints` config option for advertising `org.matrix.msc4195.stable`.
