@@ -7,11 +7,19 @@ updates:
     # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
     package-ecosystem: "pip"
     directory: "/"
+    # Only bump the minimum and maximum versions of dependencies in our
+    # lockfile. The maximum version in `pyproject.toml` may be bumped, but the
+    # minimum may not be.
+    #
+    # We want to avoid bumping the minimum version in `pyproject.toml` unless
+    # necessary, as it requires our supported Linux distributions to have
+    # those versions in their repos first.
+    versioning-strategy: "increase-if-necessary"
     # Group together all updates for this ecosystem into a single, big PR.
     #
     # Doing this prevents us from needing to review a PR per dependency upgrade
     # (which can become burdensome).
-    #
+    # 
     # Splitting up each ecosystem into their own PR (rather than putting ALL
     # upgrades into a single PR) allows us to more quicker determine the culprit
     # when CI fails.

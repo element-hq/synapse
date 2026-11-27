@@ -1,1 +1,0 @@
-Fix the minimum Rust dependency versions in `rust/Cargo.toml`, some of which were too old to build Synapse, and test them in CI. Contributed by @l5yth.
