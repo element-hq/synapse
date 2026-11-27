@@ -1,0 +1,1 @@
+Fix a bug where cancelling background tasks could leak status-reporting timers and generate excessive log messages.

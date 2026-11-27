@@ -19,6 +19,8 @@
 #
 #
 
+from unittest.mock import patch
+
 from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
@@ -333,7 +335,38 @@ class TestTaskScheduler(HomeserverTestCase):
             )
         )
 
-        self._test_cancel_task(task_id)
+        with patch.object(TaskScheduler, "_log_task_usage") as log_task_usage:
+            self._test_cancel_task(task_id)
+
+            # Cancellation should finish the wrapper, including its final report.
+            self.assertEqual(log_task_usage.call_count, 1)
+            self.assertEqual(log_task_usage.call_args.args[0], "cancelled")
+
+            # A cancelled task must not keep producing periodic status reports.
+            self.reactor.advance(TaskScheduler.OCCASIONAL_REPORT_INTERVAL.as_secs() + 1)
+            self.assertEqual(log_task_usage.call_count, 1)
+
+    def test_task_cleanup_after_database_error(self) -> None:
+        """A failed status update must not leave a task's reporting timer running."""
+        task_id = self.get_success(self.task_scheduler.schedule_task("_sleeping_task"))
+
+        with (
+            patch.object(
+                self.task_scheduler._store,
+                "update_scheduled_task",
+                side_effect=RuntimeError("Task status update failed"),
+            ),
+            patch.object(TaskScheduler, "_log_task_usage") as log_task_usage,
+        ):
+            with self.assertLogs(
+                "synapse.metrics.background_process_metrics", level="ERROR"
+            ) as logs:
+                self.reactor.advance(1)
+
+            self.assertIn("Task status update failed", logs.output[0])
+            self.assertNotIn(task_id, self.task_scheduler._running_tasks)
+            self.reactor.advance(TaskScheduler.OCCASIONAL_REPORT_INTERVAL.as_secs() + 1)
+            log_task_usage.assert_not_called()
 
     async def _incrementing_active_task(
         self, task: ScheduledTask
