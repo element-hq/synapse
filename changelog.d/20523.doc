@@ -1,0 +1,1 @@
+Serve the list of documentation versions from a static `versions.json` instead of the GitHub API, so the version picker no longer goes stale. Contributed by @famedly @itsoyou.
