@@ -19,7 +19,7 @@ updates:
     #
     # Doing this prevents us from needing to review a PR per dependency upgrade
     # (which can become burdensome).
-    # 
+    #
     # Splitting up each ecosystem into their own PR (rather than putting ALL
     # upgrades into a single PR) allows us to more quicker determine the culprit
     # when CI fails.

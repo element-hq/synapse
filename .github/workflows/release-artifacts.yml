@@ -15,6 +15,9 @@ on:
   merge_group:
   workflow_dispatch:
 
+env:
+  LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -30,7 +33,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
       - id: set-distros
         run: |
           # if we're running from a tag, get the full list of distros; otherwise just use debian:sid
@@ -80,7 +83,7 @@ jobs:
       - name: Set up python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
 
       - name: Build the packages
         # see https://github.com/docker/build-push-action/issues/252
@@ -133,9 +136,7 @@ jobs:
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          # setup-python@v4 doesn't impose a default python version. Need to use 3.x
-          # here, because `python` on osx points to Python 2.7.
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
 
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==3.2.1
@@ -170,7 +171,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.11"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
 
       - run: pip install build
 

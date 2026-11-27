@@ -9,6 +9,9 @@ on:
     branches: ["develop", "release-*"]
   workflow_dispatch:
 
+env:
+  LATEST_SUPPORTED_PYTHON_VERSION: "3.14"
+
 jobs:
   validate-schema:
     name: Ensure Synapse config schema is valid
@@ -17,7 +20,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
       - name: Install check-jsonschema
         run: pip install check-jsonschema==0.33.0
 
@@ -31,7 +34,7 @@ jobs:
             --schemafile="schema/$LATEST_META_SCHEMA_VERSION/meta.schema.json" \
             schema/synapse-config.schema.yaml
       - name: Validate default config
-      # Populates the empty instance with default values and checks against the schema.
+        # Populates the empty instance with default values and checks against the schema.
         run: |-
           echo "{}" | check-jsonschema \
             --fill-defaults --schemafile=schema/synapse-config.schema.yaml -
@@ -43,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
+          python-version: ${{ env.LATEST_SUPPORTED_PYTHON_VERSION }}
       - name: Install PyYAML
         run: pip install PyYAML==6.0.2
 
@@ -53,5 +56,5 @@ jobs:
             schema/synapse-config.schema.yaml \
           > docs/usage/configuration/config_documentation.md
       - name: Error in case of any differences
-      # Errors if there are now any modified files (untracked files are ignored).
-        run: 'git diff --exit-code'
+        # Errors if there are now any modified files (untracked files are ignored).
+        run: "git diff --exit-code"

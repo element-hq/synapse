@@ -14,7 +14,6 @@
 
 """Tests REST events for /delayed_events paths."""
 
-import sqlite3
 from http import HTTPStatus
 from typing import Literal, overload
 from unittest.mock import Mock, patch
@@ -53,7 +52,6 @@ from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import FakeChannel, make_request
 from tests.unittest import HomeserverTestCase
-from tests.utils import USE_POSTGRES_FOR_TESTS
 
 _MANAGEMENT_PATH_PREFIX = "/_matrix/client/unstable/org.matrix.msc4140/delayed_events"
 
@@ -62,16 +60,6 @@ _EVENT_TYPE = "com.example.test"
 
 class DelayedEventsUnstableSupportTestCase(HomeserverTestCase):
     servlets = [versions.register_servlets]
-
-    def tearDown(self) -> None:
-        # MemoryReactor doesn't trigger the shutdown phases, and we want the
-        # Tokio thread pool to be stopped
-        # XXX: This logic should probably get moved somewhere else
-        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
-        for phase in ["before", "during", "after"]:
-            triggers = shutdown_triggers.get(phase, [])
-            for callbable, args, kwargs in triggers:
-                callbable(*args, **kwargs)
 
     def test_false_by_default(self) -> None:
         channel = self.make_request("GET", "/_matrix/client/versions")
@@ -1501,12 +1489,6 @@ class DelayedEventsTestCase(DelayedEventsTestCaseBase):
 
 class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
     """Tests scheduling delayed sticky events (MSC4354)."""
-
-    if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
-        # We need the JSON functionality in SQLite
-        # (the sticky events store refuses to start without it, so this has to be
-        # a class-level skip: the homeserver is built before the test body runs)
-        skip = f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
 
     def default_config(self) -> JsonDict:
         config = super().default_config()

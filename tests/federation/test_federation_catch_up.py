@@ -1,4 +1,3 @@
-import sqlite3
 from typing import Callable, Collection
 from unittest import mock
 from unittest.mock import Mock
@@ -24,7 +23,6 @@ from synapse.util.retryutils import NotRetryingDestination
 
 from tests.test_utils import event_injection
 from tests.unittest import FederatingHomeserverTestCase
-from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
 class _FederationCatchUpTestCaseBase(FederatingHomeserverTestCase):
@@ -609,9 +607,6 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
     """
     Tests for the catch-up of backlogged sticky events over federation.
     """
-
-    if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
-        skip = f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
 
     def default_config(self) -> JsonDict:
         config = super().default_config()

@@ -18,7 +18,7 @@
 #
 #
 from http import HTTPStatus
-from typing import Collection, ContextManager, cast
+from typing import Collection, ContextManager, Sequence, cast
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
@@ -26,11 +26,17 @@ from parameterized import parameterized, parameterized_class
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, ProfileFields
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventTypes,
+    JoinRules,
+    Membership,
+    ProfileFields,
+)
 from synapse.api.errors import Codes, ResourceLimitError
 from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
-from synapse.events import EventBase
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sync import (
     LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE,
@@ -3316,8 +3322,376 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(state, {})
 
 
+class SyncOutOfBandMembershipTestCase(tests.unittest.FederatingHomeserverTestCase):
+    """Tests the Sync Handler with memberships in rooms the server is not in."""
+
+    servlets = [
+        admin.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.sync_handler = self.hs.get_sync_handler()
+        self.inviter = "@inviter:" + self.OTHER_SERVER_NAME
+        self.room_version = RoomVersions.V10
+
+    def _receive_invite(self, room_id: str, user_id: str) -> str:
+        """Receive an invite for `user_id` from `self.inviter` over federation.
+
+        Returns:
+            The ID of the invite event.
+        """
+        invite_pdu: JsonDict = {
+            "room_id": room_id,
+            "depth": 1,
+            "auth_events": [],
+            "prev_events": [],
+            "origin_server_ts": 1,
+            "sender": self.inviter,
+            "type": EventTypes.Member,
+            "state_key": user_id,
+            "content": {"membership": Membership.INVITE},
+        }
+        self.add_hashes_and_signatures_from_other_server(invite_pdu, self.room_version)
+        invite_event_id = make_event_from_dict(invite_pdu, self.room_version).event_id
+        self.get_success(
+            self.hs.get_federation_server().on_invite_request(
+                origin=self.OTHER_SERVER_NAME,
+                expected_room_id=room_id,
+                expected_event_id=invite_event_id,
+                event_json=invite_pdu,
+                room_version_id=self.room_version.identifier,
+            )
+        )
+        return invite_event_id
+
+    def _receive_rescission(
+        self, room_id: str, user_id: str, invite_event_id: str
+    ) -> EventBase:
+        """Receive a leave over federation from `self.inviter` rescinding the invite.
+
+        Returns:
+            The rescinding leave event.
+        """
+        leave_pdu: JsonDict = {
+            "room_id": room_id,
+            "depth": 2,
+            "auth_events": [invite_event_id],
+            "prev_events": [invite_event_id],
+            "origin_server_ts": 2,
+            "sender": self.inviter,
+            "type": EventTypes.Member,
+            "state_key": user_id,
+            "content": {"membership": Membership.LEAVE},
+        }
+        self.add_hashes_and_signatures_from_other_server(leave_pdu, self.room_version)
+        leave_event = make_event_from_dict(leave_pdu, self.room_version)
+        self.get_success(
+            self.hs.get_federation_event_handler().on_receive_pdu(
+                self.OTHER_SERVER_NAME, leave_event
+            )
+        )
+        return leave_event
+
+    def _sync(
+        self,
+        user_id: str,
+        filter_dict: JsonDict,
+        since_token: StreamToken | None = None,
+        use_state_after: bool = False,
+    ) -> SyncResult:
+        return self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                create_requester(user_id),
+                generate_sync_config(
+                    user_id,
+                    filter_collection=FilterCollection(self.hs, filter_dict),
+                    use_state_after=use_state_after,
+                ),
+                request_key=generate_request_key(),
+                since_token=since_token,
+            )
+        )
+
+    @parameterized.expand(
+        [
+            ("initial_sync", True, {"include_leave": True}, False),
+            ("initial_sync_without_include_leave", True, {}, False),
+            (
+                "initial_sync_lazy_load_members",
+                True,
+                {"include_leave": True, "state": {"lazy_load_members": True}},
+                False,
+            ),
+            ("initial_sync_state_after", True, {"include_leave": True}, True),
+            ("incremental_sync", False, {"include_leave": True}, False),
+            ("incremental_sync_without_include_leave", False, {}, False),
+        ]
+    )
+    def test_rescinded_invite(
+        self,
+        _: str,
+        initial_sync: bool,
+        room_filter: JsonDict,
+        use_state_after: bool,
+    ) -> None:
+        """A remote invite rescinded by the inviter is returned as an archived room
+        with the rescinding leave in its timeline, with or without `include_leave`,
+        like any other room the user was kicked from."""
+        user = self.register_user("user", "password")
+        room_id = "!room:" + self.OTHER_SERVER_NAME
+
+        invite_event_id = self._receive_invite(room_id, user)
+        since_token = self._sync(user, {}).next_batch
+        leave_event = self._receive_rescission(room_id, user, invite_event_id)
+
+        sync_result = self._sync(
+            user,
+            {"room": room_filter},
+            since_token=None if initial_sync else since_token,
+            use_state_after=use_state_after,
+        )
+
+        self.assertEqual([r.room_id for r in sync_result.archived], [room_id])
+        self.assertEqual(
+            [e.event.event_id for e in sync_result.archived[0].timeline.events],
+            [leave_event.event_id],
+        )
+
+    def test_rejected_invite_initial_sync(self) -> None:
+        """A remote invite the user rejected is returned as an archived room with
+        the rejection in its timeline on an initial sync with `include_leave`."""
+        user = self.register_user("user", "password")
+        room_id = "!room:" + self.OTHER_SERVER_NAME
+
+        invite_event_id = self._receive_invite(room_id, user)
+        # Make rejecting the invite through the inviting server fail, so the server
+        # rejects it locally as an out of band leave.
+        with patch.object(
+            self.hs.get_federation_handler(),
+            "do_remotely_reject_invite",
+            side_effect=Exception(),
+        ):
+            reject_event_id, _ = self.get_success(
+                self.hs.get_room_member_handler().remote_reject_invite(
+                    invite_event_id,
+                    txn_id=None,
+                    requester=create_requester(user),
+                    content={},
+                )
+            )
+
+        sync_result = self._sync(user, {"room": {"include_leave": True}})
+
+        self.assertEqual([r.room_id for r in sync_result.archived], [room_id])
+        self.assertEqual(
+            [e.event.event_id for e in sync_result.archived[0].timeline.events],
+            [reject_event_id],
+        )
+
+    def test_de_outliered_rescission_initial_sync(self) -> None:
+        """A rescinding leave that is later persisted with state, so it is no
+        longer an outlier, is returned once in an initial sync's timeline."""
+        user = self.register_user("user", "password")
+        room_id = "!room:" + self.OTHER_SERVER_NAME
+
+        invite_event_id = self._receive_invite(room_id, user)
+        leave_event = self._receive_rescission(room_id, user, invite_event_id)
+
+        state_group = self.get_success(
+            self.hs.get_datastores().state.store_state_group(
+                leave_event.event_id,
+                room_id,
+                prev_group=None,
+                delta_ids=None,
+                current_state_ids={(EventTypes.Member, user): leave_event.event_id},
+            )
+        )
+        de_outliered = make_event_from_dict(
+            leave_event.get_pdu_json(), self.room_version
+        )
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.get_success(
+            persistence.persist_event(
+                de_outliered,
+                EventContext.with_state(
+                    self.hs.get_storage_controllers(),
+                    state_group=state_group,
+                    state_group_before_event=state_group,
+                    state_delta_due_to_event={},
+                    partial_state=False,
+                    state_group_deltas={},
+                ),
+            )
+        )
+        stored = self.get_success(
+            self.hs.get_datastores().main.get_event(leave_event.event_id)
+        )
+        self.assertFalse(stored.internal_metadata.is_outlier())
+        self.assertTrue(stored.internal_metadata.is_out_of_band_membership())
+
+        sync_result = self._sync(user, {"room": {"include_leave": True}})
+
+        self.assertEqual([r.room_id for r in sync_result.archived], [room_id])
+        self.assertEqual(
+            [e.event.event_id for e in sync_result.archived[0].timeline.events],
+            [leave_event.event_id],
+        )
+
+    def test_initial_sync_only_passes_out_of_band_leaves(self) -> None:
+        """`_load_filtered_recents` relies on an initial sync passing no
+        `potential_recents` other than an out of band membership. Check every kind of
+        room membership an initial sync handles."""
+        user = self.register_user("user", "password")
+        tok = self.login("user", "password")
+        other = self.register_user("other", "password")
+        other_tok = self.login("other", "password")
+
+        # Joined.
+        self.helper.create_room_as(user, tok=tok)
+
+        # Left.
+        left_room = self.helper.create_room_as(user, tok=tok)
+        self.helper.leave(left_room, user, tok=tok)
+
+        # Kicked.
+        kicked_room = self.helper.create_room_as(other, tok=other_tok)
+        self.helper.join(kicked_room, user, tok=tok)
+        self.helper.change_membership(
+            kicked_room,
+            src=other,
+            targ=user,
+            membership=Membership.LEAVE,
+            tok=other_tok,
+        )
+
+        # Banned.
+        banned_room = self.helper.create_room_as(other, tok=other_tok)
+        self.helper.join(banned_room, user, tok=tok)
+        self.helper.ban(banned_room, src=other, targ=user, tok=other_tok)
+
+        # Invited. Not a room entry, so never reaches `_load_filtered_recents`.
+        # Included so that this test fails if it becomes one that passes events.
+        invite_room = self.helper.create_room_as(other, tok=other_tok)
+        self.helper.invite(invite_room, src=other, targ=user, tok=other_tok)
+
+        # Knocked. Not a room entry, so never reaches `_load_filtered_recents`.
+        # Included so that this test fails if it becomes one that passes events.
+        knock_room = self.helper.create_room_as(
+            other, room_version=self.room_version.identifier, tok=other_tok
+        )
+        self.helper.send_state(
+            knock_room,
+            EventTypes.JoinRules,
+            {"join_rule": JoinRules.KNOCK},
+            tok=other_tok,
+        )
+        channel = self.make_request(
+            "POST", f"/_matrix/client/v3/knock/{knock_room}", {}, tok
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # Out of band leave.
+        remote_room_id = "!room:" + self.OTHER_SERVER_NAME
+        invite_event_id = self._receive_invite(remote_room_id, user)
+        self._receive_rescission(remote_room_id, user, invite_event_id)
+
+        with patch.object(
+            self.sync_handler,
+            "_load_filtered_recents",
+            AsyncMock(wraps=self.sync_handler._load_filtered_recents),
+        ) as load_filtered_recents:
+            self._sync(user, {"room": {"include_leave": True}})
+
+        passed_recents = [
+            call.kwargs["potential_recents"]
+            for call in load_filtered_recents.call_args_list
+        ]
+        for potential_recents in passed_recents:
+            if potential_recents is not None:
+                # The only events an initial sync may pass are a single out of band
+                # leave, which `_load_filtered_recents` sends after the history.
+                self.assertEqual(len(potential_recents), 1)
+                self.assertTrue(
+                    potential_recents[0].internal_metadata.is_out_of_band_membership()
+                )
+        # The out of band leave was passed, so the check above is not vacuous.
+        self.assertEqual(
+            len([r for r in passed_recents if r is not None]), 1, passed_recents
+        )
+
+    @parameterized.expand(
+        [
+            ("limit_1", 1, False),
+            ("limit_3", 3, False),
+            ("limit_3_with_gap", 3, True),
+        ]
+    )
+    def test_rescinded_invite_after_leaving_initial_sync(
+        self, _: str, timeline_limit: int, with_gap: bool
+    ) -> None:
+        """When the user was previously in the room, an initial sync returns the
+        history they can see followed by the rescinding leave, and the state at
+        the start of that timeline. This holds when the room's history has a gap."""
+        user = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        room_id = self.helper.create_room_as(
+            user, room_version=self.room_version.identifier, tok=tok
+        )
+        name_event_id = self.helper.send_state(
+            room_id, EventTypes.Name, {"name": "the room"}, tok=tok
+        )["event_id"]
+        message_event_id = self.helper.send(room_id, "message", tok=tok)["event_id"]
+        if with_gap:
+            store = self.hs.get_datastores().main
+            message_position = self.get_success(
+                store.get_position_for_event(message_event_id)
+            )
+            self.get_success(
+                store.db_pool.simple_insert(
+                    "timeline_gaps",
+                    {
+                        "room_id": room_id,
+                        "instance_name": message_position.instance_name,
+                        "stream_ordering": message_position.stream,
+                    },
+                )
+            )
+        own_leave_event_id = self.helper.leave(room_id, user, tok=tok)["event_id"]
+
+        invite_event_id = self._receive_invite(room_id, user)
+        leave_event = self._receive_rescission(room_id, user, invite_event_id)
+
+        sync_result = self._sync(
+            user,
+            {"room": {"include_leave": True, "timeline": {"limit": timeline_limit}}},
+        )
+
+        self.assertEqual([r.room_id for r in sync_result.archived], [room_id])
+        room_result = sync_result.archived[0]
+        # Sync keeps the most recent `timeline_limit` events.
+        expected_timeline = [message_event_id, own_leave_event_id, leave_event.event_id]
+        self.assertEqual(
+            [e.event.event_id for e in room_result.timeline.events],
+            expected_timeline[-timeline_limit:],
+        )
+        # The room's earlier history, such as its creation, doesn't fit.
+        self.assertTrue(room_result.timeline.limited)
+        self.assertEqual(
+            room_result.state[(EventTypes.Name, "")].event_id, name_event_id
+        )
+
+
 class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
     """Direct tests of the per-device cache of lazy-loaded members sent."""
+
+    # A position after every other position in these tests.
+    _END = RoomStreamToken(stream=1000)
 
     @staticmethod
     def _token(stream: int) -> StreamToken:
@@ -3327,63 +3701,217 @@ class LazyLoadedMembersCacheTestCase(tests.unittest.TestCase):
             StreamKeyType.ROOM, RoomStreamToken(stream=stream)
         )
 
+    def _respond(
+        self,
+        cache: LazyLoadedMembersCache,
+        since: int | None,
+        ends_at: int,
+        sent: Sequence[str] = (),
+    ) -> None:
+        """Build a response from `since` that ends at `ends_at` and sends the
+        membership `$<name>` of each `@<name>:test` in `sent`."""
+        since_token = None if since is None else self._token(since)
+        with cache.building_response(since_token) as handle:
+            handle.next_batch = RoomStreamToken(stream=ends_at)
+            for name in sent:
+                handle.mark_sent(f"@{name}:test", f"${name}")
+
+    def _cached(self, cache: LazyLoadedMembersCache, name: str) -> bool:
+        """Whether the cache holds the membership `$<name>` of `@<name>:test`,
+        at any position."""
+        return cache.was_sent(f"@{name}:test", f"${name}", self._END)
+
     def test_forgets_only_entries_after_since(self) -> None:
         """A request from `since` forgets the entries recorded after it and
         keeps the rest."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@a:test", "$a", self._token(5))
-        cache.mark_sent("@b:test", "$b", self._token(7))
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+        cache.record("@b:test", "$b", RoomStreamToken(stream=7))
 
         # The client synced past both responses.
-        cache.start_request(self._token(7))
-        self.assertTrue(cache.was_sent("@a:test", "$a"))
-        self.assertTrue(cache.was_sent("@b:test", "$b"))
+        self._respond(cache, since=7, ends_at=7)
+        self.assertTrue(self._cached(cache, "a"))
+        self.assertTrue(self._cached(cache, "b"))
 
         # The client lost the response that ended at 7.
-        cache.start_request(self._token(6))
-        self.assertTrue(cache.was_sent("@a:test", "$a"))
-        self.assertFalse(cache.was_sent("@b:test", "$b"))
+        self._respond(cache, since=6, ends_at=7)
+        self.assertTrue(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
 
         # A later request from an even older token forgets the rest.
-        cache.start_request(self._token(4))
-        self.assertFalse(cache.was_sent("@a:test", "$a"))
+        self._respond(cache, since=4, ends_at=7)
+        self.assertFalse(self._cached(cache, "a"))
+
+    def test_only_entries_at_or_before_since_are_trusted(self) -> None:
+        """A response does not trust an entry recorded after its `since`,
+        including one recorded while it is being built."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@old:test", "$old", RoomStreamToken(stream=4))
+
+        with cache.building_response(self._token(4)) as handle:
+            # Another response for the device is built in the meantime.
+            self._respond(cache, since=4, ends_at=5, sent=["a"])
+            self.assertTrue(self._cached(cache, "a"))
+
+            self.assertTrue(handle.was_sent("@old:test", "$old"))
+            self.assertFalse(handle.was_sent("@a:test", "$a"))
+            handle.next_batch = RoomStreamToken(stream=6)
+            handle.mark_sent("@b:test", "$b")
+
+        # Once built, it deleted the other response's entry, and recorded its
+        # own as it ended later.
+        self.assertFalse(self._cached(cache, "a"))
+        self.assertTrue(self._cached(cache, "b"))
+        self.assertTrue(self._cached(cache, "old"))
 
     def test_initial_sync_forgets_everything(self) -> None:
-        """An initial sync has no `since`, and the client starts from nothing."""
+        """An initial sync has no `since`, so it trusts nothing and deletes
+        everything. It still records only if it ends after the newest
+        position. A client that processed the response ending there has not
+        seen it."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@a:test", "$a", self._token(5))
-        cache.start_request(None)
-        self.assertFalse(cache.was_sent("@a:test", "$a"))
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+        with cache.building_response(None) as handle:
+            self.assertFalse(handle.was_sent("@a:test", "$a"))
+            handle.next_batch = RoomStreamToken(stream=5)
+            handle.mark_sent("@b:test", "$b")
+        self.assertFalse(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
+
+        self._respond(cache, since=None, ends_at=6, sent=["c"])
+        self.assertTrue(self._cached(cache, "c"))
 
     def test_different_event_is_not_sent(self) -> None:
         """An entry only covers the membership event it was recorded with, so
         a changed membership counts as not sent."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@a:test", "$a1", self._token(5))
-        self.assertFalse(cache.was_sent("@a:test", "$a2"))
+        cache.record("@a:test", "$a1", RoomStreamToken(stream=5))
+        self.assertFalse(cache.was_sent("@a:test", "$a2", self._END))
 
-    def test_out_of_order_marks_are_still_forgotten(self) -> None:
-        """A response that started earlier can record its entries after a
-        later one. Its entries must still be forgotten by a request from
-        before either response."""
+    def test_out_of_order_records_are_still_forgotten(self) -> None:
+        """Entries need not be recorded in position order. Those after a
+        request's `since` must still be forgotten."""
         cache = LazyLoadedMembersCache()
-        cache.mark_sent("@b:test", "$b", self._token(7))
-        cache.mark_sent("@a:test", "$a", self._token(5))
+        cache.record("@b:test", "$b", RoomStreamToken(stream=7))
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
 
-        cache.start_request(self._token(6))
-        self.assertTrue(cache.was_sent("@a:test", "$a"))
-        self.assertFalse(cache.was_sent("@b:test", "$b"))
+        self._respond(cache, since=6, ends_at=7)
+        self.assertTrue(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
 
     def test_evicts_least_recently_used(self) -> None:
         """The cache holds `LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE` entries and
         evicts the least recently used one. A hit counts as a use."""
         cache = LazyLoadedMembersCache()
         for i in range(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE):
-            cache.mark_sent(f"@u{i}:test", f"$u{i}", self._token(1))
+            cache.record(f"@u{i}:test", f"$u{i}", RoomStreamToken(stream=1))
         # Touch the oldest entry so that it is no longer the eviction candidate.
-        self.assertTrue(cache.was_sent("@u0:test", "$u0"))
+        self.assertTrue(self._cached(cache, "u0"))
 
-        cache.mark_sent("@new:test", "$new", self._token(1))
-        self.assertTrue(cache.was_sent("@u0:test", "$u0"))
-        self.assertFalse(cache.was_sent("@u1:test", "$u1"))
-        self.assertTrue(cache.was_sent("@new:test", "$new"))
+        cache.record("@new:test", "$new", RoomStreamToken(stream=1))
+        self.assertTrue(self._cached(cache, "u0"))
+        self.assertFalse(self._cached(cache, "u1"))
+        self.assertTrue(self._cached(cache, "new"))
+
+    def test_response_ending_at_newest_position_records_nothing(self) -> None:
+        """A response from before the newest entry forgets the newer entries.
+        If it ends at the same position as the response that carried them,
+        it records nothing. The client that processed that response has not
+        seen this one. A response that ends later records."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+
+        self._respond(cache, since=4, ends_at=5, sent=["b"])
+        self.assertFalse(self._cached(cache, "a"))
+        self.assertFalse(self._cached(cache, "b"))
+
+        self._respond(cache, since=4, ends_at=6, sent=["c"])
+        self.assertTrue(self._cached(cache, "c"))
+
+    def test_forgetting_keeps_the_newest_position(self) -> None:
+        """Forgetting entries must not forget the position they were recorded
+        at. A later response from the same `since` finds nothing left to
+        forget, and must still record nothing if it ends at that position."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@a:test", "$a", RoomStreamToken(stream=5))
+
+        self._respond(cache, since=4, ends_at=5)
+        self.assertFalse(self._cached(cache, "a"))
+
+        self._respond(cache, since=4, ends_at=5, sent=["b"])
+        self.assertFalse(self._cached(cache, "b"))
+
+    def test_newest_position_survives_eviction(self) -> None:
+        """The newest position is kept even when the entries recorded at it
+        have been evicted, as a response can send more members than the
+        cache holds."""
+        cache = LazyLoadedMembersCache()
+        cache.record("@old:test", "$old", RoomStreamToken(stream=5))
+        for i in range(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE):
+            cache.record(f"@u{i}:test", f"$u{i}", RoomStreamToken(stream=5))
+        self.assertFalse(self._cached(cache, "old"))
+
+        self._respond(cache, since=4, ends_at=5, sent=["b"])
+        self.assertFalse(self._cached(cache, "b"))
+
+    def test_response_sending_no_members_raises_newest(self) -> None:
+        """A response that sent no members still raises the newest position.
+        Otherwise a response built at the same time and ending at the same
+        position would record, and the client that processed the first would
+        trust what only the second sent."""
+        cache = LazyLoadedMembersCache()
+        with cache.building_response(self._token(3)) as handle:
+            self._respond(cache, since=3, ends_at=5)
+
+            handle.next_batch = RoomStreamToken(stream=5)
+            handle.mark_sent("@a:test", "$a")
+        self.assertFalse(self._cached(cache, "a"))
+
+    def test_response_ending_where_a_client_is_records_nothing(self) -> None:
+        """A request from `since` says a client is at `since`, even if no
+        response built on this cache ended there because the cache is new or
+        the response was built elsewhere. A response built at the same time
+        that ends at `since` must not record, as that client has not seen
+        it."""
+        cache = LazyLoadedMembersCache()
+        with cache.building_response(self._token(100)) as handle:
+            self._respond(cache, since=50, ends_at=100, sent=["a"])
+            self.assertFalse(self._cached(cache, "a"))
+            self.assertFalse(handle.was_sent("@a:test", "$a"))
+            handle.next_batch = RoomStreamToken(stream=101)
+            handle.mark_sent("@b:test", "$b")
+        self.assertTrue(self._cached(cache, "b"))
+
+    def test_dropped_response_ending_later_is_forgotten(self) -> None:
+        """Two responses are built at the same time. The client processes the
+        one that ends first, and the other records as it ends later. The
+        client's next request does not trust what the other sent, and
+        deletes it."""
+        cache = LazyLoadedMembersCache()
+        with cache.building_response(self._token(3)) as dropped:
+            self._respond(cache, since=3, ends_at=5, sent=["a"])
+            dropped.next_batch = RoomStreamToken(stream=6)
+            dropped.mark_sent("@b:test", "$b")
+        self.assertTrue(self._cached(cache, "b"))
+
+        with cache.building_response(self._token(5)) as handle:
+            self.assertFalse(handle.was_sent("@b:test", "$b"))
+            handle.next_batch = RoomStreamToken(stream=7)
+        self.assertFalse(self._cached(cache, "b"))
+
+    def test_failed_response_records_nothing(self) -> None:
+        """A response that was not built never reached the client, so it
+        neither records nor raises the newest position."""
+        cache = LazyLoadedMembersCache()
+        with self.assertRaises(RuntimeError):
+            with cache.building_response(None) as handle:
+                handle.next_batch = RoomStreamToken(stream=5)
+                handle.mark_sent("@a:test", "$a")
+                # Conditional only so that mypy does not see the rest of the
+                # block as unreachable.
+                if handle.since is None:
+                    raise RuntimeError("cancelled")
+        self.assertFalse(self._cached(cache, "a"))
+
+        self._respond(cache, since=None, ends_at=5, sent=["b"])
+        self.assertTrue(self._cached(cache, "b"))

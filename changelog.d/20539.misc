@@ -1,0 +1,1 @@
+Fix failing PyO3 Cargo CI builds when Python interpreter changes (e.g. a new GitHub runner image with a new Python version).

@@ -23,7 +23,8 @@ import logging
 import os
 import re
 import threading
-from typing import Any, Callable, Mapping
+import weakref
+from typing import Any, Callable, Mapping, Protocol
 
 import attr
 
@@ -38,8 +39,20 @@ logger = logging.getLogger(__name__)
 # The prefix for all cache factor-related environment variables
 _CACHE_PREFIX = "SYNAPSE_CACHE_FACTOR"
 
-# Map from canonicalised cache name to cache.
-_CACHES: dict[str, Callable[[float], None]] = {}
+
+class ResizableCache(Protocol):
+    """A cache whose size follows the configured cache factors."""
+
+    def set_cache_factor(self, factor: float) -> object:
+        """Resize the cache to its original size multiplied by `factor`."""
+        ...
+
+
+# Map from canonicalised cache name to every live cache registered under that
+# name. There can be several if there are multiple homeservers in a process. The
+# references are weak, so registering a cache doesn't keep it (or the homeserver
+# it belongs to) alive.
+_CACHES: dict[str, "weakref.WeakSet[ResizableCache]"] = {}
 
 # a lock on the contents of _CACHES
 _CACHES_LOCK = threading.Lock()
@@ -54,7 +67,9 @@ class CacheProperties:
     default_factor_size: float = float(
         os.environ.get(_CACHE_PREFIX, _DEFAULT_FACTOR_SIZE)
     )
-    resize_all_caches_func: Callable[[], None] | None = None
+    # Returns the factor for a canonicalised cache name under the current config.
+    # Unset until the config has been read.
+    get_cache_factor_func: Callable[[str], float] | None = None
 
 
 properties = CacheProperties()
@@ -74,15 +89,12 @@ def _canonicalise_cache_name(cache_name: str) -> str:
     return cache_name.lower()
 
 
-def add_resizable_cache(
-    cache_name: str, cache_resize_callback: Callable[[float], None]
-) -> None:
+def add_resizable_cache(cache_name: str, cache: ResizableCache) -> None:
     """Register a cache whose size can dynamically change
 
     Args:
-        cache_name: A reference to the cache
-        cache_resize_callback: A callback function that will run whenever
-            the cache needs to be resized
+        cache_name: The name of the cache, which picks its cache factor.
+        cache: The cache. Only a weak reference to it is kept.
     """
     # Some caches have '*' in them which we strip out.
     cache_name = _canonicalise_cache_name(cache_name)
@@ -90,14 +102,13 @@ def add_resizable_cache(
     # sometimes caches are initialised from background threads, so we need to make
     # sure we don't conflict with another thread running a resize operation
     with _CACHES_LOCK:
-        _CACHES[cache_name] = cache_resize_callback
+        _CACHES.setdefault(cache_name, weakref.WeakSet()).add(cache)
 
-    # Ensure all loaded caches are sized appropriately
-    #
-    # This method should only run once the config has been read,
-    # as it uses values read from it
-    if properties.resize_all_caches_func:
-        properties.resize_all_caches_func()
+    # Size the new cache for the current config, if it has been read yet. The
+    # other caches are already sized correctly.
+    get_cache_factor = properties.get_cache_factor_func
+    if get_cache_factor:
+        cache.set_cache_factor(get_cache_factor(cache_name))
 
 
 class CacheConfig(Config):
@@ -117,7 +128,7 @@ class CacheConfig(Config):
         properties.default_factor_size = float(
             os.environ.get(_CACHE_PREFIX, _DEFAULT_FACTOR_SIZE)
         )
-        properties.resize_all_caches_func = None
+        properties.get_cache_factor_func = None
         with _CACHES_LOCK:
             _CACHES.clear()
 
@@ -227,10 +238,15 @@ class CacheConfig(Config):
 
         # Store this function so that it can be called from other classes without
         # needing an instance of CacheConfig
-        properties.resize_all_caches_func = self.resize_all_caches
+        properties.get_cache_factor_func = self._get_cache_factor
 
         # block other threads from modifying _CACHES while we iterate it.
         with _CACHES_LOCK:
-            for cache_name, callback in _CACHES.items():
-                new_factor = self.cache_factors.get(cache_name, self.global_factor)
-                callback(new_factor)
+            for cache_name, caches in _CACHES.items():
+                new_factor = self._get_cache_factor(cache_name)
+                for cache in caches:
+                    cache.set_cache_factor(new_factor)
+
+    def _get_cache_factor(self, cache_name: str) -> float:
+        """Returns the factor for the given canonicalised cache name."""
+        return self.cache_factors.get(cache_name, self.global_factor)

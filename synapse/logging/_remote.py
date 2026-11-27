@@ -198,9 +198,11 @@ class RemoteHandler(logging.Handler):
             self._producer.resumeProducing()
             self._connection_waiter = None
 
+        # Set the waiter before adding callbacks: if we are already connected
+        # they run synchronously and clear it again.
         deferred: Deferred = self._service.whenConnected(failAfterFailures=1)
-        deferred.addCallbacks(writer, fail)
         self._connection_waiter = deferred
+        deferred.addCallbacks(writer, fail)
 
     def _handle_pressure(self) -> None:
         """

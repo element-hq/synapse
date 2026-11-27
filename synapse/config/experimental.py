@@ -380,3 +380,7 @@ class ExperimentalConfig(Config):
 
         # MSC4512: Delegating parts of the C-S and S-S API to application services
         self.msc4512_enabled: bool = experimental.get("msc4512_enabled", False)
+
+        # MSC4536: Additional endpoints for fetching user profiles
+        # Tracked in: https://github.com/element-hq/synapse/issues/20471
+        self.msc4536_enabled: bool = experimental.get("msc4536_enabled", False)
