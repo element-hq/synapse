@@ -929,6 +929,19 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         )
 
     async def get_expired_url_cache(self, now_ts: int) -> list[tuple[str, str | None]]:
+        """Get URL preview cache entries that have expired.
+
+        Args:
+            now_ts: The current time in milliseconds. Entries whose `expires_ts`
+                is before this are returned.
+
+        Returns:
+            Up to 500 `(media_id, media_type)` tuples, oldest expiry first.
+            `media_type` comes from `local_media_repository` and is `None` if
+            there is no matching row there. Callers use it to tell
+            direct-image previews (whose file is kept until the image cache
+            expiry) apart from other cached responses.
+        """
         sql = (
             "SELECT c.media_id, m.media_type FROM local_media_repository_url_cache AS c"
             " LEFT JOIN local_media_repository AS m ON m.media_id = c.media_id"
