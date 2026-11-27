@@ -539,7 +539,13 @@ class SigningKeyUploadServlet(RestServlet):
         # setup, and that is allowed without UIA, per MSC3967.
         # If yes, then we need to authenticate the change.
         # MSC4190 can skip UIA for replacing cross-signing keys as well.
-        if is_cross_signing_setup and not requester.app_service_id:
+        # So can users who have no way to verify their device: authenticating the change
+        # would not protect anything.
+        if (
+            is_cross_signing_setup
+            and not requester.app_service_id
+            and await self._needs_reauthentication(user_id)
+        ):
             # With auth delegation, UIA is not possible. Instead, the auth service has to
             # explicitly mark the master key as replaceable.
             if self.hs.config.mas.enabled:
@@ -586,6 +592,22 @@ class SigningKeyUploadServlet(RestServlet):
 
         result = await self.e2e_keys_handler.upload_signing_keys_for_user(user_id, body)
         return 200, result
+
+    async def _needs_reauthentication(self, user_id: str) -> bool:
+        """Whether replacing the user's cross-signing keys needs re-authentication.
+
+        It doesn't if they have no way to verify their device with their current
+        identity anyway.
+        """
+        if await self.e2e_keys_handler.has_verification_methods(user_id):
+            return True
+
+        logger.info(
+            "Allowing %s to reset cross-signing without re-authentication: "
+            "no verification methods",
+            user_id,
+        )
+        return False
 
 
 class SignaturesUploadServlet(RestServlet):

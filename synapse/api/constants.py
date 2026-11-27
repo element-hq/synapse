@@ -360,6 +360,9 @@ class AccountDataTypes:
     )
     # MSC4380: Invite blocking
     INVITE_PERMISSION_CONFIG: Final = "m.invite_permission_config"
+    # Secret storage: the default key, and the master cross-signing key stored with it
+    SECRET_STORAGE_DEFAULT_KEY: Final = "m.secret_storage.default_key"
+    CROSS_SIGNING_MASTER: Final = "m.cross_signing.master"
     # Synapse-specific behaviour. See "Client-Server API Extensions" documentation
     # in Admin API for more information.
     SYNAPSE_ADMIN_CLIENT_CONFIG: Final = "io.element.synapse.admin_client_config"

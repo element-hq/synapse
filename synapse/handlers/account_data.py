@@ -21,7 +21,7 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable, Mapping
 
 from synapse.api.constants import AccountDataTypes
 from synapse.replication.http.account_data import (
@@ -195,6 +195,7 @@ class AccountDataHandler:
         """
 
         if self._instance_name in self._account_data_writers:
+            await self._remember_recovery_before_change(user_id, account_data_type)
             max_stream_id = await self._store.add_account_data_for_user(
                 user_id, account_data_type, content
             )
@@ -229,6 +230,7 @@ class AccountDataHandler:
         """
 
         if self._instance_name in self._account_data_writers:
+            await self._remember_recovery_before_change(user_id, account_data_type)
             max_stream_id = await self._store.remove_account_data_for_user(
                 user_id, account_data_type
             )
@@ -249,6 +251,45 @@ class AccountDataHandler:
                 account_data_type=account_data_type,
             )
             return response["max_stream_id"]
+
+    async def has_master_key_in_secret_storage(self, user_id: str) -> bool:
+        """Checks if the user's master cross-signing key is in secret storage (recovery).
+
+        Args:
+            user_id: The user to check
+        """
+        # Clients "delete" these by replacing them with empty content, so only a
+        # master key encrypted with the current default key counts.
+        default_key = await self._store.get_global_account_data_by_type_for_user(
+            user_id, AccountDataTypes.SECRET_STORAGE_DEFAULT_KEY
+        )
+        if default_key is None:
+            return False
+        default_key_id = default_key.get("key")
+        if not isinstance(default_key_id, str) or not default_key_id:
+            return False
+
+        master_key_secret = await self._store.get_global_account_data_by_type_for_user(
+            user_id, AccountDataTypes.CROSS_SIGNING_MASTER
+        )
+        if master_key_secret is None:
+            return False
+        encrypted = master_key_secret.get("encrypted")
+        return isinstance(encrypted, Mapping) and default_key_id in encrypted
+
+    async def _remember_recovery_before_change(
+        self, user_id: str, account_data_type: str
+    ) -> None:
+        # Clients wipe secret storage before resetting their identity, so record
+        # whether the identity was in it while we still can.
+        if account_data_type not in (
+            AccountDataTypes.SECRET_STORAGE_DEFAULT_KEY,
+            AccountDataTypes.CROSS_SIGNING_MASTER,
+        ):
+            return
+
+        if await self.has_master_key_in_secret_storage(user_id):
+            await self._store.mark_master_cross_signing_key_as_in_recovery(user_id)
 
     async def add_tag_to_room(
         self, user_id: str, room_id: str, tag: str, content: JsonMapping

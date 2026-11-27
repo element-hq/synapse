@@ -112,6 +112,7 @@ BOOLEAN_COLUMNS = {
     "device_lists_changes_in_room": ["converted_to_destinations"],
     "device_lists_outbound_pokes": ["sent"],
     "devices": ["hidden"],
+    "e2e_cross_signing_keys": ["was_in_recovery"],
     "e2e_fallback_keys_json": ["used"],
     "e2e_room_keys": ["is_verified"],
     "event_edges": ["is_state"],
