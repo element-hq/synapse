@@ -18,6 +18,7 @@
 
 pub mod ip_policy;
 pub mod python;
+pub mod server_name;
 pub mod signing;
 
 pub use python::register_module;
