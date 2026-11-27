@@ -1,0 +1,1 @@
+Changed room alias resolution to Only return servers which can authorise joins if the room has restricted join rules. Contributed by @tulir @ Beeper.
