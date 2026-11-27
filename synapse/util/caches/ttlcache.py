@@ -68,7 +68,7 @@ class TTLCache(Generic[KT, VT]):
             cache_name=cache_name,
             cache=self,
             server_name=server_name,
-            resizable=False,
+            resizable_cache=None,
         )
 
     def set(self, key: KT, value: VT, ttl: float) -> None:

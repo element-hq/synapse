@@ -21,8 +21,11 @@ import io
 from typing import Any, Generator
 from unittest.mock import ANY, Mock, create_autospec
 
+from canonicaljson import encode_canonical_json
 from netaddr import IPSet
 from parameterized import parameterized
+from signedjson.key import get_verify_key
+from signedjson.sign import verify_signed_json
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred, TimeoutError
@@ -30,13 +33,18 @@ from twisted.internet.error import ConnectingCancelledError, DNSLookupError
 from twisted.internet.testing import MemoryReactor, StringTransport
 from twisted.python.failure import Failure
 from twisted.web.client import Agent, ResponseNeverReceived
-from twisted.web.http import HTTPChannel
+from twisted.web.http import HTTPChannel, Request
 from twisted.web.http_headers import Headers
 
-from synapse.api.errors import HttpResponseException, RequestSendFailed
+from synapse.api.errors import (
+    FederationDeniedError,
+    HttpResponseException,
+    RequestSendFailed,
+)
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config._base import ConfigError
 from synapse.config.ratelimiting import RatelimitSettings
+from synapse.federation.transport.server._base import _parse_auth_header
 from synapse.http.matrixfederationclient import (
     ByteParser,
     MatrixFederationHttpClient,
@@ -49,6 +57,7 @@ from synapse.logging.context import (
     current_context,
 )
 from synapse.server import HomeServer
+from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -639,6 +648,94 @@ class FederationClientTests(HomeserverTestCase):
         request = server.requests[0]
         content = request.content.read()
         self.assertEqual(content, b'{"a":"b"}')
+
+    def _serve_one_request(self) -> tuple[Request, bytes]:
+        """Accept the client's one connection and return the request it sent,
+        with its body."""
+        self.pump()
+        clients = self.reactor.tcpClients
+        self.assertEqual(len(clients), 1)
+        client = clients[0][2].buildProtocol(None)
+        assert client is not None
+        server = HTTPChannel()
+        client.makeConnection(FakeTransport(server, self.reactor))
+        server.makeConnection(FakeTransport(client, self.reactor))
+        self.pump(0.1)
+        self.assertEqual(len(server.requests), 1)
+        request = server.requests[0]
+        assert request.content is not None
+        return request, request.content.read()
+
+    def _assert_signed(self, request: Request, content: JsonDict | None) -> None:
+        """The request's `Authorization` header signs `content` and the request
+        line, per https://spec.matrix.org/latest/server-server-api/#request-authentication."""
+        headers = request.requestHeaders.getRawHeaders(b"Authorization")
+        assert headers is not None
+        (header,) = headers
+        origin, key, sig, destination = _parse_auth_header(header)
+        signed: JsonDict = {
+            "method": request.method.decode("ascii"),
+            "uri": request.uri.decode("ascii"),
+            "origin": origin,
+            "destination": destination,
+            "signatures": {origin: {key: sig}},
+        }
+        if content is not None:
+            signed["content"] = content
+        verify_signed_json(
+            signed, self.hs.hostname, get_verify_key(self.hs.signing_key)
+        )
+
+    def test_client_signs_the_body_it_sends(self) -> None:
+        data = {"a": "\u00e9\U0001f600", "n": [1, {"b": None}]}
+        defer.ensureDeferred(
+            self.cl.put_json("testserv:8008", "/foo/bar", data=data, timeout=10000)
+        )
+        request, body = self._serve_one_request()
+        self.assertEqual(body, encode_canonical_json(data))
+        self._assert_signed(request, data)
+
+    def test_client_sends_and_signs_no_empty_body(self) -> None:
+        """An empty JSON body is neither sent nor signed. This deviates from
+        https://spec.matrix.org/latest/server-server-api/#api-standards, which
+        asks for a (potentially empty) JSON object on POST and PUT, and is kept
+        until it is fixed on its own."""
+        defer.ensureDeferred(
+            self.cl.put_json("testserv:8008", "/foo/bar", data={}, timeout=10000)
+        )
+        request, body = self._serve_one_request()
+        self.assertEqual(body, b"")
+        self._assert_signed(request, None)
+
+    @parameterized.expand(
+        [
+            ("8008\x0b",),
+            ("8008\t",),
+            (" 8008",),
+            ("+8008",),
+            ("8_008",),
+            ("-1",),
+            ("65536",),
+            ("008008",),
+        ]
+    )
+    def test_invalid_port_is_denied(self, port: str) -> None:
+        """A port that is not 1-5 ASCII digits up to 65535 is denied before
+        anything is sent and without backing off the destination."""
+        destination = f"testserv:{port}"
+        # A backoff recorded at time 0 reads back as none.
+        self.reactor.advance(1)
+        d = defer.ensureDeferred(
+            self.cl.get_json(destination, "/foo/bar", timeout=10000)
+        )
+        self.pump()
+        self.failureResultOf(d, FederationDeniedError)
+        self.assertEqual(self.reactor.tcpClients, [])
+        self.assertIsNone(
+            self.get_success(
+                self.hs.get_datastores().main.get_destination_retry_timings(destination)
+            )
+        )
 
     def test_closes_connection(self) -> None:
         """Check that the client closes unused HTTP connections"""

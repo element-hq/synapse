@@ -1,0 +1,1 @@
+Fix a long-standing bug where a user could forget a room they still had a pending invite to or knock on, if the server was not in the room.

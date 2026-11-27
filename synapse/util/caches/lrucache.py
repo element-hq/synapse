@@ -508,6 +508,7 @@ class LruCache(Generic[KT, VT]):
                 cache=self,
                 server_name=server_name,
                 collect_callback=metrics_collection_callback,
+                resizable_cache=self,
             )
         else:
             metrics = None

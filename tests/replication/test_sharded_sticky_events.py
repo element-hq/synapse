@@ -11,7 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import logging
-import sqlite3
 from contextlib import contextmanager
 from typing import Iterator
 from unittest.mock import AsyncMock
@@ -27,7 +26,6 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
-from tests.utils import USE_POSTGRES_FOR_TESTS
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +34,6 @@ class ShardedStickyEventsTestCase(BaseMultiWorkerStreamTestCase):
     """
     Tests for sharded Sticky Events.
     """
-
-    if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
-        # We need the JSON functionality in SQLite
-        skip = f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
 
     servlets = [
         synapse.rest.admin.register_servlets_for_client_rest_resource,
