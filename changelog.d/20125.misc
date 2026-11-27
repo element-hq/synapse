@@ -1,0 +1,1 @@
+Enable transaction ID-based request idempotence for the `/_synapse/replication/add_user_account_data` HTTP replication API.
