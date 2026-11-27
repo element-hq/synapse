@@ -5526,6 +5526,10 @@ properties:
       This option does not prevent users on other homeservers from enabling
       end-to-end encryption in rooms where they have permission to do so.
 
+      Known issues:
+      - If an encrypted room is _upgraded_ when this option is enabled,
+        the room upgrade will fail in a way that leaves a half-created successor room.
+
   forget_rooms_on_leave:
     type: boolean
     description: >-
