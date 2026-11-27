@@ -5505,6 +5505,31 @@ properties:
             m.room.encryption: 100
         trusted_private_chat: null
         public_chat: null
+  prevent_room_encryption_setup:
+    type: boolean
+    default: false
+    # This option is temporary and will be removed without notice.
+    # See https://github.com/element-hq/customer-success/issues/290 (internal).
+    io.element.undocumented: true
+    description: >-
+      Set to true to prevent local users from setting up encryption in rooms.
+
+      When enabled, clients will receive an error if they attempt to turn on
+      end-to-end encryption in new or existing rooms.
+
+      Existing encrypted rooms will remain encrypted.
+      These must be recreated to disable encryption.
+
+      This option is best paired with a method for disabling the UI for enabling
+      end-to-end encryption in users' Matrix clients as well.
+
+      This option does not prevent users on other homeservers from enabling
+      end-to-end encryption in rooms where they have permission to do so.
+
+      Known issues:
+      - If an encrypted room is _upgraded_ when this option is enabled,
+        the room upgrade will fail in a way that leaves a half-created successor room.
+
   forget_rooms_on_leave:
     type: boolean
     description: >-

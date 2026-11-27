@@ -19,6 +19,7 @@
 #
 #
 import collections.abc
+from http import HTTPStatus
 from typing import cast
 
 import jsonschema
@@ -114,6 +115,14 @@ class EventValidator:
                 )
             except jsonschema.ValidationError as e:
                 raise _validation_error_to_api_error(e)
+
+        elif event.type == EventTypes.RoomEncryption:
+            if config.room.prevent_room_encryption_setup:
+                raise SynapseError(
+                    HTTPStatus.FORBIDDEN,
+                    "Enabling end-to-end encryption is not allowed on this homeserver",
+                    errcode=Codes.FORBIDDEN,
+                )
 
         # If the event contains a mentions key, validate it.
         if EventContentFields.MENTIONS in event.content:
