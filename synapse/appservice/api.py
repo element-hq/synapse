@@ -265,40 +265,44 @@ class ApplicationServiceApi(SimpleHttpClient):
         async def _get() -> JsonDict | None:
             # This is required by the configuration.
             assert service.hs_token is not None
-            try:
-                args = None
-                if self.config.use_appservice_legacy_authorization:
-                    args = {"access_token": service.hs_token}
+            args = None
+            if self.config.use_appservice_legacy_authorization:
+                args = {"access_token": service.hs_token}
 
-                info = await self.get_json(
-                    f"{service.url}{APP_SERVICE_PREFIX}/thirdparty/protocol/{urllib.parse.quote(protocol)}",
-                    args,
-                    headers=self._get_headers(service),
-                )
+            info = await self.get_json(
+                f"{service.url}{APP_SERVICE_PREFIX}/thirdparty/protocol/{urllib.parse.quote(protocol)}",
+                args,
+                headers=self._get_headers(service),
+            )
 
-                if not _is_valid_3pe_metadata(info):
-                    logger.warning(
-                        "query_3pe_protocol to %s did not return a valid result",
-                        service.url,
-                    )
-                    return None
-
-                for instance in info.get("instances", []):
-                    network_id = instance.get("network_id", None)
-                    if network_id is not None:
-                        instance["instance_id"] = ThirdPartyInstanceID(
-                            service.id, network_id
-                        ).to_string()
-
-                return info
-            except Exception as ex:
+            if not _is_valid_3pe_metadata(info):
                 logger.warning(
-                    "query_3pe_protocol to %s threw exception %s", service.url, ex
+                    "query_3pe_protocol to %s did not return a valid result",
+                    service.url,
                 )
                 return None
 
+            for instance in info.get("instances", []):
+                network_id = instance.get("network_id", None)
+                if network_id is not None:
+                    instance["instance_id"] = ThirdPartyInstanceID(
+                        service.id, network_id
+                    ).to_string()
+
+            return info
+
         key = (service.id, protocol)
-        return await self.protocol_meta_cache.wrap(key, _get)
+        try:
+            return await self.protocol_meta_cache.wrap(key, _get)
+        except Exception as ex:
+            # A failed request is not cached (the ResponseCache drops a
+            # failure), so a bridge that was briefly down or slow is asked
+            # again next time rather than reported as having no protocol
+            # for the next hour.
+            logger.warning(
+                "query_3pe_protocol to %s threw exception %s", service.url, ex
+            )
+            return None
 
     async def ping(self, service: "ApplicationService", txn_id: str | None) -> None:
         # The caller should check that url is set
