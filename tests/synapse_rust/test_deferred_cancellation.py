@@ -14,7 +14,6 @@
 import socket
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Callable
 
 from twisted.internet import defer
@@ -27,48 +26,36 @@ from synapse.logging.context import (
     run_in_background,
 )
 from synapse.server import HomeServer
-from synapse.synapse_rust import reset_logging_config
 from synapse.synapse_rust.http_client import HttpClient
 from synapse.util.clock import Clock
 
+from tests.synapse_rust.test_http_client import StubRequestHandler, StubServer
 from tests.unittest import HomeserverTestCase, logcontext_clean
 
+# Reached only when a test fails; long enough for a loaded CI runner.
+_TIMEOUT = 10
 
-class _Handler(BaseHTTPRequestHandler):
+
+class _StallingHandler(StubRequestHandler):
     server: "_Server"
 
     def do_GET(self) -> None:
-        self.server.requests += 1
-        if self.path == "/stall":
-            # The request has no body, so this returns only once the client
-            # closes the connection.
-            self.connection.settimeout(10)
-            if self.connection.recv(1, socket.MSG_PEEK) == b"":
-                self.server.client_gone.set()
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"ok": true}')
-
-    def log_message(self, format: str, *args: object) -> None:
-        pass
+        if self.path != "/stall":
+            return super().do_GET()
+        self.server.calls += 1
+        # The request has no body, so this returns only once the client
+        # closes the connection.
+        self.connection.settimeout(_TIMEOUT)
+        if self.connection.recv(1, socket.MSG_PEEK) == b"":
+            self.server.client_gone.set()
 
 
-class _Server(HTTPServer):
+class _Server(StubServer):
     """`/stall` never answers; any other path answers at once."""
 
     def __init__(self) -> None:
-        super().__init__(("127.0.0.1", 0), _Handler)
-        self.requests = 0
         self.client_gone = threading.Event()
-        self._thread = threading.Thread(
-            target=self.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
-        )
-        self._thread.start()
-
-    def url(self, path: str) -> str:
-        return f"http://127.0.0.1:{self.server_port}{path}"
+        super().__init__(_StallingHandler)
 
 
 class DeferredCancellationTestCase(HomeserverTestCase):
@@ -80,7 +67,7 @@ class DeferredCancellationTestCase(HomeserverTestCase):
 
     def _wait_until(self, condition: Callable[[], object]) -> None:
         """Let the tokio threads run, without the reactor, until `condition` holds."""
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + _TIMEOUT
         while not condition():
             self.assertLess(time.monotonic(), deadline, "timed out")
             time.sleep(0.001)
@@ -94,7 +81,7 @@ class DeferredCancellationTestCase(HomeserverTestCase):
         async def request() -> None:
             try:
                 await self.client.get(
-                    url=self.server.url("/stall"), response_limit=1024
+                    url=self.server.endpoint + "stall", response_limit=1024
                 )
             except defer.CancelledError:
                 contexts.append(str(current_context()))
@@ -103,23 +90,23 @@ class DeferredCancellationTestCase(HomeserverTestCase):
         with LoggingContext(name="caller", server_name="test"):
             d = run_in_background(request)
             with PreserveLoggingContext():
-                self._wait_until(lambda: self.server.requests == 1)
+                self._wait_until(lambda: self.server.calls == 1)
                 d.cancel()
             self.assertEqual(str(current_context()), "caller")
 
         self.assertEqual(contexts, ["caller"])
         self.failureResultOf(d, defer.CancelledError)
-        self.assertTrue(self.server.client_gone.wait(10))
+        self.assertTrue(self.server.client_gone.wait(_TIMEOUT))
 
     def test_late_result_is_dropped(self) -> None:
         """A result already on its way to the reactor when the caller cancels
         is dropped without an error."""
-        d = self.client.get(url=self.server.url("/"), response_limit=1024)
+        d = self.client.get(url=self.server.endpoint, response_limit=1024)
+        # Wait until the task has queued its result for the reactor, which
+        # hasn't run it yet.
         self._wait_until(self.reactor._poll_readers)
         d.cancel()
 
         with self.assertNoLogs("synapse", level="ERROR"):
-            reset_logging_config()
             self.reactor.advance(0)
-        reset_logging_config()
         self.failureResultOf(d, defer.CancelledError)

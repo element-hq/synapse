@@ -74,8 +74,8 @@ fn logging_context_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 ///
 /// Does not handle contextvars.
 ///
-/// Cancelling the deferred aborts the task. A result that arrives after
-/// cancellation is dropped.
+/// Cancelling the deferred aborts the task, so `fut` must be safe to drop at
+/// any `.await`. A result that arrives after cancellation is dropped.
 pub fn create_deferred<'py, F, O>(
     py: Python<'py>,
     runtime: &RustRuntime,
