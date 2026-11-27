@@ -1,0 +1,1 @@
+Fix a bug where a client using `state_after` on `/sync` would keep showing a room as invited or knocked after the user rejected the invite or rescinded the knock.

@@ -3993,6 +3993,19 @@ class SyncHandler:
                 # An out of band room won't have any state changes.
                 state = {}
 
+            # An out-of-band membership is an outlier, so it is never in the
+            # computed state. Clients using `state_after` do not take state from
+            # the timeline, so it has to be reported there. `events` is the
+            # unfiltered timeline.
+            if sync_config.use_state_after and events:
+                last_event = events[-1]
+                if (
+                    last_event.type == EventTypes.Member
+                    and last_event.state_key == sync_config.user.to_string()
+                    and last_event.internal_metadata.is_out_of_band_membership()
+                ):
+                    state[(last_event.type, last_event.state_key)] = last_event
+
             summary: JsonDict | None = {}
 
             # we include a summary in room responses when we're lazy loading
