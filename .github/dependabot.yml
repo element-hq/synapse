@@ -19,7 +19,7 @@ updates:
     #
     # Doing this prevents us from needing to review a PR per dependency upgrade
     # (which can become burdensome).
-    # 
+    #
     # Splitting up each ecosystem into their own PR (rather than putting ALL
     # upgrades into a single PR) allows us to more quicker determine the culprit
     # when CI fails.
@@ -47,13 +47,6 @@ updates:
 
   - package-ecosystem: "cargo"
     directory: "/"
-    # Only bump the minimum version of a dependency in `rust/Cargo.toml` when the
-    # new version is outside the current requirement (a semver-incompatible
-    # release). Otherwise only `Cargo.lock` is updated.
-    #
-    # The minimums are what downstream packagers that do not vendor crates build
-    # against; the `trial-olddeps` CI job tests them.
-    versioning-strategy: "increase-if-necessary"
     open-pull-requests-limit: 1
     groups:
       all-rust-dependencies:
