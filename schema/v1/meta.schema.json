@@ -24,6 +24,10 @@
       "examples": [
         "### Advanced uses\n\nThe spent coffee grounds can be added to compost for improving soil and growing plants."
       ]
+    },
+    "io.element.undocumented": {
+      "type": "boolean",
+      "description": "If set to true, this option is not to be included in public documentation."
     }
   }
 }

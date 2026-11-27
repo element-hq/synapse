@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Generate Synapse documentation from JSON Schema file."""
+"""Generate Synapse documentation from JSON Schema file.
+
+Usage:
+    scripts-dev/gen_config_documentation.py \
+      schema/synapse-config.schema.yaml \
+    > docs/usage/configuration/config_documentation.md
+"""
 
 import json
 import re
 import sys
-from typing import Any
+from typing import Any, Collection, Iterable, TypedDict
 
 import yaml
 
@@ -240,6 +246,33 @@ SECTION_HEADERS = {
 }
 INDENT = "  "
 
+PropertySchema = TypedDict(
+    "PropertySchema",
+    {
+        "type": str | list[str],
+        "description": str,
+        "default": object,
+        "examples": list[object],
+        # Schema of each entry, for options of type `array`.
+        "items": "PropertySchema",
+        # Schemas of each sub-option, for options of type `object`.
+        "properties": dict[str, "PropertySchema"],
+        # Overrides the type shown in the documentation.
+        "io.element.type_name": str,
+        # Text shown after the sub-options and default configuration.
+        "io.element.post_description": str,
+        # Flag that this option should not be documented.
+        "io.element.undocumented": bool,
+    },
+    total=False,
+)
+"""
+The JSON Schema of a single config option (or sub-option), after the resolution of any `$ref`s.
+(Only includes fields used by this script.)
+
+Custom fields should also be added to `meta.schema.json`.
+"""
+
 
 has_error = False
 
@@ -251,7 +284,13 @@ def error(text: str) -> None:
 
 
 def indent(text: str, first_line: bool = True) -> str:
-    """Indents each non-empty line of the given text."""
+    """Indents each non-empty line of the given text.
+
+    Args:
+        text: The text to indent.
+        first_line: Whether to indent the first line too. Pass `False` when the
+            text continues a line that has already been started, e.g. a bullet.
+    """
     text = re.sub(r"(\n)([^\n])", r"\1" + INDENT + r"\2", text)
     if first_line:
         text = re.sub(r"^([^\n])", INDENT + r"\1", text)
@@ -265,19 +304,55 @@ def em(s: str | None) -> str:
 
 
 def a(s: str | None, suffix: str = " ") -> str:
-    """Appends a space if the given string is not empty."""
+    """Appends `suffix` if the given string is not empty.
+
+    Args:
+        s: The string to append to.
+        suffix: What to append; a space by default.
+
+    Returns:
+        `s` followed by `suffix`, or an empty string if `s` is empty or `None`.
+    """
     return s + suffix if s else ""
 
 
 def p(s: str | None, prefix: str = " ") -> str:
-    """Prepend a space if the given string is not empty."""
+    """Prepends `prefix` if the given string is not empty.
+
+    Args:
+        s: The string to prepend to.
+        prefix: What to prepend; a space by default.
+
+    Returns:
+        `prefix` followed by `s`, or an empty string if `s` is empty or `None`.
+    """
     return prefix + s if s else ""
+
+
+def filter_out_undocumented_options(
+    items: Iterable[tuple[str, PropertySchema]],
+) -> Collection[tuple[str, PropertySchema]]:
+    """
+    Filters out undocumented items (options or sub-options).
+
+    Undocumented items have the `io.element.undocumented` flag set on them.
+    """
+    return [
+        (key, option_schema)
+        for key, option_schema in items
+        if not option_schema.get("io.element.undocumented", False)
+    ]
 
 
 def resolve_local_refs(schema: dict) -> dict:
     """Returns the given schema with local $ref properties replaced by their keywords.
 
     Crude approximation that will override keywords.
+
+    Args:
+        schema: The whole config schema, with definitions under `$defs` and
+            references of the form `#/$defs/<name>`. Note that `$ref` keys are
+            deleted from it in place.
     """
     defs = schema["$defs"]
 
@@ -317,19 +392,27 @@ def resolve_local_refs(schema: dict) -> dict:
     return replace_ref(schema)
 
 
-def sep(values: dict) -> str:
-    """Separator between parts of the description."""
+def sep(option_schema: PropertySchema) -> str:
+    """Separator between parts of the description.
+
+    Args:
+        option_schema: The schema of the option whose description is being built.
+    """
     # If description is multiple paragraphs already, add new ones. Otherwise
     # append to same paragraph.
-    return "\n\n" if "\n\n" in values.get("description", "") else " "
+    return "\n\n" if "\n\n" in option_schema.get("description", "") else " "
 
 
-def type_str(values: dict) -> str:
-    """Type of the current value."""
-    if t := values.get("io.element.type_name"):
+def type_str(option_schema: PropertySchema) -> str:
+    """Type of the current value, in parentheses, e.g. `(string|null)`.
+
+    Args:
+        option_schema: The schema of the option to describe the type of.
+    """
+    if type_name := option_schema.get("io.element.type_name"):
         # Allow custom overrides for the type name, for documentation clarity
-        return f"({t})"
-    if not (t := values.get("type")):
+        return f"({type_name})"
+    if not (t := option_schema.get("type")):
         return ""
     if not isinstance(t, list):
         t = [t]
@@ -337,73 +420,95 @@ def type_str(values: dict) -> str:
     return f"({joined})"
 
 
-def items(values: dict) -> str:
-    """A block listing properties of array items."""
-    if not (items := values.get("items")):
+def items(option_schema: PropertySchema) -> str:
+    """A block listing properties of array items.
+
+    Args:
+        option_schema: The schema of an option.
+
+    Returns:
+        The block, or an empty string if the option's `items` have no
+        `properties`.
+    """
+    if not (items := option_schema.get("items")):
         return ""
     if not (item_props := items.get("properties")):
         return ""
+    if not (filtered_item_props := filter_out_undocumented_options(item_props.items())):
+        return ""
     return "\nOptions for each entry include:\n\n" + "\n".join(
-        sub_section(k, v) for k, v in item_props.items()
+        sub_section(k, v) for k, v in filtered_item_props
     )
 
 
-def properties(values: dict) -> str:
-    """A block listing object properties."""
-    if not (properties := values.get("properties")):
+def properties(option_schema: PropertySchema) -> str:
+    """A block listing object properties.
+
+    Args:
+        option_schema: The schema of an option.
+
+    Returns:
+        The block, or an empty string if the option has no `properties`.
+    """
+    if not (properties := option_schema.get("properties")):
+        return ""
+    if not (filtered_properties := filter_out_undocumented_options(properties.items())):
         return ""
     return "\nThis setting has the following sub-options:\n\n" + "\n".join(
-        sub_section(k, v) for k, v in properties.items()
+        sub_section(k, v) for k, v in filtered_properties
     )
 
 
-def sub_section(prop: str, values: dict) -> str:
-    """Formats a bullet point about the given sub-property."""
-    sep = lambda: globals()["sep"](values)
-    type_str = lambda: globals()["type_str"](values)
-    items = lambda: globals()["items"](values)
-    properties = lambda: globals()["properties"](values)
+def sub_section(prop: str, option_schema: PropertySchema) -> str:
+    """Formats a bullet point about the given sub-property.
+
+    Args:
+        prop: The name of the sub-option, e.g. `enabled` (without the parent).
+        option_schema: The schema of the sub-option.
+    """
 
     def default() -> str:
         try:
-            default = values["default"]
+            default = option_schema["default"]
             return f"Defaults to `{json.dumps(default)}`."
         except KeyError:
             return ""
 
     def description() -> str:
-        if not (description := values.get("description")):
+        if not (description := option_schema.get("description")):
             error(f"missing description for {prop}")
             return "MISSING DESCRIPTION\n"
 
-        return f"{description}{p(default(), sep())}\n"
+        return f"{description}{p(default(), sep(option_schema))}\n"
 
     return (
-        f"* `{prop}`{p(type_str())}: "
+        f"* `{prop}`{p(type_str(option_schema))}: "
         + f"{indent(description(), first_line=False)}"
-        + indent(items())
-        + indent(properties())
+        + indent(items(option_schema))
+        + indent(properties(option_schema))
     )
 
 
-def section(prop: str, values: dict) -> str:
-    """Formats a section about the given property."""
-    sep = lambda: globals()["sep"](values)
-    type_str = lambda: globals()["type_str"](values)
-    items = lambda: globals()["items"](values)
-    properties = lambda: globals()["properties"](values)
+def section(prop: str, option_schema: PropertySchema) -> str:
+    """Formats a section about the given property.
+
+    Args:
+        prop: The name of the top-level config option, e.g. `server_name`. Also
+            used to look up a heading in `SECTION_HEADERS`.
+        option_schema: The schema of the option.
+    """
 
     def is_simple_default() -> bool:
         """Whether the given default is simple enough for a one-liner."""
-        if not (d := values.get("default")):
+        if not (d := option_schema.get("default")):
             return True
         return not isinstance(d, dict) and not isinstance(d, list)
 
     def default_str() -> str:
         try:
-            default = values["default"]
+            default = option_schema["default"]
         except KeyError:
-            t = values.get("type", [])
+            t = option_schema.get("type", [])
             if "object" == t or "object" in t:
                 # Skip objects as they probably have child defaults.
                 return ""
@@ -426,10 +531,12 @@ def section(prop: str, values: dict) -> str:
         return f"### `{prop}`\n"
 
     def description() -> str:
-        if not (description := values.get("description")):
+        if not (description := option_schema.get("description")):
             error(f"missing description for {prop}")
             return "MISSING DESCRIPTION\n"
-        return f"\n{a(em(type_str()))}{description}{p(default_str(), sep())}\n"
+        type_prefix = a(em(type_str(option_schema)))
+        default_suffix = p(default_str(), sep(option_schema))
+        return f"\n{type_prefix}{description}{default_suffix}\n"
 
     def example_str(example: Any) -> str:
         return "```yaml\n" + f"{yaml.dump({prop: example}, sort_keys=False)}" + "```\n"
@@ -437,11 +544,11 @@ def section(prop: str, values: dict) -> str:
     def default_example() -> str:
         if is_simple_default():
             return ""
-        default_cfg = example_str(values["default"])
+        default_cfg = example_str(option_schema["default"])
         return f"\nDefault configuration:\n{default_cfg}"
 
     def examples() -> str:
-        if not (examples := values.get("examples")):
+        if not (examples := option_schema.get("examples")):
             return ""
 
         examples_str = "\n".join(example_str(e) for e in examples)
@@ -455,7 +562,7 @@ def section(prop: str, values: dict) -> str:
         # Sometimes it's helpful to have a description after the list of fields,
         # e.g. with a subsection that consists only of text.
         # This helps with that.
-        if not (description := values.get("io.element.post_description")):
+        if not (description := option_schema.get("io.element.post_description")):
             return ""
         return f"\n{description}\n\n"
 
@@ -464,8 +571,8 @@ def section(prop: str, values: dict) -> str:
         + header()
         + title()
         + description()
-        + items()
-        + properties()
+        + items(option_schema)
+        + properties(option_schema)
         + default_example()
         + examples()
         + post_description()
@@ -498,7 +605,10 @@ def main() -> None:
     schema = read_json_file_arg()
     schema = resolve_local_refs(schema)
 
-    sections = (section(k, v) for k, v in schema["properties"].items())
+    sections = (
+        section(k, v)
+        for k, v in filter_out_undocumented_options(schema["properties"].items())
+    )
     print(HEADER + "".join(sections), end="")
 
     if has_error:
