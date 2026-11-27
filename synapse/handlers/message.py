@@ -19,10 +19,12 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import contextlib
 import logging
 import random
+from collections import Counter
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Mapping, Optional, Sequence
 
 from canonicaljson import encode_canonical_json
 
@@ -518,6 +520,11 @@ class EventCreationHandler:
         self.limiter = Linearizer(
             max_count=1, name="room_event_creation_limit", clock=self.clock
         )
+        # Rooms with a module callback currently running. Modules sending into these
+        # rooms skip `self.limiter`, as the callback may be holding it. Any module
+        # callback awaited while the limiter is held must be wrapped in
+        # `_module_callback_running` to avoid risking a deadlock.
+        self._rooms_in_module_callback: Counter[str] = Counter()
 
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
 
@@ -988,6 +995,7 @@ class EventCreationHandler:
         depth: int | None = None,
         prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
+        from_module: bool = False,
     ) -> tuple[EventBase, int]:
         """
         Creates an event, then sends it.
@@ -1020,6 +1028,9 @@ class EventCreationHandler:
                 The state event IDs which represent the current forward extremities of the state DAG.
                 Only applicable on room versions which use a state DAG (MSC4242).
             delay_id: The delay ID of this event, if it was a delayed event.
+            from_module: True if the event is sent by a module via the module API.
+                Such events skip the per-room limiter while a module callback is
+                running for the room, as the callback may be holding the limiter.
 
         Returns:
             The event, and its stream ordering (if deduplication happened,
@@ -1090,7 +1101,13 @@ class EventCreationHandler:
         # extremities to pile up, which in turn leads to state resolution
         # taking longer.
         room_id = event_dict["room_id"]
-        async with self.limiter.queue(room_id):
+        limiter_cm: contextlib.AbstractAsyncContextManager[None]
+        if from_module and self._rooms_in_module_callback[room_id]:
+            limiter_cm = contextlib.nullcontext()
+        else:
+            limiter_cm = self.limiter.queue(room_id)
+
+        async with limiter_cm:
             if txn_id:
                 event = await self.get_event_from_transaction(
                     requester, txn_id, room_id
@@ -1103,22 +1120,32 @@ class EventCreationHandler:
                         event.internal_metadata.stream_ordering,
                     )
 
-        async with self._worker_lock_handler.acquire_read_write_lock(
-            NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
-        ):
-            return await self._create_and_send_nonmember_event_locked(
-                requester=requester,
-                event_dict=event_dict,
-                prev_event_ids=prev_event_ids,
-                state_event_ids=state_event_ids,
-                ratelimit=ratelimit,
-                txn_id=txn_id,
-                ignore_shadow_ban=ignore_shadow_ban,
-                outlier=outlier,
-                depth=depth,
-                prev_state_events=prev_state_events,
-                delay_id=delay_id,
-            )
+            async with self._worker_lock_handler.acquire_read_write_lock(
+                NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
+            ):
+                return await self._create_and_send_nonmember_event_locked(
+                    requester=requester,
+                    event_dict=event_dict,
+                    prev_event_ids=prev_event_ids,
+                    state_event_ids=state_event_ids,
+                    ratelimit=ratelimit,
+                    txn_id=txn_id,
+                    ignore_shadow_ban=ignore_shadow_ban,
+                    outlier=outlier,
+                    depth=depth,
+                    prev_state_events=prev_state_events,
+                    delay_id=delay_id,
+                )
+
+    @contextlib.contextmanager
+    def _module_callback_running(self, room_id: str) -> Iterator[None]:
+        self._rooms_in_module_callback[room_id] += 1
+        try:
+            yield
+        finally:
+            self._rooms_in_module_callback[room_id] -= 1
+            if self._rooms_in_module_callback[room_id] <= 0:
+                del self._rooms_in_module_callback[room_id]
 
     async def _create_and_send_nonmember_event_locked(
         self,
@@ -1191,11 +1218,12 @@ class EventCreationHandler:
                         Codes.FORBIDDEN,
                     )
 
-                spam_check_result = (
-                    await self._spam_checker_module_callbacks.check_event_for_spam(
-                        event
+                with self._module_callback_running(event.room_id):
+                    spam_check_result = (
+                        await self._spam_checker_module_callbacks.check_event_for_spam(
+                            event
+                        )
                     )
-                )
                 if spam_check_result != self._spam_checker_module_callbacks.NOT_SPAM:
                     if isinstance(spam_check_result, tuple):
                         try:
@@ -1432,9 +1460,10 @@ class EventCreationHandler:
                 requester.app_service_id
             )
 
-        res, new_content = await self._third_party_event_rules.check_event_allowed(
-            event, context
-        )
+        with self._module_callback_running(event.room_id):
+            res, new_content = await self._third_party_event_rules.check_event_allowed(
+                event, context
+            )
         if res is False:
             logger.info(
                 "Event %s forbidden by third-party rules",
@@ -1786,9 +1815,10 @@ class EventCreationHandler:
                         is_admin_redaction = await self.is_admin_redaction(
                             event.type, event.sender, event.redacts
                         )
-                        await self.request_ratelimiter.ratelimit(
-                            requester, is_admin_redaction=is_admin_redaction
-                        )
+                        with self._module_callback_running(event.room_id):
+                            await self.request_ratelimiter.ratelimit(
+                                requester, is_admin_redaction=is_admin_redaction
+                            )
 
                 try:
                     result = await self.send_events(
@@ -1994,9 +2024,10 @@ class EventCreationHandler:
                     event.type, event.sender, event.redacts
                 )
 
-                await self.request_ratelimiter.ratelimit(
-                    requester, is_admin_redaction=is_admin_redaction
-                )
+                with self._module_callback_running(event.room_id):
+                    await self.request_ratelimiter.ratelimit(
+                        requester, is_admin_redaction=is_admin_redaction
+                    )
 
             # run checks/actions on event based on type
             if event.type == EventTypes.Member and event.membership == Membership.JOIN:
