@@ -145,6 +145,7 @@ class PaginationHandler:
         self._relations_handler = hs.get_relations_handler()
         self._worker_locks = hs.get_worker_locks_handler()
         self._task_scheduler = hs.get_task_scheduler()
+        self._stats_handler = hs.get_stats_handler()
 
         self.pagination_lock = ReadWriteLock()
         # IDs of rooms in which there currently an active purge *or delete* operation.
@@ -464,6 +465,10 @@ class PaginationHandler:
             await self._storage_controllers.purge_events.purge_room(room_id)
 
         logger.info("purge complete for room_id %s", room_id)
+
+        # Room purge deletes rows from room_stats_current outside the stats
+        # delta stream, so refresh the room count metrics explicitly.
+        await self._stats_handler.refresh_room_metrics()
 
     @trace
     async def get_messages(
