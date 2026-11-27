@@ -240,6 +240,32 @@ class LockStore(SQLBaseStore):
 
         return lock
 
+    async def get_read_write_lock_tokens(
+        self,
+        lock_name: str,
+        lock_key: str,
+        *,
+        write: bool,
+    ) -> set[str]:
+        """Return the tokens currently holding a read/write lock.
+
+        The returned set is a point-in-time snapshot. In particular, a caller can
+        wait for these tokens to disappear without also waiting for lock holders
+        which arrive after this method returns.
+        """
+
+        tokens = await self.db_pool.simple_select_onecol(
+            table="worker_read_write_locks",
+            keyvalues={
+                "lock_name": lock_name,
+                "lock_key": lock_key,
+                "write_lock": write,
+            },
+            retcol="token",
+            desc="get_read_write_lock_tokens",
+        )
+        return set(tokens)
+
     def _try_acquire_read_write_lock_txn(
         self,
         txn: LoggingTransaction,
