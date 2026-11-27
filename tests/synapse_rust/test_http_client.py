@@ -65,8 +65,10 @@ class StubServer(HTTPServer):
 
     _thread: threading.Thread
 
-    def __init__(self) -> None:
-        super().__init__(("127.0.0.1", 0), StubRequestHandler)
+    def __init__(
+        self, handler: type[BaseHTTPRequestHandler] = StubRequestHandler
+    ) -> None:
+        super().__init__(("127.0.0.1", 0), handler)
 
         self._thread = threading.Thread(
             target=self.serve_forever,
