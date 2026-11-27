@@ -1,0 +1,1 @@
+Support reading null event IDs from the `state_groups_state` table. Future versions of Synapse will start writing such rows.
