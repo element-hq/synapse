@@ -1694,6 +1694,7 @@ dependencies = [
  "http",
  "http-body-util",
  "icu_segmenter",
+ "ipnet",
  "itertools",
  "lazy_static",
  "libc",

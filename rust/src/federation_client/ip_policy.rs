@@ -16,12 +16,11 @@
 
 use std::{fmt, net::IpAddr};
 
+use ipnet::IpNet;
+
 /// A set of IP ranges. An address only matches ranges of its own version,
 /// as in `netaddr`.
-pub struct IpSet {
-    v4: Vec<(u128, u128)>,
-    v6: Vec<(u128, u128)>,
-}
+pub struct IpSet(Vec<IpNet>);
 
 impl IpSet {
     /// Ranges as `netaddr`'s `IPSet.iter_cidrs()` gives them, such as
@@ -29,33 +28,15 @@ impl IpSet {
     /// added `0.0.0.0` and `::` and the IPv4-mapped, IPv4-compatible and 6to4
     /// ranges.
     pub fn from_cidrs<'a>(cidrs: impl IntoIterator<Item = &'a str>) -> Result<Self, CidrError> {
-        let mut set = IpSet {
-            v4: Vec::new(),
-            v6: Vec::new(),
-        };
-        for cidr in cidrs {
-            let invalid = || CidrError(cidr.to_owned());
-            let (addr, len) = cidr.split_once('/').ok_or_else(invalid)?;
-            let len: u32 = len.parse().map_err(|_| invalid())?;
-            let (bits, width, ranges) = match addr.parse().map_err(|_| invalid())? {
-                IpAddr::V4(addr) => (u128::from(u32::from(addr)), 32, &mut set.v4),
-                IpAddr::V6(addr) => (u128::from(addr), 128, &mut set.v6),
-            };
-            if len > width {
-                return Err(invalid());
-            }
-            let mask = u128::MAX.checked_shl(width - len).unwrap_or(0);
-            ranges.push((bits & mask, mask));
-        }
-        Ok(set)
+        cidrs
+            .into_iter()
+            .map(|cidr| cidr.parse().map_err(|_| CidrError(cidr.to_owned())))
+            .collect::<Result<_, _>>()
+            .map(IpSet)
     }
 
     pub fn contains(&self, ip: IpAddr) -> bool {
-        let (bits, ranges) = match ip {
-            IpAddr::V4(ip) => (u128::from(u32::from(ip)), &self.v4),
-            IpAddr::V6(ip) => (u128::from(ip), &self.v6),
-        };
-        ranges.iter().any(|&(net, mask)| bits & mask == net)
+        self.0.iter().any(|net| net.contains(&ip))
     }
 }
 
