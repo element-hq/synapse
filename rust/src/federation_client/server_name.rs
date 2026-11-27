@@ -29,7 +29,7 @@ use std::{
 #[derive(Debug)]
 pub struct ServerName {
     name: String,
-    host: RangeTo<usize>,
+    host_range: RangeTo<usize>,
     ip: Option<IpAddr>,
     port: Option<u16>,
 }
@@ -60,7 +60,7 @@ impl ServerName {
 
         Ok(ServerName {
             name: name.to_owned(),
-            host: ..host_str.len(),
+            host_range: ..host_str.len(),
             ip,
             port,
         })
@@ -72,7 +72,7 @@ impl ServerName {
 
     /// The hostname as written, with brackets around an IPv6 literal.
     pub fn host_str(&self) -> &str {
-        &self.name[self.host]
+        &self.name[self.host_range]
     }
 
     pub fn port(&self) -> Option<u16> {
