@@ -287,6 +287,9 @@ pub struct UnstableFeatureMap {
     /// MSC4502: Targeted and unrestricted room member queries
     #[serde(rename = "io.element.msc4502")]
     msc4502: bool,
+    /// MSC4457: Generic reporting API
+    #[serde(rename = "org.matrix.msc4457_report_api")]
+    msc4457: bool,
     /// MSC4536: Additional endpoints for fetching user profiles  
     /// Tracked in: https://github.com/element-hq/synapse/issues/20471
     #[serde(rename = "org.matrix.msc4536")]
@@ -346,6 +349,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
         msc4143_stable: true,
         msc4446_enabled: config.experimental.msc4446_enabled,
         msc4502: config.experimental.msc4502_enabled,
+        msc4457: config.experimental.msc4457_enabled,
         msc4536: config.experimental.msc4536_enabled,
         e2ee_forced_public: config
             .room
