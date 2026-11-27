@@ -7,6 +7,14 @@ updates:
     # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
     package-ecosystem: "pip"
     directory: "/"
+    # Only bump the minimum and maximum versions of dependencies in our
+    # lockfile. The maximum version in `pyproject.toml` may be bumped, but the
+    # minimum may not be.
+    #
+    # We want to avoid bumping the minimum version in `pyproject.toml` unless
+    # necessary, as it requires our supported Linux distributions to have
+    # those versions in their repos first.
+    versioning-strategy: "increase-if-necessary"
     # Group together all updates for this ecosystem into a single, big PR.
     #
     # Doing this prevents us from needing to review a PR per dependency upgrade
@@ -39,13 +47,6 @@ updates:
 
   - package-ecosystem: "cargo"
     directory: "/"
-    # Only bump the minimum version of a dependency in `rust/Cargo.toml` when the
-    # new version is outside the current requirement (a semver-incompatible
-    # release). Otherwise only `Cargo.lock` is updated.
-    #
-    # The minimums are what downstream packagers that do not vendor crates build
-    # against; the `trial-olddeps` CI job tests them.
-    versioning-strategy: "increase-if-necessary"
     open-pull-requests-limit: 1
     groups:
       all-rust-dependencies:
