@@ -258,42 +258,8 @@ class FederationEventHandler:
             room_id, self.server_name
         )
         if not is_in_room:
-            # Check if this is a leave event rescinding an invite
-            if (
-                pdu.type == EventTypes.Member
-                and pdu.membership == Membership.LEAVE
-                and pdu.state_key != pdu.sender
-                and self._is_mine_id(pdu.state_key)
-            ):
-                (
-                    membership,
-                    membership_event_id,
-                ) = await self._store.get_local_current_membership_for_user_in_room(
-                    pdu.state_key, pdu.room_id
-                )
-                if (
-                    membership == Membership.INVITE
-                    and membership_event_id
-                    and membership_event_id
-                    in pdu.auth_event_ids()  # The invite should be in the auth events of the rescission.
-                ):
-                    invite_event = await self._store.get_event(
-                        membership_event_id, allow_none=True
-                    )
-
-                    # We cannot fully auth the rescission event, but we can
-                    # check if the sender of the leave event is the same as the
-                    # invite.
-                    #
-                    # Technically, a room admin could rescind the invite, but we
-                    # have no way of knowing who is and isn't a room admin.
-                    if invite_event and pdu.sender == invite_event.sender:
-                        # Handle the rescission event
-                        pdu.internal_metadata.outlier = True
-                        pdu.internal_metadata.out_of_band_membership = True
-                        context = EventContext.for_outlier(self._storage_controllers)
-                        await self.persist_events_and_notify(room_id, [(pdu, context)])
-                        return
+            if await self._maybe_persist_out_of_band_membership_end(origin, pdu):
+                return
 
             logger.info(
                 "Ignoring PDU from %s as we're not in the room",
@@ -379,6 +345,83 @@ class FederationEventHandler:
             )
             context = await self._state_handler.compute_event_context(pdu)
             await self._process_received_pdu(origin, pdu, context)
+
+    async def _maybe_persist_out_of_band_membership_end(
+        self, origin: str, pdu: EventBase
+    ) -> bool:
+        """Persist `pdu`, received for a room we are not in, if it ends a local
+        user's out-of-band membership.
+
+        The event must be a leave or ban of a local user, sent by someone else, that
+        references the user's current local membership event. We hold no room state
+        to auth it against, so what is trusted instead depends on the membership it
+        ends:
+
+        - `invite`: the sender is on the inviter's server.
+
+        Args:
+            origin: The server that sent us the event.
+            pdu: The received event.
+
+        Returns:
+            True if the event was persisted as an out-of-band membership.
+        """
+        if not (
+            pdu.type == EventTypes.Member
+            and pdu.membership in (Membership.LEAVE, Membership.BAN)
+            and pdu.state_key != pdu.sender
+            and self._is_mine_id(pdu.state_key)
+        ):
+            return False
+
+        (
+            prev_membership,
+            prev_membership_event_id,
+        ) = await self._store.get_local_current_membership_for_user_in_room(
+            pdu.state_key, pdu.room_id
+        )
+        if prev_membership_event_id is None:
+            return False
+
+        # MSC4242 events carry no `auth_events`: they are calculated from the state
+        # at `prev_state_events`, which we do not hold, and `auth_event_ids()` raises
+        # until then. In those rooms the event must follow the membership directly
+        # in the state DAG.
+        referenced_event_ids = (
+            pdu.prev_state_events
+            if supports_msc4242_state_dag(pdu)
+            else pdu.auth_event_ids()
+        )
+        if prev_membership_event_id not in referenced_event_ids:
+            return False
+
+        prev_membership_event = await self._store.get_event(
+            prev_membership_event_id, allow_none=True
+        )
+        if prev_membership_event is None:
+            return False
+
+        if prev_membership == Membership.INVITE:
+            # The inviting server can sign events as any of its users, so a user on
+            # that server is as trusted as the inviter. A room admin on another
+            # server could also end the invite, but we cannot check their power
+            # level.
+            trusted = get_domain_from_id(pdu.sender) == get_domain_from_id(
+                prev_membership_event.sender
+            )
+        else:
+            # MSC4233 defines when to trust the end of a knock; it is not
+            # implemented. No other membership can be ended out of band.
+            trusted = False
+
+        if not trusted:
+            return False
+
+        pdu.internal_metadata.outlier = True
+        pdu.internal_metadata.out_of_band_membership = True
+        context = EventContext.for_outlier(self._storage_controllers)
+        await self.persist_events_and_notify(pdu.room_id, [(pdu, context)])
+        return True
 
     async def on_send_membership_event(
         self, origin: str, event: EventBase
