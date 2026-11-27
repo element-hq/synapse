@@ -1,0 +1,1 @@
+Refactor `MediaRepository` media upload and thumbnail generation to reduce duplicated code. Contributed by @famedly @itsoyou.
