@@ -815,10 +815,22 @@ class UrlPreviewer:
         logger.debug("Running url preview cache expiry")
 
         # First we delete expired url cache entries
-        media_ids = await self.store.get_expired_url_cache(now)
+        expired_media = await self.store.get_expired_url_cache(now)
 
-        removed_media = []
-        for media_id in media_ids:
+        # Media IDs whose `local_media_repository_url_cache` rows should be deleted.
+        # This is not the same as the set of files removed from disk: see below.
+        expired_cache_entries = []
+        for media_id, media_type in expired_media:
+            if media_type is not None and _is_media(media_type):
+                # For a direct link to an image, the downloaded file is also the
+                # image the preview's `og:image` points at, and clients may still
+                # request it. So we only drop the cache row here (forcing a fresh
+                # preview next time) and leave the file on disk. The second pass
+                # below deletes it, along with its `local_media_repository` row,
+                # once it is older than IMAGE_CACHE_EXPIRY_MS.
+                expired_cache_entries.append(media_id)
+                continue
+
             fname = self.filepaths.url_cache_filepath(media_id)
             try:
                 os.remove(fname)
@@ -832,16 +844,17 @@ class UrlPreviewer:
                 )
                 continue
 
-            removed_media.append(media_id)
+            expired_cache_entries.append(media_id)
 
             dirs = self.filepaths.url_cache_filepath_dirs_to_delete(media_id)
             _try_remove_parent_dirs(dirs)
 
-        await self.store.delete_url_cache(removed_media)
+        await self.store.delete_url_cache(expired_cache_entries)
 
-        if removed_media:
+        if expired_cache_entries:
             logger.debug(
-                "Deleted %d entries from url preview cache", len(removed_media)
+                "Deleted %d entries from url preview cache",
+                len(expired_cache_entries),
             )
         else:
             logger.debug("No entries removed from url preview cache")

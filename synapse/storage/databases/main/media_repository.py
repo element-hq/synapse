@@ -928,17 +928,33 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             "delete_remote_media", delete_remote_media_txn
         )
 
-    async def get_expired_url_cache(self, now_ts: int) -> list[str]:
+    async def get_expired_url_cache(self, now_ts: int) -> list[tuple[str, str | None]]:
+        """Get URL preview cache entries that have expired.
+
+        Args:
+            now_ts: The current time in milliseconds. Entries whose `expires_ts`
+                is before this are returned.
+
+        Returns:
+            Up to 500 `(media_id, media_type)` tuples, oldest expiry first.
+            `media_type` comes from `local_media_repository` and is `None` if
+            there is no matching row there. Callers use it to tell
+            direct-image previews (whose file is kept until the image cache
+            expiry) apart from other cached responses.
+        """
         sql = (
-            "SELECT media_id FROM local_media_repository_url_cache"
+            "SELECT c.media_id, m.media_type FROM local_media_repository_url_cache AS c"
+            " LEFT JOIN local_media_repository AS m ON m.media_id = c.media_id"
             " WHERE expires_ts < ?"
             " ORDER BY expires_ts ASC"
             " LIMIT 500"
         )
 
-        def _get_expired_url_cache_txn(txn: LoggingTransaction) -> list[str]:
+        def _get_expired_url_cache_txn(
+            txn: LoggingTransaction,
+        ) -> list[tuple[str, str | None]]:
             txn.execute(sql, (now_ts,))
-            return [row[0] for row in txn]
+            return txn.fetchall()
 
         return await self.db_pool.runInteraction(
             "get_expired_url_cache", _get_expired_url_cache_txn
