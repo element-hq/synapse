@@ -61,6 +61,7 @@ THUMBNAIL_SUPPORTED_MEDIA_FORMAT_MAP = {
     # because it can have transparency.
     "image/gif": "png",
     "image/png": "png",
+    "image/avif": "png",
 }
 
 URL_PREVIEW_BLACKLIST_IGNORED_BECAUSE_HTTP_PROXY_SET_WARNING = """\
