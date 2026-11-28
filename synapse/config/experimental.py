@@ -365,6 +365,9 @@ class ExperimentalConfig(Config):
         # considered sticky by the local homeserver.
         self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
 
+        # MSC4406: M_SENDER_IGNORED error code
+        self.msc4406_enabled: bool = experimental.get("msc4406_enabled", False)
+
         # MSC4450: Identity Provider selection for User-Interactive Authentication
         # with Legacy Single Sign-On (`m.login.sso`)
         # Tracked in: https://github.com/element-hq/synapse/issues/19691
